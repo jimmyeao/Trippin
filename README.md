@@ -63,6 +63,7 @@ Default keys (all rebindable in the panel):
 | F | fullscreen on / off |
 | Space | mark this beat as the downbeat |
 | [ / ] | latency −/+ 5 ms |
+| X | cycle the post effect (off → mirrors → kaleido) |
 | F5 | reload shaders |
 | F1 | show / hide the control panel |
 | Esc | leave fullscreen (it never quits; close the window to quit) |
@@ -79,12 +80,25 @@ Default keys (all rebindable in the panel):
 - **Scenery:** `ocean` (sunset sea), `clouds` (sunset cloud flight),
   `city_rain` (neon street in the rain, wet-asphalt reflections),
   `highlands` (misty mountain valley at dawn), `dunes` (desert at dusk),
-  `beach` (palm silhouettes and surf), `aurora` (northern lights over a
-  mountain lake) and `laser_show` (festival beam fans over a crowd). Flight
+  `beach` (palm silhouettes and surf), `aurora` (northern lights whose
+  curtains fold and shimmer to the spectrum over a mountain lake) and
+  `laser_show` (festival beam fans over a crowd). Flight
   scenes ride `u.flow`; nothing flashes.
 - **Mandalas / abstract:** `fire_mandala` (a fire-and-ice kaleidoscope),
   `julia_portal`, `kaleido`, `fluid` and `spectrum_rings`. These still pulse
   with the beat.
+- **Analysers** — scenes that draw the music itself: `eq_bars` (mirrored
+  spectrum bars), `eq_round` (radial analyser), `eq_skyline` (a city skyline
+  of spectrum towers), `scope` (phosphor oscilloscope), `spectrogram`
+  (scrolling waterfall), `lissajous`, `vu` (giant bass/mid/high meters),
+  `led_wall`, `waveshaper`, `polar_bloom`, `levels` and `terrain`
+  (a wireframe spectrum valley).
+- **Pulse / particle:** `shockwaves`, `pulse_grid`, `rings`, `heartbeat`
+  (a scrolling ECG), `bounce`, `stardrive`, `orbiters`, `ribbons`, `ink`,
+  `metaballs`, `sparks` (pyro fountains), `sun_rays`, `helix`,
+  `voronoi_pulse`, `chevrons` and `pixel_fall`. Ring bursts ride the beat,
+  onset splats and fountains fire on drops, trails live in the feedback
+  buffer.
 - **Seasonal:** `halloween`, `christmas` and `fireworks` only enter the
   playlist in season (October, December, Bonfire Night and New Year; see
   `Seasonal` in the panel). They're the most audio-reactive scenes:
@@ -96,6 +110,14 @@ an RTX 5070 Ti.
 
 When writing a scene, use `u.flow` for camera travel. `u.beat` gets phase
 corrections from the beat tracker, so motion driven by it stutters.
+
+## Visual effects
+
+A post effect transforms the whole frame — scene and dancer — chosen in the
+panel or with `X`: **Mirror X**, **Mirror Y**, **Quad mirror** or **Kaleido
+×6 / ×8**. **Auto** picks a fresh effect on every scene cut.
+It's applied in `present.wgsl` from `u.fx`, so it needs no scene support and
+combines with everything (a mirrored dancer in canon is five dancers).
 
 ## Silhouette dancers
 

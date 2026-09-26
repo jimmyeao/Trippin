@@ -162,6 +162,21 @@ def main():
             solid[i] = np.where(b, np.maximum(m, 0.6), m)
             solid[i] = np.where(binary_fill_holes(solid[i] > 0.4), np.maximum(solid[i], 0.6), solid[i])
         masks = solid
+
+    # Keep only the largest blob per frame: backdrop debris, poles or a second
+    # figure at the frame edge otherwise render as stray objects next to her.
+    # Close first so a limb split by a matte gap still joins the body.
+    from scipy.ndimage import label as cc_label
+    clean = np.empty_like(masks)
+    for i, m in enumerate(masks):
+        b = binary_closing(m > 0.5, structure=np.ones((7, 7)), iterations=2) if args.fill else m > 0.5
+        lab, n = cc_label(b)
+        if n == 0:
+            continue
+        sizes = np.bincount(lab.ravel())
+        sizes[0] = 0
+        clean[i] = np.where(lab == sizes.argmax(), m, 0.0)
+    masks = clean
     del frames
     print(f"{len(masks)} frames at {FPS} fps ({len(masks) / FPS:.1f}s), dancer region {x1 - x0}x{y1 - y0}px")
 

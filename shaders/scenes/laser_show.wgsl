@@ -22,8 +22,19 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // Night air with a haze glow around the rig.
     var col = mix(vec3<f32>(0.015, 0.01, 0.04), vec3<f32>(0.0, 0.0, 0.012), clamp(p.y + 0.6, 0.0, 1.0));
 
+    // Smoke: two drifting fog banks — a slow mid-height haze and a thicker
+    // ground layer rolling over the crowd. Beams modulate by it below, so
+    // they read as shafts cutting through the smoke rather than flat lines.
+    let haze = fbm(vec2<f32>(p.x * 1.6 - u.flow * 0.07, p.y * 2.6) + u.seed)
+             * (0.35 + 0.65 * smoothstep(-0.3, 0.7, p.y));
+    let ground_fog = fbm(vec2<f32>(p.x * 2.8 + u.flow * 0.11, p.y * 6.0 + u.seed * 2.0))
+                   * smoothstep(0.15, 0.75, p.y);
+    let fog = haze * 0.8 + ground_fog * 1.4;
+
     // Main fan: a dozen beams from behind the crowd, panning on the tempo
-    // clock. The fan opens as intensity climbs.
+    // clock. The fan opens as intensity climbs. Beams accumulate separately
+    // so they can light the smoke they pass through.
+    var beams = vec3<f32>(0.0);
     let o = vec2<f32>(0.0, 0.62);
     let spread = 1.35 * (0.75 + 0.45 * u.intensity);
     let chase = floor(u.beat * 2.0);                     // eighth-note chase
@@ -36,7 +47,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         let ang = base + sweep;
         let hue = fi / 12.0 + u.hue * 0.15;
         let bc = palette(hue) * palette(hue);            // squared: saturated
-        col += bc * beam(p, o, ang) * on * (0.55 + 0.45 * beat_pulse(2.5)) * 1.6;
+        beams += bc * beam(p, o, ang) * on * (0.55 + 0.45 * beat_pulse(2.5)) * 1.6;
     }
 
     // Side rigs near the top corners firing down across the fan.
@@ -48,9 +59,20 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
             let ang = PI * 0.5 - side * (0.5 + fj * 0.35)
                     + 0.25 * sin(u.flow * 0.5 + fj * 1.3 + side * 2.0);
             let bc = palette(0.6 + fj * 0.11 + u.hue * 0.15);
-            col += bc * bc * beam(p, so, ang) * (0.5 + 0.5 * beat_pulse(2.0)) * 0.9;
+            beams += bc * bc * beam(p, so, ang) * (0.5 + 0.5 * beat_pulse(2.0)) * 0.9;
         }
     }
+
+    // Shafts: the beam's own light, brighter and sharper where the smoke is
+    // thick, plus a diffuse scatter so the fog bank itself glows where the
+    // beams cross it.
+    col += beams * (0.35 + fog * 1.8);
+    col += beams * fog * fog * 1.2;                       // dense wisps flare
+
+    // Unlit smoke stays faintly visible — cool ambient drifting past.
+    col += vec3<f32>(0.05, 0.07, 0.11) * fog * (0.35 + u.energy * 0.4);
+    // Smoke rolling low across the crowd picks up spill light.
+    col += palette(u.hue * 0.15 + 0.5) * ground_fog * (0.10 + u.bass * 0.25);
 
     // Haze bloom around the rig point, breathing on the beat.
     let d2 = dot(p - o, p - o);

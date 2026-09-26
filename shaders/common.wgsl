@@ -24,8 +24,8 @@ struct U {
     flash: f32,       // 1 on a cut, decays
     flow: f32,        // smooth beat clock for motion (never jumps); use for travel
     master: f32,      // overall brightness (blackout fades to 0)
-    _pad1: f32,
-    _pad2: f32,
+    fx: f32,          // post effect mode (see present.wgsl / Fx in config.rs)
+    _pad: f32,
     spectrum: array<vec4<f32>, 8>,
 };
 

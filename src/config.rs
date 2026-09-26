@@ -25,13 +25,14 @@ pub enum Action {
     MarkDownbeat,
     LatencyDown,
     LatencyUp,
+    CycleFx,
     ReloadShaders,
     TogglePanel,
     LeaveFullscreen,
 }
 
 impl Action {
-    pub const ALL: [Action; 18] = [
+    pub const ALL: [Action; 19] = [
         Action::NextScene,
         Action::PrevScene,
         Action::ModeAuto,
@@ -47,6 +48,7 @@ impl Action {
         Action::MarkDownbeat,
         Action::LatencyDown,
         Action::LatencyUp,
+        Action::CycleFx,
         Action::ReloadShaders,
         Action::TogglePanel,
         Action::LeaveFullscreen,
@@ -69,6 +71,7 @@ impl Action {
             Action::MarkDownbeat => "Mark this beat as the downbeat",
             Action::LatencyDown => "Latency -5 ms (visuals later)",
             Action::LatencyUp => "Latency +5 ms (visuals earlier)",
+            Action::CycleFx => "Effect: off / mirror / kaleido",
             Action::ReloadShaders => "Reload shaders",
             Action::TogglePanel => "Show / hide this control panel",
             Action::LeaveFullscreen => "Leave fullscreen",
@@ -92,6 +95,7 @@ impl Action {
             Action::MarkDownbeat => "Space",
             Action::LatencyDown => "[",
             Action::LatencyUp => "]",
+            Action::CycleFx => "X",
             Action::ReloadShaders => "F5",
             Action::TogglePanel => "F1",
             Action::LeaveFullscreen => "Escape",
@@ -153,6 +157,64 @@ fn month_day(secs: i64) -> (u32, u32) {
     (month, day)
 }
 
+/// Whole-frame post effect: mirrors, kaleidoscope, colour invert. Applied in
+/// `present.wgsl` from `u.fx`, so it transforms the scene and dancer alike.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Fx {
+    Off,
+    MirrorX,
+    MirrorY,
+    Quad,
+    Kaleido6,
+    Kaleido8,
+}
+
+impl Fx {
+    pub const ALL: [Fx; 6] = [
+        Fx::Off,
+        Fx::MirrorX,
+        Fx::MirrorY,
+        Fx::Quad,
+        Fx::Kaleido6,
+        Fx::Kaleido8,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Fx::Off => "Off",
+            Fx::MirrorX => "Mirror X",
+            Fx::MirrorY => "Mirror Y",
+            Fx::Quad => "Quad mirror",
+            Fx::Kaleido6 => "Kaleido x6",
+            Fx::Kaleido8 => "Kaleido x8",
+        }
+    }
+
+    /// The number handed to the shader (`u.fx`).
+    pub fn index(self) -> f32 {
+        match self {
+            Fx::Off => 0.0,
+            Fx::MirrorX => 1.0,
+            Fx::MirrorY => 2.0,
+            Fx::Quad => 3.0,
+            Fx::Kaleido6 => 4.0,
+            Fx::Kaleido8 => 5.0,
+        }
+    }
+
+    pub fn next(self) -> Fx {
+        let i = Fx::ALL.iter().position(|&f| f == self).unwrap_or(0);
+        Fx::ALL[(i + 1) % Fx::ALL.len()]
+    }
+
+    /// A random pick for auto mode; never repeats the current effect.
+    pub fn random(r: f32, cur: Fx) -> Fx {
+        let i = (r * Fx::ALL.len() as f32) as usize % Fx::ALL.len();
+        let f = Fx::ALL[i];
+        if f == cur { Fx::ALL[(i + 1) % Fx::ALL.len()] } else { f }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Tristate {
     Auto,
@@ -179,6 +241,10 @@ pub struct Settings {
     pub disabled_clips: Vec<String>,
     /// Dancer height as a fraction of the screen.
     pub dancer_size: f32,
+    /// Fixed post effect (ignored while `fx_auto` is on).
+    pub fx: Fx,
+    /// Pick a fresh post effect on every scene cut.
+    pub fx_auto: bool,
     pub latency_ms: f32,
     pub show_panel: bool,
 }
@@ -198,6 +264,8 @@ impl Default for Settings {
             canon: Tristate::Auto,
             disabled_clips: Vec::new(),
             dancer_size: 0.85,
+            fx: Fx::Off,
+            fx_auto: false,
             latency_ms: 30.0,
             show_panel: true,
         }

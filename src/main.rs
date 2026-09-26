@@ -31,7 +31,7 @@ use winit::keyboard::Key;
 use winit::window::{Fullscreen, Window, WindowId};
 
 use audio::{AudioEngine, Command, Features};
-use config::{in_season, key_name, today, Action, Mode, Seasonal, Settings, Tristate};
+use config::{in_season, key_name, today, Action, Fx, Mode, Seasonal, Settings, Tristate};
 use dancer::DancerLayer;
 use director::Director;
 use panel::{Panel, Status, UiCommand};
@@ -66,6 +66,8 @@ struct App {
     master: f32,
     features: Features,
     beat_pos: f64,
+    /// The post effect showing now — the auto-pilot's pick when `fx_auto` is on.
+    fx_current: Fx,
 }
 
 impl App {
@@ -137,6 +139,10 @@ impl App {
             self.dancer.on_cut(intensity, || director.rand(), s.dancer_style, s.canon, &s.disabled_clips);
         }
         let dancer_u = self.dancer.uniforms(pos, f.downbeat, f.bpm, dt, s.dancer_size, &s.disabled_clips);
+        if ev.cut && s.fx_auto {
+            let r = self.director.rand();
+            self.fx_current = Fx::random(r, self.fx_current);
+        }
 
         // Tempo changes ease in; position only ever moves forward smoothly.
         self.flow_bpm += (f.bpm - self.flow_bpm) * (dt * 1.5).min(1.0);
@@ -172,7 +178,8 @@ impl App {
             flash: d.flash,
             flow: self.flow as f32,
             master: self.master,
-            _pad: [0.0; 2],
+            fx: if s.fx_auto { self.fx_current } else { s.fx }.index(),
+            _pad: 0.0,
             spectrum,
         };
         if let Err(e) = r.render(d.scene, &u, dancer_u.as_ref()) {
@@ -216,6 +223,7 @@ impl App {
             clip: self.dancer.loaded_name(),
             blackout: self.blackout,
             fullscreen: r.window.fullscreen().is_some(),
+            fx: if self.settings.fx_auto { self.fx_current } else { self.settings.fx },
         };
         let Some(p) = self.panel.as_mut() else { return };
         self.last_panel_draw = Instant::now();
@@ -277,6 +285,11 @@ impl App {
             }
             Action::LatencyDown => s.latency_ms -= 5.0,
             Action::LatencyUp => s.latency_ms += 5.0,
+            // Cycling the effect by hand turns auto off: the key always shows what it does.
+            Action::CycleFx => {
+                s.fx_auto = false;
+                s.fx = s.fx.next();
+            }
             Action::ReloadShaders => {
                 if let Some(r) = self.renderer.as_mut() {
                     r.reload_shaders(true);
@@ -527,6 +540,7 @@ fn main() -> Result<()> {
         panel: None,
         director: Director::new(),
         dancer,
+        fx_current: settings.fx,
         settings,
         dirty_since: None,
         no_save,
