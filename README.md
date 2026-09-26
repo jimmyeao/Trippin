@@ -1,6 +1,6 @@
 # Trippin
 
-Live, music-reactive visuals for DJ sets, in the style of OOVIE. Trippin listens
+Live, music-reactive visuals for DJ sets. Trippin listens
 to whatever your DJ software is playing and drives GPU shader scenes from it. It
 tracks band energy, onsets, tempo and beat phase, and an auto-pilot cuts between
 scenes on phrase boundaries and drops.
