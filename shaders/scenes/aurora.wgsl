@@ -1,7 +1,7 @@
-// Realistic aurora: green-to-magenta curtains rippling over a mountain range
-// under a starry sky, mirrored in a still lake. The curtains are stacked
-// layers of stretched ridged noise seen in perspective, which gives them
-// height and folds. The music gently brightens them; nothing flashes.
+// Spectrum-driven aurora: the curtains ARE the analyser — each ribbon layer's
+// fold depth and height follow its band of the spectrum, striation brightness
+// rides the same band, and the kick swells the whole display. Mountains and
+// lake reflection remain, but nothing is static anymore.
 
 fn curtain(pt: vec2<f32>, t: f32) -> f32 {
     // Thin ribbons winding across the ground plane; every layer above samples
@@ -9,14 +9,17 @@ fn curtain(pt: vec2<f32>, t: f32) -> f32 {
     var v = 0.0;
     for (var k = 0; k < 2; k++) {
         let fk = f32(k);
-        let wind = 2.2 * sin(pt.x * 0.18 + t * 0.05 + fk * 2.0) + 1.4 * fbm(vec2<f32>(pt.x * 0.12, fk * 5.0 + t * 0.02));
-        let d = pt.y - (14.0 + fk * 7.0) - wind;
+        // This layer listens to a different slice of the spectrum: the ground
+        // coordinate picks a bin, and that band sets fold depth and lift.
+        let s = spec(clamp(pt.x * 0.035 + 0.5, 0.0, 1.0) * (0.55 + fk * 0.45));
+        let wind = (2.2 + s * 7.0) * sin(pt.x * 0.18 + t * 0.05 + fk * 2.0) + 1.4 * fbm(vec2<f32>(pt.x * 0.12, fk * 5.0 + t * 0.02));
+        let d = pt.y - (14.0 + fk * 7.0 + s * 9.0) - wind;
         let band = exp(-d * d * 0.35);
-        // Fine vertical striations that shimmer along the ribbon.
-        let rays = 0.45 + 0.55 * noise(vec2<f32>(pt.x * 2.5 + t * 0.3, fk * 3.0));
+        // Fine vertical striations whose shimmer rate and brightness ride the band.
+        let rays = 0.35 + 0.65 * noise(vec2<f32>(pt.x * 2.5 + t * (0.3 + s * 0.9), fk * 3.0)) * (0.4 + s * 1.5);
         v += band * rays * (0.7 + 0.3 * fk);
     }
-    return v;
+    return v * (0.8 + u.onset * 0.5);
 }
 
 fn aurora(ro: vec3<f32>, rd: vec3<f32>, t: f32) -> vec3<f32> {
@@ -27,8 +30,9 @@ fn aurora(ro: vec3<f32>, rd: vec3<f32>, t: f32) -> vec3<f32> {
         let dist = (h - ro.y) / rd.y;
         let pt = ro.xz + rd.xz * dist;
         let v = curtain(pt, t);
-        // Green at the base of the curtain, magenta toward the top.
-        let tint = mix(vec3<f32>(0.1, 1.0, 0.45), vec3<f32>(0.75, 0.2, 0.9), smoothstep(8.0, 30.0, fi));
+        // Green at the base of the curtain, magenta toward the top; loud highs
+        // push more magenta into the upper sky.
+        let tint = mix(vec3<f32>(0.1, 1.0, 0.45), vec3<f32>(0.75, 0.2, 0.9), smoothstep(8.0, 30.0, fi) * (0.5 + u.high * 0.7));
         col += tint * v * exp(-fi * 0.07) * 0.09;
     }
     return col * smoothstep(0.0, 0.25, rd.y);
@@ -51,7 +55,7 @@ fn mountains(x: f32) -> f32 {
 fn sky(rd: vec3<f32>, t: f32) -> vec3<f32> {
     var col = mix(vec3<f32>(0.02, 0.04, 0.08), vec3<f32>(0.0, 0.005, 0.02), clamp(rd.y * 1.5, 0.0, 1.0));
     col += stars(rd);
-    let a = aurora(vec3<f32>(0.0, 0.0, t * 0.05), rd, t) * (0.8 + 0.5 * u.intensity);
+    let a = aurora(vec3<f32>(0.0, 0.0, t * 0.05), rd, t) * (0.55 + 0.7 * u.intensity + 0.6 * u.kick);
     return col + a;
 }
 

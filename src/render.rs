@@ -53,7 +53,9 @@ pub struct Uniforms {
     pub flow: f32,
     /// Overall brightness 0..1 (blackout fades this to 0).
     pub master: f32,
-    pub _pad: [f32; 2],
+    /// Post effect mode (`Fx::index`), consumed by `present.wgsl`.
+    pub fx: f32,
+    pub _pad: f32,
     pub spectrum: [f32; SPECTRUM_BINS],
 }
 

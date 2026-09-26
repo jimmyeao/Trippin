@@ -7,7 +7,7 @@ use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
 use winit::window::Window;
 
-use crate::config::{in_season, today, Action, Mode, Seasonal, Settings, Tristate};
+use crate::config::{in_season, today, Action, Fx, Mode, Seasonal, Settings, Tristate};
 use crate::dancer::STYLES;
 use crate::render::Gpu;
 
@@ -30,6 +30,8 @@ pub struct Status {
     pub clip: Option<String>,
     pub blackout: bool,
     pub fullscreen: bool,
+    /// The post effect actually on screen (the auto-pilot's pick in auto mode).
+    pub fx: Fx,
 }
 
 pub struct Panel {
@@ -229,6 +231,20 @@ fn build_ui(
             if ui.button(fs).clicked() {
                 cmd.push(UiCommand::Do(Action::Fullscreen));
             }
+        });
+    });
+
+    section(ui, "Visual effects", |ui| {
+        ui.checkbox(&mut s.fx_auto, "Auto — a fresh effect on every scene cut");
+        ui.horizontal_wrapped(|ui| {
+            for f in Fx::ALL {
+                ui.selectable_value(&mut s.fx, f, f.label());
+            }
+        });
+        ui.small(if s.fx_auto {
+            format!("On screen now: {}", st.fx.label())
+        } else {
+            "Transforms the whole frame, dancer included.".to_string()
         });
     });
 

@@ -77,32 +77,41 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         let depth = sin(a);                       // -1 back .. 1 front
         let d2 = dot(p - bp, p - bp);
         let twinkle = 0.55 + 0.45 * sin(t * (2.0 + hash21(vec2<f32>(fi, 1.0)) * 3.0) + fi * 1.7);
-        let bright = twinkle * mix(0.25, 1.0, depth * 0.5 + 0.5) * glow_amt;
+        // Each bulb sits on a spectrum band by height — the spiral lights in
+        // the shape of the music, bass at the base, highs at the tip.
+        let band = spec(s * 0.8 + 0.05);
+        let bright = twinkle * mix(0.25, 1.0, depth * 0.5 + 0.5) * glow_amt * (0.3 + band * 1.4);
         col += bulb_colour(fi) * bright * 0.00022 / (d2 + 0.00006);
     }
-    // White garland lights on a counter-spiral.
+    // White garland lights on a counter-spiral, chasing on the beat.
     for (var i = 0; i < 60; i++) {
         let fi = f32(i);
         let s = (fi + 0.5) / 60.0;
         let a = -s * 4.0 * TAU + spin + 1.0;
         let bp = vec2<f32>(rb * s * 0.95 * cos(a), top + s * (bottom - top) * 0.97);
         let d2 = dot(p - bp, p - bp);
-        let bright = (0.4 + 0.6 * (sin(a) * 0.5 + 0.5)) * glow_amt;
+        let chase = 0.5 + 0.5 * sin(a - u.beat * TAU * 0.5);
+        let bright = (0.3 + 0.7 * chase * (sin(a) * 0.5 + 0.5)) * glow_amt * (0.5 + u.mid);
         col += vec3<f32>(1.0, 0.9, 0.7) * bright * 0.00006 / (d2 + 0.00003);
     }
+
+    // A warm wave climbs the tree once per beat.
+    let wave = exp(-abs(s_h - (1.0 - u.beat_phase)) * 8.0) * beat_pulse(6.0);
+    col += vec3<f32>(1.0, 0.75, 0.35) * wave * in_tree * 0.22;
 
     // Star on top: gold, slowly turning, shimmering with the music.
     let sp = rot(sin(t * 0.5) * 0.2) * (p - vec2<f32>(0.0, top - 0.04));
     let star = sd_star5(vec2<f32>(sp.x, -sp.y), 0.075, 0.45);
-    let shimmer = 0.8 + 0.2 * sin(t * 3.0) + 0.4 * u.intensity;
+    let shimmer = 0.8 + 0.2 * sin(t * 3.0) + 0.4 * u.intensity + u.kick * 0.7;
     col = mix(col, vec3<f32>(1.0, 0.8, 0.3) * shimmer, smoothstep(0.003, -0.003, star));
     col += vec3<f32>(1.0, 0.7, 0.2) * shimmer * 0.02 / (abs(star) + 0.02) * 0.35;
 
-    // Falling snow, three depths.
-    let snow = snow_layer(in.uv, 7.0, 0.05, 0.06, t) * 0.4
-        + snow_layer(in.uv + 0.3, 13.0, 0.08, 0.06, t) * 0.55
-        + snow_layer(in.uv + 0.7, 22.0, 0.12, 0.07, t) * 0.8;
-    col += vec3<f32>(0.85, 0.9, 1.0) * snow * 0.5;
+    // Falling snow, three depths — heavier and faster when the music is loud.
+    let storm = 1.0 + u.energy * 0.8;
+    let snow = snow_layer(in.uv, 7.0, 0.05 * storm, 0.06, t) * 0.4
+        + snow_layer(in.uv + 0.3, 13.0, 0.08 * storm, 0.06, t) * 0.55
+        + snow_layer(in.uv + 0.7, 22.0, 0.12 * storm, 0.07, t) * 0.8;
+    col += vec3<f32>(0.85, 0.9, 1.0) * snow * (0.4 + u.high * 0.4);
 
     col += prev(in.uv) * 0.06;
     return vec4<f32>(col, 1.0);
