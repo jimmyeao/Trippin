@@ -5,6 +5,7 @@
 //! time — Show, Scenes, Dancer, Effects, Keys — so it stays tidy even with
 //! 50+ scenes.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use winit::event::WindowEvent;
@@ -14,6 +15,7 @@ use winit::window::{Icon, Window, WindowLevel};
 use crate::config::{in_season, today, Action, Fx, Mode, Seasonal, Settings, Tristate};
 use crate::dancer::STYLES;
 use crate::render::Gpu;
+use crate::timeline::{Cue, CueKind, PlayMode, SongCtl, Timeline};
 
 /// A fully-tessellated egui frame, ready to be drawn without the settings lock.
 pub struct PanelFrame {
@@ -27,6 +29,14 @@ pub enum UiCommand {
     Do(Action),
     GoToScene(usize),
     ShowClip(usize),
+    /// Decode an audio file and build a fresh timeline for it.
+    LoadSong(PathBuf),
+    /// Open a saved timeline `.json`.
+    LoadTimeline(PathBuf),
+    /// Save the current timeline under `timelines/<name>.json`.
+    SaveTimeline,
+    /// Transport control for the song player.
+    Song(SongCtl),
 }
 
 /// Live state shown in the panel's status area, written by the render thread.
@@ -52,11 +62,12 @@ enum Tab {
     Scenes,
     Dancer,
     Effects,
+    Timeline,
     Keys,
 }
 
 impl Tab {
-    const ALL: [Tab; 5] = [Tab::Show, Tab::Scenes, Tab::Dancer, Tab::Effects, Tab::Keys];
+    const ALL: [Tab; 6] = [Tab::Show, Tab::Scenes, Tab::Dancer, Tab::Effects, Tab::Timeline, Tab::Keys];
 
     fn label(self) -> &'static str {
         match self {
@@ -64,6 +75,7 @@ impl Tab {
             Tab::Scenes => "Scenes",
             Tab::Dancer => "Dancer",
             Tab::Effects => "Effects",
+            Tab::Timeline => "Timeline",
             Tab::Keys => "Keys",
         }
     }
@@ -82,6 +94,12 @@ pub struct Panel {
     tab: Tab,
     /// Text filter for the scene list.
     scene_filter: String,
+    /// Selected cue index in the timeline tab.
+    tl_sel: Option<usize>,
+    /// Cue kind chosen in the "add cue" picker (keeps its last params).
+    tl_add: CueKind,
+    /// Text field for an explicit song path (drag-drop is the fast path).
+    song_path: String,
     /// Throttles configure retries after a failure.
     last_configure: std::time::Instant,
     /// False after an acquire failure — retry configure before acquiring again.
@@ -148,6 +166,9 @@ impl Panel {
             rebinding: None,
             tab: Tab::Show,
             scene_filter: String::new(),
+            tl_sel: None,
+            tl_add: CueKind::NextScene,
+            song_path: String::new(),
             last_configure: std::time::Instant::now(),
             surface_ok: true,
             seen_epoch: 0,
@@ -176,6 +197,7 @@ impl Panel {
         status: &Status,
         scenes: &[String],
         clips: &[String],
+        tl_shared: &crate::timeline::Shared,
     ) -> (Vec<UiCommand>, bool, PanelFrame) {
         let mut commands = Vec::new();
         let mut changed = false;
@@ -184,9 +206,15 @@ impl Panel {
         let rebinding = &mut self.rebinding;
         let tab = &mut self.tab;
         let scene_filter = &mut self.scene_filter;
+        let tl_sel = &mut self.tl_sel;
+        let tl_add = &mut self.tl_add;
+        let song_path = &mut self.song_path;
         let mut out = self.ctx.run_ui(raw, |ui| {
             ui.add_space(6.0);
-            changed |= build_ui(ui, settings, status, scenes, clips, rebinding, tab, scene_filter, &mut commands);
+            changed |= build_ui(
+                ui, settings, status, scenes, clips, tl_shared, rebinding, tab, scene_filter,
+                tl_sel, tl_add, song_path, &mut commands,
+            );
         });
         self.state.handle_platform_output(&self.window, out.platform_output);
         let prims = self.ctx.tessellate(out.shapes, out.pixels_per_point);
@@ -300,9 +328,13 @@ fn build_ui(
     st: &Status,
     scenes: &[String],
     clips: &[String],
+    tl_shared: &crate::timeline::Shared,
     rebinding: &mut Option<Action>,
     tab: &mut Tab,
     scene_filter: &mut String,
+    tl_sel: &mut Option<usize>,
+    tl_add: &mut CueKind,
+    song_path: &mut String,
     cmd: &mut Vec<UiCommand>,
 ) -> bool {
     let before = serde_json::to_string(s).unwrap_or_default();
@@ -348,6 +380,7 @@ fn build_ui(
             Tab::Scenes => scenes_tab(ui, s, st, scenes, scene_filter, cmd),
             Tab::Dancer => dancer_tab(ui, s, st, clips, cmd),
             Tab::Effects => effects_tab(ui, s, st),
+            Tab::Timeline => timeline_tab(ui, tl_shared, scenes, clips, tl_sel, tl_add, song_path, cmd),
             Tab::Keys => keys_tab(ui, s, rebinding),
         });
 
@@ -557,5 +590,469 @@ fn keys_tab(ui: &mut egui::Ui, s: &mut Settings, rebinding: &mut Option<Action>)
     ui.add_space(4.0);
     if ui.button("Reset all keys to defaults").clicked() {
         s.keys = Settings::default().keys;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Timeline tab — load a track, drop cues on its beat grid, play or follow.
+// ---------------------------------------------------------------------------
+
+fn fmt_time(t: f64) -> String {
+    let t = t.max(0.0);
+    format!("{}:{:04.1}", (t / 60.0) as u64, t % 60.0)
+}
+
+fn cue_color(k: &CueKind) -> egui::Color32 {
+    use egui::Color32;
+    match k {
+        CueKind::Scene(_) | CueKind::NextScene | CueKind::PrevScene => Color32::from_rgb(160, 95, 250),
+        CueKind::Fx(_) | CueKind::FxAuto(_) => Color32::from_rgb(70, 200, 220),
+        CueKind::Dancer(_)
+        | CueKind::Clip(_)
+        | CueKind::NextClip
+        | CueKind::NextLook
+        | CueKind::Look(_) => Color32::from_rgb(90, 210, 130),
+        CueKind::Canon(_) => Color32::from_rgb(150, 220, 90),
+        CueKind::Blackout(_) => Color32::from_rgb(240, 90, 90),
+        CueKind::Mode(_) => Color32::from_rgb(240, 175, 70),
+    }
+}
+
+/// Pick a string from `opts` — returns true when the value changed.
+fn pick_str(ui: &mut egui::Ui, id: egui::Id, cur: &mut String, opts: &[String]) -> bool {
+    let mut changed = false;
+    egui::ComboBox::from_id_salt(id)
+        .width(110.0)
+        .selected_text(if cur.is_empty() { "pick…" } else { cur.as_str() })
+        .show_ui(ui, |ui| {
+            for o in opts {
+                changed |= ui.selectable_value(cur, o.clone(), o).changed();
+            }
+        });
+    changed
+}
+
+/// Param editors for a cue kind. Returns true when it changed.
+fn cue_param_ui(ui: &mut egui::Ui, kind: &mut CueKind, scenes: &[String], clips: &[String], id: egui::Id) -> bool {
+    match kind {
+        CueKind::Scene(n) => pick_str(ui, id.with("sc"), n, scenes),
+        CueKind::Clip(n) => pick_str(ui, id.with("cl"), n, clips),
+        CueKind::Mode(m) => {
+            ui.selectable_value(m, Mode::Auto, "auto").changed()
+                | ui.selectable_value(m, Mode::Static, "static").changed()
+                | ui.selectable_value(m, Mode::Manual, "manual").changed()
+        }
+        CueKind::Dancer(b) | CueKind::Blackout(b) | CueKind::FxAuto(b) => {
+            ui.checkbox(b, "on").changed()
+        }
+        CueKind::Look(l) => {
+            let mut changed = false;
+            egui::ComboBox::from_id_salt(id.with("lk"))
+                .width(90.0)
+                .selected_text((*l).map(|i| STYLES[i]).unwrap_or("auto"))
+                .show_ui(ui, |ui| {
+                    changed |= ui.selectable_value(l, None, "auto").changed();
+                    for (i, name) in STYLES.iter().enumerate() {
+                        changed |= ui.selectable_value(l, Some(i), *name).changed();
+                    }
+                });
+            changed
+        }
+        CueKind::Canon(t) => {
+            ui.selectable_value(t, Tristate::Auto, "auto").changed()
+                | ui.selectable_value(t, Tristate::On, "on").changed()
+                | ui.selectable_value(t, Tristate::Off, "off").changed()
+        }
+        CueKind::Fx(f) => {
+            let mut changed = false;
+            egui::ComboBox::from_id_salt(id.with("fx")).width(100.0).selected_text(f.label()).show_ui(
+                ui,
+                |ui| {
+                    for v in Fx::ALL {
+                        changed |= ui.selectable_value(f, v, v.label()).changed();
+                    }
+                },
+            );
+            changed
+        }
+        _ => false,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn timeline_tab(
+    ui: &mut egui::Ui,
+    tl_shared: &crate::timeline::Shared,
+    scenes: &[String],
+    clips: &[String],
+    sel: &mut Option<usize>,
+    add_kind: &mut CueKind,
+    song_path: &mut String,
+    cmd: &mut Vec<UiCommand>,
+) {
+    use egui::{pos2, vec2, Align2, Color32, FontId, Sense, Shape, Stroke};
+
+    let mut guard = tl_shared.lock().unwrap_or_else(|e| e.into_inner());
+    // Destructure so closures borrow disjoint fields.
+    let crate::timeline::TimelineState {
+        doc: doc_opt,
+        mode,
+        pos_s,
+        cursor_s,
+        recording,
+        autosync,
+        live_locked,
+        live_score,
+        dirty,
+        snap,
+        message,
+        busy,
+    } = &mut *guard;
+
+    // --- Load ---------------------------------------------------------------
+    ui.horizontal(|ui| {
+        ui.label("Track");
+        ui.add(egui::TextEdit::singleline(song_path).desired_width(150.0).hint_text("mp3 / flac / wav / m4a…"));
+        if ui
+            .add_enabled(!*busy, egui::Button::new("Load"))
+            .on_hover_text("Decode and analyse — a few seconds")
+            .clicked()
+            && !song_path.trim().is_empty()
+        {
+            cmd.push(UiCommand::LoadSong(PathBuf::from(song_path.trim())));
+        }
+        let saved = Timeline::list(&crate::config::timelines_dir());
+        if !saved.is_empty() {
+            egui::ComboBox::from_id_salt("tl_open").selected_text("open saved…").show_ui(ui, |ui| {
+                for p in saved {
+                    let stem = p.file_stem().unwrap_or_default().to_string_lossy().to_string();
+                    if ui.selectable_label(false, &stem).clicked() {
+                        cmd.push(UiCommand::LoadTimeline(p.clone()));
+                    }
+                }
+            });
+        }
+    });
+    ui.small("…or drop an audio file / timeline .json on either window.");
+    if *busy {
+        ui.horizontal(|ui| {
+            ui.spinner();
+            ui.label("decoding — a few seconds");
+        });
+    }
+    if !message.is_empty() {
+        ui.small(message.as_str());
+    }
+    let Some(doc) = doc_opt.as_mut() else {
+        if doc_opt.is_none() && !*busy {
+            ui.add_space(6.0);
+            ui.label("No timeline yet — load a track to start one.");
+        }
+        return;
+    };
+
+    // --- Header + transport ---------------------------------------------------
+    let dur = doc.duration.max(0.001);
+    let beats_total = doc.total_beats().max(1.0);
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(&doc.name).strong());
+        ui.small(format!("{dur_txt} · {bpm:.1} BPM · {beats:.0} beats{uns}",
+            dur_txt = fmt_time(dur),
+            bpm = doc.bpm,
+            beats = beats_total,
+            uns = if *dirty { "  •" } else { "" },
+        ));
+    });
+    ui.horizontal(|ui| {
+        let playing = *mode == PlayMode::Playing;
+        if ui
+            .add_enabled(!*busy, egui::Button::new(if playing { "⏸  Pause" } else { "▶  Play" }))
+            .clicked()
+        {
+            cmd.push(UiCommand::Song(SongCtl::Toggle));
+        }
+        if ui
+            .add_enabled(*mode != PlayMode::Stopped, egui::Button::new("⏹"))
+            .on_hover_text("Stop — live audio resumes")
+            .clicked()
+        {
+            cmd.push(UiCommand::Song(SongCtl::Stop));
+        }
+        let rec_txt = egui::RichText::new(if *recording { "● REC" } else { "● rec" })
+            .color(if *recording { Color32::from_rgb(255, 80, 80) } else { Color32::GRAY });
+        if ui.toggle_value(recording, rec_txt)
+            .on_hover_text("Record your hotkeys/panel clicks as cues while it plays")
+            .changed()
+            && *recording
+            && *mode != PlayMode::Playing
+        {
+            ui.ctx().request_repaint();
+        }
+        ui.checkbox(snap, "snap ¼");
+        ui.checkbox(autosync, "follow live")
+            .on_hover_text("When stopped: recognise this track in the room and cue it live");
+        if *autosync && *mode != PlayMode::Playing {
+            if *live_locked {
+                ui.colored_label(Color32::from_rgb(120, 230, 130), format!("locked {:.0}%", *live_score * 100.0));
+            } else {
+                ui.colored_label(Color32::GRAY, "listening…");
+            }
+        }
+    });
+    {
+        let beat = (doc.bpm / 60.0) * (*pos_s - doc.first_beat);
+        let tag = match *mode {
+            PlayMode::Playing => "playing",
+            PlayMode::Paused => "paused",
+            PlayMode::Stopped if *live_locked => "live match",
+            PlayMode::Stopped => "",
+        };
+        ui.monospace(format!("{}  ·  beat {:.2}  {}", fmt_time(*pos_s), beat.max(0.0), tag));
+    }
+
+    // --- The strip ------------------------------------------------------------
+    let strip_h = 132.0f32;
+    let lane_h = 14.0f32;
+    let axis_h = 14.0f32;
+    let (rect, strip_resp) =
+        ui.allocate_exact_size(vec2(ui.available_width().max(80.0), strip_h), Sense::click_and_drag());
+    let p = ui.painter_at(rect);
+    let wave_mid = rect.top() + lane_h + (strip_h - lane_h - axis_h) * 0.5;
+    let wave_half = (strip_h - lane_h - axis_h) * 0.47;
+    // Beat↔time as plain closures over copies — keeps `doc` free for editing.
+    let (fb, bps) = (doc.first_beat, doc.beats_per_sec());
+    let dur_f = dur;
+    let x_at = |t: f64| rect.left() + (t / dur_f) as f32 * rect.width();
+    let beat_at = |t: f64| (t - fb) * bps;
+    let time_at = |b: f64| fb + b / bps;
+    let b_at_x = |px: f32| beat_at(((px - rect.left()) as f64 / rect.width() as f64 * dur_f).clamp(0.0, dur_f));
+    p.rect_filled(rect, 3.0, Color32::from_gray(18));
+
+    if !doc.overview.is_empty() {
+        let n = doc.overview.len();
+        for (i, &a) in doc.overview.iter().enumerate() {
+            let x = x_at(i as f64 / n as f64 * dur);
+            let a = a.min(1.0) * wave_half;
+            p.line_segment(
+                [pos2(x, wave_mid - a), pos2(x, wave_mid + a)],
+                Stroke::new(1.0, Color32::from_gray(85)),
+            );
+        }
+    }
+    // Bar lines every 4 beats, stronger each 4 bars, numbered.
+    for bar in 0..=(beats_total / 4.0).ceil() as i64 {
+        let t = time_at(bar as f64 * 4.0);
+        if t > dur {
+            break;
+        }
+        let x = x_at(t);
+        let strong = bar % 4 == 0;
+        p.line_segment(
+            [pos2(x, rect.top() + lane_h), pos2(x, rect.bottom() - axis_h)],
+            Stroke::new(1.0, Color32::from_gray(if strong { 70 } else { 40 })),
+        );
+        if strong {
+            p.text(
+                pos2(x + 3.0, rect.bottom() - axis_h + 1.0),
+                Align2::LEFT_TOP,
+                format!("{}", bar + 1),
+                FontId::proportional(9.0),
+                Color32::from_gray(115),
+            );
+        }
+    }
+
+    // Cue markers — clickable/draggable triangles in the top lane.
+    let mut to_delete: Option<usize> = None;
+    // The dragged cue gets resorted after the loop; remember which it was.
+    let mut resort_sel: Option<(f64, &'static str)> = None;
+    for (i, cue) in doc.cues.iter_mut().enumerate() {
+        let x = x_at(time_at(cue.beat));
+        let hit = egui::Rect::from_min_size(pos2(x - 6.0, rect.top() - 1.0), vec2(12.0, lane_h + 8.0));
+        let r = ui.interact(hit, egui::Id::new(("tlcue", i)), Sense::click_and_drag());
+        if r.dragged() {
+            let db = r.drag_delta().x as f64 * beats_total / rect.width() as f64;
+            cue.beat = (cue.beat + db).clamp(0.0, beats_total);
+            *dirty = true;
+            *sel = Some(i);
+        }
+        if r.drag_stopped() {
+            if *snap {
+                cue.beat = (cue.beat * 4.0).round() / 4.0;
+            }
+            resort_sel = Some((cue.beat, cue.kind.label()));
+        }
+        if r.clicked() {
+            *sel = Some(i);
+            *cursor_s = time_at(cue.beat);
+        }
+        if r.secondary_clicked() {
+            to_delete = Some(i);
+        }
+        let mut col = cue_color(&cue.kind);
+        if *sel == Some(i) || r.hovered() {
+            col = Color32::WHITE;
+            p.text(
+                pos2(x, rect.top() + lane_h + 2.0),
+                Align2::CENTER_TOP,
+                format!("{} {}", cue.kind.label(), cue.kind.detail()),
+                FontId::proportional(9.0),
+                Color32::WHITE,
+            );
+        }
+        p.add(Shape::convex_polygon(
+            vec![pos2(x - 5.0, rect.top()), pos2(x + 5.0, rect.top()), pos2(x, rect.top() + 7.0)],
+            col,
+            Stroke::NONE,
+        ));
+        p.line_segment(
+            [pos2(x, rect.top() + 7.0), pos2(x, rect.bottom() - axis_h)],
+            Stroke::new(1.0, cue_color(&cue.kind).gamma_multiply(0.55)),
+        );
+    }
+    if let Some((beat, label)) = resort_sel {
+        doc.sort_cues();
+        *sel = doc
+            .cues
+            .iter()
+            .position(|c| c.beat == beat && c.kind.label() == label)
+            .or(*sel);
+    }
+    if let Some(i) = to_delete {
+        doc.cues.remove(i);
+        *dirty = true;
+        if *sel == Some(i) {
+            *sel = None;
+        }
+    }
+
+    // Clicking/dragging empty strip seeks: the playhead while running, the
+    // edit cursor while stopped.
+    if (strip_resp.clicked() || strip_resp.dragged()) && to_delete.is_none() {
+        if let Some(pos) = strip_resp.interact_pointer_pos() {
+            let mut b = b_at_x(pos.x);
+            if *snap {
+                b = (b * 4.0).round() / 4.0;
+            }
+            let t = time_at(b).clamp(0.0, dur);
+            *cursor_s = t;
+            if *mode != PlayMode::Stopped {
+                cmd.push(UiCommand::Song(SongCtl::Seek(t)));
+            } else {
+                *pos_s = t;
+            }
+            *sel = None;
+        }
+    }
+
+    // Playhead: the transport position while playing/paused, live-match
+    // position while locked, else the edit cursor.
+    let head_s = if *mode != PlayMode::Stopped || *live_locked { *pos_s } else { *cursor_s };
+    let hx = x_at(head_s.clamp(0.0, dur));
+    p.line_segment(
+        [pos2(hx, rect.top()), pos2(hx, rect.bottom() - axis_h)],
+        Stroke::new(1.5, Color32::from_rgb(230, 70, 70)),
+    );
+
+    // --- Add / edit ----------------------------------------------------------
+    ui.horizontal(|ui| {
+        ui.label("add");
+        egui::ComboBox::from_id_salt("tl_add_kind")
+            .width(96.0)
+            .selected_text(add_kind.label())
+            .show_ui(ui, |ui| {
+                for k in CueKind::picker() {
+                    if ui
+                        .selectable_label(
+                            std::mem::discriminant(&k) == std::mem::discriminant(add_kind),
+                            k.label(),
+                        )
+                        .clicked()
+                    {
+                        *add_kind = k;
+                    }
+                }
+            });
+        cue_param_ui(ui, add_kind, scenes, clips, egui::Id::new("tl_add_param"));
+        if ui.button("+ at cursor").clicked() {
+            let mut kind = add_kind.clone();
+            match &mut kind {
+                CueKind::Scene(n) if n.is_empty() => *n = scenes.first().cloned().unwrap_or_default(),
+                CueKind::Clip(n) if n.is_empty() => *n = clips.first().cloned().unwrap_or_default(),
+                _ => {}
+            }
+            let mut b = doc.beat_at(*cursor_s).max(0.0);
+            if *snap {
+                b = (b * 4.0).round() / 4.0;
+            }
+            doc.cues.push(Cue { beat: b, kind });
+            doc.sort_cues();
+            *dirty = true;
+        }
+    });
+
+    if let Some(i) = *sel {
+        if i < doc.cues.len() {
+            let cue = &mut doc.cues[i];
+            ui.horizontal(|ui| {
+                ui.label("cue");
+                if ui
+                    .add(egui::DragValue::new(&mut cue.beat).speed(0.25).range(0.0..=beats_total))
+                    .changed()
+                {
+                    *dirty = true;
+                }
+                if cue_param_ui(ui, &mut cue.kind, scenes, clips, egui::Id::new("tl_sel_param")) {
+                    *dirty = true;
+                }
+                if ui.small_button("✕").on_hover_text("delete cue").clicked() {
+                    to_delete = Some(i);
+                }
+            });
+        } else {
+            *sel = None;
+        }
+    }
+    if let Some(i) = to_delete.filter(|i| *i < doc.cues.len()) {
+        doc.cues.remove(i);
+        *dirty = true;
+        *sel = None;
+    }
+
+    // --- Save + cue list ------------------------------------------------------
+    ui.horizontal(|ui| {
+        ui.label("name");
+        ui.add(egui::TextEdit::singleline(&mut doc.name).desired_width(130.0));
+        if ui.button("Save").on_hover_text("timelines/<name>.json").clicked() {
+            cmd.push(UiCommand::SaveTimeline);
+        }
+        ui.small(format!("{} cues", doc.cues.len()));
+    });
+    ui.separator();
+    let mut row_del: Option<usize> = None;
+    egui::Grid::new("tl_cues").num_columns(4).striped(true).show(ui, |ui| {
+        for (i, c) in doc.cues.iter().enumerate() {
+            let r = ui.selectable_label(
+                *sel == Some(i),
+                egui::RichText::new(format!("{:>7.2}", c.beat)).monospace(),
+            );
+            if r.clicked() {
+                *sel = Some(i);
+                *cursor_s = doc.time_at(c.beat);
+            }
+            ui.colored_label(cue_color(&c.kind), c.kind.label());
+            ui.small(c.kind.detail());
+            if ui.small_button("✕").clicked() {
+                row_del = Some(i);
+            }
+            ui.end_row();
+        }
+    });
+    if let Some(i) = row_del {
+        doc.cues.remove(i);
+        *dirty = true;
+        if *sel == Some(i) {
+            *sel = None;
+        }
     }
 }

@@ -3,6 +3,11 @@
 //! Usage: trippin [--list-devices] [--device "<name part>"] [--mic] [--scene <name>]
 //!                [--dancer [style]] [--no-dancer] [--canon] [--no-panel]
 //!                [--gpu low] [--scale 0.75] [--fullscreen] [--vsync]
+//!                [--song <audio file>]
+//!
+//! `--song` (or dropping an audio file / timeline .json on the window) loads a
+//! track for the Timeline tab: waveform + beat grid, draggable cues, record
+//! mode (G) that writes hotkey/panel actions as cues while it plays (T).
 //!
 //! A control panel window opens alongside the visuals (F1 toggles it): modes,
 //! scene playlist, dancer options, sync and rebindable hotkeys. Settings are
@@ -25,8 +30,10 @@ mod dancer;
 mod director;
 mod panel;
 mod render;
+mod song;
 #[cfg(target_os = "macos")]
 mod sysaudio;
+mod timeline;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
@@ -45,6 +52,7 @@ use dancer::DancerLayer;
 use director::Director;
 use panel::{Panel, Status, UiCommand};
 use render::{Gpu, Renderer, Uniforms};
+use timeline::{Cue, CueKind, Matcher, PlayMode, SongCtl};
 
 /// State shared between the event thread and the render thread.
 struct Shared {
@@ -52,6 +60,10 @@ struct Shared {
     settings: Mutex<Settings>,
     /// Live status for the panel, written by the render thread.
     status: Mutex<Status>,
+    /// Timeline doc + transport/follow-live state.
+    timeline: timeline::Shared,
+    /// Raw onset envelope for the live-match correlator.
+    env: audio::SharedEnv,
     /// Settings changed on the render thread — the event thread saves them.
     dirty: AtomicBool,
     /// The visuals window is closing.
@@ -67,6 +79,12 @@ enum Msg {
     Act(Action),
     GoToScene(usize),
     ShowClip(usize),
+    /// Decode an audio file and start a fresh timeline from it.
+    LoadSong(std::path::PathBuf),
+    /// Open a saved timeline `.json`.
+    LoadTimeline(std::path::PathBuf),
+    /// Transport control for the song player.
+    Transport(SongCtl),
 }
 
 /// Lock even when poisoned: a panicking sibling thread shouldn't take the
@@ -94,12 +112,78 @@ fn usable_scenes(r: &Renderer, s: &Settings) -> Vec<usize> {
     if on.is_empty() { all } else { on }
 }
 
+/// Stop the song player and put the live audio engine back.
+fn stop_song(
+    player: &mut Option<song::SongPlayer>,
+    audio: &mut AudioEngine,
+    cfg: &(Option<String>, bool),
+    shared: &Shared,
+) {
+    if player.take().is_some() {
+        match AudioEngine::start(cfg.0.as_deref(), cfg.1, Some(shared.env.clone())) {
+            Ok(eng) => *audio = eng,
+            Err(e) => eprintln!("live audio restart failed: {e:#}"),
+        }
+    }
+}
+
+/// Fire one timeline cue — mirrors `apply_render` for the cue kinds.
+/// `usable` is this frame's usable-scenes list.
+fn fire_cue(
+    kind: &CueKind,
+    r: &mut Renderer,
+    dir: &mut Director,
+    dancer: &mut DancerLayer,
+    blackout: &mut bool,
+    shared: &Shared,
+    usable: &[usize],
+) {
+    let mut s = lock(&shared.settings);
+    match kind {
+        CueKind::Scene(name) => {
+            if let Some(i) = r.scene_names().iter().position(|n| n == name) {
+                dir.cut_to(i);
+            }
+        }
+        CueKind::NextScene => dir.next_scene(usable, s.random_order),
+        CueKind::PrevScene => dir.prev_scene(usable),
+        CueKind::Mode(m) => s.mode = *m,
+        CueKind::Dancer(on) => {
+            s.dancer_enabled = *on;
+            if *on {
+                dancer.showing = true;
+            }
+        }
+        CueKind::Clip(name) => {
+            if let Some(i) = shared.clip_names.iter().position(|n| n == name) {
+                dancer.request(i);
+                dancer.showing = true;
+            }
+        }
+        CueKind::NextClip => {
+            dancer.next_clip();
+            dancer.showing = true;
+        }
+        CueKind::NextLook => s.dancer_style = Some((dancer.style + 1) % dancer::STYLES.len()),
+        CueKind::Look(l) => s.dancer_style = *l,
+        CueKind::Canon(t) => s.canon = *t,
+        CueKind::Blackout(b) => *blackout = *b,
+        CueKind::Fx(f) => {
+            s.fx_auto = false;
+            s.fx = *f;
+        }
+        CueKind::FxAuto(b) => s.fx_auto = *b,
+    }
+    shared.dirty.store(true, Ordering::Relaxed);
+}
+
 /// The whole show, free-running on its own thread at vsync pace.
 fn render_loop(
     mut r: Renderer,
     mut dir: Director,
     mut dancer: DancerLayer,
-    audio: AudioEngine,
+    mut audio: AudioEngine,
+    audio_cfg: (Option<String>, bool),
     shared: Arc<Shared>,
     rx: mpsc::Receiver<Msg>,
 ) {
@@ -120,6 +204,26 @@ fn render_loop(
     // The post effect showing now — the auto-pilot's pick when `fx_auto` is on.
     let mut fx_current = lock(&shared.settings).fx;
 
+    // --- Timeline state ---------------------------------------------------
+    // Decodes run on a throwaway thread; results land in `song_rx` and the
+    // engine/player swap happens here (cpal streams aren't Send anyway).
+    let (song_tx, song_rx) = mpsc::channel::<Result<song::Song, String>>();
+    let mut song: Option<Arc<song::Song>> = None;
+    let mut player: Option<song::SongPlayer> = None;
+    // True while a decode belongs to a loaded .json (keep its cues) rather
+    // than a bare audio file (start a fresh doc from it).
+    let mut loading_for_doc = false;
+    let mut matcher = Matcher::new();
+    // Highest beat already dispatched — cues are one-shot events.
+    let mut fired_past = f64::MIN;
+    let mut was_locked = false;
+    let spawn_load = |tx: &mpsc::Sender<Result<song::Song, String>>, path: std::path::PathBuf| {
+        let tx = tx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(song::load(&path).map_err(|e| format!("{e:#}")));
+        });
+    };
+
     while !shared.quit.load(Ordering::Relaxed) {
         // Resize events can get lost or arrive out of order during fullscreen
         // transitions — trust the window's real size, checked every frame.
@@ -137,6 +241,116 @@ fn render_loop(
                     dancer.showing = true;
                 }
                 Msg::Act(a) => apply_render(&mut r, &mut dir, &mut dancer, &mut blackout, &audio, &shared, a),
+                Msg::LoadSong(path) => {
+                    let mut tl = lock(&shared.timeline);
+                    if !tl.busy {
+                        tl.busy = true;
+                        tl.message = format!("loading {}…", path.display());
+                        loading_for_doc = false;
+                        spawn_load(&song_tx, path);
+                    }
+                }
+                Msg::LoadTimeline(path) => match timeline::Timeline::load(&path) {
+                    Ok(doc) => {
+                        let song_path = doc.song.clone();
+                        let name = doc.name.clone();
+                        {
+                            let mut tl = lock(&shared.timeline);
+                            tl.doc = Some(doc);
+                            tl.mode = PlayMode::Stopped;
+                            tl.pos_s = 0.0;
+                            tl.cursor_s = 0.0;
+                            tl.dirty = false;
+                            tl.message = format!("timeline {name}");
+                        }
+                        matcher.reset();
+                        was_locked = false;
+                        fired_past = f64::MIN;
+                        stop_song(&mut player, &mut audio, &audio_cfg, &shared);
+                        if song_path.exists() {
+                            let mut tl = lock(&shared.timeline);
+                            if !tl.busy {
+                                tl.busy = true;
+                                loading_for_doc = true;
+                                spawn_load(&song_tx, song_path);
+                            }
+                        } else {
+                            lock(&shared.timeline).message =
+                                "song file missing — strip + live match only".into();
+                        }
+                    }
+                    Err(e) => lock(&shared.timeline).message = format!("{e:#}"),
+                },
+                Msg::Transport(ctl) => {
+                    eprintln!("Timeline: transport {ctl:?} (mode {:?})", lock(&shared.timeline).mode);
+                    let mut tl = lock(&shared.timeline);
+                    match ctl {
+                        SongCtl::Toggle => match tl.mode {
+                            PlayMode::Playing => {
+                                if let Some(p) = &player {
+                                    p.set_playing(false);
+                                }
+                                tl.mode = PlayMode::Paused;
+                            }
+                            PlayMode::Paused => {
+                                if let Some(p) = &player {
+                                    p.set_playing(true);
+                                }
+                                tl.mode = PlayMode::Playing;
+                            }
+                            PlayMode::Stopped => {
+                                if let Some(sg) = &song {
+                                    match AudioEngine::start_song(sg.clone(), Some(shared.env.clone()))
+                                    {
+                                        Ok((eng, pl)) => {
+                                            if tl.cursor_s > 0.05 {
+                                                pl.seek_s(tl.cursor_s);
+                                                fired_past = tl
+                                                    .doc
+                                                    .as_ref()
+                                                    .map(|d| d.beat_at(tl.cursor_s))
+                                                    .unwrap_or(f64::MIN);
+                                            }
+                                            audio = eng;
+                                            player = Some(pl);
+                                            tl.mode = PlayMode::Playing;
+                                            tl.message.clear();
+                                            println!("Timeline: playing");
+                                        }
+                                        Err(e) => {
+                                            tl.message = format!("play failed: {e:#}");
+                                            eprintln!("Timeline: {e:#}");
+                                        }
+                                    }
+                                } else {
+                                    tl.message = "no song loaded".into();
+                                }
+                            }
+                        },
+                        SongCtl::Stop => {
+                            tl.mode = PlayMode::Stopped;
+                            tl.pos_s = 0.0;
+                            drop(tl);
+                            stop_song(&mut player, &mut audio, &audio_cfg, &shared);
+                            fired_past = f64::MIN;
+                            continue;
+                        }
+                        SongCtl::Seek(t) => {
+                            if let Some(p) = &player {
+                                p.seek_s(t);
+                                tl.pos_s = t;
+                                fired_past = tl
+                                    .doc
+                                    .as_ref()
+                                    .map(|d| d.beat_at(t))
+                                    .unwrap_or(f64::MIN);
+                            } else {
+                                tl.cursor_s = t.max(0.0);
+                                tl.pos_s = tl.cursor_s;
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -148,6 +362,126 @@ fn render_loop(
         }
         let s = lock(&shared.settings).clone();
         let usable = usable_scenes(&r, &s);
+
+        // --- Timeline: loader results, transport state, cue dispatch -------
+        // Lock order note: the panel draws under the settings lock and takes
+        // the timeline lock inside it, so here the timeline lock must never
+        // be held while locking settings — collect, drop, then act.
+        while let Ok(res) = song_rx.try_recv() {
+            match res {
+                Ok(s2) => {
+                    let song_arc = Arc::new(s2);
+                    {
+                        let mut tl = lock(&shared.timeline);
+                        tl.busy = false;
+                        if loading_for_doc {
+                            tl.message = format!("song ready: {}", song_arc.name);
+                        } else {
+                            println!(
+                                "Song: {} — {:.1} BPM, {:.1}s, first beat {:.2}s",
+                                song_arc.name, song_arc.bpm, song_arc.duration,
+                                song_arc.first_beat
+                            );
+                            tl.doc = Some(timeline::Timeline::from_song(&song_arc));
+                            tl.mode = PlayMode::Stopped;
+                            tl.pos_s = 0.0;
+                            tl.cursor_s = 0.0;
+                            tl.dirty = false;
+                            tl.message = format!(
+                                "{} — {:.0} BPM, {:.0} bars",
+                                song_arc.name,
+                                song_arc.bpm,
+                                song_arc.bpm * song_arc.duration / 240.0
+                            );
+                            matcher.reset();
+                            was_locked = false;
+                            fired_past = f64::MIN;
+                        }
+                    }
+                    song = Some(song_arc);
+                }
+                Err(e) => {
+                    let mut tl = lock(&shared.timeline);
+                    tl.busy = false;
+                    tl.message = format!("load failed: {e}");
+                }
+            }
+        }
+
+        // Track end → stop cleanly and hand audio back to the live input.
+        if player.as_ref().is_some_and(|p| p.finished()) {
+            {
+                let mut tl = lock(&shared.timeline);
+                tl.mode = PlayMode::Stopped;
+                tl.pos_s = 0.0;
+            }
+            stop_song(&mut player, &mut audio, &audio_cfg, &shared);
+            fired_past = f64::MIN;
+        }
+
+        // Pick a playhead: the player's clock while the file plays, else the
+        // live-match estimate while follow-live is on. Fire the cues due.
+        {
+            let mut guard = lock(&shared.timeline);
+            let tl = &mut *guard;
+            let mut due: Vec<CueKind> = Vec::new();
+            let mut new_fired = fired_past;
+            if let Some(doc) = tl.doc.as_ref() {
+                let pos_b: Option<f64> = match tl.mode {
+                    PlayMode::Playing => {
+                        let t = player.as_ref().map(|p| p.position_s()).unwrap_or(0.0);
+                        tl.pos_s = t;
+                        Some(doc.beat_at(t))
+                    }
+                    _ if tl.autosync => {
+                        // Follow-live: correlate the room's onset envelope
+                        // against the song's (2×/sec), coast between evals.
+                        let live_pos = if matcher.due() {
+                            let (env, fps) = {
+                                let e = lock(&shared.env);
+                                (e.env.iter().copied().collect::<Vec<f32>>(), e.fps as f64)
+                            };
+                            if fps > 0.0 {
+                                matcher.update(&env, fps, doc)
+                            } else {
+                                matcher.coast()
+                            }
+                        } else {
+                            matcher.coast()
+                        };
+                        tl.live_locked = matcher.locked;
+                        tl.live_score = matcher.score;
+                        if matcher.locked && !was_locked {
+                            // Fresh lock: don't dump the backlog mid-bar.
+                            new_fired = live_pos.map(|p| doc.beat_at(p)).unwrap_or(new_fired);
+                        }
+                        was_locked = matcher.locked;
+                        if let Some(p) = live_pos {
+                            tl.pos_s = p;
+                            Some(doc.beat_at(p))
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                };
+                if let Some(b) = pos_b {
+                    // Big jumps (lock acquire, seek) skip rather than dump.
+                    if new_fired == f64::MIN || (b - new_fired).abs() > 8.0 {
+                        new_fired = b;
+                    }
+                    for c in doc.cues_between(new_fired, b) {
+                        due.push(c.kind.clone());
+                    }
+                    new_fired = b;
+                }
+            }
+            drop(guard);
+            fired_past = new_fired;
+            for kind in &due {
+                fire_cue(kind, &mut r, &mut dir, &mut dancer, &mut blackout, &shared, &usable);
+            }
+        }
 
         if now - last_reload_check > Duration::from_millis(500) {
             last_reload_check = now;
@@ -310,8 +644,12 @@ fn apply_render(
             s.fx = s.fx.next();
         }
         Action::ReloadShaders => r.reload_shaders(true),
-        // Handled on the event thread (it owns the windows).
-        Action::Fullscreen | Action::LeaveFullscreen | Action::TogglePanel => {}
+        // Handled on the event thread (windows / timeline transport).
+        Action::Fullscreen
+        | Action::LeaveFullscreen
+        | Action::TogglePanel
+        | Action::TimelinePlay
+        | Action::TimelineRecord => {}
     }
     shared.dirty.store(true, Ordering::Relaxed);
 }
@@ -331,6 +669,12 @@ struct App {
     settings: Settings,
     shared: Option<Arc<Shared>>,
     render_tx: Option<mpsc::Sender<Msg>>,
+    /// Live-input args — kept so stopping song playback restores the engine.
+    audio_cfg: (Option<String>, bool),
+    /// `--song <path>` — a timeline for this file is opened on startup.
+    start_song: Option<std::path::PathBuf>,
+    /// Shared onset-envelope log — the same one the live audio engine taps.
+    env: audio::SharedEnv,
     /// When settings last changed (saved a moment later).
     dirty_since: Option<Instant>,
     /// Command-line overrides are for this run only: don't write them to disk.
@@ -361,6 +705,36 @@ impl App {
     fn send(&self, msg: Msg) {
         if let Some(tx) = &self.render_tx {
             let _ = tx.send(msg);
+        }
+    }
+
+    /// Write an action into the timeline if recording is armed — the cue
+    /// lands on the (snapped) beat at the current playhead.
+    fn record_cue(&mut self, kind: CueKind) {
+        let Some(sh) = &self.shared else { return };
+        let mut guard = lock(&sh.timeline);
+        let tl = &mut *guard;
+        if !tl.recording || !(tl.mode == PlayMode::Playing || tl.live_locked) {
+            return;
+        }
+        let Some(doc) = tl.doc.as_mut() else { return };
+        let mut beat = doc.beat_at(tl.pos_s).max(0.0);
+        if tl.snap {
+            beat = (beat * 4.0).round() / 4.0;
+        }
+        doc.cues.push(Cue { beat, kind });
+        doc.sort_cues();
+        tl.dirty = true;
+    }
+
+    fn record_action(&mut self, action: Action) {
+        let Some(sh) = &self.shared else { return };
+        // Order: settings/status cloned first, timeline lock after — same
+        // order as the panel, never nested.
+        let s = lock(&sh.settings).clone();
+        let st = lock(&sh.status).clone();
+        if let Some(kind) = timeline::cue_for_action(action, &s, &st) {
+            self.record_cue(kind);
         }
     }
 
@@ -405,8 +779,16 @@ impl App {
                     }
                 }
             }
+            Action::TimelinePlay => self.send(Msg::Transport(SongCtl::Toggle)),
+            Action::TimelineRecord => {
+                if let Some(sh) = &self.shared {
+                    let mut tl = lock(&sh.timeline);
+                    tl.recording = !tl.recording;
+                }
+            }
             _ => self.send(Msg::Act(action)),
         }
+        self.record_action(action);
         self.mark_dirty();
     }
 
@@ -462,7 +844,7 @@ impl App {
             if p.window.is_visible() == Some(false) {
                 return;
             }
-            p.run_ui(&mut s, &status, &shared.scene_names, &shared.clip_names)
+            p.run_ui(&mut s, &status, &shared.scene_names, &shared.clip_names, &shared.timeline)
         };
         if let Some(p) = self.panel.as_mut() {
             p.present(frame);
@@ -473,8 +855,34 @@ impl App {
         for c in commands {
             match c {
                 UiCommand::Do(a) => self.apply(a, event_loop),
-                UiCommand::GoToScene(i) => self.send(Msg::GoToScene(i)),
-                UiCommand::ShowClip(i) => self.send(Msg::ShowClip(i)),
+                UiCommand::GoToScene(i) => {
+                    if let Some(name) = shared.scene_names.get(i) {
+                        self.record_cue(CueKind::Scene(name.clone()));
+                    }
+                    self.send(Msg::GoToScene(i));
+                }
+                UiCommand::ShowClip(i) => {
+                    if let Some(name) = shared.clip_names.get(i) {
+                        self.record_cue(CueKind::Clip(name.clone()));
+                    }
+                    self.send(Msg::ShowClip(i));
+                }
+                UiCommand::LoadSong(p) => self.send(Msg::LoadSong(p)),
+                UiCommand::LoadTimeline(p) => self.send(Msg::LoadTimeline(p)),
+                UiCommand::Song(ctl) => self.send(Msg::Transport(ctl)),
+                UiCommand::SaveTimeline => {
+                    let mut tl = lock(&shared.timeline);
+                    if let Some(doc) = tl.doc.as_mut() {
+                        doc.sort_cues();
+                        tl.message = match doc.save(&config::timelines_dir()) {
+                            Ok(f) => {
+                                tl.dirty = false;
+                                format!("saved {}", f.display())
+                            }
+                            Err(e) => format!("save failed: {e:#}"),
+                        };
+                    }
+                }
             }
         }
     }
@@ -529,6 +937,8 @@ impl ApplicationHandler for App {
         let shared = Arc::new(Shared {
             settings: Mutex::new(self.settings.clone()),
             status: Mutex::new(Status::default()),
+            timeline: timeline::TimelineState::new(),
+            env: self.env.clone(),
             dirty: AtomicBool::new(false),
             quit: AtomicBool::new(false),
             scene_names: r.scene_names(),
@@ -540,6 +950,7 @@ impl ApplicationHandler for App {
         let audio = self.audio.take().unwrap();
         let dir = self.director.take().unwrap();
         let dancer = self.dancer.take().unwrap();
+        let audio_cfg = self.audio_cfg.clone();
         let sh = shared.clone();
         std::thread::Builder::new()
             .name("render".into())
@@ -548,7 +959,7 @@ impl ApplicationHandler for App {
                 // live UI is the worst failure mode mid-set. Log it (the panic
                 // hook prints details) and tell the event loop to exit.
                 if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    render_loop(r, dir, dancer, audio, sh.clone(), rx)
+                    render_loop(r, dir, dancer, audio, audio_cfg, sh.clone(), rx)
                 }))
                 .is_err()
                 {
@@ -558,6 +969,9 @@ impl ApplicationHandler for App {
             .expect("spawn render thread");
 
         self.window = Some(window);
+        if let Some(p) = self.start_song.take() {
+            self.send(Msg::LoadSong(p));
+        }
         if self.settings.show_panel && !self.no_panel {
             self.open_panel(event_loop);
         }
@@ -617,6 +1031,15 @@ impl ApplicationHandler for App {
                 event_loop.exit();
             }
             WindowEvent::Resized(size) => self.send(Msg::Resize(size.width, size.height)),
+            WindowEvent::DroppedFile(path) => {
+                // Drop an audio file or a timeline .json anywhere on the
+                // visuals to load it.
+                if song::is_audio_file(&path) {
+                    self.send(Msg::LoadSong(path));
+                } else if path.extension().and_then(|e| e.to_str()) == Some("json") {
+                    self.send(Msg::LoadTimeline(path));
+                }
+            }
             WindowEvent::KeyboardInput { event, .. } => {
                 if event.state == ElementState::Pressed && !event.repeat {
                     self.key(event_loop, &event.logical_key)
@@ -742,8 +1165,10 @@ fn main() -> Result<()> {
     }
     let device = arg_value(&args, "--device");
     let mic = args.iter().any(|a| a == "--mic");
-    let audio = AudioEngine::start(device, mic)?;
+    let env = audio::EnvLog::new();
+    let audio = AudioEngine::start(device, mic, Some(env.clone()))?;
     println!("Audio: {}", audio.device_name);
+    let start_song = arg_value(&args, "--song").map(std::path::PathBuf::from);
 
     let mut settings = Settings::load();
     let mut no_save = false;
@@ -790,6 +1215,9 @@ fn main() -> Result<()> {
         settings,
         shared: None,
         render_tx: None,
+        audio_cfg: (device.map(str::to_string), mic),
+        start_song,
+        env,
         dirty_since: None,
         no_save,
         start_fullscreen: args.iter().any(|a| a == "--fullscreen"),

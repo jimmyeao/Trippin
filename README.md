@@ -82,6 +82,7 @@ cargo run --release -- --gpu low            # use the integrated GPU (renders at
 cargo run --release -- --scale 0.6          # scene render resolution, upscaled to the window
 cargo run --release -- --vsync              # macOS: vsync-gated presents instead of the default
 cargo run --release -- --fullscreen
+cargo run --release -- --song track.wav   # open a track on the Timeline tab
 ```
 
 Drag the visuals window to the projector / LED wall and press **F**. A
@@ -114,6 +115,8 @@ Default keys (all rebindable in the panel):
 | [ / ] | latency −/+ 5 ms |
 | X | cycle the post effect (off → mirrors → kaleido) |
 | F5 | reload shaders |
+| T | timeline play / pause |
+| G | timeline record on / off |
 | F1 (P on macOS) | show / hide the control panel |
 | Esc | leave fullscreen (it never quits; close the window to quit) |
 
@@ -169,6 +172,31 @@ sits over the plain frame). **Auto** picks a fresh effect on every scene cut
 (Mirror Y stays manual-only — an upside-down dancer reads as a glitch).
 It's applied in `present.wgsl` from `u.fx`, so it needs no scene support and
 combines with everything (a mirrored dancer in canon is five dancers).
+
+## Timeline
+
+The **Timeline** tab is a Clipchamp-style cue sheet for a track: load a song
+(`--song`, the Load button, or dropping an mp3 / flac / wav / m4a / ogg on
+either window) and it's decoded and analysed offline — the strip shows the
+waveform, a beat/bar grid and a playhead.
+
+- **Play** (`T`) plays the track through the speakers *and* the analyser, so
+  the visuals react to the song itself; live input resumes when it ends or
+  you stop it. Click/drag empty strip space to scrub the edit cursor.
+- **Cues** are dropped on the strip with the type picker + `+ at cursor`,
+  then dragged along the timeline, snapped to quarter-beats (the `snap`
+  toggle), edited below, or right-clicked to delete. A cue can cut to a
+  scene, step scenes, switch modes, toggle the dancer / canon / blackout,
+  pick a routine or look, or set the post effect.
+- **Record** (`G`) arms recording: while the timeline is playing, every
+  hotkey and panel action lands on the strip as a cue — perform the show
+  once, then save.
+- **Save** writes `timelines/<name>.json` next to `trippin.json` (dropping a
+  `.json` back on the window reloads it).
+- **Follow live** is the adventurous bit: it correlates the room's live
+  audio onset envelope against the track's stored envelope, locks on when
+  the same song is playing in the room and fires the cues at the matching
+  position — a pre-programmed show that follows the DJ's deck.
 
 ## Silhouette dancers
 

@@ -29,10 +29,12 @@ pub enum Action {
     ReloadShaders,
     TogglePanel,
     LeaveFullscreen,
+    TimelinePlay,
+    TimelineRecord,
 }
 
 impl Action {
-    pub const ALL: [Action; 19] = [
+    pub const ALL: [Action; 21] = [
         Action::NextScene,
         Action::PrevScene,
         Action::ModeAuto,
@@ -52,6 +54,8 @@ impl Action {
         Action::ReloadShaders,
         Action::TogglePanel,
         Action::LeaveFullscreen,
+        Action::TimelinePlay,
+        Action::TimelineRecord,
     ];
 
     pub fn label(self) -> &'static str {
@@ -75,6 +79,8 @@ impl Action {
             Action::ReloadShaders => "Reload shaders",
             Action::TogglePanel => "Show / hide this control panel",
             Action::LeaveFullscreen => "Leave fullscreen",
+            Action::TimelinePlay => "Timeline play / pause",
+            Action::TimelineRecord => "Timeline record on / off",
         }
     }
 
@@ -102,6 +108,8 @@ impl Action {
                 if cfg!(target_os = "macos") { "P" } else { "F1" }
             }
             Action::LeaveFullscreen => "Escape",
+            Action::TimelinePlay => "T",
+            Action::TimelineRecord => "G",
         }
     }
 }
@@ -315,6 +323,15 @@ fn path() -> PathBuf {
         }
         None => local,
     }
+}
+
+/// Where timeline `.json` docs live — a `timelines/` dir next to
+/// `trippin.json`.
+pub fn timelines_dir() -> PathBuf {
+    path()
+        .parent()
+        .map(|p| p.join("timelines"))
+        .unwrap_or_else(|| PathBuf::from("timelines"))
 }
 
 impl Settings {

@@ -15,8 +15,8 @@ use rustfft::FftPlanner;
 
 pub const SPECTRUM_BINS: usize = 32;
 
-const FFT_SIZE: usize = 2048;
-const HOP: usize = 512;
+pub(crate) const FFT_SIZE: usize = 2048;
+pub(crate) const HOP: usize = 512;
 const ENV_SECONDS: f32 = 8.0;
 const MIN_BPM: f32 = 70.0;
 const MAX_BPM: f32 = 180.0;
@@ -87,6 +87,35 @@ impl Features {
 
 pub type SharedFeatures = Arc<Mutex<Features>>;
 
+/// Rolling log of the raw onset (spectral-flux) envelope — one entry per
+/// analysis hop. The timeline matcher cross-correlates this against a
+/// loaded song's envelope to find where in the track the live audio is.
+pub struct EnvLog {
+    /// Onset strength per hop, newest last, capped ~90 s.
+    pub env: VecDeque<f32>,
+    /// Total hops ever pushed (env index of the newest sample is hops-1).
+    pub hops: u64,
+    /// Hops per second (sample_rate / HOP).
+    pub fps: f32,
+}
+
+impl EnvLog {
+    pub fn new() -> SharedEnv {
+        Arc::new(Mutex::new(Self { env: VecDeque::new(), hops: 0, fps: 0.0 }))
+    }
+    fn push(&mut self, v: f32, fps: f32) {
+        self.fps = fps;
+        let cap = (90.0 * fps).max(1.0) as usize;
+        self.env.push_back(v);
+        while self.env.len() > cap {
+            self.env.pop_front();
+        }
+        self.hops += 1;
+    }
+}
+
+pub type SharedEnv = Arc<Mutex<EnvLog>>;
+
 /// Commands from the UI thread to the analyser.
 pub enum Command {
     /// Treat the beat nearest to now as the downbeat.
@@ -98,6 +127,9 @@ enum Backend {
     Cpal(#[allow(dead_code)] cpal::Stream),
     #[cfg(target_os = "macos")]
     System(#[allow(dead_code)] crate::sysaudio::SystemCapture),
+    /// Timeline playback — the player is owned by the render loop; the
+    /// backend just marks which source the analyser is hearing.
+    Song,
 }
 
 pub struct AudioEngine {
@@ -136,14 +168,15 @@ impl AudioEngine {
     /// ScreenCaptureKit output mix on macOS (`mic` forces the default input
     /// there instead). Otherwise the first device whose name contains the
     /// string — inputs plus, on Windows, outputs via loopback.
-    pub fn start(device: Option<&str>, mic: bool) -> Result<Self> {
+    pub fn start(device: Option<&str>, mic: bool, tap: Option<SharedEnv>) -> Result<Self> {
+        let _ = mic; // only consulted on macOS (system-audio vs input choice)
         let (tx, rx) = mpsc::sync_channel::<Vec<f32>>(64);
 
         #[cfg(target_os = "macos")]
         if device.is_none() && !mic {
             match crate::sysaudio::start(tx.clone()) {
                 Ok(cap) => {
-                    return Self::spawn(rx, crate::sysaudio::SAMPLE_RATE, "system audio".into(), Backend::System(cap));
+                    return Self::spawn(rx, crate::sysaudio::SAMPLE_RATE, "system audio".into(), Backend::System(cap), tap);
                 }
                 Err(e) => eprintln!("system audio unavailable: {e:#} — using the default input"),
             }
@@ -192,7 +225,21 @@ impl AudioEngine {
         };
         stream.play()?;
 
-        Self::spawn(rx, sample_rate, name, Backend::Cpal(stream))
+        Self::spawn(rx, sample_rate, name, Backend::Cpal(stream), tap)
+    }
+
+    /// Play a decoded song file: the player drives the analyser (at source
+    /// rate) and the speakers together so the visuals react to the track.
+    /// Returns the engine plus the controllable player.
+    pub fn start_song(
+        song: std::sync::Arc<crate::song::Song>,
+        tap: Option<SharedEnv>,
+    ) -> Result<(Self, crate::song::SongPlayer)> {
+        let (tx, rx) = mpsc::sync_channel::<Vec<f32>>(64);
+        let player = crate::song::SongPlayer::start(song.clone(), tx)?;
+        let name = format!("file: {}", song.name);
+        let eng = Self::spawn(rx, song.sr as f32, name, Backend::Song, tap)?;
+        Ok((eng, player))
     }
 
     /// Shared tail: the analysis thread and the feature snapshot channel.
@@ -201,13 +248,14 @@ impl AudioEngine {
         sample_rate: f32,
         device_name: String,
         backend: Backend,
+        tap: Option<SharedEnv>,
     ) -> Result<Self> {
         let features: SharedFeatures = Arc::new(Mutex::new(Features::default()));
         let (cmd_tx, cmd_rx) = mpsc::channel();
         let shared = features.clone();
         std::thread::Builder::new()
             .name("analysis".into())
-            .spawn(move || Analyzer::new(sample_rate, shared, cmd_rx).run(rx))?;
+            .spawn(move || Analyzer::new(sample_rate, shared, cmd_rx, tap).run(rx))?;
 
         Ok(Self { _backend: backend, features, commands: cmd_tx, device_name })
     }
@@ -272,6 +320,8 @@ struct Analyzer {
     flux_gain: AutoGain,
     /// Onset strength envelope at `fps`, newest last.
     env: VecDeque<f32>,
+    /// Optional tap so the timeline matcher can watch the same envelope.
+    tap: Option<SharedEnv>,
     bass_env: VecDeque<f32>,
     flux_hist: VecDeque<f32>,
     frames_since_tempo: usize,
@@ -291,7 +341,7 @@ struct Analyzer {
 }
 
 impl Analyzer {
-    fn new(sr: f32, shared: SharedFeatures, commands: mpsc::Receiver<Command>) -> Self {
+    fn new(sr: f32, shared: SharedFeatures, commands: mpsc::Receiver<Command>, tap: Option<SharedEnv>) -> Self {
         let fft = FftPlanner::new().plan_fft_forward(FFT_SIZE);
         let window = (0..FFT_SIZE)
             .map(|i| 0.5 - 0.5 * (2.0 * std::f32::consts::PI * i as f32 / FFT_SIZE as f32).cos())
@@ -312,6 +362,7 @@ impl Analyzer {
             spec_gain: AutoGain::new(1e-4),
             flux_gain: AutoGain::new(1e-4),
             env: VecDeque::new(),
+            tap,
             bass_env: VecDeque::new(),
             flux_hist: VecDeque::new(),
             frames_since_tempo: 0,
@@ -386,6 +437,11 @@ impl Analyzer {
         let max_env = (ENV_SECONDS * self.fps) as usize;
         push_capped(&mut self.env, flux, max_env);
         push_capped(&mut self.bass_env, bass_flux, max_env);
+        if let Some(t) = &self.tap {
+            if let Ok(mut t) = t.lock() {
+                t.push(flux, self.fps);
+            }
+        }
 
         // Onset pulses: flux above a local adaptive threshold.
         push_capped(&mut self.flux_hist, flux, (0.5 * self.fps) as usize);
