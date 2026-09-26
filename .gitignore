@@ -1,0 +1,9 @@
+/target
+/recordings
+__pycache__/
+*.pyc
+/sidecar/.venv
+/sidecar/models
+/tools/.mocap_cache
+/trippin.json
+/dist

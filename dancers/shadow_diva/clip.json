@@ -1,0 +1,10 @@
+{
+  "name": "shadow_diva",
+  "energy": 0.35,
+  "fps": 29.999,
+  "frames": 116,
+  "beats": 8,
+  "width": 348,
+  "height": 512,
+  "source": "choreo_diva.bvh (CMU Graphics Lab Motion Capture Database, mocap.cs.cmu.edu)"
+}
