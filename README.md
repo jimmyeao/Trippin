@@ -30,8 +30,25 @@ cargo build --release --features gui
 
 CI also builds `Trippin.app` as a universal binary (Intel + Apple Silicon) —
 grab `Trippin-macOS-<version>.zip` from releases or workflow artifacts, unzip,
-and drag to Applications. The app isn't signed/notarized, so first launch is
-**right-click → Open** (or `xattr -dr com.apple.quarantine Trippin.app`).
+and drag to Applications. CI artifacts are signed and notarized when the
+signing secrets below are configured, so they open like any other app;
+unsigned builds still hit Gatekeeper — `xattr -dr com.apple.quarantine
+Trippin.app`, or attempt to open then **System Settings → Privacy &
+Security → Open Anyway**.
+
+#### Signing secrets (repo → Settings → Secrets and variables → Actions)
+
+- `APPLE_CERTIFICATE` — base64 of a **Developer ID Application** cert +
+  private key exported as `.p12` (Keychain Access → export, or Xcode →
+  Manage Certificates → Developer ID Application first). Encode with
+  `base64 -i cert.p12 | pbcopy`.
+- `APPLE_CERTIFICATE_PASSWORD` — the `.p12` export password.
+- `APPLE_SIGNING_IDENTITY` — e.g. `Developer ID Application: Name (TEAMID)`;
+  `security find-identity -v -p codesigning` prints the exact string.
+- `APPLE_ID` — the Apple ID email for notarization.
+- `APPLE_PASSWORD` — an **app-specific password** for that account
+  (appleid.apple.com → Sign-In and Security → App-Specific Passwords).
+- `APPLE_TEAM_ID` — the 10-char team ID (developer.apple.com → Membership).
 
 Settings live in `~/Library/Application Support/Trippin/trippin.json`. Shaders
 and dancers resolve from the bundle's `Contents/Resources/`; running from a

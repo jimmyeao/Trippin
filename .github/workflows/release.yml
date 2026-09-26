@@ -101,6 +101,11 @@ jobs:
 
   macos:
     runs-on: macos-latest
+    # Secrets can't be referenced in step-level `if:` — evaluate them here
+    # once. Missing secrets leave the build running but unsigned.
+    env:
+      HAS_CERT: ${{ secrets.APPLE_CERTIFICATE != '' }}
+      HAS_NOTARY: ${{ secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_ID != '' && secrets.APPLE_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -167,11 +172,60 @@ jobs:
             <key>NSHighResolutionCapable</key><true/>
             <key>LSMinimumSystemVersion</key><string>12.0</string>
             <key>NSMicrophoneUsageDescription</key><string>Trippin listens to audio input to drive music-reactive visuals.</string>
+            <key>NSScreenCaptureUsageDescription</key><string>Trippin captures the system audio mix (not the screen) to drive music-reactive visuals.</string>
           </dict>
           </plist>
           EOF
 
-          ditto -c -k --keepParent Trippin.app "Trippin-macOS-${{ steps.version.outputs.version }}.zip"
+      - name: Import signing certificate
+        if: env.HAS_CERT == 'true'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          security create-keychain -p "" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "" build.keychain
+          echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
+          security import certificate.p12 -k build.keychain \
+            -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain
+          rm certificate.p12
+          security find-identity -v -p codesigning build.keychain
+
+      - name: Sign Trippin.app (hardened runtime)
+        if: env.HAS_CERT == 'true'
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          codesign --force --options runtime --timestamp \
+            --entitlements installer/macos/Entitlements.plist \
+            --sign "$APPLE_SIGNING_IDENTITY" Trippin.app
+          codesign --verify --strict --verbose=2 Trippin.app
+
+      - name: Notarize and staple
+        if: env.HAS_NOTARY == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          ditto -c -k --keepParent Trippin.app notarize.zip
+          xcrun notarytool submit notarize.zip \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          xcrun stapler staple Trippin.app
+          xcrun stapler validate Trippin.app
+          rm notarize.zip
+
+      - name: Zip Trippin.app
+        run: ditto -c -k --keepParent Trippin.app "Trippin-macOS-${{ steps.version.outputs.version }}.zip"
+
+      - name: Remove signing keychain
+        if: ${{ always() && env.HAS_CERT == 'true' }}
+        run: security delete-keychain build.keychain || true
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
