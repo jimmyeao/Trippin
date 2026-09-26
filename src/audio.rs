@@ -93,8 +93,15 @@ pub enum Command {
     MarkDownbeat,
 }
 
+enum Backend {
+    // Kept for its lifetime only — dropping the stream stops capture.
+    Cpal(#[allow(dead_code)] cpal::Stream),
+    #[cfg(target_os = "macos")]
+    System(#[allow(dead_code)] crate::sysaudio::SystemCapture),
+}
+
 pub struct AudioEngine {
-    _stream: cpal::Stream,
+    _backend: Backend,
     pub features: SharedFeatures,
     pub commands: mpsc::Sender<Command>,
     pub device_name: String,
@@ -109,6 +116,8 @@ pub fn list_devices() -> Result<()> {
             println!("  {}", device_name(&d));
         }
     }
+    #[cfg(target_os = "macos")]
+    println!("(system audio is captured directly by default — these are the fallbacks)");
     println!("Input devices (use --device \"<part of name>\"):");
     for d in host.input_devices()? {
         println!("  {}", device_name(&d));
@@ -123,11 +132,23 @@ fn device_name(d: &cpal::Device) -> String {
 }
 
 impl AudioEngine {
-    /// `device`: None = loopback of the default output device (Windows); on
-    /// platforms without output loopback, the default input (BlackHole, an
-    /// audio interface, or the mic). Otherwise the first device whose name
-    /// contains the string — inputs plus, on Windows, outputs via loopback.
-    pub fn start(device: Option<&str>) -> Result<Self> {
+    /// `device`: None = system audio — WASAPI loopback on Windows, the
+    /// ScreenCaptureKit output mix on macOS (`mic` forces the default input
+    /// there instead). Otherwise the first device whose name contains the
+    /// string — inputs plus, on Windows, outputs via loopback.
+    pub fn start(device: Option<&str>, mic: bool) -> Result<Self> {
+        let (tx, rx) = mpsc::sync_channel::<Vec<f32>>(64);
+
+        #[cfg(target_os = "macos")]
+        if device.is_none() && !mic {
+            match crate::sysaudio::start(tx.clone()) {
+                Ok(cap) => {
+                    return Self::spawn(rx, crate::sysaudio::SAMPLE_RATE, "system audio".into(), Backend::System(cap));
+                }
+                Err(e) => eprintln!("system audio unavailable: {e:#} — using the default input"),
+            }
+        }
+
         let host = cpal::default_host();
         let dev = match device {
             #[cfg(target_os = "windows")]
@@ -162,7 +183,6 @@ impl AudioEngine {
         let channels = config.channels as usize;
         let sample_rate = config.sample_rate as f32;
 
-        let (tx, rx) = mpsc::sync_channel::<Vec<f32>>(64);
         let stream = match supported.sample_format() {
             SampleFormat::F32 => build_stream::<f32>(&dev, &config, channels, tx)?,
             SampleFormat::I16 => build_stream::<i16>(&dev, &config, channels, tx)?,
@@ -172,6 +192,16 @@ impl AudioEngine {
         };
         stream.play()?;
 
+        Self::spawn(rx, sample_rate, name, Backend::Cpal(stream))
+    }
+
+    /// Shared tail: the analysis thread and the feature snapshot channel.
+    fn spawn(
+        rx: mpsc::Receiver<Vec<f32>>,
+        sample_rate: f32,
+        device_name: String,
+        backend: Backend,
+    ) -> Result<Self> {
         let features: SharedFeatures = Arc::new(Mutex::new(Features::default()));
         let (cmd_tx, cmd_rx) = mpsc::channel();
         let shared = features.clone();
@@ -179,7 +209,7 @@ impl AudioEngine {
             .name("analysis".into())
             .spawn(move || Analyzer::new(sample_rate, shared, cmd_rx).run(rx))?;
 
-        Ok(Self { _stream: stream, features, commands: cmd_tx, device_name: name })
+        Ok(Self { _backend: backend, features, commands: cmd_tx, device_name })
     }
 }
 

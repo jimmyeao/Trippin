@@ -188,7 +188,7 @@ fn mtime(p: &Path) -> Option<SystemTime> {
 }
 
 impl Renderer {
-    pub async fn new(window: Arc<Window>, low_power: bool, scale: Option<f32>) -> Result<Self> {
+    pub async fn new(window: Arc<Window>, low_power: bool, scale: Option<f32>, vsync: bool) -> Result<Self> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
         let surface = instance.create_surface(window.clone())?;
         let adapter = instance
@@ -228,12 +228,36 @@ impl Renderer {
         let mut config = surface
             .get_default_config(&adapter, size.width.max(1), size.height.max(1))
             .context("surface not supported by adapter")?;
-        config.present_mode = wgpu::PresentMode::AutoVsync;
+        // Metal drawables only return to the pool once the WindowServer has
+        // composited them; vsync-gated (Fifo) presents then quantize to every
+        // other frame whenever the compositor is loaded (a fullscreen app on
+        // another display is enough) — a sticky ~30 fps. Immediate removes the
+        // vsync quantisation: the acquire still self-paces to the compositor's
+        // drain rate, and windowed content can't tear anyway.
+        let caps = surface.get_capabilities(&adapter);
+        config.present_mode = if cfg!(target_os = "macos")
+            && !vsync
+            && caps.present_modes.contains(&wgpu::PresentMode::Immediate)
+        {
+            wgpu::PresentMode::Immediate
+        } else {
+            wgpu::PresentMode::AutoVsync
+        };
+        // Metal lists Bgra8Unorm first — but the present shader relies on the
+        // hardware sRGB encode, so prefer an sRGB surface format.
+        if let Some(f) = caps
+            .formats
+            .iter()
+            .copied()
+            .find(|f| f.is_srgb())
+        {
+            config.format = f;
+        }
         {
             let _g = submit_gate.lock().unwrap_or_else(|e| e.into_inner());
             surface.configure(&device, &config);
         }
-
+        println!("Surface: {:?}, {:?}", config.present_mode, config.format);
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("frame"),
             entries: &[
@@ -458,6 +482,25 @@ impl Renderer {
         }
     }
 
+    /// Time between frames the render loop should hold to when the present
+    /// mode doesn't pace itself — on macOS `Immediate` free-runs once the
+    /// drawable pool stops back-pressuring, so we cap at the display's
+    /// refresh instead of burning the GPU on frames nobody sees. `None`
+    /// where vsync throttles already.
+    pub fn frame_interval(&self) -> Option<Duration> {
+        if self.config.present_mode != wgpu::PresentMode::Immediate {
+            return None;
+        }
+        let hz = self
+            .window
+            .current_monitor()
+            .and_then(|m| m.refresh_rate_millihertz())
+            .map(|mhz| mhz as f64 / 1000.0)
+            .filter(|h| *h > 1.0)
+            .unwrap_or(60.0);
+        Some(Duration::from_secs_f64(1.0 / hz))
+    }
+
     /// Size of the scene render targets (what shaders see as the resolution).
     pub fn gpu(&self) -> Gpu {
         Gpu {
@@ -669,13 +712,24 @@ impl Renderer {
                 }
                 self.surface_ok = true;
             }
+            // Back off while the surface is unhealthy — reconfigure runs at
+            // 4 Hz, so there's no work worth thousands of spins a second.
+            std::thread::sleep(Duration::from_millis(4));
             return Ok(());
         }
         let acquired = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.surface.get_current_texture()));
         let frame = match acquired {
             Ok(wgpu::CurrentSurfaceTexture::Success(f)) | Ok(wgpu::CurrentSurfaceTexture::Suboptimal(f)) => f,
             Ok(wgpu::CurrentSurfaceTexture::Timeout) => return Ok(()),
-            _ => {
+            // Occluded (covered, minimised, off-screen) is transient — skip the
+            // frame rather than churning the surface, and nap so the loop
+            // doesn't spin on an invisible window.
+            Ok(wgpu::CurrentSurfaceTexture::Occluded) => {
+                std::thread::sleep(Duration::from_millis(16));
+                return Ok(());
+            }
+            other => {
+                eprintln!("acquire: {other:?}");
                 self.surface_ok = false;
                 return Ok(());
             }
@@ -726,12 +780,16 @@ impl Renderer {
             pass.set_bind_group(0, &self.bind_groups[self.current], &[]);
             pass.draw(0..3, 0..1);
         }
+        // Notify before presenting, but outside the gate: on macOS this call
+        // dispatches synchronously to the main thread, and the main thread
+        // can be waiting on `submit_gate` in the panel — holding it here
+        // deadlocks.
+        self.window.pre_present_notify();
         {
             // The gate keeps the queue still while a surface configure on the
             // other thread waits for it to go idle — see Gpu::submit_gate.
             let _g = self.submit_gate.lock().unwrap_or_else(|e| e.into_inner());
             self.queue.submit([enc.finish()]);
-            self.window.pre_present_notify();
             self.queue.present(frame);
         }
         Ok(())

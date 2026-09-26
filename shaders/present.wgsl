@@ -48,7 +48,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     col *= 1.0 - 0.9 * dot(scr, scr) * 1.6;
     col += u.flash * u.flash * 0.35;
     col *= u.master;
-    col += (hash21(in.uv * vec2<f32>(u.res_x, u.res_y) + floor(fract(u.time * 7.0) * 997.0)) - 0.5) * 0.012;
+    // Grain fades out in the blacks — flat noise there shimmers as a dirty
+    // texture, speckles a blacked-out screen, and costs encoders bits on
+    // pure noise. Real film grain vanishes in deep shadow anyway.
+    let lum = max(col.r, max(col.g, col.b));
+    col += (hash21(in.uv * vec2<f32>(u.res_x, u.res_y) + floor(fract(u.time * 7.0) * 997.0)) - 0.5) * 0.012 * smoothstep(0.0, 0.08, lum);
     // The surface is usually sRGB, so let the hardware do the encode.
     return vec4<f32>(max(col, vec3<f32>(0.0)), 1.0);
 }

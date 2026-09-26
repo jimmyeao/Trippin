@@ -97,7 +97,10 @@ impl Action {
             Action::LatencyUp => "]",
             Action::CycleFx => "X",
             Action::ReloadShaders => "F5",
-            Action::TogglePanel => "F1",
+            // No F-keys on Touch Bar Macs — F1 is a brightness key there.
+            Action::TogglePanel => {
+                if cfg!(target_os = "macos") { "P" } else { "F1" }
+            }
             Action::LeaveFullscreen => "Escape",
         }
     }
@@ -323,6 +326,12 @@ impl Settings {
         // Actions added in newer versions get their default key.
         for a in Action::ALL {
             s.keys.entry(a).or_insert_with(|| a.default_key().to_string());
+        }
+        // macOS builds moved the panel off F1 (a brightness key on Touch Bar
+        // machines); a saved "F1" is the old default, not a deliberate pick.
+        #[cfg(target_os = "macos")]
+        if s.keys.get(&Action::TogglePanel).is_some_and(|k| k == "F1") {
+            s.keys.insert(Action::TogglePanel, Action::TogglePanel.default_key().to_string());
         }
         s
     }

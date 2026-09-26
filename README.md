@@ -37,26 +37,33 @@ Settings live in `~/Library/Application Support/Trippin/trippin.json`. Shaders
 and dancers resolve from the bundle's `Contents/Resources/`; running from a
 checkout uses the repo directories as before.
 
-**Audio is the one difference:** macOS has no output loopback, so the default
-capture is the default **input** device (mic permission prompt on first run —
-granted via `NSMicrophoneUsageDescription` in the bundle). For system audio
-install BlackHole and pick it with `--device "BlackHole"`, or feed a DJ
-booth-out into an interface. `--list-devices` shows what's available.
-Note F1 is a brightness key on Mac keyboards — rebind the panel key in the
-Keys tab if needed.
+**Audio:** macOS captures the system output mix directly via ScreenCaptureKit
+— the same API OBS uses — so no mic or BlackHole loopback is needed. macOS
+prompts once for screen/system-audio recording permission on first launch
+(macOS 13+; on older systems it falls back to the default input). `--mic`
+forces the microphone, and `--device "<name>"` picks a specific input or
+interface for a DJ booth-out. `--list-devices` shows what's available.
+The panel key is **P** on macOS (F1 is a brightness key on Touch Bar
+machines; Fn+F1 also works). On macOS, presents are ungated from vsync and
+the render
+loop self-paces at the display's refresh — vsync-gated presents stall ~2
+frames whenever the compositor is loaded (e.g. another app fullscreen on a
+second display); `--vsync` restores them if that ever causes trouble.
 
 ## Run
 
 ```
-cargo run --release                         # loopback of the default output device
+cargo run --release                         # capture what you hear (loopback / system audio)
 cargo run --release -- --list-devices       # list capture devices
 cargo run --release -- --device "Serato"    # a specific input (or output-as-loopback)
+cargo run --release -- --mic                # force the default input instead of system audio
 cargo run --release -- --scene tunnel       # start on a scene, auto-pilot off
 cargo run --release -- --dancer neon --canon  # force a dancer look (auto-pilot changes it on cuts)
 cargo run --release -- --no-dancer          # start with the dancer layer off
 cargo run --release -- --no-panel           # no control panel window
 cargo run --release -- --gpu low            # use the integrated GPU (renders at 75% by default)
 cargo run --release -- --scale 0.6          # scene render resolution, upscaled to the window
+cargo run --release -- --vsync              # macOS: vsync-gated presents instead of the default
 cargo run --release -- --fullscreen
 ```
 
@@ -90,7 +97,7 @@ Default keys (all rebindable in the panel):
 | [ / ] | latency −/+ 5 ms |
 | X | cycle the post effect (off → mirrors → kaleido) |
 | F5 | reload shaders |
-| F1 | show / hide the control panel |
+| F1 (P on macOS) | show / hide the control panel |
 | Esc | leave fullscreen (it never quits; close the window to quit) |
 
 ## Scenes
@@ -207,6 +214,7 @@ mocap.cs.cmu.edu. The database was created with funding from NSF EIA-0196217.*
 
 ```
 src/audio.rs     cpal capture (WASAPI loopback) + FFT analysis, onset/tempo/phase tracking
+src/sysaudio.rs  macOS system audio via ScreenCaptureKit (the OBS desktop-audio API)
 src/director.rs  auto-pilot: scene cuts every 8/16 bars or on a drop, intensity, palette
 src/render.rs    wgpu: ping-pong HDR feedback targets, per-scene pipelines, hot reload
 src/dancer.rs    dancer clips: background loading, beat-locked frame timing, auto half/double time

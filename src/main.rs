@@ -1,8 +1,8 @@
 //! Trippin — live music-reactive visuals for DJ sets.
 //!
-//! Usage: trippin [--list-devices] [--device "<name part>"] [--scene <name>]
+//! Usage: trippin [--list-devices] [--device "<name part>"] [--mic] [--scene <name>]
 //!                [--dancer [style]] [--no-dancer] [--canon] [--no-panel]
-//!                [--gpu low] [--scale 0.75] [--fullscreen]
+//!                [--gpu low] [--scale 0.75] [--fullscreen] [--vsync]
 //!
 //! A control panel window opens alongside the visuals (F1 toggles it): modes,
 //! scene playlist, dancer options, sync and rebindable hotkeys. Settings are
@@ -25,6 +25,8 @@ mod dancer;
 mod director;
 mod panel;
 mod render;
+#[cfg(target_os = "macos")]
+mod sysaudio;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
@@ -103,6 +105,11 @@ fn render_loop(
 ) {
     let started = Instant::now();
     let mut last_frame = started;
+    // Some present modes self-pace (vsync, or drawable back-pressure); when
+    // they don't — macOS Immediate — cap the loop at the display's refresh.
+    let mut frame_interval = r.frame_interval();
+    let mut next_frame = started;
+    let mut pace_recheck = started;
     let mut last_reload_check = started;
     let mut last_status = Instant::now();
     let mut fps = 0.0f32;
@@ -238,6 +245,20 @@ fn render_loop(
                 fx: if s.fx_auto { fx_current } else { s.fx },
             };
         }
+
+        if let Some(interval) = frame_interval {
+            next_frame += interval;
+            if next_frame < now {
+                // Long stall (heavy scene, window drag): don't play catch-up.
+                next_frame = now;
+            }
+            std::thread::sleep(next_frame - now);
+            // The window may have moved to a display with another refresh rate.
+            if now - pace_recheck > Duration::from_secs(2) {
+                pace_recheck = now;
+                frame_interval = r.frame_interval();
+            }
+        }
     }
 }
 
@@ -319,6 +340,7 @@ struct App {
     no_panel: bool,
     low_power: bool,
     render_scale: Option<f32>,
+    vsync: bool,
     last_panel_draw: Instant,
     last_title: Instant,
     /// Debounce for the panel toggle — autorepeat and focus churn can both
@@ -479,7 +501,12 @@ impl ApplicationHandler for App {
         if self.start_fullscreen {
             toggle_fullscreen(&window);
         }
-        let r = match pollster::block_on(Renderer::new(window.clone(), self.low_power, self.render_scale)) {
+        let r = match pollster::block_on(Renderer::new(
+            window.clone(),
+            self.low_power,
+            self.render_scale,
+            self.vsync,
+        )) {
             Ok(r) => r,
             Err(e) => {
                 eprintln!("renderer init failed: {e:#}");
@@ -714,7 +741,8 @@ fn main() -> Result<()> {
         return check_shaders();
     }
     let device = arg_value(&args, "--device");
-    let audio = AudioEngine::start(device)?;
+    let mic = args.iter().any(|a| a == "--mic");
+    let audio = AudioEngine::start(device, mic)?;
     println!("Audio: {}", audio.device_name);
 
     let mut settings = Settings::load();
@@ -769,6 +797,7 @@ fn main() -> Result<()> {
         no_panel: args.iter().any(|a| a == "--no-panel"),
         low_power: arg_value(&args, "--gpu") == Some("low"),
         render_scale: arg_value(&args, "--scale").and_then(|s| s.parse().ok()),
+        vsync: args.iter().any(|a| a == "--vsync"),
         last_panel_draw: Instant::now(),
         last_title: Instant::now(),
         last_panel_toggle: Instant::now() - Duration::from_secs(1),
