@@ -1,10 +1,10 @@
 {
   "name": "stock_skirt",
   "fps": 30,
-  "frames": 174,
-  "beats": 12,
+  "frames": 230,
+  "beats": 16,
   "width": 404,
   "height": 512,
-  "energy": 0.38,
+  "energy": 0.36,
   "source": "Pixabay: https://pixabay.com/videos/dancer-girl-dancing-movement-75329/"
 }

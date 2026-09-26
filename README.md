@@ -11,10 +11,11 @@ Download `Trippin-Setup-<version>.exe` from the GitHub **Releases** page (or
 from the artifacts of the latest *Build installer* workflow run) and run it.
 Settings are saved to `%APPDATA%\Trippin	rippin.json`.
 
-To release a new version: bump `version` in `Cargo.toml`, then tag and push,
-for example `git tag v0.2.0 && git push origin v0.2.0`. The workflow builds
-the installer and publishes the release. Every push to `master` also builds
-an installer artifact.
+To release a new version: **Actions → Build installer → Run workflow**, enter
+the version (e.g. `0.2.0`) — it bumps `Cargo.toml`, commits, tags `v<version>`,
+builds the installer and publishes the release. Or do it by hand: bump
+`version` in `Cargo.toml`, then `git tag v0.2.0 && git push origin v0.2.0`.
+Every push to `master` also builds an installer artifact.
 
 Build the installer locally (needs Inno Setup 6):
 
@@ -75,9 +76,19 @@ Default keys (all rebindable in the panel):
   portal zoom), `tunnel` and `synthwave`. These move on `u.flow`, a smooth
   tempo clock that never jumps, and they have no beat flashes, so the flight
   stays fluid.
+- **Scenery:** `ocean` (sunset sea), `clouds` (sunset cloud flight),
+  `city_rain` (neon street in the rain, wet-asphalt reflections),
+  `highlands` (misty mountain valley at dawn), `dunes` (desert at dusk),
+  `beach` (palm silhouettes and surf), `aurora` (northern lights over a
+  mountain lake) and `laser_show` (festival beam fans over a crowd). Flight
+  scenes ride `u.flow`; nothing flashes.
 - **Mandalas / abstract:** `fire_mandala` (a fire-and-ice kaleidoscope),
   `julia_portal`, `kaleido`, `fluid` and `spectrum_rings`. These still pulse
   with the beat.
+- **Seasonal:** `halloween`, `christmas` and `fireworks` only enter the
+  playlist in season (October, December, Bonfire Night and New Year; see
+  `Seasonal` in the panel). They're the most audio-reactive scenes:
+  beat-flickering lanterns, onset lightning, and bursts that barrage on drops.
 
 Heaviest on integrated graphics (at the automatic 75% scale): `block_tunnel`
 ~57 fps and `fire_mandala` ~84 fps at 2560×1440. Every scene holds 144 fps on
@@ -101,20 +112,31 @@ giving its beat count and energy. Frame 0 lands on the downbeat, and playback
 is stretched to the live BPM, switching to half or double time automatically
 so the moves never look sped up or slowed down.
 
-**The built-in library** is shadow dancing in the style of backlit
-tech-house dancers: continuous hip sway with the weight dropping onto one hip,
-body rolls, and arm shapes (the diamond overhead, a hand in the hair, hands on
-hips, snake arms), with turns into profile. `tools/choreo.py` choreographs
-it on a real CMU mocap skeleton, with IK to keep the feet planted, and
-`tools/mocap_dancer.py --whole` renders it as a curvy female silhouette with
-simulated hair. Routines by energy: `tease` 0.1, `profile`, `diva`, `frame`,
-`snake`, `wave`, `hips` 0.85. The earlier CMU modern-dance clips are
-available with `--modern`.
+**The built-in library** is real dancers cut out of free Pixabay stock
+footage by `tools/stock_dancer.py` (see `dancers/CREDITS.md` for sources).
+It mats silhouette clips by brightness or colour, searches for the stretch
+whose end pose best matches its start while she's actually moving, crossfades
+the seam and loops it over a whole number of bars. The shipped clips run
+8–16 beats at a calm-to-club energy range.
 
-Rebuild or extend the library with:
+Add a clip from any silhouette-style footage:
 
 ```
-py -m pip install -r tools/requirements.txt
+py -m pip install -r tools/requirements.txt imageio-ffmpeg
+py tools/stock_dancer.py clip.mp4 --name my_clip --matte dark    # dark dancer on bright bg
+py tools/contact_sheet.py my_clip sheet.png                      # eyeball the loop
+```
+
+`--matte light` suits a bright dancer on black, `--matte green` a coloured
+one, `--fill` fills glow-outline footage into a solid body, and `--beats`
+sets the loop lengths to try (default 16/12/8).
+
+A procedural library is still available: `tools/choreo.py` choreographs
+shadow-dance routines on a real CMU mocap skeleton with IK-planted feet, and
+`tools/mocap_dancer.py` renders them (or any BVH take) as curvy silhouettes
+with simulated hair:
+
+```
 py tools/build_dancer_library.py             # downloads the takes, renders all clips
 py tools/mocap_dancer.py take.bvh --name x --view three-quarter   # one clip from any BVH
 ```
@@ -151,7 +173,8 @@ shaders/scenes/*.wgsl    one file per scene; new files are picked up live
 ```
 
 ### Writing a scene
-Add `shaders/scenes/<name>.wgsl` with `@fragment fn fs_main(in: VsOut) -> @location(0) vec4<f32>`.
+`cargo run -- --check-shaders` validates every shader with naga and exits — no
+window, no GPU. Add `shaders/scenes/<name>.wgsl` with `@fragment fn fs_main(in: VsOut) -> @location(0) vec4<f32>`.
 Everything in `common.wgsl` is available: `u.bass/mid/high/energy`, `u.kick`,
 `u.onset`, `u.beat` (beat position), `u.beat_phase`, `u.bar_phase`, `u.build`,
 `u.intensity`, `u.hue`, `u.seed`, `u.flash`, `spec(x)`, `prev(uv)` (last frame,

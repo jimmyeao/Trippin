@@ -20,6 +20,7 @@ Mattes:
 """
 import argparse
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -32,12 +33,29 @@ FPS = 30
 REF_BPM = 124.0
 SCOUT_HEIGHT = 270         # first pass: find where the dancer is
 
+# imageio-ffmpeg bundles an ffmpeg binary (but no ffprobe) if none is on PATH.
+FFMPEG = shutil.which("ffmpeg")
+if not FFMPEG:
+    try:
+        import imageio_ffmpeg
+        FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
+    except ImportError:
+        FFMPEG = "ffmpeg"
+
 
 def video_size(video):
-    probe = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
-                            "stream=width,height", "-of", "csv=p=0", str(video)],
-                           capture_output=True, text=True, check=True).stdout.strip().split(",")
-    return int(probe[0]), int(probe[1])
+    try:
+        probe = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                                "stream=width,height", "-of", "csv=p=0", str(video)],
+                               capture_output=True, text=True, check=True).stdout.strip().split(",")
+        return int(probe[0]), int(probe[1])
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        # No ffprobe: `ffmpeg -i` prints "Stream #... Video: ... WxH" on stderr.
+        err = subprocess.run([FFMPEG, "-i", str(video)], capture_output=True, text=True).stderr
+        m = re.search(r"Video:.*? (\d{2,5})x(\d{2,5})", err)
+        if not m:
+            raise SystemExit("can't read video size; install ffprobe or imageio-ffmpeg")
+        return int(m.group(1)), int(m.group(2))
 
 
 def read_frames(video, rgb, height, crop=None):
@@ -53,7 +71,7 @@ def read_frames(video, rgb, height, crop=None):
     w = max(2, int(round(w0 * h / h0 / 2)) * 2)
     vf += f",scale={w}:{h}"
     ch = 3 if rgb else 1
-    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(video), "-vf", vf,
+    raw = subprocess.run([FFMPEG, "-v", "error", "-i", str(video), "-vf", vf,
                           "-pix_fmt", "rgb24" if rgb else "gray", "-f", "rawvideo", "-"],
                          capture_output=True, check=True).stdout
     frames = np.frombuffer(raw, np.uint8)
@@ -112,6 +130,8 @@ def main():
     ap.add_argument("--height", type=int, default=512)
     ap.add_argument("--beats", type=int, nargs="+", default=[16, 12, 8],
                     help="loop lengths to consider, in beats at 124 BPM")
+    ap.add_argument("--fill", action="store_true",
+                    help="close gaps and fill holes in the matte (for glow/outline footage)")
     ap.add_argument("--energy", type=float, help="0 calm .. 1 driving (default: measured)")
     ap.add_argument("--source", default="", help="credit / origin, stored in clip.json")
     args = ap.parse_args()
@@ -133,6 +153,15 @@ def main():
     # Pass 2 (full detail): just the dancer's region, at about output size.
     frames = read_frames(args.video, rgb, int(args.height * 1.25), crop=(x0, y0, (x1 - x0) // 2 * 2, (y1 - y0) // 2 * 2))
     masks = matte(frames, args.matte, args.threshold, args.softness)
+    if args.fill:
+        # Outline/glow footage mattes hollow: close the rim, fill the body.
+        from scipy.ndimage import binary_closing, binary_fill_holes
+        solid = np.empty_like(masks)
+        for i, m in enumerate(masks):
+            b = binary_closing(m > 0.5, structure=np.ones((9, 9)), iterations=3)
+            solid[i] = np.where(b, np.maximum(m, 0.6), m)
+            solid[i] = np.where(binary_fill_holes(solid[i] > 0.4), np.maximum(solid[i], 0.6), solid[i])
+        masks = solid
     del frames
     print(f"{len(masks)} frames at {FPS} fps ({len(masks) / FPS:.1f}s), dancer region {x1 - x0}x{y1 - y0}px")
 

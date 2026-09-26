@@ -52,8 +52,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
     let sun = normalize(vec3<f32>(0.0, 0.12, 1.0));
     let ro = vec3<f32>(0.0, 3.2, u.flow * 1.5);
-    let sway = rot(sin(u.time * 0.15) * 0.04) * vec2<f32>(p.x, -p.y);
-    let rd = normalize(vec3<f32>(sway.x, sway.y - 0.12, 1.6));
+    // Yaw pans the view along the horizon without tilting it; a slow pitch
+    // bob breathes. Rolling the camera made the sea line slant.
+    let yaw = sin(u.time * 0.11) * 0.1;
+    let dxz = rot(yaw) * vec2<f32>(p.x, 1.6);
+    let rd = normalize(vec3<f32>(dxz.x, -p.y - 0.12 + sin(u.time * 0.07) * 0.02, dxz.y));
 
     var col: vec3<f32>;
     if rd.y > 0.0 {

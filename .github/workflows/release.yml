@@ -1,6 +1,10 @@
 # Builds the Windows installer.
 # - Every push to master and every PR: build + installer, uploaded as a workflow artifact.
 # - Pushing a tag like v0.2.0: also publishes a GitHub release with the installer attached.
+# - Manual release (Actions > Build installer > Run workflow > version):
+#   bumps Cargo.toml/Cargo.lock, pushes the commit and a v<version> tag, builds,
+#   and publishes the release — all in one run. (A tag pushed by GITHUB_TOKEN
+#   can't trigger a second workflow run, so the release happens here.)
 name: Build installer
 
 on:
@@ -9,6 +13,14 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      release_version:
+        description: "Version to release, e.g. 0.2.0 (blank = build only)"
+        required: false
+      prerelease:
+        description: "Mark as a pre-release"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -25,12 +37,30 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
+      - name: Bump version, commit and tag (manual release)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.release_version != '' }}
+        shell: pwsh
+        run: |
+          $v = "${{ inputs.release_version }}".TrimStart('v')
+          (Get-Content Cargo.toml -Raw) -replace '(?m)^version\s*=\s*"[^"]*"', "version = `"$v`"" |
+            Set-Content Cargo.toml -NoNewline
+          cargo metadata --format-version 1 --quiet | Out-Null   # refresh the version in Cargo.lock
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml Cargo.lock
+          git commit -m "Release v$v [skip ci]"
+          git tag "v$v"
+          git push origin HEAD:master
+          git push origin "v$v"
+
       - name: Work out version
         id: version
         shell: pwsh
         run: |
           if ($env:GITHUB_REF -like "refs/tags/v*") {
             $v = $env:GITHUB_REF_NAME.Substring(1)
+          } elseif ("${{ inputs.release_version }}" -ne "") {
+            $v = "${{ inputs.release_version }}".TrimStart('v')
           } else {
             $base = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"(.+)"').Matches[0].Groups[1].Value
             $v = "$base-build.$env:GITHUB_RUN_NUMBER"
@@ -60,9 +90,11 @@ jobs:
           name: Trippin-Setup-${{ steps.version.outputs.version }}
           path: dist/*.exe
 
-      - name: Publish release (tags only)
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Publish release (tags and manual releases)
+        if: ${{ startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release_version != '') }}
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*.exe
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v{0}', inputs.release_version) }}
+          prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease }}
           generate_release_notes: true

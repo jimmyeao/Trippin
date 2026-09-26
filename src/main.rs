@@ -432,10 +432,54 @@ fn arg_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
     args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).map(String::as_str)
 }
 
+/// Validate every shader with naga and exit — no window or GPU needed.
+fn check_shaders() -> Result<()> {
+    let dir = render::find_shader_dir()?;
+    let common = std::fs::read_to_string(dir.join("common.wgsl"))?;
+    let mut paths: Vec<std::path::PathBuf> = std::fs::read_dir(dir.join("scenes"))?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .collect();
+    paths.retain(|p| p.extension().is_some_and(|e| e == "wgsl"));
+    paths.sort();
+    paths.push(dir.join("present.wgsl"));
+    paths.push(dir.join("dancer.wgsl"));
+    let mut bad = 0;
+    for p in &paths {
+        let body = std::fs::read_to_string(p)?;
+        let src = format!("{common}\n{body}");
+        let name = p.file_name().unwrap().to_string_lossy();
+        let valid = wgpu::naga::front::wgsl::parse_str(&src)
+            .map_err(|e| e.emit_to_string(&src))
+            .and_then(|m| {
+                wgpu::naga::valid::Validator::new(
+                    wgpu::naga::valid::ValidationFlags::all(),
+                    wgpu::naga::valid::Capabilities::all(),
+                )
+                .validate(&m)
+                .map_err(|e| e.emit_to_string(&src))
+            });
+        match valid {
+            Ok(_) => println!("ok   {name}"),
+            Err(e) => {
+                bad += 1;
+                eprintln!("FAIL {name}:\n{e}");
+            }
+        }
+    }
+    if bad > 0 {
+        anyhow::bail!("{bad} shader(s) failed validation");
+    }
+    println!("All shaders valid.");
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--list-devices") {
         return audio::list_devices();
+    }
+    if args.iter().any(|a| a == "--check-shaders") {
+        return check_shaders();
     }
     let device = arg_value(&args, "--device");
     let audio = AudioEngine::start(device)?;

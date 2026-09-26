@@ -55,8 +55,10 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
     let sun = normalize(vec3<f32>(0.25, 0.1, 1.0));
     let ro = vec3<f32>(sin(u.time * 0.05) * 2.0, 0.8, u.flow * 1.2);
-    let tilt = rot(sin(u.time * 0.1) * 0.05) * vec2<f32>(p.x, -p.y);
-    let rd = normalize(vec3<f32>(tilt.x, tilt.y - 0.18, 1.5));
+    // Yaw, not roll: banking tilted the cloud deck's horizon line.
+    let yaw = sin(u.time * 0.08) * 0.09;
+    let dxz = rot(yaw) * vec2<f32>(p.x, 1.5);
+    let rd = normalize(vec3<f32>(dxz.x, -p.y - 0.18 + sin(u.time * 0.06) * 0.015, dxz.y));
 
     var col = sky(rd, sun);
     // Only rays heading down into the cloud layer need marching.
