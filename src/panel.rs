@@ -7,7 +7,7 @@ use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
 use winit::window::Window;
 
-use crate::config::{Action, Mode, Settings, Tristate};
+use crate::config::{in_season, today, Action, Mode, Seasonal, Settings, Tristate};
 use crate::dancer::STYLES;
 use crate::render::Gpu;
 
@@ -233,10 +233,28 @@ fn build_ui(
     });
 
     section(ui, "Scenes in rotation", |ui| {
+        ui.horizontal(|ui| {
+            ui.label("Seasonal scenes");
+            ui.selectable_value(&mut s.seasonal, Seasonal::Auto, "Auto (in season)");
+            ui.selectable_value(&mut s.seasonal, Seasonal::Always, "Always");
+            ui.selectable_value(&mut s.seasonal, Seasonal::Off, "Off");
+        });
+        let date = today();
+        let in_now: Vec<&str> = scenes.iter().map(String::as_str).filter(|n| in_season(n, date) == Some(true)).collect();
+        ui.small(if in_now.is_empty() {
+            "Nothing seasonal today (Halloween: Oct, Christmas: Dec, fireworks: Bonfire Night and New Year).".to_string()
+        } else {
+            format!("In season today: {}", in_now.join(", "))
+        });
         egui::Grid::new("scenes").num_columns(2).striped(true).show(ui, |ui| {
             for (i, name) in scenes.iter().enumerate() {
                 let mut on = !s.disabled_scenes.contains(name);
-                if ui.checkbox(&mut on, name).changed() {
+                let label = match in_season(name, date) {
+                    Some(true) => format!("{name} (seasonal, in season)"),
+                    Some(false) => format!("{name} (seasonal)"),
+                    None => name.clone(),
+                };
+                if ui.checkbox(&mut on, label).changed() {
                     if on {
                         s.disabled_scenes.retain(|n| n != name);
                     } else {

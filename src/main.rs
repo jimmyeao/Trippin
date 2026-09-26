@@ -31,7 +31,7 @@ use winit::keyboard::Key;
 use winit::window::{Fullscreen, Window, WindowId};
 
 use audio::{AudioEngine, Command, Features};
-use config::{key_name, Action, Mode, Settings, Tristate};
+use config::{in_season, key_name, today, Action, Mode, Seasonal, Settings, Tristate};
 use dancer::DancerLayer;
 use director::Director;
 use panel::{Panel, Status, UiCommand};
@@ -73,13 +73,23 @@ impl App {
         self.dirty_since = Some(Instant::now());
     }
 
-    /// Scenes that compile and are ticked in the playlist.
+    /// Scenes that compile, are ticked in the playlist and (for seasonal
+    /// scenes) are in season.
     fn usable_scenes(&self) -> Vec<usize> {
         let Some(r) = self.renderer.as_ref() else { return Vec::new() };
         let names = r.scene_names();
         let all = r.usable_scenes();
-        let on: Vec<usize> =
-            all.iter().copied().filter(|&i| !self.settings.disabled_scenes.contains(&names[i])).collect();
+        let date = today();
+        let on: Vec<usize> = all
+            .iter()
+            .copied()
+            .filter(|&i| !self.settings.disabled_scenes.contains(&names[i]))
+            .filter(|&i| match (self.settings.seasonal, in_season(&names[i], date)) {
+                (_, None) | (Seasonal::Always, _) => true,
+                (Seasonal::Off, Some(_)) => false,
+                (Seasonal::Auto, Some(in_now)) => in_now,
+            })
+            .collect();
         if on.is_empty() {
             all
         } else {
@@ -118,15 +128,15 @@ impl App {
             Tristate::Off => self.dancer.canon = false,
             Tristate::Auto => {}
         }
-        if let Some(clip) = self.dancer.poll_loaded() {
-            r.set_dancer_clip(&clip);
+        for (slot, clip) in self.dancer.poll_loaded() {
+            r.set_dancer_clip(slot, &clip);
         }
         if (ev.cut || ev.phrase) && s.mode != Mode::Manual && self.dancer.enabled {
             let intensity = self.director.intensity;
             let director = &mut self.director;
             self.dancer.on_cut(intensity, || director.rand(), s.dancer_style, s.canon, &s.disabled_clips);
         }
-        let dancer_u = self.dancer.uniforms(pos, f.downbeat, f.bpm, dt, s.dancer_size);
+        let dancer_u = self.dancer.uniforms(pos, f.downbeat, f.bpm, dt, s.dancer_size, &s.disabled_clips);
 
         // Tempo changes ease in; position only ever moves forward smoothly.
         self.flow_bpm += (f.bpm - self.flow_bpm) * (dt * 1.5).min(1.0);
@@ -203,7 +213,7 @@ impl App {
             fps: self.fps,
             device: self.audio.device_name.clone(),
             scene: self.director.scene,
-            clip: self.dancer.loaded.as_ref().map(|c| c.name.clone()),
+            clip: self.dancer.loaded_name(),
             blackout: self.blackout,
             fullscreen: r.window.fullscreen().is_some(),
         };

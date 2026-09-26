@@ -17,7 +17,7 @@ use anyhow::{anyhow, Context, Result};
 use winit::window::Window;
 
 use crate::audio::SPECTRUM_BINS;
-use crate::dancer::{Clip, DancerUniforms};
+use crate::dancer::{Clip, DancerUniforms, SLOTS};
 
 const SCENE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
@@ -110,8 +110,9 @@ pub struct Renderer {
     dancer_layout: wgpu::BindGroupLayout,
     dancer_pipeline_layout: wgpu::PipelineLayout,
     dancer_buf: wgpu::Buffer,
-    /// Mask texture array + bind group for the loaded clip.
-    dancer_clip: Option<(wgpu::Texture, wgpu::BindGroup)>,
+    /// Mask texture array per dancer slot (main + canon companions).
+    dancer_masks: [Option<(wgpu::Texture, wgpu::TextureView)>; SLOTS],
+    dancer_bg: Option<wgpu::BindGroup>,
 }
 
 pub fn find_shader_dir() -> Result<PathBuf> {
@@ -130,6 +131,19 @@ pub fn find_shader_dir() -> Result<PathBuf> {
 
 fn scaled(w: u32, h: u32, scale: f32) -> (u32, u32) {
     (((w as f32 * scale) as u32).max(1), ((h as f32 * scale) as u32).max(1))
+}
+
+fn dancer_tex_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Texture {
+            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+            view_dimension: wgpu::TextureViewDimension::D2Array,
+            multisampled: false,
+        },
+        count: None,
+    }
 }
 
 fn mtime(p: &Path) -> Option<SystemTime> {
@@ -221,18 +235,11 @@ impl Renderer {
         let dancer_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("dancer"),
             entries: &[
+                dancer_tex_entry(0),
+                dancer_tex_entry(1),
+                dancer_tex_entry(2),
                 wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2Array,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
+                    binding: 3,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
@@ -287,7 +294,8 @@ impl Renderer {
             dancer_layout,
             dancer_pipeline_layout,
             dancer_buf,
-            dancer_clip: None,
+            dancer_masks: Default::default(),
+            dancer_bg: None,
         };
         r.reload_shaders(true);
         if r.present.pipeline.is_none() {
@@ -477,8 +485,9 @@ impl Renderer {
         Ok(pipeline)
     }
 
-    /// Upload a dancer clip's masks as a texture array (replacing any previous one).
-    pub fn set_dancer_clip(&mut self, clip: &Clip) {
+    /// Upload a dancer clip's masks as a texture array into `slot`
+    /// (0 = main dancer, 1-2 = canon companions), replacing what was there.
+    pub fn set_dancer_clip(&mut self, slot: usize, clip: &Clip) {
         let size = wgpu::Extent3d { width: clip.width, height: clip.height, depth_or_array_layers: 1 };
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("dancer masks"),
@@ -511,15 +520,23 @@ impl Renderer {
             dimension: Some(wgpu::TextureViewDimension::D2Array),
             ..Default::default()
         });
-        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        self.dancer_masks[slot] = Some((texture, view));
+
+        // Rebuild the bind group; empty slots borrow any loaded one (the
+        // shader skips slots whose frame count is 0).
+        let Some(fallback) = self.dancer_masks.iter().flatten().next().map(|(_, v)| v.clone()) else { return };
+        let views: Vec<wgpu::TextureView> =
+            self.dancer_masks.iter().map(|m| m.as_ref().map_or(fallback.clone(), |(_, v)| v.clone())).collect();
+        self.dancer_bg = Some(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("dancer"),
             layout: &self.dancer_layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
-                wgpu::BindGroupEntry { binding: 1, resource: self.dancer_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&views[0]) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&views[1]) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&views[2]) },
+                wgpu::BindGroupEntry { binding: 3, resource: self.dancer_buf.as_entire_binding() },
             ],
-        });
-        self.dancer_clip = Some((texture, bind_group));
+        }));
     }
 
     /// Render `scene` (plus the dancer layer, if given) into the next
@@ -557,8 +574,8 @@ impl Renderer {
             pass.set_pipeline(pipeline);
             pass.set_bind_group(0, &self.bind_groups[prev], &[]);
             pass.draw(0..3, 0..1);
-            if let (Some(_), Some(dancer), Some((_, dancer_bg))) =
-                (dancer, self.dancer.pipeline.as_ref(), self.dancer_clip.as_ref())
+            if let (Some(_), Some(dancer), Some(dancer_bg)) =
+                (dancer, self.dancer.pipeline.as_ref(), self.dancer_bg.as_ref())
             {
                 pass.set_pipeline(dancer);
                 pass.set_bind_group(1, dancer_bg, &[]);

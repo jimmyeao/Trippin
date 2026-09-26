@@ -47,21 +47,32 @@ pub struct Clip {
     pub frames: Vec<Vec<u8>>,
 }
 
+/// Dancer slots: 0 is the main dancer, 1 and 2 the canon companions, each
+/// with its own routine so they never just copy each other.
+pub const SLOTS: usize = 3;
+
+#[repr(C)]
+#[derive(Clone, Copy, Default, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct SlotUniforms {
+    /// Fractional frame index into this slot's loop.
+    pub frame: f32,
+    /// Frame count; 0 = nothing loaded in this slot yet.
+    pub frames: f32,
+    /// Mask width / height.
+    pub aspect: f32,
+    pub _pad: f32,
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Default, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct DancerUniforms {
-    pub frame: f32,
-    pub frames: f32,
+    pub slots: [SlotUniforms; SLOTS],
     pub opacity: f32,
     pub style: f32,
-    /// Number of dancers: 1, or 3 for the mirrored canon.
+    /// Number of dancers: 1, or 3 for the canon.
     pub count: f32,
-    /// Mask width / height.
-    pub aspect: f32,
-    /// Dancer height as a fraction of the screen height.
+    /// Main dancer height as a fraction of the screen height.
     pub scale: f32,
-    /// Frames the side dancers lag behind the middle one.
-    pub lag: f32,
 }
 
 pub fn find_dancer_dir() -> Option<PathBuf> {
@@ -143,7 +154,32 @@ pub struct ClipInfo {
     pub aspect: f32,
 }
 
-/// Owns the clip list and the background loader; the renderer owns the GPU copy.
+/// One dancer: which routine it shows, its background load, and its tempo mapping.
+#[derive(Default)]
+struct Slot {
+    current: Option<usize>,
+    loaded: Option<ClipInfo>,
+    loader: Option<mpsc::Receiver<Result<Clip>>>,
+    loop_beats: f32,
+    loop_bpm: f32,
+}
+
+impl Slot {
+    /// Frame uniforms for `pos`, re-picking half/double time only when the
+    /// tempo really moves so the dancer doesn't jump on BPM jitter.
+    fn uniforms(&mut self, pos: f64, downbeat: u64, bpm: f32) -> SlotUniforms {
+        let Some(info) = self.loaded.as_ref() else { return SlotUniforms::default() };
+        if (bpm - self.loop_bpm).abs() / bpm.max(1.0) > 0.05 {
+            self.loop_bpm = bpm;
+            self.loop_beats = loop_beats(info.duration, info.beats, bpm);
+        }
+        // Frame 0 of the clip sits on the downbeat.
+        let t = ((pos - downbeat as f64) / self.loop_beats.max(1.0) as f64).rem_euclid(1.0);
+        SlotUniforms { frame: (t * info.frames as f64) as f32, frames: info.frames as f32, aspect: info.aspect, _pad: 0.0 }
+    }
+}
+
+/// Owns the clip list and the background loaders; the renderer owns the GPU copies.
 pub struct DancerLayer {
     /// User switch for the whole layer.
     pub enabled: bool,
@@ -152,12 +188,9 @@ pub struct DancerLayer {
     pub style: usize,
     pub canon: bool,
     pub clips: Vec<ClipEntry>,
-    pub current: usize,
-    pub loaded: Option<ClipInfo>,
-    loop_beats: f32,
-    loop_bpm: f32,
+    slots: [Slot; SLOTS],
     opacity: f32,
-    loader: Option<mpsc::Receiver<Result<Clip>>>,
+    rng: u64,
 }
 
 impl DancerLayer {
@@ -169,29 +202,48 @@ impl DancerLayer {
             style: 0,
             canon: false,
             clips,
-            current: 0,
-            loaded: None,
-            loop_beats: 8.0,
-            loop_bpm: 0.0,
+            slots: Default::default(),
             opacity: 0.0,
-            loader: None,
+            rng: 0x9E37_79B9_7F4A_7C15,
         }
     }
 
-    /// Start loading clip `index` on a background thread.
-    pub fn request(&mut self, index: usize) {
+    fn rand(&mut self) -> f32 {
+        self.rng ^= self.rng << 13;
+        self.rng ^= self.rng >> 7;
+        self.rng ^= self.rng << 17;
+        (self.rng >> 40) as f32 / (1u64 << 24) as f32
+    }
+
+    /// The main dancer's routine index.
+    pub fn current(&self) -> Option<usize> {
+        self.slots[0].current
+    }
+
+    pub fn loaded_name(&self) -> Option<String> {
+        self.slots[0].loaded.as_ref().map(|c| c.name.clone())
+    }
+
+    /// Start loading routine `index` into `slot` on a background thread.
+    fn request_slot(&mut self, slot: usize, index: usize) {
         let Some(path) = self.clips.get(index).map(|c| c.path.clone()) else { return };
-        self.current = index;
+        self.slots[slot].current = Some(index);
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
             let _ = tx.send(load_clip(&path));
         });
-        self.loader = Some(rx);
+        self.slots[slot].loader = Some(rx);
+    }
+
+    /// Show routine `index` on the main dancer.
+    pub fn request(&mut self, index: usize) {
+        self.request_slot(0, index);
     }
 
     pub fn next_clip(&mut self) {
         if !self.clips.is_empty() {
-            self.request((self.current + 1) % self.clips.len());
+            let next = self.current().map_or(0, |c| (c + 1) % self.clips.len());
+            self.request(next);
         }
     }
 
@@ -199,12 +251,39 @@ impl DancerLayer {
         self.clips.iter().map(|c| c.name.clone()).collect()
     }
 
-    /// Load a clip whose energy suits the track: one of the three closest
-    /// matches other than the current clip (skipping `disabled` ones),
-    /// chosen by `r` in 0..1.
+    /// Give each canon companion a routine that differs from the main dancer
+    /// and from the other companion (keeping any that already do).
+    fn refresh_companions(&mut self, disabled: &[String]) {
+        for slot in 1..SLOTS {
+            let taken: Vec<usize> =
+                (0..SLOTS).filter(|&s| s != slot).filter_map(|s| self.slots[s].current).collect();
+            let mine = self.slots[slot].current;
+            if mine.is_some_and(|m| !taken.contains(&m) && !disabled.contains(&self.clips[m].name)) {
+                continue;
+            }
+            let free: Vec<usize> = (0..self.clips.len())
+                .filter(|i| !taken.contains(i) && !disabled.contains(&self.clips[*i].name))
+                .collect();
+            // Too few ticked routines to go round: at least differ from the main dancer.
+            let pool: Vec<usize> = if free.is_empty() {
+                (0..self.clips.len()).filter(|i| Some(*i) != self.slots[0].current).collect()
+            } else {
+                free
+            };
+            if !pool.is_empty() {
+                let pick = pool[(self.rand() * pool.len() as f32) as usize % pool.len()];
+                self.request_slot(slot, pick);
+            }
+        }
+    }
+
+    /// Load a routine whose energy suits the track: one of the three closest
+    /// matches other than the current one (skipping `disabled` ones), chosen
+    /// by `r` in 0..1.
     pub fn pick_for(&mut self, intensity: f32, r: f32, disabled: &[String]) {
+        let current = self.current();
         let mut order: Vec<usize> = (0..self.clips.len())
-            .filter(|&i| i != self.current && !disabled.contains(&self.clips[i].name))
+            .filter(|&i| Some(i) != current && !disabled.contains(&self.clips[i].name))
             .collect();
         order.sort_by(|&a, &b| {
             let d = |i: usize| (self.clips[i].energy - intensity).abs();
@@ -246,65 +325,84 @@ impl DancerLayer {
             Tristate::On => true,
             Tristate::Off => false,
         };
-        let current = self.clips.get(self.current);
+        let current = self.current().and_then(|i| self.clips.get(i));
         let current_ok = current.is_some_and(|c| !disabled.contains(&c.name));
         let energy = current.map_or(0.5, |c| c.energy);
         if !current_ok || (energy - intensity).abs() > 0.4 || rand() < 0.3 {
             let r = rand();
             self.pick_for(intensity, r, disabled);
         }
+        // Fresh companions each time the canon comes in, so the trio keeps changing.
+        if self.canon {
+            for slot in 1..SLOTS {
+                self.slots[slot].current = None;
+            }
+            self.refresh_companions(disabled);
+        }
     }
 
-    /// A finished background load, ready to upload.
-    pub fn poll_loaded(&mut self) -> Option<Clip> {
-        let result = self.loader.as_ref()?.try_recv().ok()?;
-        self.loader = None;
-        match result {
-            Ok(clip) => {
-                println!("dancer clip: {} ({} frames)", clip.name, clip.frames.len());
-                self.loaded = Some(ClipInfo {
-                    name: clip.name.clone(),
-                    duration: clip.duration,
-                    beats: clip.beats,
-                    frames: clip.frames.len(),
-                    aspect: clip.width as f32 / clip.height as f32,
-                });
-                self.loop_bpm = 0.0;
-                Some(clip)
-            }
-            Err(e) => {
-                eprintln!("dancer clip failed: {e:#}");
-                None
+    /// Finished background loads, ready to upload: (slot, clip).
+    pub fn poll_loaded(&mut self) -> Vec<(usize, Clip)> {
+        let mut done = Vec::new();
+        for (i, slot) in self.slots.iter_mut().enumerate() {
+            let Some(result) = slot.loader.as_ref().and_then(|rx| rx.try_recv().ok()) else { continue };
+            slot.loader = None;
+            match result {
+                Ok(clip) => {
+                    println!("dancer {i}: {} ({} frames)", clip.name, clip.frames.len());
+                    slot.loaded = Some(ClipInfo {
+                        name: clip.name.clone(),
+                        duration: clip.duration,
+                        beats: clip.beats,
+                        frames: clip.frames.len(),
+                        aspect: clip.width as f32 / clip.height as f32,
+                    });
+                    slot.loop_bpm = 0.0;
+                    done.push((i, clip));
+                }
+                Err(e) => eprintln!("dancer clip failed: {e:#}"),
             }
         }
+        done
     }
 
     /// Per-frame uniforms, or None when nothing should be drawn.
-    pub fn uniforms(&mut self, pos: f64, downbeat: u64, bpm: f32, dt: f32, size: f32) -> Option<DancerUniforms> {
+    pub fn uniforms(
+        &mut self,
+        pos: f64,
+        downbeat: u64,
+        bpm: f32,
+        dt: f32,
+        size: f32,
+        disabled: &[String],
+    ) -> Option<DancerUniforms> {
         let target = if self.enabled && self.showing { 1.0 } else { 0.0 };
         self.opacity += (target - self.opacity) * (dt * 4.0).min(1.0);
-        let info = self.loaded.as_ref()?;
-        let (frames, aspect) = (info.frames, info.aspect);
+        self.slots[0].loaded.as_ref()?;
         if self.opacity < 0.01 {
             return None;
         }
-        // Re-pick the loop length only when the tempo really moves, so the
-        // dancer doesn't jump between half and double time on BPM jitter.
-        if (bpm - self.loop_bpm).abs() / bpm.max(1.0) > 0.05 {
-            self.loop_bpm = bpm;
-            self.loop_beats = loop_beats(info.duration, info.beats, bpm);
+        // Canon switched on by hand, or the main routine changed to one a
+        // companion was showing: make sure all three dance something different.
+        if self.canon && self.slots[1..].iter().all(|s| s.loader.is_none()) {
+            let clash = (1..SLOTS).any(|s| {
+                let c = self.slots[s].current;
+                c.is_none() || (0..s).any(|o| self.slots[o].current == c)
+            });
+            if clash {
+                self.refresh_companions(disabled);
+            }
         }
-        // Frame 0 of the clip sits on the downbeat.
-        let t = ((pos - downbeat as f64) / self.loop_beats as f64).rem_euclid(1.0);
+        let mut slots = [SlotUniforms::default(); SLOTS];
+        for (i, slot) in self.slots.iter_mut().enumerate() {
+            slots[i] = slot.uniforms(pos, downbeat, bpm);
+        }
         Some(DancerUniforms {
-            frame: (t * frames as f64) as f32,
-            frames: frames as f32,
+            slots,
             opacity: self.opacity,
             style: self.style as f32,
             count: if self.canon { 3.0 } else { 1.0 },
-            aspect,
             scale: size,
-            lag: (frames as f32 / (self.loop_beats * 2.0)).round(), // half a beat
         })
     }
 }

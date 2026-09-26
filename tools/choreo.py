@@ -69,15 +69,66 @@ ROUTINES = {
 }
 
 
-def smooth(x):
-    return x * x * (3 - 2 * x)
+# Beats per keyframe for the arms, turns and arches (the dance itself), and
+# how much continuous hip sway the routine has (0 = only the weight shifts ..
+# 1 = grooving throughout). The hips run slower than the arms: weight shifts
+# take WEIGHT_SLOWDOWN times as long, and the figure-8 sway takes 4 beats.
+KEY_BEATS = {"tease": 2, "profile": 2, "diva": 2, "frame": 2, "spin": 2,
+             "snake": 2, "wave": 2, "hips": 2}
+WEIGHT_SLOWDOWN = 2
+GROOVE = {"tease": 0.15, "profile": 0.2, "diva": 0.3, "frame": 0.3, "spin": 0.2,
+          "snake": 0.35, "wave": 0.35, "hips": 0.6}
+
+# Overlapping action: each part of the body plays the choreography this many
+# beats behind the hips, so movement ripples up the body and out along the arms.
+LAG = {"hips": 0.0, "spine": 0.15, "neck": 0.25, "head": 0.35,
+       "upper_arm": 0.25, "forearm": 0.45, "hand": 0.6}
 
 
-def keyframe_blend(keys, beat, beats):
-    """(prev key, next key, eased weight) for a cyclic list, one key per 2 beats."""
-    pos = (beat % beats) / 2.0
-    i = int(math.floor(pos)) % len(keys)
-    return keys[i], keys[(i + 1) % len(keys)], smooth(pos - math.floor(pos))
+def routine_beats(routine):
+    # The slower weight track sets the loop length (the arm sequence plays twice).
+    return len(ROUTINES[routine]) * KEY_BEATS.get(routine, 2) * WEIGHT_SLOWDOWN
+
+
+def catmull(p0, p1, p2, p3, t):
+    """Catmull-Rom spline between p1 and p2: smooth velocity through every key."""
+    t2, t3 = t * t, t * t * t
+    return 0.5 * (2 * p1 + (p2 - p0) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (3 * p1 - p0 - 3 * p2 + p3) * t3)
+
+
+class Track:
+    """Cyclic spline through one value per keyframe, sampled at any beat."""
+
+    def __init__(self, values, key_beats, wrap_add=0.0):
+        self.v = [float(x) for x in values]
+        self.key_beats = key_beats
+        self.wrap_add = wrap_add   # added per full cycle (for turns that spin round)
+
+    def at(self, beat):
+        n = len(self.v)
+        pos = beat / self.key_beats
+        i = math.floor(pos)
+        u = pos - i
+        # Linger slightly near each pose, but never stop: speed is 0.85..1.15.
+        u = u - 0.15 / TWO_PI * math.sin(TWO_PI * u)
+
+        def val(k):
+            cycles, j = divmod(k, n)
+            return self.v[j] + cycles * self.wrap_add
+
+        return catmull(val(i - 1), val(i), val(i + 1), val(i + 2), u)
+
+
+TWO_PI = 2 * math.pi
+
+
+def unwrap(angles):
+    """Turn keys unwrapped to be continuous; returns (values, amount per cycle)."""
+    out = [angles[0]]
+    for a in angles[1:] + angles[:1]:
+        d = (a - out[-1] + 180) % 360 - 180
+        out.append(out[-1] + d)
+    return out[:-1], out[-1] - out[0]
 
 
 def lerp(a, b, w):
@@ -127,7 +178,7 @@ def basis(hinge, direction):
     return np.stack([x, y, np.cross(x, y)], 1)
 
 
-def solve_leg(sk, local, root_pos, side, foot_target, facing, point_toe):
+def solve_leg(sk, local, root_pos, side, foot_target, facing, toe_point):
     """Two-bone IK: set UpLeg/Leg/Foot local rotations so the foot reaches its target."""
     S = "Left" if side > 0 else "Right"
     hip_name = "LHipJoint" if side > 0 else "RHipJoint"
@@ -158,7 +209,7 @@ def solve_leg(sk, local, root_pos, side, foot_target, facing, point_toe):
     parent = wr[hip_name]
     local[f"{S}UpLeg"] = parent.T @ w_thigh
     local[f"{S}Leg"] = w_thigh.T @ w_shin
-    local[f"{S}Foot"] = w_shin.T @ (facing @ rx(-35 if point_toe else 0))
+    local[f"{S}Foot"] = w_shin.T @ (facing @ rx(-35 * toe_point))
 
 
 def arm_rotations(pose, side, wave):
@@ -171,55 +222,75 @@ def arm_rotations(pose, side, wave):
 
 def pose_at(sk, routine, beat, beats, rest_hips):
     keys = ROUTINES[routine]
-    k0, k1, w = keyframe_blend(keys, beat, beats)
-    turn = lerp(k0[2], k1[2] if abs(k1[2] - k0[2]) <= 180 else k1[2] - 360, w)
-    arch = lerp(k0[3], k1[3], w)
-    weight = lerp(k0[4], k1[4], w)                 # +1 on the left hip, -1 on the right
+    kb = KEY_BEATS.get(routine, 2)
+    turns, spin = unwrap([k[2] for k in keys])
+    turn_t = Track(turns, kb, spin)
+    arch_t = Track([k[3] for k in keys], kb)
+    weight_t = Track([k[4] for k in keys], kb * WEIGHT_SLOWDOWN)
+    arm_t = {
+        (side, param): Track([ARM_POSES[k[idx]][param] for k in keys], kb)
+        for side, idx in ((1, 0), (-1, 1)) for param in ("elev", "fwd", "bend", "bend_fwd")
+    }
+    groove = GROOVE.get(routine, 0.3)
 
-    ph = math.pi * beat
-    sway = math.sin(ph)                             # hips cross side to side every beat
-    groove = 0.5 + 0.5 * math.cos(2 * ph)           # dip on each beat
-    roll = 2 * math.pi * beat / 4                   # body roll, one per bar
+    def part(name):
+        return beat - LAG[name]
 
-    local = {}
+    # Hips lead: the weight shifts plus a soft figure-8 (side to side over two
+    # beats, forward and back twice as fast), scaled by the routine's groove.
+    b = part("hips")
+    weight = weight_t.at(b)
+    turn = turn_t.at(b)
+    fig_x = math.sin(math.pi * b / 2) * groove
+    fig_z = math.sin(math.pi * b) * groove * 0.35
     facing = ry(turn)
-    # Pelvis: sway plus the weighted hip pushed out and dropped on the other side.
-    hip_shift = 1.7 * sway + 0.9 * weight
-    tilt = 13 * sway + 7 * weight
-    local["Hips"] = facing @ rz(tilt) @ rx(-4 * math.sin(roll))
-    root = rest_hips + facing @ np.array([hip_shift, -0.45 - 0.3 * groove, 0.0])
+    hip_shift = 1.0 * weight + 1.1 * fig_x
+    tilt = 8 * weight + 8 * fig_x
+    # Knees soften as the weight passes through the middle.
+    dip = 0.35 * (1.0 - min(abs(weight), 1.0)) + 0.1 * groove * (0.5 + 0.5 * math.cos(math.pi * b))
+    local = {}
+    local["Hips"] = facing @ rz(tilt) @ ry(6 * fig_z)
+    root = rest_hips + facing @ np.array([hip_shift, -0.45 - dip, 0.4 * fig_z])
 
-    # Spine: counter-tilt the chest, ripple a body roll upward, arch the back.
+    # Spine follows the hips, counter-tilting into an S-curve, with a slow roll.
+    bs = part("spine")
+    w_s = weight_t.at(bs)
+    sway_s = math.sin(math.pi * bs / 2) * groove
+    arch = arch_t.at(bs)
+    roll = TWO_PI * bs / 8
     for i, name in enumerate(("LowerBack", "Spine", "Spine1")):
-        wave = 5 * math.sin(roll - 0.8 * (i + 1))
-        # The ribcage swings back over the feet: an S-curve through the body.
-        local[name] = rz(-tilt * 0.6) @ rx(wave + arch / 3)
-    local["Neck"] = rz(-4 * sway) @ rx(-arch * 0.3)
-    local["Head"] = rz(-6 * sway) @ rx(4 * math.sin(roll - 3.0))
+        wave = 3 * math.sin(roll - 0.8 * (i + 1))
+        local[name] = rz(-(8 * w_s + 8 * sway_s) * 0.6) @ rx(wave + arch / 3)
+    bn, bh = part("neck"), part("head")
+    local["Neck"] = rz(-3 * weight_t.at(bn) - 4 * math.sin(math.pi * bn / 2) * groove) @ rx(-arch_t.at(bn) * 0.3)
+    local["Head"] = rz(-4 * weight_t.at(bh) - 5 * math.sin(math.pi * bh / 2) * groove)         @ rx(3 * math.sin(TWO_PI * bh / 8 - 3.0))
 
-    # Arms: eased between keyframe shapes, with a slow snake undulation.
-    for side, S, idx in ((1, "Left", 0), (-1, "Right", 1)):
-        a = ARM_POSES[k0[idx]]
-        b = ARM_POSES[k1[idx]]
-        pose = {k: lerp(a[k], b[k], w) for k in a}
-        wave = 8 * math.sin(roll + (0 if side > 0 else math.pi))
-        upper, fore = arm_rotations(pose, side, wave)
+    # Arms: the upper arm leads, the forearm and hand trail behind it, which
+    # turns every shape change into a flowing, snake-like gesture.
+    for side, S in ((1, "Left"), (-1, "Right")):
+        bu, bf, bw = part("upper_arm"), part("forearm"), part("hand")
+        upper_pose = {k: arm_t[(side, k)].at(bu) for k in ("elev", "fwd")}
+        fore_pose = {k: arm_t[(side, k)].at(bf) for k in ("bend", "bend_fwd")}
+        pose = {**upper_pose, **fore_pose}
+        undulate = 4 * math.sin(TWO_PI * bu / 8 + (0 if side > 0 else math.pi))
+        upper, fore = arm_rotations(pose, side, undulate)
         local[f"{S}Shoulder"] = rz(max(pose["elev"], 0) * 0.12 * side)
         local[f"{S}Arm"] = upper
         local[f"{S}ForeArm"] = fore
-        local[f"{S}Hand"] = rz(-12 * side * math.sin(roll + side))
+        local[f"{S}Hand"] = rz(-10 * side * math.sin(TWO_PI * bw / 8 + side))
 
     # Feet planted under the hips, the free leg's foot drawn in with toe pointed.
-    ground = rest_hips[1] + sk.offset["LHipJoint"][1] + sk.offset["LeftUpLeg"][1] \
-        + sk.offset["LeftLeg"][1] + sk.offset["LeftFoot"][1]
+    ground = rest_hips[1] + sk.offset["LHipJoint"][1] + sk.offset["LeftUpLeg"][1]         + sk.offset["LeftLeg"][1] + sk.offset["LeftFoot"][1]
     for side in (1, -1):
-        free = (weight * side) < 0          # the leg on the unweighted side relaxes
-        amount = min(abs(weight), 1.0) if free else 0.0
+        # The unweighted side relaxes. A smooth ramp (not a clip at zero) so the
+        # free foot eases into and out of its step instead of kicking off.
+        ramp = float(np.clip((-weight * side + 0.3) / 1.3, 0.0, 1.0))
+        amount = ramp * ramp * (3 - 2 * ramp)
         x = side * (2.0 - 1.1 * amount)
         z = 0.9 * amount
         target = rest_hips + facing @ np.array([x, 0.0, z])
         target[1] = ground + 0.9 * amount   # heel lifts on the free foot
-        solve_leg(sk, local, root, side, target, facing, amount > 0.5)
+        solve_leg(sk, local, root, side, target, facing, amount)
     return root, local
 
 
@@ -240,12 +311,13 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("routine", choices=sorted(ROUTINES))
     ap.add_argument("--out", type=Path, required=True)
-    ap.add_argument("--beats", type=int, default=8)
+    ap.add_argument("--beats", type=int, help="loop length (default: the routine's own length)")
     ap.add_argument("--pose", help="static test pose LEFT,RIGHT (routine name is then ignored)")
     args = ap.parse_args()
     if args.pose:
         l, r = args.pose.split(",")
         ROUTINES[args.routine] = [(l, r, 20, 6, 1)] * 2
+    args.beats = args.beats or routine_beats(args.routine)
 
     sk = Skeleton(SKELETON)
     rest_hips = np.array([0.0, 17.0, 0.0])

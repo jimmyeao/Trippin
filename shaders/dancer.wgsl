@@ -1,33 +1,61 @@
-// Silhouette dancer, alpha-blended (premultiplied) over the scene. Written into
-// the feedback target, so scenes with trails leave echoes of the dancer.
-// Must match `DancerUniforms` in src/dancer.rs.
+// Silhouette dancers, alpha-blended (premultiplied) over the scene. Written
+// into the feedback target, so scenes with trails leave echoes of them.
+// Slot 0 is the main dancer; in the canon, slots 1 and 2 dance either side,
+// each with its own routine. Must match `DancerUniforms` in src/dancer.rs.
 
-struct D {
-    frame: f32,    // fractional frame index into the loop
-    frames: f32,
-    opacity: f32,
-    style: f32,    // 0 shadow, 1 neon, 2 fill, 3 strobe
-    count: f32,    // 1, or 3 for the mirrored canon
+struct Slot {
+    frame: f32,    // fractional frame index into this slot's loop
+    frames: f32,   // 0 = nothing loaded in this slot
     aspect: f32,   // mask width / height
-    scale: f32,    // dancer height as a fraction of screen height
-    lag: f32,      // frames the side dancers trail by
+    _pad: f32,
 };
 
-@group(1) @binding(0) var masks: texture_2d_array<f32>;
-@group(1) @binding(1) var<uniform> d: D;
+struct D {
+    slots: array<Slot, 3>,
+    opacity: f32,
+    style: f32,    // 0 shadow, 1 neon, 2 fill, 3 strobe
+    count: f32,    // 1, or 3 for the canon
+    scale: f32,    // main dancer height as a fraction of screen height
+};
 
-fn wrap_frame(f: f32) -> f32 {
-    return ((f % d.frames) + d.frames) % d.frames;
+@group(1) @binding(0) var masks0: texture_2d_array<f32>;
+@group(1) @binding(1) var masks1: texture_2d_array<f32>;
+@group(1) @binding(2) var masks2: texture_2d_array<f32>;
+@group(1) @binding(3) var<uniform> d: D;
+
+fn sample_layer(slot: i32, luv: vec2<f32>, layer: i32) -> f32 {
+    if slot == 1 {
+        return textureSampleLevel(masks1, samp, luv, layer, 0.0).r;
+    }
+    if slot == 2 {
+        return textureSampleLevel(masks2, samp, luv, layer, 0.0).r;
+    }
+    return textureSampleLevel(masks0, samp, luv, layer, 0.0).r;
+}
+
+fn mask_size(slot: i32) -> vec2<f32> {
+    if slot == 1 {
+        return vec2<f32>(textureDimensions(masks1).xy);
+    }
+    if slot == 2 {
+        return vec2<f32>(textureDimensions(masks2).xy);
+    }
+    return vec2<f32>(textureDimensions(masks0).xy);
+}
+
+fn wrap_frame(f: f32, n: f32) -> f32 {
+    return ((f % n) + n) % n;
 }
 
 // Mask coverage at mask-space uv, blending neighbouring frames.
-fn mask_at(luv: vec2<f32>, f: f32) -> f32 {
+fn mask_at(slot: i32, luv: vec2<f32>) -> f32 {
+    let s = d.slots[slot];
     let inside = all(luv >= vec2<f32>(0.0)) && all(luv <= vec2<f32>(1.0));
-    let fa = floor(wrap_frame(f));
-    let fb = wrap_frame(fa + 1.0);
-    let a = textureSampleLevel(masks, samp, luv, i32(fa), 0.0).r;
-    let b = textureSampleLevel(masks, samp, luv, i32(fb), 0.0).r;
-    return select(0.0, mix(a, b, fract(f)), inside);
+    let fa = floor(wrap_frame(s.frame, s.frames));
+    let fb = wrap_frame(fa + 1.0, s.frames);
+    let a = sample_layer(slot, luv, i32(fa));
+    let b = sample_layer(slot, luv, i32(fb));
+    return select(0.0, mix(a, b, fract(s.frame)), inside);
 }
 
 struct Hit {
@@ -36,19 +64,19 @@ struct Hit {
     luv: vec2<f32>,
 };
 
-fn dancer_at(p: vec2<f32>, x: f32, size: f32, flip: bool, f: f32) -> Hit {
+fn dancer_at(p: vec2<f32>, slot: i32, x: f32, size: f32, flip: bool) -> Hit {
     let h = 2.0 * d.scale * size;
-    let w = h * d.aspect;
+    let w = h * d.slots[slot].aspect;
     let bottom = 0.98;
     var luv = vec2<f32>((p.x - x) / w + 0.5, (p.y - (bottom - h)) / h);
     if flip {
         luv.x = 1.0 - luv.x;
     }
-    let texel = 2.0 / vec2<f32>(textureDimensions(masks).xy);
-    let gx = mask_at(luv + vec2<f32>(texel.x, 0.0), f) - mask_at(luv - vec2<f32>(texel.x, 0.0), f);
-    let gy = mask_at(luv + vec2<f32>(0.0, texel.y), f) - mask_at(luv - vec2<f32>(0.0, texel.y), f);
+    let texel = 2.0 / mask_size(slot);
+    let gx = mask_at(slot, luv + vec2<f32>(texel.x, 0.0)) - mask_at(slot, luv - vec2<f32>(texel.x, 0.0));
+    let gy = mask_at(slot, luv + vec2<f32>(0.0, texel.y)) - mask_at(slot, luv - vec2<f32>(0.0, texel.y));
     var hit: Hit;
-    hit.m = mask_at(luv, f);
+    hit.m = mask_at(slot, luv);
     hit.edge = clamp(length(vec2<f32>(gx, gy)) * 1.5, 0.0, 1.0);
     hit.luv = luv;
     return hit;
@@ -91,14 +119,20 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
     var out = vec4<f32>(0.0);
     if d.count > 1.5 {
-        // Canon: a mirrored pair either side, smaller and a half-beat behind.
-        let w = 2.0 * d.scale * d.aspect;
-        let side = d.frame - d.lag;
-        // Keep wide clips (leaps, arabesques) inside the screen edges.
-        let x = min(w * 0.95, aspect() - w * 0.8 * 0.5);
-        out = over(shade(dancer_at(p, -x, 0.8, true, side), 0.33), out);
-        out = over(shade(dancer_at(p, x, 0.8, false, side), 0.66), out);
+        // Canon: a companion either side, smaller, each with its own routine.
+        let side = 0.8;
+        let w0 = 2.0 * d.scale * d.slots[0].aspect;
+        for (var i = 1; i < 3; i++) {
+            if d.slots[i].frames < 0.5 {
+                continue;
+            }
+            let wi = 2.0 * d.scale * side * d.slots[i].aspect;
+            // Clear of the main dancer, but kept inside the screen edges.
+            let x = min((w0 * 0.5 + wi * 0.5) * 1.05, aspect() - wi * 0.5);
+            let sx = select(x, -x, i == 1);
+            out = over(shade(dancer_at(p, i, sx, side, i == 1), f32(i) * 0.33), out);
+        }
     }
-    out = over(shade(dancer_at(p, 0.0, 1.0, false, d.frame), 0.0), out);
+    out = over(shade(dancer_at(p, 0, 0.0, 1.0, false), 0.0), out);
     return out;
 }
