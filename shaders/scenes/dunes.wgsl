@@ -48,7 +48,10 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     var col = sky(rd, sun);
 
-    if rd.y < 0.0 {
+    // March rays pointing slightly UP too: a crest can rise above the
+    // ray-horizon when it's taller than the camera's eye line, and clipping
+    // them at rd.y == 0 slices dune tops off flat.
+    if rd.y < 0.35 {
         var t = 0.0;
         var hit_t = -1.0;
         for (var i = 0; i < 48; i++) {

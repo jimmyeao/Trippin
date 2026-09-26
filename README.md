@@ -1,3 +1,5 @@
+<p align="center"><img src="logo.png" width="200" alt="Trippin logo"></p>
+
 # Trippin
 
 Live, music-reactive visuals for DJ sets. Trippin listens
@@ -40,11 +42,15 @@ cargo run --release -- --fullscreen
 ```
 
 Drag the visuals window to the projector / LED wall and press **F**. A
-**control panel** window opens alongside it (F1 shows/hides it). It holds live
-status (BPM, beat, scene, routine), mode, previous/next, random order, scene
-length, blackout, the scene playlist, dancer options (on/off, look, canon,
-size, which routines), latency, and **rebindable hotkeys** (click Rebind, then
-press a key). Everything is saved to `trippin.json`.
+**control panel** window opens alongside it (F1 shows/hides it), organised
+into tabs — **Show** (modes, scene stepping, length, blackout, fullscreen,
+latency/downbeat), **Scenes** (the playlist: tick to include, search filter,
+"show" to jump to one now), **Dancer** (on/off, look, canon, size, which
+routines), **Effects** (the post effect + strength — picks apply live to the
+output, so the panel doubles as a preview) and **Keys** (rebindable hotkeys:
+click Rebind, then press a key). Everything is saved to `trippin.json`, and
+the visuals keep animating while the panel is being moved — rendering runs
+on its own thread.
 
 **Modes:** *Auto* cuts scenes every phrase and early on drops, and the dancer
 follows the track. *Static* holds the current scene while the dancer still
@@ -115,7 +121,9 @@ corrections from the beat tracker, so motion driven by it stutters.
 
 A post effect transforms the whole frame — scene and dancer — chosen in the
 panel or with `X`: **Mirror X**, **Mirror Y**, **Quad mirror** or **Kaleido
-×6 / ×8**. **Auto** picks a fresh effect on every scene cut.
+×6 / ×8**. The **Strength** slider blends the transform in (at 50% a mirror
+sits over the plain frame). **Auto** picks a fresh effect on every scene cut
+(Mirror Y stays manual-only — an upside-down dancer reads as a glitch).
 It's applied in `present.wgsl` from `u.fx`, so it needs no scene support and
 combines with everything (a mirrored dancer in canon is five dancers).
 

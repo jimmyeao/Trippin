@@ -25,8 +25,9 @@ struct U {
     flow: f32,        // smooth beat clock for motion (never jumps); use for travel
     master: f32,      // overall brightness (blackout fades to 0)
     fx: f32,          // post effect mode (see present.wgsl / Fx in config.rs)
-    _pad: f32,
+    fx_amt: f32,      // post effect strength 0..1 (uv blend in present.wgsl)
     spectrum: array<vec4<f32>, 8>,
+    wave: array<vec4<f32>, 16>,   // 64 time-domain samples, -1..1 (scope scenes)
 };
 
 @group(0) @binding(0) var<uniform> u: U;
@@ -85,6 +86,17 @@ fn spec(x: f32) -> f32 {
     let a = u.spectrum[i / 4u][i % 4u];
     let j = min(i + 1u, 31u);
     let b = u.spectrum[j / 4u][j % 4u];
+    return mix(a, b, fract(f));
+}
+
+// Time-domain audio sample: -1..1 across 64 samples of the last ~21 ms;
+// x in 0..1 maps left (older) to right (newest). The real waveform.
+fn wave(x: f32) -> f32 {
+    let f = clamp(x, 0.0, 0.999) * 64.0;
+    let i = u32(f);
+    let a = u.wave[i / 4u][i % 4u];
+    let j = min(i + 1u, 63u);
+    let b = u.wave[j / 4u][j % 4u];
     return mix(a, b, fract(f));
 }
 

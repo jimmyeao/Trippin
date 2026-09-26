@@ -55,7 +55,14 @@ fn mask_at(slot: i32, luv: vec2<f32>) -> f32 {
     let fb = wrap_frame(fa + 1.0, s.frames);
     let a = sample_layer(slot, luv, i32(fa));
     let b = sample_layer(slot, luv, i32(fb));
-    return select(0.0, mix(a, b, fract(s.frame)), inside);
+    let m = select(0.0, mix(a, b, fract(s.frame)), inside);
+    // Soft clip: some clips have her limbs leaving the sprite (cropped source
+    // footage). Fade at the borders so they dissolve instead of slicing to a
+    // hard edge — the edge gradient would draw that as a bright line.
+    // The bottom edge stays hard: her feet are planted on the floor.
+    let fade = smoothstep(0.0, 0.035, luv.x) * smoothstep(0.0, 0.035, 1.0 - luv.x)
+             * smoothstep(0.0, 0.02, luv.y);
+    return m * fade;
 }
 
 struct Hit {

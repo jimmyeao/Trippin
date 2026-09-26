@@ -1,5 +1,5 @@
 // Post-process the scene's HDR frame onto the window: FX transform (mirror /
-// kaleido / invert, per u.fx), kick-driven chromatic aberration, tone mapping,
+// kaleido, per u.fx/u.fx_amt), kick-driven chromatic aberration, tone mapping,
 // vignette, cut flash and a little film grain.
 
 fn aces(x: vec3<f32>) -> vec3<f32> {
@@ -34,7 +34,7 @@ fn fx_uv(uv: vec2<f32>, m: i32) -> vec2<f32> {
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let fxm = i32(u.fx + 0.5);
-    let uv = fx_uv(in.uv, fxm);
+    let uv = mix(in.uv, fx_uv(in.uv, fxm), clamp(u.fx_amt, 0.0, 1.0));
     let dir = uv - 0.5;
     let ca = 0.004 + 0.012 * u.kick * u.intensity;
     var col = vec3<f32>(

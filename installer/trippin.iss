@@ -15,6 +15,7 @@ AppComments=Live music-reactive visuals and shadow dancers for DJ sets
 DefaultDirName={autopf}\Trippin
 DefaultGroupName=Trippin
 UninstallDisplayIcon={app}\trippin.exe
+SetupIconFile=..\logo.ico
 OutputDir=..\dist
 OutputBaseFilename=Trippin-Setup-{#AppVersion}
 Compression=lzma2/max

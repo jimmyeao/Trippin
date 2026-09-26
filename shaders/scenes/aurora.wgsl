@@ -1,39 +1,43 @@
-// Spectrum-driven aurora: the curtains ARE the analyser — each ribbon layer's
-// fold depth and height follow its band of the spectrum, striation brightness
-// rides the same band, and the kick swells the whole display. Mountains and
-// lake reflection remain, but nothing is static anymore.
+// Spectrum aurora: the curtains' lower edges ARE the analyser — looking
+// across the sky, each ribbon layer's edge traces a slice of the spectrum,
+// so loud bands literally raise the lights. Vertical striations stream
+// upward on the beat clock, onsets shimmer them, kicks swell the sky.
 
 fn curtain(pt: vec2<f32>, t: f32) -> f32 {
     // Thin ribbons winding across the ground plane; every layer above samples
     // the same ribbon, which draws it as a tall curtain of vertical rays.
     var v = 0.0;
-    for (var k = 0; k < 2; k++) {
+    for (var k = 0; k < 3; k++) {
         let fk = f32(k);
-        // This layer listens to a different slice of the spectrum: the ground
-        // coordinate picks a bin, and that band sets fold depth and lift.
-        let s = spec(clamp(pt.x * 0.035 + 0.5, 0.0, 1.0) * (0.55 + fk * 0.45));
-        let wind = (2.2 + s * 7.0) * sin(pt.x * 0.18 + t * 0.05 + fk * 2.0) + 1.4 * fbm(vec2<f32>(pt.x * 0.12, fk * 5.0 + t * 0.02));
-        let d = pt.y - (14.0 + fk * 7.0 + s * 9.0) - wind;
-        let band = exp(-d * d * 0.35);
-        // Fine vertical striations whose shimmer rate and brightness ride the band.
-        let rays = 0.35 + 0.65 * noise(vec2<f32>(pt.x * 2.5 + t * (0.3 + s * 0.9), fk * 3.0)) * (0.4 + s * 1.5);
-        v += band * rays * (0.7 + 0.3 * fk);
+        // Each layer's ground-x spans a different slice of the spectrum, and
+        // the band level IS the curtain's lower edge — the sky draws the music.
+        let xp = clamp(pt.x * (0.030 + fk * 0.012) + 0.5, 0.0, 1.0);
+        let s = spec(xp);
+        // Wind still bends the ribbon, now on the beat clock.
+        let wind = (1.2 + s * 2.5) * sin(pt.x * 0.15 + u.flow * 0.35 + fk * 2.3)
+                 + 1.2 * fbm(vec2<f32>(pt.x * 0.10, fk * 5.0 + u.flow * 0.04));
+        let edge = 7.0 + fk * 5.5 + s * 26.0 + wind;
+        let d = pt.y - edge;
+        let band = exp(-d * d * 0.30);
+        // Vertical striations streaming upward, faster and brighter when loud.
+        let rays = noise(vec2<f32>(pt.x * 2.8 + fk * 7.0, pt.y * 0.22 - u.flow * (0.7 + s * 1.8)));
+        v += band * (0.2 + 0.8 * rays) * (0.30 + s * 1.7);
     }
-    return v * (0.8 + u.onset * 0.5);
+    return v * (0.6 + u.onset * 0.8 + u.kick * 0.5);
 }
 
 fn aurora(ro: vec3<f32>, rd: vec3<f32>, t: f32) -> vec3<f32> {
     var col = vec3<f32>(0.0);
     for (var i = 0; i < 36; i++) {
         let fi = f32(i);
-        let h = 0.6 + fi * 0.09;                     // layer height
+        let h = 0.6 + fi * 0.11;                     // layer height
         let dist = (h - ro.y) / rd.y;
         let pt = ro.xz + rd.xz * dist;
         let v = curtain(pt, t);
         // Green at the base of the curtain, magenta toward the top; loud highs
         // push more magenta into the upper sky.
-        let tint = mix(vec3<f32>(0.1, 1.0, 0.45), vec3<f32>(0.75, 0.2, 0.9), smoothstep(8.0, 30.0, fi) * (0.5 + u.high * 0.7));
-        col += tint * v * exp(-fi * 0.07) * 0.09;
+        let tint = mix(vec3<f32>(0.1, 1.0, 0.45), vec3<f32>(0.75, 0.2, 0.9), smoothstep(6.0, 30.0, fi) * (0.4 + u.high * 0.8));
+        col += tint * v * exp(-fi * 0.06) * 0.11;
     }
     return col * smoothstep(0.0, 0.25, rd.y);
 }
@@ -55,7 +59,7 @@ fn mountains(x: f32) -> f32 {
 fn sky(rd: vec3<f32>, t: f32) -> vec3<f32> {
     var col = mix(vec3<f32>(0.02, 0.04, 0.08), vec3<f32>(0.0, 0.005, 0.02), clamp(rd.y * 1.5, 0.0, 1.0));
     col += stars(rd);
-    let a = aurora(vec3<f32>(0.0, 0.0, t * 0.05), rd, t) * (0.55 + 0.7 * u.intensity + 0.6 * u.kick);
+    let a = aurora(vec3<f32>(0.0, 0.0, t * 0.05), rd, t) * (0.5 + 0.8 * u.intensity + 0.7 * u.kick);
     return col + a;
 }
 

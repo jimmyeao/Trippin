@@ -35,6 +35,8 @@ pub struct Features {
     pub onset: f32,
     pub kick: f32,
     pub spectrum: [f32; SPECTRUM_BINS],
+    /// Time-domain trace: 64 samples over the last ~21 ms, for scope scenes.
+    pub waveform: [f32; 64],
     pub bpm: f32,
     /// Beat phase 0..1 at `phase_at`, and the beat count at that moment.
     pub beat_phase: f32,
@@ -58,6 +60,7 @@ impl Default for Features {
             onset: 0.0,
             kick: 0.0,
             spectrum: [0.0; SPECTRUM_BINS],
+            waveform: [0.0; 64],
             bpm: 120.0,
             beat_phase: 0.0,
             beat_count: 0,
@@ -377,6 +380,16 @@ impl Analyzer {
         let g = self.spec_gain.apply(peak) / peak.max(1e-9);
         for (dst, src) in self.f.spectrum.iter_mut().zip(bins) {
             smooth(dst, (src * g).min(1.0), 0.6, 0.12);
+        }
+
+        // Time-domain trace: 64 samples decimated from the newest 1024
+        // (~21 ms at 48 kHz), lightly auto-levelled so quiet tracks still
+        // show a wiggle.
+        let n = self.buf.len();
+        let wgain = (0.5 / (rms * 3.0 + 0.02)).clamp(0.6, 5.0);
+        for (i, w) in self.f.waveform.iter_mut().enumerate() {
+            let s = self.buf[n - 1024 + i * 16 + 8];
+            *w = (s * wgain).clamp(-1.0, 1.0);
         }
 
         self.track_beats(silent);

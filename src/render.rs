@@ -10,8 +10,9 @@
 //! `dancer.wgsl`.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::time::SystemTime;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{anyhow, Context, Result};
 use winit::window::Window;
@@ -55,8 +56,12 @@ pub struct Uniforms {
     pub master: f32,
     /// Post effect mode (`Fx::index`), consumed by `present.wgsl`.
     pub fx: f32,
-    pub _pad: f32,
+    /// Post effect strength 0..1 (uv blend in `present.wgsl`).
+    pub fx_amt: f32,
     pub spectrum: [f32; SPECTRUM_BINS],
+    /// Time-domain trace: 64 samples (16×vec4), consumed by scope scenes.
+    /// (`[f32; 64]` isn't `Pod`, so it's packed as vec4s to match WGSL.)
+    pub waveform: [[f32; 4]; 16],
 }
 
 #[derive(Default, Clone, Copy, PartialEq)]
@@ -83,6 +88,19 @@ pub struct Gpu {
     pub adapter: wgpu::Adapter,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
+    /// Bumped by the uncaptured-error callback. A failed `configure` reports
+    /// only through the callback (the call returns `()`), leaving the surface
+    /// unconfigured — and `get_current_texture` *panics* on that. Each surface
+    /// owner compares against the epoch it last saw and reconfigures when it
+    /// advances; a counter (not a flag) so both surfaces observe every error.
+    pub surface_epoch: Arc<AtomicU64>,
+    /// Serializes queue submission and present with surface `configure`.
+    /// `configure` waits for the device to go idle, then requires the queue to
+    /// be empty at that instant — if another thread keeps submitting
+    /// (the render loop submits every vsync), the wait can never satisfy that
+    /// and fails with `GpuWaitTimeout` forever. Holding this gate around
+    /// submit/present/configure makes the wait reliable.
+    pub submit_gate: Arc<Mutex<()>>,
 }
 
 pub struct Renderer {
@@ -115,6 +133,19 @@ pub struct Renderer {
     /// Mask texture array per dancer slot (main + canon companions).
     dancer_masks: [Option<(wgpu::Texture, wgpu::TextureView)>; SLOTS],
     dancer_bg: Option<wgpu::BindGroup>,
+    /// A size seen but not yet applied — settled before the surface is
+    /// reconfigured, so resize bursts can't churn the swapchain.
+    pending_size: Option<(u32, u32, Instant)>,
+    /// Throttles configure retries after a failure.
+    last_configure: Instant,
+    /// False after an acquire failure — retry configure before acquiring again.
+    surface_ok: bool,
+    /// Shared with `Gpu` / the error callback — see `Gpu::surface_epoch`.
+    surface_epoch: Arc<AtomicU64>,
+    /// The error epoch this surface has already reconfigured for.
+    seen_epoch: u64,
+    /// Shared submit/configure gate — see `Gpu::submit_gate`.
+    submit_gate: Arc<Mutex<()>>,
 }
 
 pub fn find_shader_dir() -> Result<PathBuf> {
@@ -176,13 +207,28 @@ impl Renderer {
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor { label: Some("trippin"), ..Default::default() })
             .await?;
+        // Surface real errors — wgpu otherwise fails silently and later calls
+        // panic on invalid resources, hiding the original cause. A failed
+        // configure also marks surfaces dirty so they get reconfigured before
+        // the next acquire (which would panic on an unconfigured surface).
+        let surface_epoch = Arc::new(AtomicU64::new(0));
+        let epoch = surface_epoch.clone();
+        device.on_uncaptured_error(Arc::new(move |e| {
+            eprintln!("wgpu error: {e}");
+            epoch.fetch_add(1, Ordering::Relaxed);
+        }));
+        device.set_device_lost_callback(|reason, msg| eprintln!("GPU device lost ({reason:?}): {msg}"));
+        let submit_gate = Arc::new(Mutex::new(()));
 
         let size = window.inner_size();
         let mut config = surface
             .get_default_config(&adapter, size.width.max(1), size.height.max(1))
             .context("surface not supported by adapter")?;
         config.present_mode = wgpu::PresentMode::AutoVsync;
-        surface.configure(&device, &config);
+        {
+            let _g = submit_gate.lock().unwrap_or_else(|e| e.into_inner());
+            surface.configure(&device, &config);
+        }
 
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("frame"),
@@ -298,6 +344,12 @@ impl Renderer {
             dancer_buf,
             dancer_masks: Default::default(),
             dancer_bg: None,
+            pending_size: None,
+            last_configure: Instant::now(),
+            surface_ok: true,
+            surface_epoch,
+            seen_epoch: 0,
+            submit_gate,
         };
         r.reload_shaders(true);
         if r.present.pipeline.is_none() {
@@ -355,11 +407,51 @@ impl Renderer {
         }
         self.config.width = w;
         self.config.height = h;
-        self.surface.configure(&self.device, &self.config);
+        self.last_configure = Instant::now();
+        {
+            let _g = self.submit_gate.lock().unwrap_or_else(|e| e.into_inner());
+            self.surface.configure(&self.device, &self.config);
+        }
+        self.surface_ok = true;
         let (tw, th) = scaled(w, h, self.scale);
         self.targets = Self::make_targets(&self.device, tw, th);
         self.bind_groups =
             Self::make_bind_groups(&self.device, &self.layout, &self.uniform_buf, &self.sampler, &self.targets);
+    }
+
+    /// The size the surface was last configured with.
+    pub fn surface_size(&self) -> (u32, u32) {
+        (self.config.width, self.config.height)
+    }
+
+    /// A resize event hint — applied once the size settles (see `sync_size`).
+    pub fn note_size(&mut self, w: u32, h: u32) {
+        if w > 0 && h > 0 && (w, h) != self.surface_size() {
+            self.pending_size = Some((w, h, Instant::now()));
+        }
+    }
+
+    /// Reconfigure the surface if the window's real size doesn't match the
+    /// configured size and has been stable for a moment. Fullscreen
+    /// transitions emit a burst of sizes; configuring on every one churns the
+    /// swapchain mid-present, which can take the whole device down. Covers
+    /// resize events lost or reordered during transitions.
+    pub fn sync_size(&mut self) {
+        let size = self.window.inner_size();
+        let wanted = (size.width, size.height);
+        if size.width == 0 || size.height == 0 || wanted == self.surface_size() {
+            self.pending_size = None;
+            return;
+        }
+        match self.pending_size {
+            Some((w, h, since)) if (w, h) == wanted => {
+                if since.elapsed() > std::time::Duration::from_millis(150) {
+                    self.pending_size = None;
+                    self.resize(w, h);
+                }
+            }
+            _ => self.pending_size = Some((wanted.0, wanted.1, std::time::Instant::now())),
+        }
     }
 
     /// Size of the scene render targets (what shaders see as the resolution).
@@ -369,6 +461,8 @@ impl Renderer {
             adapter: self.adapter.clone(),
             device: self.device.clone(),
             queue: self.queue.clone(),
+            surface_epoch: self.surface_epoch.clone(),
+            submit_gate: self.submit_gate.clone(),
         }
     }
 
@@ -549,13 +643,38 @@ impl Renderer {
             self.queue.write_buffer(&self.dancer_buf, 0, bytemuck::bytes_of(d));
         }
 
-        let frame = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(f) | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
-            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
-                self.surface.configure(&self.device, &self.config);
+        // A failed configure is reported via the device's error callback —
+        // asynchronously, and only drained by poll/submit. Polling here forces
+        // the callback to run before we touch the surface: if configure failed,
+        // the epoch has advanced and we reconfigure instead of calling
+        // get_current_texture on an unconfigured surface (which panics).
+        // catch_unwind below remains only as a last-resort guard.
+        let _ = self.device.poll(wgpu::PollType::Poll);
+        let epoch = self.surface_epoch.load(Ordering::Relaxed);
+        if epoch != self.seen_epoch {
+            self.seen_epoch = epoch;
+            self.surface_ok = false;
+        }
+        if !self.surface_ok {
+            self.sync_size();
+            if self.pending_size.is_none() && self.last_configure.elapsed() > Duration::from_millis(250) {
+                self.last_configure = Instant::now();
+                {
+                    let _g = self.submit_gate.lock().unwrap_or_else(|e| e.into_inner());
+                    self.surface.configure(&self.device, &self.config);
+                }
+                self.surface_ok = true;
+            }
+            return Ok(());
+        }
+        let acquired = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.surface.get_current_texture()));
+        let frame = match acquired {
+            Ok(wgpu::CurrentSurfaceTexture::Success(f)) | Ok(wgpu::CurrentSurfaceTexture::Suboptimal(f)) => f,
+            Ok(wgpu::CurrentSurfaceTexture::Timeout) => return Ok(()),
+            _ => {
+                self.surface_ok = false;
                 return Ok(());
             }
-            _ => return Ok(()),
         };
         let prev = self.current;
         let next = 1 - prev;
@@ -603,9 +722,14 @@ impl Renderer {
             pass.set_bind_group(0, &self.bind_groups[self.current], &[]);
             pass.draw(0..3, 0..1);
         }
-        self.queue.submit([enc.finish()]);
-        self.window.pre_present_notify();
-        self.queue.present(frame);
+        {
+            // The gate keeps the queue still while a surface configure on the
+            // other thread waits for it to go idle — see Gpu::submit_gate.
+            let _g = self.submit_gate.lock().unwrap_or_else(|e| e.into_inner());
+            self.queue.submit([enc.finish()]);
+            self.window.pre_present_notify();
+            self.queue.present(frame);
+        }
         Ok(())
     }
 }

@@ -157,16 +157,23 @@ fn month_day(secs: i64) -> (u32, u32) {
     (month, day)
 }
 
-/// Whole-frame post effect: mirrors, kaleidoscope, colour invert. Applied in
+/// Whole-frame post effect: mirrors and kaleidoscope. Applied in
 /// `present.wgsl` from `u.fx`, so it transforms the scene and dancer alike.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// `#[serde(other)]` keeps a stale value (e.g. a removed mode) from
+/// invalidating the whole settings file.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Fx {
-    Off,
     MirrorX,
     MirrorY,
     Quad,
     Kaleido6,
     Kaleido8,
+    /// Last so `#[serde(other)]` lands here: a removed mode in a stale
+    /// trippin.json (e.g. "Invert") falls back to Off instead of being
+    /// rejected with the whole settings file.
+    #[serde(other)]
+    #[default]
+    Off,
 }
 
 impl Fx {
@@ -207,11 +214,15 @@ impl Fx {
         Fx::ALL[(i + 1) % Fx::ALL.len()]
     }
 
+    /// Auto pool: MirrorY is excluded — an upside-down dancer mid-set reads
+    /// as a glitch rather than an effect (it stays selectable by hand).
+    const AUTO: [Fx; 5] = [Fx::Off, Fx::MirrorX, Fx::Quad, Fx::Kaleido6, Fx::Kaleido8];
+
     /// A random pick for auto mode; never repeats the current effect.
     pub fn random(r: f32, cur: Fx) -> Fx {
-        let i = (r * Fx::ALL.len() as f32) as usize % Fx::ALL.len();
-        let f = Fx::ALL[i];
-        if f == cur { Fx::ALL[(i + 1) % Fx::ALL.len()] } else { f }
+        let i = (r * Fx::AUTO.len() as f32) as usize % Fx::AUTO.len();
+        let f = Fx::AUTO[i];
+        if f == cur { Fx::AUTO[(i + 1) % Fx::AUTO.len()] } else { f }
     }
 }
 
@@ -245,6 +256,8 @@ pub struct Settings {
     pub fx: Fx,
     /// Pick a fresh post effect on every scene cut.
     pub fx_auto: bool,
+    /// Post effect strength 0..1 — blends the transform in `present.wgsl`.
+    pub fx_amt: f32,
     pub latency_ms: f32,
     pub show_panel: bool,
 }
@@ -266,6 +279,7 @@ impl Default for Settings {
             dancer_size: 0.85,
             fx: Fx::Off,
             fx_auto: false,
+            fx_amt: 1.0,
             latency_ms: 30.0,
             show_panel: true,
         }
