@@ -102,9 +102,12 @@ pub struct AudioEngine {
 
 pub fn list_devices() -> Result<()> {
     let host = cpal::default_host();
-    println!("Output devices (captured via loopback, the default):");
-    for d in host.output_devices()? {
-        println!("  {}", device_name(&d));
+    #[cfg(target_os = "windows")]
+    {
+        println!("Output devices (captured via loopback, the default):");
+        for d in host.output_devices()? {
+            println!("  {}", device_name(&d));
+        }
     }
     println!("Input devices (use --device \"<part of name>\"):");
     for d in host.input_devices()? {
@@ -120,20 +123,32 @@ fn device_name(d: &cpal::Device) -> String {
 }
 
 impl AudioEngine {
-    /// `device`: None = loopback of the default output device; otherwise the
-    /// first input (or output, as loopback) device whose name contains it.
+    /// `device`: None = loopback of the default output device (Windows); on
+    /// platforms without output loopback, the default input (BlackHole, an
+    /// audio interface, or the mic). Otherwise the first device whose name
+    /// contains the string — inputs plus, on Windows, outputs via loopback.
     pub fn start(device: Option<&str>) -> Result<Self> {
         let host = cpal::default_host();
         let dev = match device {
+            #[cfg(target_os = "windows")]
             None => host
                 .default_output_device()
                 .ok_or_else(|| anyhow!("no default output device"))?,
+            #[cfg(not(target_os = "windows"))]
+            None => host
+                .default_input_device()
+                .ok_or_else(|| anyhow!("no default input device"))?,
             Some(needle) => {
                 let needle = needle.to_lowercase();
-                host.input_devices()?
-                    .chain(host.output_devices()?)
-                    .find(|d| device_name(d).to_lowercase().contains(&needle))
-                    .ok_or_else(|| anyhow!("no audio device matching {needle:?}; try --list-devices"))?
+                let mut inputs = host.input_devices()?;
+                let found = inputs.find(|d| device_name(d).to_lowercase().contains(&needle));
+                #[cfg(target_os = "windows")]
+                let found = found.or_else(|| {
+                    host.output_devices()
+                        .ok()
+                        .and_then(|mut outs| outs.find(|d| device_name(d).to_lowercase().contains(&needle)))
+                });
+                found.ok_or_else(|| anyhow!("no audio device matching {needle:?}; try --list-devices"))?
             }
         };
         let name = device_name(&dev);

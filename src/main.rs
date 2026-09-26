@@ -17,7 +17,7 @@
 
 // Installer builds (`--features gui`) are a windowed app with no console;
 // plain `cargo run` keeps the console for shader errors and logs.
-#![cfg_attr(feature = "gui", windows_subsystem = "windows")]
+#![cfg_attr(all(feature = "gui", windows), windows_subsystem = "windows")]
 
 mod audio;
 mod config;

@@ -153,6 +153,10 @@ pub fn find_shader_dir() -> Result<PathBuf> {
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             candidates.push(dir.join("shaders"));
+            // Inside a .app bundle: Contents/MacOS/trippin → Contents/Resources.
+            if let Some(contents) = dir.parent() {
+                candidates.push(contents.join("Resources/shaders"));
+            }
         }
     }
     candidates.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("shaders"));

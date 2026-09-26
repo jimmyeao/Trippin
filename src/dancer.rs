@@ -80,6 +80,10 @@ pub fn find_dancer_dir() -> Option<PathBuf> {
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             candidates.push(dir.join("dancers"));
+            // Inside a .app bundle: Contents/MacOS/trippin → Contents/Resources.
+            if let Some(contents) = dir.parent() {
+                candidates.push(contents.join("Resources/dancers"));
+            }
         }
     }
     candidates.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("dancers"));

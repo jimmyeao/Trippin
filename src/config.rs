@@ -287,16 +287,26 @@ impl Default for Settings {
 }
 
 /// `trippin.json` in the working directory if one exists (handy when running
-/// from the repo), otherwise `%APPDATA%\Trippin	rippin.json` so an installed
-/// copy in Program Files can still save.
+/// from the repo), otherwise the platform config dir (`%APPDATA%\Trippin`,
+/// `~/Library/Application Support/Trippin`, `~/.config/trippin`) so an
+/// installed copy can still save.
 fn path() -> PathBuf {
     let local = PathBuf::from("trippin.json");
     if local.exists() {
         return local;
     }
-    match std::env::var_os("APPDATA") {
-        Some(appdata) => {
-            let dir = PathBuf::from(appdata).join("Trippin");
+    #[cfg(target_os = "windows")]
+    let dir = std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("Trippin"));
+    #[cfg(target_os = "macos")]
+    let dir = std::env::var_os("HOME")
+        .map(|h| PathBuf::from(h).join("Library/Application Support/Trippin"));
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let dir = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
+        .map(|d| d.join("trippin"));
+    match dir {
+        Some(dir) => {
             let _ = std::fs::create_dir_all(&dir);
             dir.join("trippin.json")
         }

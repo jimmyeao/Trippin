@@ -26,6 +26,25 @@ cargo build --release --features gui
 "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=0.1.0 installer	rippin.iss
 ```
 
+### macOS
+
+CI also builds `Trippin.app` as a universal binary (Intel + Apple Silicon) —
+grab `Trippin-macOS-<version>.zip` from releases or workflow artifacts, unzip,
+and drag to Applications. The app isn't signed/notarized, so first launch is
+**right-click → Open** (or `xattr -dr com.apple.quarantine Trippin.app`).
+
+Settings live in `~/Library/Application Support/Trippin/trippin.json`. Shaders
+and dancers resolve from the bundle's `Contents/Resources/`; running from a
+checkout uses the repo directories as before.
+
+**Audio is the one difference:** macOS has no output loopback, so the default
+capture is the default **input** device (mic permission prompt on first run —
+granted via `NSMicrophoneUsageDescription` in the bundle). For system audio
+install BlackHole and pick it with `--device "BlackHole"`, or feed a DJ
+booth-out into an interface. `--list-devices` shows what's available.
+Note F1 is a brightness key on Mac keyboards — rebind the panel key in the
+Keys tab if needed.
+
 ## Run
 
 ```
