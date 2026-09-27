@@ -13,9 +13,10 @@ struct Slot {
 struct D {
     slots: array<Slot, 3>,
     opacity: f32,
-    style: f32,    // 0 shadow, 1 neon, 2 fill, 3 strobe
+    style: f32,    // 0 shadow, 1 neon, 2 strobe
     count: f32,    // 1, or 3 for the canon
     scale: f32,    // main dancer height as a fraction of screen height
+    trail: f32,    // 1 = ghost echoes of earlier frames trail her movement
 };
 
 @group(1) @binding(0) var masks0: texture_2d_array<f32>;
@@ -47,15 +48,16 @@ fn wrap_frame(f: f32, n: f32) -> f32 {
     return ((f % n) + n) % n;
 }
 
-// Mask coverage at mask-space uv, blending neighbouring frames.
-fn mask_at(slot: i32, luv: vec2<f32>) -> f32 {
+// Mask coverage at mask-space uv at a (possibly fractional, wrapping) frame,
+// blending neighbouring frames.
+fn mask_at_frame(slot: i32, luv: vec2<f32>, frame: f32) -> f32 {
     let s = d.slots[slot];
     let inside = all(luv >= vec2<f32>(0.0)) && all(luv <= vec2<f32>(1.0));
-    let fa = floor(wrap_frame(s.frame, s.frames));
+    let fa = floor(wrap_frame(frame, s.frames));
     let fb = wrap_frame(fa + 1.0, s.frames);
     let a = sample_layer(slot, luv, i32(fa));
     let b = sample_layer(slot, luv, i32(fb));
-    let m = select(0.0, mix(a, b, fract(s.frame)), inside);
+    let m = select(0.0, mix(a, b, fract(frame)), inside);
     // Soft clip: some clips have her limbs leaving the sprite (cropped source
     // footage). Fade at the borders so they dissolve instead of slicing to a
     // hard edge — the edge gradient would draw that as a bright line.
@@ -65,13 +67,17 @@ fn mask_at(slot: i32, luv: vec2<f32>) -> f32 {
     return m * fade;
 }
 
+fn mask_at(slot: i32, luv: vec2<f32>) -> f32 {
+    return mask_at_frame(slot, luv, d.slots[slot].frame);
+}
+
 struct Hit {
     m: f32,
     edge: f32,
     luv: vec2<f32>,
 };
 
-fn dancer_at(p: vec2<f32>, slot: i32, x: f32, size: f32, flip: bool) -> Hit {
+fn dancer_luv(p: vec2<f32>, slot: i32, x: f32, size: f32, flip: bool) -> vec2<f32> {
     let h = 2.0 * d.scale * size;
     let w = h * d.slots[slot].aspect;
     let bottom = 0.98;
@@ -79,6 +85,11 @@ fn dancer_at(p: vec2<f32>, slot: i32, x: f32, size: f32, flip: bool) -> Hit {
     if flip {
         luv.x = 1.0 - luv.x;
     }
+    return luv;
+}
+
+fn dancer_at(p: vec2<f32>, slot: i32, x: f32, size: f32, flip: bool) -> Hit {
+    let luv = dancer_luv(p, slot, x, size, flip);
     let texel = 2.0 / mask_size(slot);
     let gx = mask_at(slot, luv + vec2<f32>(texel.x, 0.0)) - mask_at(slot, luv - vec2<f32>(texel.x, 0.0));
     let gy = mask_at(slot, luv + vec2<f32>(0.0, texel.y)) - mask_at(slot, luv - vec2<f32>(0.0, texel.y));
@@ -101,12 +112,6 @@ fn shade(hit: Hit, tint: f32) -> vec4<f32> {
         return vec4<f32>(col, max(m * 0.85, e * 0.3));
     }
     if style == 2 {
-        // Posterised colour fill, bands scrolling with the beat.
-        let band = floor(fract(hit.luv.y * 3.0 - u.beat * 0.5) * 4.0) / 4.0;
-        let col = palette(band * 0.5 + 0.3 + tint) * (0.8 + 1.2 * beat_pulse(6.0));
-        return vec4<f32>(col * m, m);
-    }
-    if style == 3 {
         // Strobe: a white flash of the body on each beat, outline in between.
         let flash = beat_pulse(10.0);
         let col = vec3<f32>(2.0) * flash * m + e * palette(0.5 + tint);
@@ -119,6 +124,26 @@ fn shade(hit: Hit, tint: f32) -> vec4<f32> {
 
 fn over(front: vec4<f32>, back: vec4<f32>) -> vec4<f32> {
     return front + back * (1.0 - front.a);
+}
+
+// A dancer with her motion echoes layered behind her: earlier frames of the
+// same routine sampled at a lag, hue-shifted and dimmer — cheap "video echo"
+// trails that work under every look.
+fn shaded_with_trails(
+    p: vec2<f32>, slot: i32, x: f32, size: f32, flip: bool, tint: f32,
+) -> vec4<f32> {
+    var acc = shade(dancer_at(p, slot, x, size, flip), tint);
+    if d.trail > 0.5 {
+        let luv = dancer_luv(p, slot, x, size, flip);
+        let frame = d.slots[slot].frame;
+        for (var g = 1; g <= 3; g++) {
+            let gm = mask_at_frame(slot, luv, frame - f32(g) * 5.0);
+            let a = gm * d.opacity * 0.5 / f32(g);
+            let col = palette(tint + f32(g) * 0.08 + u.beat * 0.04) * a * (1.0 + u.kick);
+            acc = over(acc, vec4<f32>(col, a));
+        }
+    }
+    return acc;
 }
 
 @fragment
@@ -137,9 +162,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
             // Clear of the main dancer, but kept inside the screen edges.
             let x = min((w0 * 0.5 + wi * 0.5) * 1.05, aspect() - wi * 0.5);
             let sx = select(x, -x, i == 1);
-            out = over(shade(dancer_at(p, i, sx, side, i == 1), f32(i) * 0.33), out);
+            out = over(shaded_with_trails(p, i, sx, side, i == 1, f32(i) * 0.33), out);
         }
     }
-    out = over(shade(dancer_at(p, 0, 0.0, 1.0, false), 0.0), out);
+    out = over(shaded_with_trails(p, 0, 0.0, 1.0, false, 0.0), out);
     return out;
 }

@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use serde::Deserialize;
 
 use crate::config::Tristate;
@@ -13,7 +13,7 @@ use crate::config::Tristate;
 /// Largest frame count we upload (wgpu's default texture-array limit is 256).
 pub const MAX_FRAMES: usize = 256;
 
-pub const STYLES: [&str; 4] = ["shadow", "neon", "fill", "strobe"];
+pub const STYLES: [&str; 3] = ["shadow", "neon", "strobe"];
 
 #[derive(Deserialize)]
 struct ClipMeta {
@@ -73,6 +73,9 @@ pub struct DancerUniforms {
     pub count: f32,
     /// Main dancer height as a fraction of the screen height.
     pub scale: f32,
+    /// 1.0 = ghost echoes of earlier frames trail her movement.
+    pub trail: f32,
+    pub _pad2: [f32; 3],
 }
 
 pub fn find_dancer_dir() -> Option<PathBuf> {
@@ -98,9 +101,15 @@ pub fn list_clips(dir: &Path) -> Vec<ClipEntry> {
     paths
         .into_iter()
         .filter_map(|path| {
-            let meta: ClipMeta = serde_json::from_str(&std::fs::read_to_string(path.join("clip.json")).ok()?).ok()?;
+            let meta: ClipMeta =
+                serde_json::from_str(&std::fs::read_to_string(path.join("clip.json")).ok()?)
+                    .ok()?;
             let name = path.file_name()?.to_string_lossy().into_owned();
-            Some(ClipEntry { name, path, energy: meta.energy })
+            Some(ClipEntry {
+                name,
+                path,
+                energy: meta.energy,
+            })
         })
         .collect()
 }
@@ -109,7 +118,10 @@ pub fn load_clip(dir: &Path) -> Result<Clip> {
     let meta: ClipMeta = serde_json::from_str(&std::fs::read_to_string(dir.join("clip.json"))?)
         .with_context(|| format!("parsing {}", dir.join("clip.json").display()))?;
     if meta.frames == 0 || meta.fps <= 0.0 || meta.beats <= 0.0 {
-        return Err(anyhow!("{}: clip.json needs frames, fps and beats > 0", dir.display()));
+        return Err(anyhow!(
+            "{}: clip.json needs frames, fps and beats > 0",
+            dir.display()
+        ));
     }
     // Evenly subsample overlong clips rather than failing.
     let keep = meta.frames.min(MAX_FRAMES);
@@ -118,7 +130,9 @@ pub fn load_clip(dir: &Path) -> Result<Clip> {
     for k in 0..keep {
         let i = k * meta.frames / keep;
         let path = dir.join("frames").join(format!("{i:04}.png"));
-        let img = image::open(&path).with_context(|| format!("loading {}", path.display()))?.into_luma8();
+        let img = image::open(&path)
+            .with_context(|| format!("loading {}", path.display()))?
+            .into_luma8();
         if k == 0 {
             (width, height) = img.dimensions();
         } else if img.dimensions() != (width, height) {
@@ -172,14 +186,21 @@ impl Slot {
     /// Frame uniforms for `pos`, re-picking half/double time only when the
     /// tempo really moves so the dancer doesn't jump on BPM jitter.
     fn uniforms(&mut self, pos: f64, downbeat: u64, bpm: f32) -> SlotUniforms {
-        let Some(info) = self.loaded.as_ref() else { return SlotUniforms::default() };
+        let Some(info) = self.loaded.as_ref() else {
+            return SlotUniforms::default();
+        };
         if (bpm - self.loop_bpm).abs() / bpm.max(1.0) > 0.05 {
             self.loop_bpm = bpm;
             self.loop_beats = loop_beats(info.duration, info.beats, bpm);
         }
         // Frame 0 of the clip sits on the downbeat.
         let t = ((pos - downbeat as f64) / self.loop_beats.max(1.0) as f64).rem_euclid(1.0);
-        SlotUniforms { frame: (t * info.frames as f64) as f32, frames: info.frames as f32, aspect: info.aspect, _pad: 0.0 }
+        SlotUniforms {
+            frame: (t * info.frames as f64) as f32,
+            frames: info.frames as f32,
+            aspect: info.aspect,
+            _pad: 0.0,
+        }
     }
 }
 
@@ -199,7 +220,9 @@ pub struct DancerLayer {
 
 impl DancerLayer {
     pub fn new() -> Self {
-        let clips = find_dancer_dir().map(|d| list_clips(&d)).unwrap_or_default();
+        let clips = find_dancer_dir()
+            .map(|d| list_clips(&d))
+            .unwrap_or_default();
         Self {
             enabled: true,
             showing: true,
@@ -230,7 +253,9 @@ impl DancerLayer {
 
     /// Start loading routine `index` into `slot` on a background thread.
     fn request_slot(&mut self, slot: usize, index: usize) {
-        let Some(path) = self.clips.get(index).map(|c| c.path.clone()) else { return };
+        let Some(path) = self.clips.get(index).map(|c| c.path.clone()) else {
+            return;
+        };
         self.slots[slot].current = Some(index);
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
@@ -259,10 +284,13 @@ impl DancerLayer {
     /// and from the other companion (keeping any that already do).
     fn refresh_companions(&mut self, disabled: &[String]) {
         for slot in 1..SLOTS {
-            let taken: Vec<usize> =
-                (0..SLOTS).filter(|&s| s != slot).filter_map(|s| self.slots[s].current).collect();
+            let taken: Vec<usize> = (0..SLOTS)
+                .filter(|&s| s != slot)
+                .filter_map(|s| self.slots[s].current)
+                .collect();
             let mine = self.slots[slot].current;
-            if mine.is_some_and(|m| !taken.contains(&m) && !disabled.contains(&self.clips[m].name)) {
+            if mine.is_some_and(|m| !taken.contains(&m) && !disabled.contains(&self.clips[m].name))
+            {
                 continue;
             }
             let free: Vec<usize> = (0..self.clips.len())
@@ -270,7 +298,9 @@ impl DancerLayer {
                 .collect();
             // Too few ticked routines to go round: at least differ from the main dancer.
             let pool: Vec<usize> = if free.is_empty() {
-                (0..self.clips.len()).filter(|i| Some(*i) != self.slots[0].current).collect()
+                (0..self.clips.len())
+                    .filter(|i| Some(*i) != self.slots[0].current)
+                    .collect()
             } else {
                 free
             };
@@ -314,15 +344,13 @@ impl DancerLayer {
         // Mostly the classic black shadow; strobe only when the track drives.
         let r = rand();
         self.style = if let Some(s) = style {
-            s
+            s.min(STYLES.len() - 1)
         } else if r < 0.45 {
             0
-        } else if r < 0.7 {
-            2
         } else if r < 0.9 || intensity < 0.6 {
             1
         } else {
-            3
+            2
         };
         self.canon = match canon {
             Tristate::Auto => intensity > 0.6 && rand() < 0.6,
@@ -349,7 +377,9 @@ impl DancerLayer {
     pub fn poll_loaded(&mut self) -> Vec<(usize, Clip)> {
         let mut done = Vec::new();
         for (i, slot) in self.slots.iter_mut().enumerate() {
-            let Some(result) = slot.loader.as_ref().and_then(|rx| rx.try_recv().ok()) else { continue };
+            let Some(result) = slot.loader.as_ref().and_then(|rx| rx.try_recv().ok()) else {
+                continue;
+            };
             slot.loader = None;
             match result {
                 Ok(clip) => {
@@ -378,9 +408,14 @@ impl DancerLayer {
         bpm: f32,
         dt: f32,
         size: f32,
+        trails: bool,
         disabled: &[String],
     ) -> Option<DancerUniforms> {
-        let target = if self.enabled && self.showing { 1.0 } else { 0.0 };
+        let target = if self.enabled && self.showing {
+            1.0
+        } else {
+            0.0
+        };
         self.opacity += (target - self.opacity) * (dt * 4.0).min(1.0);
         self.slots[0].loaded.as_ref()?;
         if self.opacity < 0.01 {
@@ -407,6 +442,8 @@ impl DancerLayer {
             style: self.style as f32,
             count: if self.canon { 3.0 } else { 1.0 },
             scale: size,
+            trail: if trails { 1.0 } else { 0.0 },
+            _pad2: [0.0; 3],
         })
     }
 }

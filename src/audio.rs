@@ -1,4 +1,4 @@
-﻿//! Audio capture (WASAPI loopback or a chosen input device) and live analysis:
+//! Audio capture (WASAPI loopback or a chosen input device) and live analysis:
 //! band energies, onsets, tempo and beat phase. The render loop reads a
 //! `Features` snapshot each frame and extrapolates the beat phase from it.
 
@@ -7,11 +7,11 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SampleFormat, SizedSample};
-use rustfft::num_complex::Complex;
 use rustfft::FftPlanner;
+use rustfft::num_complex::Complex;
 
 pub const SPECTRUM_BINS: usize = 32;
 
@@ -76,7 +76,11 @@ impl Features {
     /// Beat position (whole beats + fraction) extrapolated to `now`.
     pub fn beat_position(&self, now: Instant) -> f64 {
         let dt = now.saturating_duration_since(self.phase_at).as_secs_f64();
-        self.beat_count as f64 + self.beat_phase as f64 + dt * self.bpm as f64 / 60.0
+        // Extrapolate only to the end of the current beat — if the analyser
+        // stalls (e.g. a paused show engine feeding nothing), the beat clock
+        // must freeze rather than run away on a stale tempo.
+        let budget = (1.0 - self.beat_phase as f64).max(0.0) * 60.0 / self.bpm.max(1.0) as f64;
+        self.beat_count as f64 + self.beat_phase as f64 + dt.min(budget) * self.bpm as f64 / 60.0
     }
 
     /// Beat index within the bar (0 = downbeat) for a given beat position.
@@ -101,7 +105,11 @@ pub struct EnvLog {
 
 impl EnvLog {
     pub fn new() -> SharedEnv {
-        Arc::new(Mutex::new(Self { env: VecDeque::new(), hops: 0, fps: 0.0 }))
+        Arc::new(Mutex::new(Self {
+            env: VecDeque::new(),
+            hops: 0,
+            fps: 0.0,
+        }))
     }
     fn push(&mut self, v: f32, fps: f32) {
         self.fps = fps;
@@ -176,7 +184,13 @@ impl AudioEngine {
         if device.is_none() && !mic {
             match crate::sysaudio::start(tx.clone()) {
                 Ok(cap) => {
-                    return Self::spawn(rx, crate::sysaudio::SAMPLE_RATE, "system audio".into(), Backend::System(cap), tap);
+                    return Self::spawn(
+                        rx,
+                        crate::sysaudio::SAMPLE_RATE,
+                        "system audio".into(),
+                        Backend::System(cap),
+                        tap,
+                    );
                 }
                 Err(e) => eprintln!("system audio unavailable: {e:#} — using the default input"),
             }
@@ -198,11 +212,13 @@ impl AudioEngine {
                 let found = inputs.find(|d| device_name(d).to_lowercase().contains(&needle));
                 #[cfg(target_os = "windows")]
                 let found = found.or_else(|| {
-                    host.output_devices()
-                        .ok()
-                        .and_then(|mut outs| outs.find(|d| device_name(d).to_lowercase().contains(&needle)))
+                    host.output_devices().ok().and_then(|mut outs| {
+                        outs.find(|d| device_name(d).to_lowercase().contains(&needle))
+                    })
                 });
-                found.ok_or_else(|| anyhow!("no audio device matching {needle:?}; try --list-devices"))?
+                found.ok_or_else(|| {
+                    anyhow!("no audio device matching {needle:?}; try --list-devices")
+                })?
             }
         };
         let name = device_name(&dev);
@@ -228,17 +244,27 @@ impl AudioEngine {
         Self::spawn(rx, sample_rate, name, Backend::Cpal(stream), tap)
     }
 
-    /// Play a decoded song file: the player drives the analyser (at source
-    /// rate) and the speakers together so the visuals react to the track.
-    /// Returns the engine plus the controllable player.
-    pub fn start_song(
-        song: std::sync::Arc<crate::song::Song>,
+    /// Play a timeline's clip regions: the player drives the analyser and
+    /// the speakers together so the visuals react to the show. Played audio
+    /// is resampled to the first region's rate before analysis. Returns the
+    /// engine plus the controllable player.
+    pub fn start_show(
+        regions: Vec<crate::song::Region>,
+        start_s: f64,
         tap: Option<SharedEnv>,
-    ) -> Result<(Self, crate::song::SongPlayer)> {
+    ) -> Result<(Self, crate::song::ShowPlayer)> {
         let (tx, rx) = mpsc::sync_channel::<Vec<f32>>(64);
-        let player = crate::song::SongPlayer::start(song.clone(), tx)?;
-        let name = format!("file: {}", song.name);
-        let eng = Self::spawn(rx, song.sr as f32, name, Backend::Song, tap)?;
+        let analysis_sr = regions.first().map(|r| r.song.sr as f64).unwrap_or(48000.0);
+        let name = format!(
+            "show: {}",
+            regions
+                .iter()
+                .map(|r| r.song.name.as_str())
+                .collect::<Vec<_>>()
+                .join(" + ")
+        );
+        let player = crate::song::ShowPlayer::start(regions, analysis_sr, start_s, tx)?;
+        let eng = Self::spawn(rx, analysis_sr as f32, name, Backend::Song, tap)?;
         Ok((eng, player))
     }
 
@@ -257,7 +283,12 @@ impl AudioEngine {
             .name("analysis".into())
             .spawn(move || Analyzer::new(sample_rate, shared, cmd_rx, tap).run(rx))?;
 
-        Ok(Self { _backend: backend, features, commands: cmd_tx, device_name })
+        Ok(Self {
+            _backend: backend,
+            features,
+            commands: cmd_tx,
+            device_name,
+        })
     }
 }
 
@@ -276,7 +307,9 @@ where
         move |data: &[T], _| {
             let mono: Vec<f32> = data
                 .chunks(channels)
-                .map(|frame| frame.iter().map(|&s| s.to_sample::<f32>()).sum::<f32>() / channels as f32)
+                .map(|frame| {
+                    frame.iter().map(|&s| s.to_sample::<f32>()).sum::<f32>() / channels as f32
+                })
                 .collect();
             // Drop audio rather than block the audio thread if analysis stalls.
             let _ = tx.try_send(mono);
@@ -341,7 +374,12 @@ struct Analyzer {
 }
 
 impl Analyzer {
-    fn new(sr: f32, shared: SharedFeatures, commands: mpsc::Receiver<Command>, tap: Option<SharedEnv>) -> Self {
+    fn new(
+        sr: f32,
+        shared: SharedFeatures,
+        commands: mpsc::Receiver<Command>,
+        tap: Option<SharedEnv>,
+    ) -> Self {
         let fft = FftPlanner::new().plan_fft_forward(FFT_SIZE);
         let window = (0..FFT_SIZE)
             .map(|i| 0.5 - 0.5 * (2.0 * std::f32::consts::PI * i as f32 / FFT_SIZE as f32).cos())
@@ -358,7 +396,11 @@ impl Analyzer {
             since_hop: 0,
             prev_mag: vec![0.0; FFT_SIZE / 2],
             prev_bass: 0.0,
-            gains: [AutoGain::new(1e-3), AutoGain::new(1e-4), AutoGain::new(1e-5)],
+            gains: [
+                AutoGain::new(1e-3),
+                AutoGain::new(1e-4),
+                AutoGain::new(1e-5),
+            ],
             spec_gain: AutoGain::new(1e-4),
             flux_gain: AutoGain::new(1e-4),
             env: VecDeque::new(),
@@ -409,13 +451,20 @@ impl Analyzer {
             .map(|(s, w)| Complex::new(s * w, 0.0))
             .collect();
         self.fft.process(&mut spec);
-        let mag: Vec<f32> = spec[..FFT_SIZE / 2].iter().map(|c| c.norm() / FFT_SIZE as f32).collect();
+        let mag: Vec<f32> = spec[..FFT_SIZE / 2]
+            .iter()
+            .map(|c| c.norm() / FFT_SIZE as f32)
+            .collect();
 
         let band = |lo: f32, hi: f32, a: &Self| -> f32 {
             let (l, h) = (a.bin(lo), a.bin(hi));
             (mag[l..h].iter().map(|m| m * m).sum::<f32>() / (h - l) as f32).sqrt()
         };
-        let raw = [band(20.0, 150.0, self), band(150.0, 2000.0, self), band(2000.0, 16000.0, self)];
+        let raw = [
+            band(20.0, 150.0, self),
+            band(150.0, 2000.0, self),
+            band(2000.0, 16000.0, self),
+        ];
         let rms = (self.buf.iter().map(|s| s * s).sum::<f32>() / FFT_SIZE as f32).sqrt();
         let silent = rms < 1e-4;
 
@@ -458,7 +507,11 @@ impl Analyzer {
         }
 
         // Levels, smoothed with fast attack / slower release.
-        let levels: Vec<f32> = raw.iter().zip(self.gains.iter_mut()).map(|(&x, g)| g.apply(x)).collect();
+        let levels: Vec<f32> = raw
+            .iter()
+            .zip(self.gains.iter_mut())
+            .map(|(&x, g)| g.apply(x))
+            .collect();
         smooth(&mut self.f.bass, levels[0], 0.6, 0.15);
         smooth(&mut self.f.mid, levels[1], 0.5, 0.1);
         smooth(&mut self.f.high, levels[2], 0.5, 0.1);
@@ -496,7 +549,8 @@ impl Analyzer {
         self.track_beats(silent);
 
         self.frames_since_tempo += 1;
-        if self.frames_since_tempo as f32 > self.fps * 0.5 && self.env.len() as f32 > self.fps * 4.0 {
+        if self.frames_since_tempo as f32 > self.fps * 0.5 && self.env.len() as f32 > self.fps * 4.0
+        {
             self.frames_since_tempo = 0;
             if !silent {
                 self.estimate_tempo();
@@ -507,7 +561,11 @@ impl Analyzer {
         for cmd in self.commands.try_iter().collect::<Vec<_>>() {
             match cmd {
                 Command::MarkDownbeat => {
-                    let nearest = if self.phase < 0.5 { self.beat_count } else { self.beat_count + 1 };
+                    let nearest = if self.phase < 0.5 {
+                        self.beat_count
+                    } else {
+                        self.beat_count + 1
+                    };
                     self.downbeat = nearest % 4;
                     self.downbeat_votes = [0.0; 4];
                     self.downbeat_votes[self.downbeat as usize] = 10.0;
@@ -547,7 +605,9 @@ impl Analyzer {
                 .max_by(|&a, &b| self.downbeat_votes[a].total_cmp(&self.downbeat_votes[b]))
                 .unwrap_or(0) as u64;
             // Hysteresis so the downbeat doesn't flicker between candidates.
-            if self.downbeat_votes[best as usize] > self.downbeat_votes[self.downbeat as usize] * 1.3 {
+            if self.downbeat_votes[best as usize]
+                > self.downbeat_votes[self.downbeat as usize] * 1.3
+            {
                 self.downbeat = best;
             }
         }
@@ -567,7 +627,9 @@ impl Analyzer {
         let ac = |lag: usize| -> f32 {
             x[lag..].iter().zip(&x).map(|(a, b)| a * b).sum::<f32>() / (x.len() - lag) as f32
         };
-        let acs: Vec<f32> = (0..=max_lag + 1).map(|l| if l >= min_lag - 1 { ac(l) } else { 0.0 }).collect();
+        let acs: Vec<f32> = (0..=max_lag + 1)
+            .map(|l| if l >= min_lag - 1 { ac(l) } else { 0.0 })
+            .collect();
         let zero = x.iter().map(|v| v * v).sum::<f32>() / x.len() as f32;
         let mut best = (0usize, f32::MIN);
         for lag in min_lag..=max_lag {
@@ -585,7 +647,11 @@ impl Analyzer {
         // Parabolic interpolation for a fractional period.
         let (a, b, c) = (acs[lag - 1], acs[lag], acs[lag + 1]);
         let denom = a - 2.0 * b + c;
-        let offset = if denom.abs() > 1e-12 { (0.5 * (a - c) / denom).clamp(-0.5, 0.5) } else { 0.0 };
+        let offset = if denom.abs() > 1e-12 {
+            (0.5 * (a - c) / denom).clamp(-0.5, 0.5)
+        } else {
+            0.0
+        };
         let period = lag as f32 + offset;
         let conf = (acs[lag] / zero.max(1e-12)).clamp(0.0, 1.0);
         self.confidence += (conf - self.confidence) * 0.3;
@@ -630,7 +696,9 @@ impl Analyzer {
                 }
                 let i = n - 1 - idx.round() as usize;
                 // Tolerate +/-1 frame of jitter.
-                let v = env[i].max(env[i.saturating_sub(1)]).max(env[(i + 1).min(n - 1)] * 0.8);
+                let v = env[i]
+                    .max(env[i.saturating_sub(1)])
+                    .max(env[(i + 1).min(n - 1)] * 0.8);
                 sum += v;
                 k += 1.0;
             }

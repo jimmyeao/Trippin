@@ -9,15 +9,18 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let fx = (i + 0.5) / bars;
     let v = spec(fx);
 
-    // Distance from the centre line; each bar grows both ways.
+    // Distance from the centre line; each bar grows both ways. Edge AA is
+    // pixel-proportional (fwidth) so bars stay crisp at any resolution.
     let d = abs(in.uv.y - 0.5) * 2.0;
     let h = 0.04 + v * (0.8 + 0.15 * u.intensity);
-    let bar = smoothstep(0.0, 0.06, h - d);
+    let aay = fwidth(d) * 1.5;
+    let bar = smoothstep(-aay, aay, h - d);
 
-    // Rounded column edges and a brighter tip.
+    // 10% gutter between columns, crisp sides, brighter tip.
     let edge = min(cell, 1.0 - cell);
-    let side = smoothstep(0.0, 0.25, edge);
-    let tip = smoothstep(0.10, 0.0, h - d);
+    let aax = fwidth(cell) * 1.5;
+    let side = smoothstep(-aax, aax, edge - 0.10);
+    let tip = smoothstep(0.06, 0.0, h - d);
     let base = palette(fx * 0.85 + 0.15) * (0.55 + 0.65 * v);
 
     var col = base * bar * side;

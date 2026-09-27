@@ -24,6 +24,9 @@ pub struct Director {
     pub intensity: f32,
     bars_in_scene: u32,
     last_bar: i64,
+    /// Downbeat slot the bar count is aligned to — a manual re-mark shifts
+    /// the bar grid and must not count as a new bar.
+    last_downbeat: u64,
     /// Lowest energy seen over the last few bars (a breakdown).
     recent_low: f32,
     rng: u64,
@@ -46,6 +49,7 @@ impl Director {
             intensity: 0.0,
             bars_in_scene: 0,
             last_bar: i64::MIN,
+            last_downbeat: u64::MAX,
             recent_low: 1.0,
             rng,
             pending_cut: false,
@@ -75,10 +79,17 @@ impl Director {
             return;
         }
         let pick = if random && usable.len() > 1 {
-            let others: Vec<usize> = usable.iter().copied().filter(|&s| s != self.scene).collect();
+            let others: Vec<usize> = usable
+                .iter()
+                .copied()
+                .filter(|&s| s != self.scene)
+                .collect();
             others[(self.rand() * others.len() as f32) as usize % others.len()]
         } else {
-            let i = usable.iter().position(|&s| s == self.scene).map_or(0, |i| i + 1);
+            let i = usable
+                .iter()
+                .position(|&s| s == self.scene)
+                .map_or(0, |i| i + 1);
             usable[i % usable.len()]
         };
         self.cut_to(pick);
@@ -94,10 +105,24 @@ impl Director {
     }
 
     /// Call once per frame. `pos` is the beat position including latency offset.
-    pub fn update(&mut self, f: &Features, pos: f64, dt: f32, usable: &[usize], s: &Settings) -> Events {
-        let mut ev = Events { cut: std::mem::take(&mut self.pending_cut), phrase: false };
+    pub fn update(
+        &mut self,
+        f: &Features,
+        pos: f64,
+        dt: f32,
+        usable: &[usize],
+        s: &Settings,
+    ) -> Events {
+        let mut ev = Events {
+            cut: std::mem::take(&mut self.pending_cut),
+            phrase: false,
+        };
         self.flash = (self.flash - dt * 2.5).max(0.0);
-        let target = if f.silent { 0.15 } else { (f.energy * 0.8 + f.build.max(0.0) * 0.4).min(1.0) };
+        let target = if f.silent {
+            0.15
+        } else {
+            (f.energy * 0.8 + f.build.max(0.0) * 0.4).min(1.0)
+        };
         self.intensity += (target - self.intensity) * (dt * 2.0).min(1.0);
 
         // The current scene was switched off in the playlist (or failed to compile).
@@ -106,6 +131,11 @@ impl Director {
         }
 
         let bar = ((pos - f.downbeat as f64) / 4.0).floor() as i64;
+        // A re-marked downbeat re-anchors the grid — not a new bar.
+        if f.downbeat != self.last_downbeat {
+            self.last_downbeat = f.downbeat;
+            self.last_bar = bar;
+        }
         if bar == self.last_bar {
             self.recent_low = self.recent_low.min(f.energy);
             return ev;
@@ -118,7 +148,10 @@ impl Director {
         }
 
         // A drop: energy on this downbeat is well above the recent breakdown.
-        let drop = s.cut_on_drops && f.energy - self.recent_low > 0.35 && f.energy > 0.55 && self.bars_in_scene >= 2;
+        let drop = s.cut_on_drops
+            && f.energy - self.recent_low > 0.35
+            && f.energy > 0.55
+            && self.bars_in_scene >= 2;
         let phrase_end = self.bars_in_scene >= s.phrase_bars.max(1);
         if drop || phrase_end {
             if s.mode == Mode::Auto {

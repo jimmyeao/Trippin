@@ -6,14 +6,14 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SampleFormat, SizedSample};
-use rustfft::num_complex::Complex;
 use rustfft::FftPlanner;
+use rustfft::num_complex::Complex;
 
 use crate::audio::{FFT_SIZE, HOP};
 
@@ -36,7 +36,9 @@ pub struct Song {
 }
 
 /// Audio file extensions we try to load.
-pub const AUDIO_EXTS: &[&str] = &["mp3", "flac", "wav", "ogg", "opus", "m4a", "aac", "aiff", "aif"];
+pub const AUDIO_EXTS: &[&str] = &[
+    "mp3", "flac", "wav", "ogg", "opus", "m4a", "aac", "aiff", "aif",
+];
 
 pub fn is_audio_file(p: &Path) -> bool {
     p.extension()
@@ -54,8 +56,23 @@ pub fn load(path: &Path) -> Result<Song> {
     let onsets = onset_envelope(&mono, sr);
     let (bpm, first_beat) = estimate_bpm(&onsets, fps as f32).unwrap_or((120.0, 0.0));
     let overview = make_overview(&mono, 1600);
-    let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("song").to_string();
-    Ok(Song { name, path: path.to_path_buf(), sr, mono: Arc::new(mono), duration, bpm, first_beat, onsets, onset_fps: fps, overview })
+    let name = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("song")
+        .to_string();
+    Ok(Song {
+        name,
+        path: path.to_path_buf(),
+        sr,
+        mono: Arc::new(mono),
+        duration,
+        bpm,
+        first_beat,
+        onsets,
+        onset_fps: fps,
+        overview,
+    })
 }
 
 fn decode(path: &Path) -> Result<(Vec<f32>, u32)> {
@@ -73,9 +90,16 @@ fn decode(path: &Path) -> Result<(Vec<f32>, u32)> {
         hint.with_extension(ext);
     }
     let mut format = symphonia::default::get_probe()
-        .probe(&hint, mss, FormatOptions::default(), MetadataOptions::default())
+        .probe(
+            &hint,
+            mss,
+            FormatOptions::default(),
+            MetadataOptions::default(),
+        )
         .context("unrecognised audio format")?;
-    let track = format.default_track(TrackType::Audio).context("no audio track")?;
+    let track = format
+        .default_track(TrackType::Audio)
+        .context("no audio track")?;
     let track_id = track.id;
     let params = track
         .codec_params
@@ -170,7 +194,9 @@ fn estimate_bpm(env: &[f32], fps: f32) -> Option<(f64, f64)> {
     let ac = |lag: usize| -> f32 {
         x[lag..].iter().zip(&x).map(|(a, b)| a * b).sum::<f32>() / (x.len() - lag) as f32
     };
-    let acs: Vec<f32> = (0..=max_lag + 1).map(|l| if l >= min_lag { ac(l) } else { 0.0 }).collect();
+    let acs: Vec<f32> = (0..=max_lag + 1)
+        .map(|l| if l >= min_lag { ac(l) } else { 0.0 })
+        .collect();
     let mut best = (0usize, f32::MIN);
     for lag in min_lag..=max_lag {
         let bpm = 60.0 * fps / lag as f32;
@@ -184,7 +210,11 @@ fn estimate_bpm(env: &[f32], fps: f32) -> Option<(f64, f64)> {
     let lag = best.0;
     let (a, b, c) = (acs[lag - 1], acs[lag], acs[lag + 1]);
     let denom = a - 2.0 * b + c;
-    let off = if denom.abs() > 1e-12 { (0.5 * (a - c) / denom).clamp(-0.5, 0.5) } else { 0.0 };
+    let off = if denom.abs() > 1e-12 {
+        (0.5 * (a - c) / denom).clamp(-0.5, 0.5)
+    } else {
+        0.0
+    };
     let period = lag as f32 + off;
     let bpm = 60.0 * fps as f64 / period as f64;
 
@@ -198,7 +228,10 @@ fn estimate_bpm(env: &[f32], fps: f32) -> Option<(f64, f64)> {
         let mut i = o as f32;
         while (i as usize) < env.len() {
             let j = i.round() as usize;
-            let v = env.get(j).copied().unwrap_or(0.0)
+            let v = env
+                .get(j)
+                .copied()
+                .unwrap_or(0.0)
                 .max(env.get(j.saturating_sub(1)).copied().unwrap_or(0.0))
                 .max(env.get(j + 1).copied().unwrap_or(0.0) * 0.8);
             sum += v;
@@ -221,112 +254,179 @@ fn make_overview(mono: &[f32], points: usize) -> Vec<f32> {
 }
 
 // ---------------------------------------------------------------------------
-// Playback: drives the analyser feed AND an output stream from one cursor, so
-// what the visuals react to is what comes out of the speakers.
+// Playback: a multi-clip show. One cpal output stream walks the global
+// timeline (clip regions with gaps as silence); a feeder thread copies the
+// played audio — resampled to the analyser's rate — into the analyser
+// channel. So what the visuals react to is what comes out of the speakers.
 // ---------------------------------------------------------------------------
 
-/// Plays a `Song`: a cpal output stream reads the mono buffer at the device
-/// rate (linear resample, channel-duplicated); a feeder thread copies the
-/// played samples into the analyser channel. With no output device the
-/// feeder drives the clock itself, so playback still works headless.
-pub struct SongPlayer {
+/// One song region for playback: a decoded song at a global offset.
+pub struct Region {
+    pub offset_s: f64,
+    pub song: Arc<Song>,
+}
+
+/// Global seconds → mono sample at the region's own rate.
+fn sample_at(regions: &[Region], t: f64) -> f32 {
+    for r in regions {
+        let local = t - r.offset_s;
+        if local < 0.0 {
+            break;
+        }
+        if local >= r.song.duration {
+            continue;
+        }
+        let pos = local * r.song.sr as f64;
+        let i = pos as usize;
+        let f = (pos - i as f64) as f32;
+        let m = &r.song.mono;
+        return m.get(i).copied().unwrap_or(0.0) * (1.0 - f)
+            + m.get(i + 1).copied().unwrap_or(0.0) * f;
+    }
+    0.0
+}
+
+/// Plays a timeline's clip regions: a cpal output stream reads the regions
+/// at the device rate; a feeder thread copies played samples into the
+/// analyser channel (resampled to `analysis_sr`, since regions may differ).
+/// With no output device the feeder drives a virtual clock instead.
+pub struct ShowPlayer {
+    /// Global timeline position, in device-rate frames.
     cursor: Arc<AtomicU64>,
     playing: Arc<AtomicBool>,
     finished: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
     seek_gen: Arc<AtomicU64>,
-    seek_pos: Arc<AtomicU64>,
-    sr: f64,
-    len: u64,
+    /// Seek target in global seconds (f64 bits).
+    seek_s: Arc<AtomicU64>,
+    /// Device (or virtual) frames per second — cursor units.
+    rate: f64,
+    total_s: f64,
     _stream: Option<cpal::Stream>,
     _feeder: Option<std::thread::JoinHandle<()>>,
 }
 
-impl SongPlayer {
-    pub fn start(song: Arc<Song>, tx: mpsc::SyncSender<Vec<f32>>) -> Result<Self> {
+impl ShowPlayer {
+    /// `regions`: decoded songs at their timeline offsets (must be sorted by
+    /// offset; overlaps resolve to the earliest region). `analysis_sr` is the
+    /// rate the analyser was spawned with — played audio is resampled to it.
+    /// `start_s` = global seconds to begin from.
+    pub fn start(
+        mut regions: Vec<Region>,
+        analysis_sr: f64,
+        start_s: f64,
+        tx: mpsc::SyncSender<Vec<f32>>,
+    ) -> Result<Self> {
+        if regions.is_empty() {
+            return Err(anyhow!("no playable clips"));
+        }
+        regions.sort_by(|a, b| a.offset_s.total_cmp(&b.offset_s));
+        let total_s = regions
+            .iter()
+            .map(|r| r.offset_s + r.song.duration)
+            .fold(0.0, f64::max);
+
         let cursor = Arc::new(AtomicU64::new(0));
         let playing = Arc::new(AtomicBool::new(true));
         let finished = Arc::new(AtomicBool::new(false));
         let stop = Arc::new(AtomicBool::new(false));
         let seek_gen = Arc::new(AtomicU64::new(0));
-        let seek_pos = Arc::new(AtomicU64::new(0));
+        let seek_s = Arc::new(AtomicU64::new(start_s.max(0.0).to_bits()));
 
-        let stream = build_output(&song, &cursor, &playing, &finished, &seek_gen, &seek_pos);
-        let has_output = stream.is_some();
-        if !has_output {
-            eprintln!("song playback: no output device — visuals only");
-        }
+        let regions = Arc::new(regions);
+        let (stream, rate) = match build_output(
+            &regions, total_s, &cursor, &playing, &finished, &seek_gen, &seek_s,
+        ) {
+            Some((s, r)) => (Some(s), r),
+            None => {
+                eprintln!("show playback: no output device — visuals only");
+                (None, 48000.0)
+            }
+        };
+        cursor.store((start_s.max(0.0) * rate) as u64, Ordering::Relaxed);
 
         let feeder = {
-            let (song, cursor, playing, finished, stop, seek_gen, seek_pos) = (
-                song.clone(),
+            let (regions, cursor, playing, finished, stop, seek_gen, seek_s) = (
+                regions.clone(),
                 cursor.clone(),
                 playing.clone(),
                 finished.clone(),
                 stop.clone(),
                 seek_gen.clone(),
-                seek_pos.clone(),
+                seek_s.clone(),
             );
-            std::thread::Builder::new().name("song-feed".into()).spawn(move || {
-                let mut sent = 0u64;
-                let mut vpos = 0.0f64;
-                let mut vlast = Instant::now();
-                let mut seen_seek = 0u64;
-                let len = song.mono.len() as u64;
-                while !stop.load(Ordering::Relaxed) {
-                    std::thread::sleep(Duration::from_millis(8));
-                    let g = seek_gen.load(Ordering::Relaxed);
-                    if g != seen_seek {
-                        seen_seek = g;
-                        sent = seek_pos.load(Ordering::Relaxed).min(len);
-                        vpos = sent as f64;
-                    }
-                    if !has_output {
-                        // No output stream to pace us — run a virtual clock.
-                        let now = Instant::now();
-                        if playing.load(Ordering::Relaxed) {
-                            vpos += now.duration_since(vlast).as_secs_f64() * song.sr as f64;
+            let has_output = stream.is_some();
+            std::thread::Builder::new()
+                .name("show-feed".into())
+                .spawn(move || {
+                    let mut sent_t = start_s.max(0.0);
+                    let mut vt = start_s.max(0.0);
+                    let mut vlast = Instant::now();
+                    let mut seen_seek = 0u64;
+                    while !stop.load(Ordering::Relaxed) {
+                        std::thread::sleep(Duration::from_millis(8));
+                        let g = seek_gen.load(Ordering::Relaxed);
+                        if g != seen_seek {
+                            seen_seek = g;
+                            sent_t = f64::from_bits(seek_s.load(Ordering::Relaxed)).max(0.0);
+                            vt = sent_t;
                         }
-                        vlast = now;
-                        let v = (vpos as u64).min(len);
-                        cursor.store(v, Ordering::Relaxed);
-                        if v >= len {
-                            finished.store(true, Ordering::Relaxed);
-                            playing.store(false, Ordering::Relaxed);
+                        if !has_output {
+                            // No output stream to pace us — run a virtual clock.
+                            let now = Instant::now();
+                            if playing.load(Ordering::Relaxed) {
+                                vt += now.duration_since(vlast).as_secs_f64();
+                            }
+                            vlast = now;
+                            cursor.store((vt.min(total_s) * rate) as u64, Ordering::Relaxed);
+                            if vt >= total_s {
+                                finished.store(true, Ordering::Relaxed);
+                                playing.store(false, Ordering::Relaxed);
+                            }
+                        }
+                        let pos_t = (cursor.load(Ordering::Relaxed) as f64 / rate).min(total_s);
+                        if pos_t > sent_t {
+                            // Emit the played span at the analyser's rate —
+                            // silence for gaps between regions.
+                            let n = ((pos_t - sent_t) * analysis_sr) as usize;
+                            if n > 0 {
+                                let chunk: Vec<f32> = (0..n)
+                                    .map(|i| sample_at(&regions, sent_t + i as f64 / analysis_sr))
+                                    .collect();
+                                let _ = tx.try_send(chunk); // drop rather than stall the analyser
+                            }
+                            sent_t = pos_t;
                         }
                     }
-                    let pos = cursor.load(Ordering::Relaxed).min(len);
-                    if pos > sent {
-                        let chunk: Vec<f32> = song.mono[sent as usize..pos as usize].to_vec();
-                        let _ = tx.try_send(chunk); // drop rather than stall if the analyser lags
-                        sent = pos;
-                    }
-                }
-            })?
+                })?
         };
 
-        let _ = stream.as_ref().map(|s| s.play());
+        if let Some(s) = &stream {
+            let _ = s.play();
+        }
         Ok(Self {
             cursor,
             playing,
             finished,
             stop,
             seek_gen,
-            seek_pos,
-            sr: song.sr as f64,
-            len: song.mono.len() as u64,
+            seek_s,
+            rate,
+            total_s,
             _stream: stream,
             _feeder: Some(feeder),
         })
     }
 
-    /// Seconds into the song the speakers have reached.
+    /// Global timeline seconds the output has reached.
     pub fn position_s(&self) -> f64 {
-        self.cursor.load(Ordering::Relaxed).min(self.len) as f64 / self.sr
+        (self.cursor.load(Ordering::Relaxed) as f64 / self.rate).min(self.total_s)
     }
-    pub fn seek_s(&self, s: f64) {
-        let frames = (s.max(0.0) * self.sr) as u64;
-        self.seek_pos.store(frames.min(self.len), Ordering::Relaxed);
+    /// Global seconds.
+    pub fn seek(&self, s: f64) {
+        let s = s.clamp(0.0, self.total_s);
+        self.seek_s.store(s.to_bits(), Ordering::Relaxed);
+        self.cursor.store((s * self.rate) as u64, Ordering::Relaxed);
         self.seek_gen.fetch_add(1, Ordering::Relaxed);
         self.finished.store(false, Ordering::Relaxed);
     }
@@ -338,7 +438,7 @@ impl SongPlayer {
     }
 }
 
-impl Drop for SongPlayer {
+impl Drop for ShowPlayer {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
         if let Some(f) = self._feeder.take() {
@@ -348,66 +448,76 @@ impl Drop for SongPlayer {
 }
 
 fn build_output(
-    song: &Arc<Song>,
+    regions: &Arc<Vec<Region>>,
+    total_s: f64,
     cursor: &Arc<AtomicU64>,
     playing: &Arc<AtomicBool>,
     finished: &Arc<AtomicBool>,
     seek_gen: &Arc<AtomicU64>,
-    seek_pos: &Arc<AtomicU64>,
-) -> Option<cpal::Stream> {
+    seek_s: &Arc<AtomicU64>,
+) -> Option<(cpal::Stream, f64)> {
     let host = cpal::default_host();
     let dev = host.default_output_device()?;
     let supported = dev.default_output_config().ok()?;
     let config = supported.config();
-    match supported.sample_format() {
-        SampleFormat::F32 => {
-            build_output_stream::<f32>(&dev, config.clone(), song, cursor, playing, finished, seek_gen, seek_pos).ok()
-        }
-        SampleFormat::I16 => {
-            build_output_stream::<i16>(&dev, config.clone(), song, cursor, playing, finished, seek_gen, seek_pos).ok()
-        }
-        SampleFormat::U16 => {
-            build_output_stream::<u16>(&dev, config.clone(), song, cursor, playing, finished, seek_gen, seek_pos).ok()
-        }
+    let rate = config.sample_rate as f64;
+    let stream = match supported.sample_format() {
+        SampleFormat::F32 => build_output_stream::<f32>(
+            &dev, config, regions, total_s, cursor, playing, finished, seek_gen, seek_s,
+        )
+        .ok(),
+        SampleFormat::I16 => build_output_stream::<i16>(
+            &dev, config, regions, total_s, cursor, playing, finished, seek_gen, seek_s,
+        )
+        .ok(),
+        SampleFormat::U16 => build_output_stream::<u16>(
+            &dev, config, regions, total_s, cursor, playing, finished, seek_gen, seek_s,
+        )
+        .ok(),
         _ => None,
-    }
+    }?;
+    Some((stream, rate))
 }
 
 fn build_output_stream<T>(
     dev: &cpal::Device,
     config: cpal::StreamConfig,
-    song: &Arc<Song>,
+    regions: &Arc<Vec<Region>>,
+    total_s: f64,
     cursor: &Arc<AtomicU64>,
     playing: &Arc<AtomicBool>,
     finished: &Arc<AtomicBool>,
     seek_gen: &Arc<AtomicU64>,
-    seek_pos: &Arc<AtomicU64>,
+    seek_s: &Arc<AtomicU64>,
 ) -> Result<cpal::Stream>
 where
     T: SizedSample + FromSample<f32>,
 {
     let channels = config.channels as usize;
-    let ratio = song.sr as f64 / config.sample_rate as f64;
-    let mono = song.mono.clone();
-    let len = mono.len() as f64;
-    let (cursor, playing, finished, seek_gen, seek_pos) =
-        (cursor.clone(), playing.clone(), finished.clone(), seek_gen.clone(), seek_pos.clone());
-    let mut pos = 0.0f64;
+    let rate = config.sample_rate as f64;
+    let regions = regions.clone();
+    let (cursor, playing, finished, seek_gen, seek_s) = (
+        cursor.clone(),
+        playing.clone(),
+        finished.clone(),
+        seek_gen.clone(),
+        seek_s.clone(),
+    );
+    let mut pos = f64::from_bits(seek_s.load(Ordering::Relaxed)).max(0.0) * rate;
     let mut seen_seek = seek_gen.load(Ordering::Relaxed);
+    let total_frames = total_s * rate;
     let stream = dev.build_output_stream::<T, _, _>(
         config.clone(),
         move |data: &mut [T], _| {
             let g = seek_gen.load(Ordering::Relaxed);
             if g != seen_seek {
                 seen_seek = g;
-                pos = seek_pos.load(Ordering::Relaxed) as f64;
+                pos = f64::from_bits(seek_s.load(Ordering::Relaxed)).max(0.0) * rate;
             }
             let on = playing.load(Ordering::Relaxed);
             for out in data.chunks_mut(channels) {
-                let i = pos as usize;
-                let s = if on && pos < len - 1.0 {
-                    let f = (pos - i as f64) as f32;
-                    mono.get(i).copied().unwrap_or(0.0) * (1.0 - f) + mono.get(i + 1).copied().unwrap_or(0.0) * f
+                let s = if on && pos < total_frames {
+                    sample_at(&regions, pos / rate)
                 } else {
                     0.0
                 };
@@ -415,17 +525,17 @@ where
                     *o = T::from_sample(s);
                 }
                 if on {
-                    pos += ratio;
+                    pos += 1.0;
                 }
             }
-            if pos >= len {
-                pos = len;
+            if pos >= total_frames {
+                pos = total_frames;
                 finished.store(true, Ordering::Relaxed);
                 playing.store(false, Ordering::Relaxed);
             }
             cursor.store(pos.max(0.0) as u64, Ordering::Relaxed);
         },
-        |e| eprintln!("song output error: {e}"),
+        |e| eprintln!("show output error: {e}"),
         None,
     )?;
     Ok(stream)
@@ -484,9 +594,21 @@ mod tests {
         write_wav(&path, sr, &mono);
 
         let song = load(&path).expect("decode wav");
-        assert!((song.duration - secs).abs() < 0.2, "duration {}", song.duration);
-        assert!((song.bpm - bpm).abs() < 2.0, "bpm {} expected ~{bpm}", song.bpm);
-        assert!(song.first_beat >= 0.0 && song.first_beat < 0.6, "first_beat {}", song.first_beat);
+        assert!(
+            (song.duration - secs).abs() < 0.2,
+            "duration {}",
+            song.duration
+        );
+        assert!(
+            (song.bpm - bpm).abs() < 2.0,
+            "bpm {} expected ~{bpm}",
+            song.bpm
+        );
+        assert!(
+            song.first_beat >= 0.0 && song.first_beat < 0.6,
+            "first_beat {}",
+            song.first_beat
+        );
         // One onset per hop minus the warm-up FFT frame.
         assert!((song.onsets.len() as f64 - secs * song.onset_fps).abs() < 10.0);
         assert_eq!(song.overview.len(), 1600);

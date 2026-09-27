@@ -28,13 +28,14 @@ pub enum Action {
     CycleFx,
     ReloadShaders,
     TogglePanel,
+    ToggleEditor,
     LeaveFullscreen,
     TimelinePlay,
     TimelineRecord,
 }
 
 impl Action {
-    pub const ALL: [Action; 21] = [
+    pub const ALL: [Action; 22] = [
         Action::NextScene,
         Action::PrevScene,
         Action::ModeAuto,
@@ -53,6 +54,7 @@ impl Action {
         Action::CycleFx,
         Action::ReloadShaders,
         Action::TogglePanel,
+        Action::ToggleEditor,
         Action::LeaveFullscreen,
         Action::TimelinePlay,
         Action::TimelineRecord,
@@ -78,6 +80,7 @@ impl Action {
             Action::CycleFx => "Effect: off / mirror / kaleido",
             Action::ReloadShaders => "Reload shaders",
             Action::TogglePanel => "Show / hide this control panel",
+            Action::ToggleEditor => "Show the timeline editor",
             Action::LeaveFullscreen => "Leave fullscreen",
             Action::TimelinePlay => "Timeline play / pause",
             Action::TimelineRecord => "Timeline record on / off",
@@ -105,7 +108,18 @@ impl Action {
             Action::ReloadShaders => "F5",
             // No F-keys on Touch Bar Macs — F1 is a brightness key there.
             Action::TogglePanel => {
-                if cfg!(target_os = "macos") { "P" } else { "F1" }
+                if cfg!(target_os = "macos") {
+                    "P"
+                } else {
+                    "F1"
+                }
+            }
+            Action::ToggleEditor => {
+                if cfg!(target_os = "macos") {
+                    "E"
+                } else {
+                    "F2"
+                }
             }
             Action::LeaveFullscreen => "Escape",
             Action::TimelinePlay => "T",
@@ -139,7 +153,10 @@ pub const SEASONS: [(&str, &[((u32, u32), (u32, u32))]); 3] = [
     ("halloween", &[((10, 1), (11, 2))]),
     ("christmas", &[((12, 1), (12, 27))]),
     // Bonfire Night and New Year.
-    ("fireworks", &[((11, 1), (11, 8)), ((12, 28), (12, 31)), ((1, 1), (1, 2))]),
+    (
+        "fireworks",
+        &[((11, 1), (11, 8)), ((12, 28), (12, 31)), ((1, 1), (1, 2))],
+    ),
 ];
 
 /// None if `scene` isn't seasonal, otherwise whether it's in season on (month, day).
@@ -233,7 +250,11 @@ impl Fx {
     pub fn random(r: f32, cur: Fx) -> Fx {
         let i = (r * Fx::AUTO.len() as f32) as usize % Fx::AUTO.len();
         let f = Fx::AUTO[i];
-        if f == cur { Fx::AUTO[(i + 1) % Fx::AUTO.len()] } else { f }
+        if f == cur {
+            Fx::AUTO[(i + 1) % Fx::AUTO.len()]
+        } else {
+            f
+        }
     }
 }
 
@@ -263,6 +284,8 @@ pub struct Settings {
     pub disabled_clips: Vec<String>,
     /// Dancer height as a fraction of the screen.
     pub dancer_size: f32,
+    /// Ghost echoes of earlier frames trail the dancer's movement.
+    pub dancer_trails: bool,
     /// Fixed post effect (ignored while `fx_auto` is on).
     pub fx: Fx,
     /// Pick a fresh post effect on every scene cut.
@@ -276,7 +299,10 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            keys: Action::ALL.iter().map(|a| (*a, a.default_key().to_string())).collect(),
+            keys: Action::ALL
+                .iter()
+                .map(|a| (*a, a.default_key().to_string()))
+                .collect(),
             mode: Mode::Auto,
             random_order: true,
             phrase_bars: 16,
@@ -288,6 +314,7 @@ impl Default for Settings {
             canon: Tristate::Auto,
             disabled_clips: Vec::new(),
             dancer_size: 0.85,
+            dancer_trails: false,
             fx: Fx::Off,
             fx_auto: false,
             fx_amt: 1.0,
@@ -338,17 +365,26 @@ impl Settings {
     pub fn load() -> Self {
         let mut s: Settings = std::fs::read_to_string(path())
             .ok()
-            .and_then(|t| serde_json::from_str(&t).map_err(|e| eprintln!("trippin.json ignored: {e}")).ok())
+            .and_then(|t| {
+                serde_json::from_str(&t)
+                    .map_err(|e| eprintln!("trippin.json ignored: {e}"))
+                    .ok()
+            })
             .unwrap_or_default();
         // Actions added in newer versions get their default key.
         for a in Action::ALL {
-            s.keys.entry(a).or_insert_with(|| a.default_key().to_string());
+            s.keys
+                .entry(a)
+                .or_insert_with(|| a.default_key().to_string());
         }
         // macOS builds moved the panel off F1 (a brightness key on Touch Bar
         // machines); a saved "F1" is the old default, not a deliberate pick.
         #[cfg(target_os = "macos")]
         if s.keys.get(&Action::TogglePanel).is_some_and(|k| k == "F1") {
-            s.keys.insert(Action::TogglePanel, Action::TogglePanel.default_key().to_string());
+            s.keys.insert(
+                Action::TogglePanel,
+                Action::TogglePanel.default_key().to_string(),
+            );
         }
         s
     }
@@ -365,7 +401,10 @@ impl Settings {
     }
 
     pub fn action_for(&self, key: &str) -> Option<Action> {
-        self.keys.iter().find(|(_, k)| k.as_str() == key).map(|(a, _)| *a)
+        self.keys
+            .iter()
+            .find(|(_, k)| k.as_str() == key)
+            .map(|(a, _)| *a)
     }
 }
 
@@ -377,7 +416,6 @@ pub fn key_name(key: &Key) -> Option<String> {
         _ => None,
     }
 }
-
 
 #[cfg(test)]
 mod tests {

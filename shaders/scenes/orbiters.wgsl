@@ -5,9 +5,10 @@
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv) * 0.55;
 
-    // Trails decay with a slow rotation — orbits smear into rings.
+    // Trails decay with a slow rotation — short enough that each orb reads as
+    // a comet tail rather than the four orbs per ring fusing into a band.
     let bp = centred(in.uv) * 0.985;
-    var col = prev(uncentred(rot(0.004) * bp)) * 0.90;
+    var col = prev(uncentred(rot(0.006) * bp)) * 0.82;
 
     for (var i = 0; i < 16; i++) {
         let fi = f32(i);
@@ -18,19 +19,22 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         let speed = (0.3 + ring * 0.15) * (0.5 + u.energy);
         let dir = select(1.0, -1.0, i32(ring) % 2 == 1);
         let ang = u.flow * speed * dir + hash21(vec2<f32>(fi, u.seed)) * TAU;
-        let rad = 0.12 + ring * 0.16 + v * 0.20 + u.kick * 0.02;
+        // Inner ring starts far enough out that the orbs' halos never overlap
+        // the centre — that overlap smeared into a permanent disc before.
+        let rad = 0.17 + ring * 0.15 + v * 0.16 + u.kick * 0.02;
         let pos = vec2<f32>(cos(ang), sin(ang)) * rad;
 
         let d = length(p - pos);
-        let size = 0.006 + v * 0.010;
+        let size = 0.007 + v * 0.010;
         let orb = smoothstep(size, size * 0.3, d);
-        let glow = exp(-d * 20.0) * 0.25;
+        let glow = exp(-d * 34.0) * 0.10;
 
-        col += palette(band * 0.5 + fi / 16.0 + u.hue) * (orb * (0.7 + v) + glow);
+        col += palette(band * 0.5 + fi / 16.0 + u.hue) * (orb * (0.8 + v) + glow);
     }
 
-    // Central glow pulsing with the kick.
-    col += palette(0.5) * exp(-length(p) * 9.0) * (0.3 + u.kick);
+    // Faint ember at the hub — driven by the music, dies in silence so the
+    // feedback can't accumulate a permanent blob.
+    col += palette(0.5) * exp(-length(p) * 18.0) * (u.kick * 0.5 + u.bass * 0.10);
 
     return vec4<f32>(finite(col), 1.0);
 }

@@ -12,18 +12,20 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, SyncSender};
 use std::time::Duration;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use block2::RcBlock;
 use dispatch2::{DispatchQueue, DispatchQueueAttr, DispatchRetained};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyClass, NSObject, NSObjectProtocol, ProtocolObject};
-use objc2::{define_class, msg_send, sel, AllocAnyThread, DefinedClass};
+use objc2::{AllocAnyThread, DefinedClass, define_class, msg_send, sel};
 use objc2_core_audio_types::{
-    kAudioFormatFlagIsFloat, kAudioFormatFlagIsNonInterleaved, kAudioFormatFlagIsSignedInteger,
-    kAudioFormatLinearPCM, AudioBufferList,
+    AudioBufferList, kAudioFormatFlagIsFloat, kAudioFormatFlagIsNonInterleaved,
+    kAudioFormatFlagIsSignedInteger, kAudioFormatLinearPCM,
 };
 use objc2_core_foundation::CFRetained;
-use objc2_core_media::{CMAudioFormatDescriptionGetStreamBasicDescription, CMBlockBuffer, CMSampleBuffer};
+use objc2_core_media::{
+    CMAudioFormatDescriptionGetStreamBasicDescription, CMBlockBuffer, CMSampleBuffer,
+};
 use objc2_foundation::{NSArray, NSError};
 use objc2_screen_capture_kit::{
     SCContentFilter, SCShareableContent, SCStream, SCStreamConfiguration, SCStreamOutput,
@@ -50,7 +52,12 @@ define_class!(
     unsafe impl SCStreamOutput for AudioSink {
         // SAFETY: signature matches the protocol method.
         #[unsafe(method(stream:didOutputSampleBuffer:ofType:))]
-        fn did_output(&self, _stream: &SCStream, sample_buffer: &CMSampleBuffer, ty: SCStreamOutputType) {
+        fn did_output(
+            &self,
+            _stream: &SCStream,
+            sample_buffer: &CMSampleBuffer,
+            ty: SCStreamOutputType,
+        ) {
             if ty == SCStreamOutputType::Audio {
                 // SAFETY: the sample buffer is valid for the duration of the callback.
                 unsafe { push_audio(self.ivars(), sample_buffer) };
@@ -61,7 +68,10 @@ define_class!(
 
 impl AudioSink {
     fn new(tx: SyncSender<Vec<f32>>) -> Retained<Self> {
-        let this = Self::alloc().set_ivars(SinkIvars { tx, bad_format: AtomicBool::new(false) });
+        let this = Self::alloc().set_ivars(SinkIvars {
+            tx,
+            bad_format: AtomicBool::new(false),
+        });
         // SAFETY: `init` on NSObject takes no arguments.
         unsafe { msg_send![super(this), init] }
     }
@@ -85,7 +95,9 @@ unsafe fn push_audio(iv: &SinkIvars, buf: &CMSampleBuffer) {
         if !buf.is_valid() || !buf.data_is_ready() {
             return;
         }
-        let Some(desc) = buf.format_description() else { return };
+        let Some(desc) = buf.format_description() else {
+            return;
+        };
         let Some(asbd) = CMAudioFormatDescriptionGetStreamBasicDescription(&desc).as_ref() else {
             return;
         };
@@ -174,23 +186,25 @@ unsafe fn push_audio(iv: &SinkIvars, buf: &CMSampleBuffer) {
 
 fn shareable_content() -> Result<Retained<SCShareableContent>> {
     let (tx, rx) = mpsc::channel();
-    let block = RcBlock::new(move |content: *mut SCShareableContent, error: *mut NSError| {
-        let res = match unsafe { Retained::retain(content) } {
-            Some(c) => Ok(c),
-            None => {
-                // Screen capture never prompts on modern macOS — the user has
-                // to switch the responsible app on in System Settings.
-                let msg = unsafe { error.as_ref() }
-                    .map(|e| e.localizedDescription().to_string())
-                    .unwrap_or_else(|| "no shareable content".into());
-                Err(format!(
-                    "{msg} — grant “Screen & System Audio Recording” to the \
+    let block = RcBlock::new(
+        move |content: *mut SCShareableContent, error: *mut NSError| {
+            let res = match unsafe { Retained::retain(content) } {
+                Some(c) => Ok(c),
+                None => {
+                    // Screen capture never prompts on modern macOS — the user has
+                    // to switch the responsible app on in System Settings.
+                    let msg = unsafe { error.as_ref() }
+                        .map(|e| e.localizedDescription().to_string())
+                        .unwrap_or_else(|| "no shareable content".into());
+                    Err(format!(
+                        "{msg} — grant “Screen & System Audio Recording” to the \
                      app that launched trippin in System Settings → Privacy & Security"
-                ))
-            }
-        };
-        let _ = tx.send(res);
-    });
+                    ))
+                }
+            };
+            let _ = tx.send(res);
+        },
+    );
     unsafe {
         SCShareableContent::getShareableContentExcludingDesktopWindows_onScreenWindowsOnly_completionHandler(
             true, false, &block,
@@ -231,7 +245,11 @@ pub fn start(tx: SyncSender<Vec<f32>>) -> Result<SystemCapture> {
 
     let excluded: Retained<NSArray<SCWindow>> = NSArray::new();
     let filter = unsafe {
-        SCContentFilter::initWithDisplay_excludingWindows(SCContentFilter::alloc(), &display, &excluded)
+        SCContentFilter::initWithDisplay_excludingWindows(
+            SCContentFilter::alloc(),
+            &display,
+            &excluded,
+        )
     };
 
     let config = unsafe { SCStreamConfiguration::new() };
@@ -276,5 +294,9 @@ pub fn start(tx: SyncSender<Vec<f32>>) -> Result<SystemCapture> {
     });
     unsafe { stream.startCaptureWithCompletionHandler(Some(&block)) };
 
-    Ok(SystemCapture { _stream: stream, _sink: sink, _queue: queue })
+    Ok(SystemCapture {
+        _stream: stream,
+        _sink: sink,
+        _queue: queue,
+    })
 }

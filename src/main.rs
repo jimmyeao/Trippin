@@ -28,15 +28,18 @@ mod audio;
 mod config;
 mod dancer;
 mod director;
+mod editor;
+mod egui_win;
 mod panel;
 mod render;
 mod song;
 #[cfg(target_os = "macos")]
 mod sysaudio;
+mod text;
 mod timeline;
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -47,7 +50,7 @@ use winit::keyboard::Key;
 use winit::window::{Fullscreen, Icon, Window, WindowId};
 
 use audio::{AudioEngine, Command};
-use config::{in_season, key_name, today, Action, Fx, Mode, Seasonal, Settings, Tristate};
+use config::{Action, Fx, Mode, Seasonal, Settings, Tristate, in_season, key_name, today};
 use dancer::DancerLayer;
 use director::Director;
 use panel::{Panel, Status, UiCommand};
@@ -71,6 +74,9 @@ struct Shared {
     /// Fixed after init; the panel lists them.
     scene_names: Vec<String>,
     clip_names: Vec<String>,
+    /// Finished scene thumbnails for the editor: (name, w, h, RGBA8).
+    /// Produced on the render thread, drained by `draw_editor`.
+    thumbs: Mutex<Vec<(String, u32, u32, Vec<u8>)>>,
 }
 
 /// Work the event thread hands to the render thread.
@@ -79,12 +85,19 @@ enum Msg {
     Act(Action),
     GoToScene(usize),
     ShowClip(usize),
-    /// Decode an audio file and start a fresh timeline from it.
+    /// Decode an audio file and append it to the current timeline as a clip
+    /// (a fresh doc is created when none is loaded).
     LoadSong(std::path::PathBuf),
-    /// Open a saved timeline `.json`.
+    /// Open a saved timeline `.json` — decodes every clip's audio file.
     LoadTimeline(std::path::PathBuf),
-    /// Transport control for the song player.
+    /// Fire a cue's effect immediately (editor preview).
+    FireCue(CueKind),
+    /// Transport control for the show player.
     Transport(SongCtl),
+    /// Render a scene thumbnail for the editor's cue blocks.
+    Thumb(String),
+    /// Fade out every live text overlay (editor closed / show tidied up).
+    FadeText,
 }
 
 /// Lock even when poisoned: a panicking sibling thread shouldn't take the
@@ -102,6 +115,9 @@ fn usable_scenes(r: &Renderer, s: &Settings) -> Vec<usize> {
     let on: Vec<usize> = all
         .iter()
         .copied()
+        // `void` is the timeline's "scenes off" baseline — reachable only
+        // via an explicit cue, never by autopilot or next/prev.
+        .filter(|&i| names[i] != "void")
         .filter(|&i| !s.disabled_scenes.contains(&names[i]))
         .filter(|&i| match (s.seasonal, in_season(&names[i], date)) {
             (_, None) | (Seasonal::Always, _) => true,
@@ -112,9 +128,9 @@ fn usable_scenes(r: &Renderer, s: &Settings) -> Vec<usize> {
     if on.is_empty() { all } else { on }
 }
 
-/// Stop the song player and put the live audio engine back.
+/// Stop the show player and put the live audio engine back.
 fn stop_song(
-    player: &mut Option<song::SongPlayer>,
+    player: &mut Option<song::ShowPlayer>,
     audio: &mut AudioEngine,
     cfg: &(Option<String>, bool),
     shared: &Shared,
@@ -127,16 +143,95 @@ fn stop_song(
     }
 }
 
+/// The live rig's settings the first time a timeline takes over — the show
+/// borrows mode/dancer/fx while it plays, and they must be handed back (and
+/// never persisted) when it stops, or the live show looks "stuck" afterwards.
+#[derive(Clone, Copy)]
+struct ShowBaseline {
+    mode: Mode,
+    dancer_enabled: bool,
+    dancer_style: Option<usize>,
+    dancer_trails: bool,
+    canon: Tristate,
+    fx: Fx,
+    fx_auto: bool,
+    scene: usize,
+    blackout: bool,
+    dancer_showing: bool,
+}
+
+impl ShowBaseline {
+    fn take(shared: &Shared, dir: &Director, dancer: &DancerLayer, blackout: bool) -> Self {
+        let s = lock(&shared.settings);
+        Self {
+            mode: s.mode,
+            dancer_enabled: s.dancer_enabled,
+            dancer_style: s.dancer_style,
+            dancer_trails: s.dancer_trails,
+            canon: s.canon,
+            fx: s.fx,
+            fx_auto: s.fx_auto,
+            scene: dir.scene,
+            blackout,
+            dancer_showing: dancer.showing,
+        }
+    }
+}
+
+/// End the show: stop the player, swap audio back to the live input, hand the
+/// borrowed settings back, and fade any text the show (or a palette preview)
+/// left on screen.
+fn end_show(
+    player: &mut Option<song::ShowPlayer>,
+    audio: &mut AudioEngine,
+    cfg: &(Option<String>, bool),
+    shared: &Shared,
+    pre_show: &mut Option<ShowBaseline>,
+    dir: &mut Director,
+    dancer: &mut DancerLayer,
+    text_slots: &mut [Option<text::TextState>; text::TEXT_SLOTS],
+    blackout: &mut bool,
+    started: Instant,
+) {
+    stop_song(player, audio, cfg, shared);
+    if let Some(b) = pre_show.take() {
+        {
+            let mut s = lock(&shared.settings);
+            s.mode = b.mode;
+            s.dancer_enabled = b.dancer_enabled;
+            s.dancer_style = b.dancer_style;
+            s.dancer_trails = b.dancer_trails;
+            s.canon = b.canon;
+            s.fx = b.fx;
+            s.fx_auto = b.fx_auto;
+        }
+        *blackout = b.blackout;
+        dancer.showing = b.dancer_showing;
+        if dir.scene != b.scene {
+            dir.cut_to(b.scene);
+        }
+    }
+    let now_t = (Instant::now() - started).as_secs_f32();
+    for ts in text_slots.iter_mut().flatten() {
+        ts.out_at.get_or_insert(now_t);
+    }
+}
+
 /// Fire one timeline cue — mirrors `apply_render` for the cue kinds.
-/// `usable` is this frame's usable-scenes list.
+/// `usable` is this frame's usable-scenes list. `persist` marks the settings
+/// dirty for saving — only for explicit user previews; cues fired by timeline
+/// playback are show state and must never reach trippin.json.
 fn fire_cue(
     kind: &CueKind,
     r: &mut Renderer,
     dir: &mut Director,
     dancer: &mut DancerLayer,
+    text_slots: &mut [Option<text::TextState>; text::TEXT_SLOTS],
+    now_t: f32,
     blackout: &mut bool,
     shared: &Shared,
     usable: &[usize],
+    persist: bool,
 ) {
     let mut s = lock(&shared.settings);
     match kind {
@@ -157,15 +252,20 @@ fn fire_cue(
         CueKind::Clip(name) => {
             if let Some(i) = shared.clip_names.iter().position(|n| n == name) {
                 dancer.request(i);
-                dancer.showing = true;
             }
+            dancer.showing = true;
+            s.dancer_enabled = true;
         }
         CueKind::NextClip => {
             dancer.next_clip();
             dancer.showing = true;
+            s.dancer_enabled = true;
         }
         CueKind::NextLook => s.dancer_style = Some((dancer.style + 1) % dancer::STYLES.len()),
-        CueKind::Look(l) => s.dancer_style = *l,
+        CueKind::Look(l) => {
+            s.dancer_style = l.map(|i| i.min(dancer::STYLES.len() - 1));
+        }
+        CueKind::Trails(b) => s.dancer_trails = *b,
         CueKind::Canon(t) => s.canon = *t,
         CueKind::Blackout(b) => *blackout = *b,
         CueKind::Fx(f) => {
@@ -173,8 +273,128 @@ fn fire_cue(
             s.fx = *f;
         }
         CueKind::FxAuto(b) => s.fx_auto = *b,
+        CueKind::Text(spec) => {
+            let lane = spec.lane as usize % text::TEXT_SLOTS;
+            if spec.text.trim().is_empty() {
+                return;
+            }
+            match text::rasterize(&spec.text, 96.0) {
+                Some(bmp) => {
+                    let aspect = bmp.width as f32 / bmp.height.max(1) as f32;
+                    r.set_text_bitmap(lane, &bmp);
+                    text_slots[lane] = Some(text::TextState {
+                        spec: spec.clone(),
+                        aspect,
+                        born: now_t,
+                        out_at: None,
+                    });
+                }
+                None => {
+                    lock(&shared.timeline).message =
+                        "text: no usable font found — drop a .ttf in fonts/".into();
+                }
+            }
+        }
+        CueKind::TextOff(lane) => {
+            let lane = *lane as usize % text::TEXT_SLOTS;
+            if let Some(ts) = text_slots[lane].as_mut() {
+                ts.out_at.get_or_insert(now_t);
+            }
+        }
     }
-    shared.dirty.store(true, Ordering::Relaxed);
+    if persist {
+        shared.dirty.store(true, Ordering::Relaxed);
+    }
+}
+
+/// Apply the timeline's implied state at the playhead (see
+/// [`Timeline::state_at`]) — called when playback starts and after every
+/// seek, so skipping around lands on the right scene/dancer/fx state and a
+/// fresh song starts with everything off until a cue turns it on.
+fn apply_playhead(
+    st: &timeline::PlayheadState,
+    r: &mut Renderer,
+    dir: &mut Director,
+    dancer: &mut DancerLayer,
+    text_slots: &mut [Option<text::TextState>; text::TEXT_SLOTS],
+    now_t: f32,
+    blackout: &mut bool,
+    shared: &Shared,
+    usable: &[usize],
+    pre_show: &mut Option<ShowBaseline>,
+) {
+    // First borrow of the rig: remember what the live show looked like so the
+    // show's state never leaks past its end (see `end_show`).
+    if pre_show.is_none() {
+        *pre_show = Some(ShowBaseline::take(shared, dir, dancer, *blackout));
+    }
+    {
+        let mut s = lock(&shared.settings);
+        s.mode = st.mode;
+        s.dancer_enabled = st.dancer;
+        dancer.showing = st.dancer;
+        if let Some(l) = st.look {
+            s.dancer_style = l;
+        }
+        if st.look_steps != 0 {
+            let n = dancer::STYLES.len() as i64;
+            let base = s.dancer_style.unwrap_or(dancer.style) as i64;
+            s.dancer_style = Some((base + st.look_steps).rem_euclid(n) as usize);
+        }
+        s.dancer_trails = st.trails;
+        s.canon = st.canon;
+        s.fx = st.fx;
+        s.fx_auto = st.fx_auto;
+        *blackout = st.blackout;
+    }
+
+    // Scene: the last absolute cue wins; before any scene cue the baseline
+    // is `void` (black) so a song starts with scenes "off". Net next/prev
+    // steps then apply relative to whatever that leaves showing.
+    let want = st.scene.as_deref().unwrap_or("void");
+    if let Some(i) = r.scene_names().iter().position(|n| n == want) {
+        if i != dir.scene {
+            dir.cut_to(i);
+        }
+    }
+    if st.scene_steps != 0 && !usable.is_empty() {
+        let n = usable.len() as i64;
+        let cur = usable.iter().position(|&x| x == dir.scene).unwrap_or(0) as i64;
+        let target = usable[(cur + st.scene_steps).rem_euclid(n) as usize];
+        if target != dir.scene {
+            dir.cut_to(target);
+        }
+    }
+
+    // Routine: request only on change — loading a PNG sequence isn't cheap.
+    if let Some(name) = &st.clip {
+        if let Some(i) = shared.clip_names.iter().position(|n| n == name) {
+            let n = shared.clip_names.len().max(1) as i64;
+            let idx = ((i as i64 + st.clip_steps).rem_euclid(n)) as usize;
+            if dancer.current() != Some(idx) {
+                dancer.request(idx);
+            }
+        }
+    }
+
+    // Text lanes: diff against what's live so seeks don't re-rasterize a
+    // card that's already up (but a faded-out one gets revived).
+    for lane in 0..text::TEXT_SLOTS {
+        let want = st.text[lane].as_ref();
+        let have = text_slots[lane]
+            .as_ref()
+            .filter(|t| t.out_at.is_none())
+            .map(|t| &t.spec);
+        let kind = match (want, have) {
+            (Some(w), Some(h)) if w == h => continue,
+            (Some(w), _) => CueKind::Text(w.clone()),
+            (None, Some(_)) => CueKind::TextOff(lane as u8),
+            (None, None) => continue,
+        };
+        fire_cue(
+            &kind, r, dir, dancer, text_slots, now_t, blackout, shared, usable, false,
+        );
+    }
 }
 
 /// The whole show, free-running on its own thread at vsync pace.
@@ -205,22 +425,36 @@ fn render_loop(
     let mut fx_current = lock(&shared.settings).fx;
 
     // --- Timeline state ---------------------------------------------------
-    // Decodes run on a throwaway thread; results land in `song_rx` and the
-    // engine/player swap happens here (cpal streams aren't Send anyway).
-    let (song_tx, song_rx) = mpsc::channel::<Result<song::Song, String>>();
-    let mut song: Option<Arc<song::Song>> = None;
-    let mut player: Option<song::SongPlayer> = None;
-    // True while a decode belongs to a loaded .json (keep its cues) rather
-    // than a bare audio file (start a fresh doc from it).
-    let mut loading_for_doc = false;
+    // Decodes run on throwaway threads; results land in `song_rx` tagged with
+    // their path and the player swap happens here (cpal streams aren't Send).
+    let (song_tx, song_rx) = mpsc::channel::<(std::path::PathBuf, Result<song::Song, String>)>();
+    // Decoded audio, keyed by file path — clips reference songs by path.
+    let mut songs: std::collections::HashMap<std::path::PathBuf, Arc<song::Song>> =
+        Default::default();
+    let mut player: Option<song::ShowPlayer> = None;
+    // Decode jobs in flight, and which of them are "append as a new clip"
+    // (vs filling a placeholder clip from a loaded .json).
+    let mut pending_decodes = 0usize;
+    let mut pending_adds: Vec<std::path::PathBuf> = Vec::new();
     let mut matcher = Matcher::new();
-    // Highest beat already dispatched — cues are one-shot events.
+    // Live text overlays — one per text lane; `TextOff` starts the fade-out.
+    let mut text_slots: [Option<text::TextState>; text::TEXT_SLOTS] = [None, None];
+    // Live rig as it was before a timeline borrowed it — restored on show end.
+    let mut pre_show: Option<ShowBaseline> = None;
+    // Global seconds up to which cues were already dispatched — one-shot.
     let mut fired_past = f64::MIN;
     let mut was_locked = false;
-    let spawn_load = |tx: &mpsc::Sender<Result<song::Song, String>>, path: std::path::PathBuf| {
+    let spawn_load = |tx: &mpsc::Sender<(std::path::PathBuf, Result<song::Song, String>)>,
+                      path: std::path::PathBuf| {
         let tx = tx.clone();
         std::thread::spawn(move || {
-            let _ = tx.send(song::load(&path).map_err(|e| format!("{e:#}")));
+            // A panicking decode must still reply — otherwise pending_decodes
+            // never drains and the editor's busy flag wedges on.
+            let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                song::load(&path).map_err(|e| format!("{e:#}"))
+            }))
+            .unwrap_or_else(|_| Err("decoder crashed".into()));
+            let _ = tx.send((path, res));
         });
     };
 
@@ -240,20 +474,53 @@ fn render_loop(
                     dancer.request(i);
                     dancer.showing = true;
                 }
-                Msg::Act(a) => apply_render(&mut r, &mut dir, &mut dancer, &mut blackout, &audio, &shared, a),
+                Msg::Act(a) => apply_render(
+                    &mut r,
+                    &mut dir,
+                    &mut dancer,
+                    &mut blackout,
+                    &audio,
+                    &shared,
+                    a,
+                ),
                 Msg::LoadSong(path) => {
-                    let mut tl = lock(&shared.timeline);
-                    if !tl.busy {
+                    eprintln!("Timeline: load song {}", path.display());
+                    // Already decoded? Append the clip straight away.
+                    if let Some(sg) = songs.get(&path) {
+                        let mut tl = lock(&shared.timeline);
+                        if tl.doc.is_none() {
+                            tl.doc = Some(timeline::Timeline::default());
+                        }
+                        tl.doc.as_mut().unwrap().add_song(sg);
+                        tl.dirty = true;
+                        tl.message = format!("added {}", sg.name);
+                    } else if !pending_adds.contains(&path) {
+                        pending_adds.push(path.clone());
+                        pending_decodes += 1;
+                        let mut tl = lock(&shared.timeline);
                         tl.busy = true;
                         tl.message = format!("loading {}…", path.display());
-                        loading_for_doc = false;
+                        drop(tl);
                         spawn_load(&song_tx, path);
                     }
                 }
                 Msg::LoadTimeline(path) => match timeline::Timeline::load(&path) {
                     Ok(doc) => {
-                        let song_path = doc.song.clone();
                         let name = doc.name.clone();
+                        // Decode every clip's audio that isn't already loaded.
+                        let missing: Vec<std::path::PathBuf> = doc
+                            .clips
+                            .iter()
+                            .map(|c| c.song.clone())
+                            .filter(|p| !songs.contains_key(p) && p.exists())
+                            .collect();
+                        let missing_n = missing.len();
+                        let lacked: Vec<String> = doc
+                            .clips
+                            .iter()
+                            .filter(|c| !songs.contains_key(&c.song) && !c.song.exists())
+                            .map(|c| c.name.clone())
+                            .collect();
                         {
                             let mut tl = lock(&shared.timeline);
                             tl.doc = Some(doc);
@@ -261,29 +528,81 @@ fn render_loop(
                             tl.pos_s = 0.0;
                             tl.cursor_s = 0.0;
                             tl.dirty = false;
-                            tl.message = format!("timeline {name}");
+                            tl.busy = missing_n > 0;
+                            tl.message = if lacked.is_empty() {
+                                format!("timeline {name}")
+                            } else {
+                                format!("timeline {name} — missing audio: {}", lacked.join(", "))
+                            };
                         }
                         matcher.reset();
                         was_locked = false;
                         fired_past = f64::MIN;
-                        stop_song(&mut player, &mut audio, &audio_cfg, &shared);
-                        if song_path.exists() {
-                            let mut tl = lock(&shared.timeline);
-                            if !tl.busy {
-                                tl.busy = true;
-                                loading_for_doc = true;
-                                spawn_load(&song_tx, song_path);
-                            }
-                        } else {
-                            lock(&shared.timeline).message =
-                                "song file missing — strip + live match only".into();
+                        end_show(
+                            &mut player,
+                            &mut audio,
+                            &audio_cfg,
+                            &shared,
+                            &mut pre_show,
+                            &mut dir,
+                            &mut dancer,
+                            &mut text_slots,
+                            &mut blackout,
+                            started,
+                        );
+                        pending_decodes += missing_n;
+                        for p in missing {
+                            spawn_load(&song_tx, p);
                         }
                     }
-                    Err(e) => lock(&shared.timeline).message = format!("{e:#}"),
+                    Err(e) => lock(&shared.timeline).message = format!("open failed: {e:#}"),
                 },
+                Msg::FireCue(kind) => {
+                    let usable_now = {
+                        let s = lock(&shared.settings);
+                        usable_scenes(&r, &s)
+                    };
+                    fire_cue(
+                        &kind,
+                        &mut r,
+                        &mut dir,
+                        &mut dancer,
+                        &mut text_slots,
+                        (Instant::now() - started).as_secs_f32(),
+                        &mut blackout,
+                        &shared,
+                        &usable_now,
+                        true,
+                    );
+                }
+                Msg::FadeText => {
+                    let now_t = (Instant::now() - started).as_secs_f32();
+                    for ts in text_slots.iter_mut().flatten() {
+                        ts.out_at.get_or_insert(now_t);
+                    }
+                }
+                Msg::Thumb(key) => {
+                    // Editor keys thumbs "scene:<name>"; render by bare name.
+                    let name = key.strip_prefix("scene:").unwrap_or(&key);
+                    match r.scene_names().iter().position(|n| *n == name) {
+                        Some(i) => match r.thumbnail(i, 128, 72) {
+                            Some(px) => {
+                                lock(&shared.thumbs).push((key.clone(), 128, 72, px));
+                            }
+                            None => eprintln!("Thumb: render failed for {name}"),
+                        },
+                        None => eprintln!("Thumb: no scene named {name}"),
+                    }
+                }
                 Msg::Transport(ctl) => {
-                    eprintln!("Timeline: transport {ctl:?} (mode {:?})", lock(&shared.timeline).mode);
+                    eprintln!(
+                        "Timeline: transport {ctl:?} (mode {:?})",
+                        lock(&shared.timeline).mode
+                    );
                     let mut tl = lock(&shared.timeline);
+                    // State the playhead implies after this transport op —
+                    // applied once the timeline lock is released below.
+                    let mut apply_st = None;
                     match ctl {
                         SongCtl::Toggle => match tl.mode {
                             PlayMode::Playing => {
@@ -299,18 +618,27 @@ fn render_loop(
                                 tl.mode = PlayMode::Playing;
                             }
                             PlayMode::Stopped => {
-                                if let Some(sg) = &song {
-                                    match AudioEngine::start_song(sg.clone(), Some(shared.env.clone()))
-                                    {
+                                let regions = tl
+                                    .doc
+                                    .as_ref()
+                                    .map(|d| d.regions(&songs))
+                                    .unwrap_or_default();
+                                if regions.is_empty() {
+                                    tl.message = if tl.busy {
+                                        "still decoding…".into()
+                                    } else {
+                                        "no decoded songs on the timeline".into()
+                                    };
+                                } else {
+                                    match AudioEngine::start_show(
+                                        regions,
+                                        tl.cursor_s,
+                                        Some(shared.env.clone()),
+                                    ) {
                                         Ok((eng, pl)) => {
-                                            if tl.cursor_s > 0.05 {
-                                                pl.seek_s(tl.cursor_s);
-                                                fired_past = tl
-                                                    .doc
-                                                    .as_ref()
-                                                    .map(|d| d.beat_at(tl.cursor_s))
-                                                    .unwrap_or(f64::MIN);
-                                            }
+                                            fired_past = tl.cursor_s;
+                                            apply_st =
+                                                tl.doc.as_ref().map(|d| d.state_at(tl.cursor_s));
                                             audio = eng;
                                             player = Some(pl);
                                             tl.mode = PlayMode::Playing;
@@ -322,33 +650,63 @@ fn render_loop(
                                             eprintln!("Timeline: {e:#}");
                                         }
                                     }
-                                } else {
-                                    tl.message = "no song loaded".into();
                                 }
                             }
                         },
                         SongCtl::Stop => {
                             tl.mode = PlayMode::Stopped;
                             tl.pos_s = 0.0;
+                            tl.live_locked = false;
                             drop(tl);
-                            stop_song(&mut player, &mut audio, &audio_cfg, &shared);
+                            end_show(
+                                &mut player,
+                                &mut audio,
+                                &audio_cfg,
+                                &shared,
+                                &mut pre_show,
+                                &mut dir,
+                                &mut dancer,
+                                &mut text_slots,
+                                &mut blackout,
+                                started,
+                            );
+                            // A stale lock must not re-apply show state over
+                            // the rig we just handed back.
+                            matcher.reset();
+                            was_locked = false;
                             fired_past = f64::MIN;
                             continue;
                         }
                         SongCtl::Seek(t) => {
                             if let Some(p) = &player {
-                                p.seek_s(t);
+                                p.seek(t);
                                 tl.pos_s = t;
-                                fired_past = tl
-                                    .doc
-                                    .as_ref()
-                                    .map(|d| d.beat_at(t))
-                                    .unwrap_or(f64::MIN);
+                                fired_past = t;
                             } else {
                                 tl.cursor_s = t.max(0.0);
                                 tl.pos_s = tl.cursor_s;
                             }
+                            apply_st = tl.doc.as_ref().map(|d| d.state_at(t));
                         }
+                    }
+                    drop(tl);
+                    if let Some(st) = apply_st {
+                        let usable_now = {
+                            let s = lock(&shared.settings);
+                            usable_scenes(&r, &s)
+                        };
+                        apply_playhead(
+                            &st,
+                            &mut r,
+                            &mut dir,
+                            &mut dancer,
+                            &mut text_slots,
+                            (Instant::now() - started).as_secs_f32(),
+                            &mut blackout,
+                            &shared,
+                            &usable_now,
+                            &mut pre_show,
+                        );
                     }
                 }
             }
@@ -367,42 +725,51 @@ fn render_loop(
         // Lock order note: the panel draws under the settings lock and takes
         // the timeline lock inside it, so here the timeline lock must never
         // be held while locking settings — collect, drop, then act.
-        while let Ok(res) = song_rx.try_recv() {
+        while let Ok((path, res)) = song_rx.try_recv() {
+            pending_decodes = pending_decodes.saturating_sub(1);
             match res {
                 Ok(s2) => {
-                    let song_arc = Arc::new(s2);
-                    {
-                        let mut tl = lock(&shared.timeline);
-                        tl.busy = false;
-                        if loading_for_doc {
-                            tl.message = format!("song ready: {}", song_arc.name);
-                        } else {
-                            println!(
-                                "Song: {} — {:.1} BPM, {:.1}s, first beat {:.2}s",
-                                song_arc.name, song_arc.bpm, song_arc.duration,
-                                song_arc.first_beat
-                            );
-                            tl.doc = Some(timeline::Timeline::from_song(&song_arc));
-                            tl.mode = PlayMode::Stopped;
-                            tl.pos_s = 0.0;
-                            tl.cursor_s = 0.0;
-                            tl.dirty = false;
-                            tl.message = format!(
-                                "{} — {:.0} BPM, {:.0} bars",
-                                song_arc.name,
-                                song_arc.bpm,
-                                song_arc.bpm * song_arc.duration / 240.0
-                            );
-                            matcher.reset();
-                            was_locked = false;
-                            fired_past = f64::MIN;
+                    let sg = Arc::new(s2);
+                    songs.insert(path.clone(), sg.clone());
+                    println!(
+                        "Song: {} — {:.1} BPM, {:.1}s, first beat {:.2}s",
+                        sg.name, sg.bpm, sg.duration, sg.first_beat
+                    );
+                    let mut tl = lock(&shared.timeline);
+                    tl.busy = pending_decodes > 0;
+                    if pending_adds.iter().any(|p| p == &path) {
+                        // A bare audio file — append it as a clip region.
+                        pending_adds.retain(|p| p != &path);
+                        let doc = tl.doc.get_or_insert_with(timeline::Timeline::default);
+                        doc.add_song(&sg);
+                        tl.dirty = true;
+                        tl.message = format!(
+                            "{} — {:.0} BPM, {:.0} bars",
+                            sg.name,
+                            sg.bpm,
+                            sg.bpm * sg.duration / 240.0
+                        );
+                    } else if let Some(doc) = tl.doc.as_mut() {
+                        // Fill placeholder clips loaded from a .json — keep
+                        // the saved offset, take the fresh analysis.
+                        let mut filled = false;
+                        for c in doc
+                            .clips
+                            .iter_mut()
+                            .filter(|c| c.song == path && c.overview.is_empty())
+                        {
+                            *c = timeline::Clip::from_song(&sg, c.offset_s);
+                            filled = true;
+                        }
+                        if filled {
+                            tl.message = format!("decoded {}", sg.name);
                         }
                     }
-                    song = Some(song_arc);
                 }
                 Err(e) => {
+                    pending_adds.retain(|p| p != &path);
                     let mut tl = lock(&shared.timeline);
-                    tl.busy = false;
+                    tl.busy = pending_decodes > 0;
                     tl.message = format!("load failed: {e}");
                 }
             }
@@ -414,8 +781,22 @@ fn render_loop(
                 let mut tl = lock(&shared.timeline);
                 tl.mode = PlayMode::Stopped;
                 tl.pos_s = 0.0;
+                tl.live_locked = false;
             }
-            stop_song(&mut player, &mut audio, &audio_cfg, &shared);
+            end_show(
+                &mut player,
+                &mut audio,
+                &audio_cfg,
+                &shared,
+                &mut pre_show,
+                &mut dir,
+                &mut dancer,
+                &mut text_slots,
+                &mut blackout,
+                started,
+            );
+            matcher.reset();
+            was_locked = false;
             fired_past = f64::MIN;
         }
 
@@ -426,16 +807,21 @@ fn render_loop(
             let tl = &mut *guard;
             let mut due: Vec<CueKind> = Vec::new();
             let mut new_fired = fired_past;
+            // A fresh live-lock lands mid-song — apply the playhead state
+            // (like a seek) so cues already behind it still took effect.
+            let mut locked_state = None;
+            let mut lost_lock = false;
             if let Some(doc) = tl.doc.as_ref() {
-                let pos_b: Option<f64> = match tl.mode {
+                // The playhead in global timeline seconds.
+                let pos_t: Option<f64> = match tl.mode {
                     PlayMode::Playing => {
                         let t = player.as_ref().map(|p| p.position_s()).unwrap_or(0.0);
                         tl.pos_s = t;
-                        Some(doc.beat_at(t))
+                        Some(t)
                     }
-                    _ if tl.autosync => {
+                    PlayMode::Stopped if tl.autosync => {
                         // Follow-live: correlate the room's onset envelope
-                        // against the song's (2×/sec), coast between evals.
+                        // against every clip's (2×/sec), coast between evals.
                         let live_pos = if matcher.due() {
                             let (env, fps) = {
                                 let e = lock(&shared.env);
@@ -451,35 +837,81 @@ fn render_loop(
                         };
                         tl.live_locked = matcher.locked;
                         tl.live_score = matcher.score;
+                        // Losing the lock ends the borrowed state — a live
+                        // lock still counts as "the show owns the rig".
+                        lost_lock = was_locked && !matcher.locked;
                         if matcher.locked && !was_locked {
-                            // Fresh lock: don't dump the backlog mid-bar.
-                            new_fired = live_pos.map(|p| doc.beat_at(p)).unwrap_or(new_fired);
+                            // Fresh lock: don't dump the backlog mid-bar —
+                            // apply the implied state at the lock point.
+                            if let Some(p) = live_pos {
+                                new_fired = p;
+                                locked_state = Some(doc.state_at(p));
+                            }
                         }
                         was_locked = matcher.locked;
                         if let Some(p) = live_pos {
                             tl.pos_s = p;
-                            Some(doc.beat_at(p))
+                            Some(p)
                         } else {
                             None
                         }
                     }
                     _ => None,
                 };
-                if let Some(b) = pos_b {
+                if let Some(t) = pos_t {
                     // Big jumps (lock acquire, seek) skip rather than dump.
-                    if new_fired == f64::MIN || (b - new_fired).abs() > 8.0 {
-                        new_fired = b;
+                    if new_fired == f64::MIN || (t - new_fired).abs() > 4.0 {
+                        new_fired = t;
                     }
-                    for c in doc.cues_between(new_fired, b) {
-                        due.push(c.kind.clone());
+                    for k in doc.edges_between_s(new_fired, t) {
+                        due.push(k);
                     }
-                    new_fired = b;
+                    new_fired = t;
                 }
             }
             drop(guard);
             fired_past = new_fired;
+            if let Some(st) = locked_state {
+                apply_playhead(
+                    &st,
+                    &mut r,
+                    &mut dir,
+                    &mut dancer,
+                    &mut text_slots,
+                    (now - started).as_secs_f32(),
+                    &mut blackout,
+                    &shared,
+                    &usable,
+                    &mut pre_show,
+                );
+            }
             for kind in &due {
-                fire_cue(kind, &mut r, &mut dir, &mut dancer, &mut blackout, &shared, &usable);
+                fire_cue(
+                    kind,
+                    &mut r,
+                    &mut dir,
+                    &mut dancer,
+                    &mut text_slots,
+                    (now - started).as_secs_f32(),
+                    &mut blackout,
+                    &shared,
+                    &usable,
+                    false,
+                );
+            }
+            if lost_lock {
+                end_show(
+                    &mut player,
+                    &mut audio,
+                    &audio_cfg,
+                    &shared,
+                    &mut pre_show,
+                    &mut dir,
+                    &mut dancer,
+                    &mut text_slots,
+                    &mut blackout,
+                    started,
+                );
             }
         }
 
@@ -508,9 +940,23 @@ fn render_loop(
         }
         if (ev.cut || ev.phrase) && s.mode != Mode::Manual && dancer.enabled {
             let intensity = dir.intensity;
-            dancer.on_cut(intensity, || dir.rand(), s.dancer_style, s.canon, &s.disabled_clips);
+            dancer.on_cut(
+                intensity,
+                || dir.rand(),
+                s.dancer_style,
+                s.canon,
+                &s.disabled_clips,
+            );
         }
-        let dancer_u = dancer.uniforms(pos, f.downbeat, f.bpm, dt, s.dancer_size, &s.disabled_clips);
+        let dancer_u = dancer.uniforms(
+            pos,
+            f.downbeat,
+            f.bpm,
+            dt,
+            s.dancer_size,
+            s.dancer_trails,
+            &s.disabled_clips,
+        );
         if ev.cut && s.fx_auto {
             let seed = dir.rand();
             fx_current = Fx::random(seed, fx_current);
@@ -558,7 +1004,43 @@ fn render_loop(
             spectrum,
             waveform,
         };
-        if let Err(e) = r.render(dir.scene, &u, dancer_u.as_ref()) {
+        // Text overlays: fade in over 0.35 s, out over 0.5 s; a faded-out
+        // slot drops off (its texture stays bound but the shader skips it).
+        let now_t = u.time;
+        let mut text_u = text::TextUniforms::default();
+        let mut any_text = false;
+        for (slot, st) in text_slots.iter_mut().enumerate() {
+            let Some(ts) = st else { continue };
+            let mut opacity = ((now_t - ts.born) / 0.35).min(1.0);
+            if let Some(o) = ts.out_at {
+                opacity *= (1.0 - (now_t - o) / 0.5).max(0.0);
+                if opacity <= 0.0 {
+                    *st = None;
+                    continue;
+                }
+            }
+            // 11% of screen height; squeeze wider text to fit the screen.
+            let screen_asp = w as f32 / h.max(1) as f32;
+            let mut half_h = 0.11f32;
+            let mut half_w = half_h * ts.aspect;
+            if half_w > screen_asp * 0.92 {
+                half_w = screen_asp * 0.92;
+                half_h = half_w / ts.aspect;
+            }
+            text_u.slots[slot] = text::TextSlotU {
+                quad: [0.0, ts.spec.pos.y(), half_w, half_h],
+                aspect: ts.aspect,
+                style: ts.spec.style.index(),
+                opacity,
+                born: ts.born,
+                life: 0.0,
+                hue: (slot as f32) * 0.37 + ts.spec.style.index() * 0.11,
+                _pad: [0.0; 2],
+            };
+            any_text = true;
+        }
+        let text_arg = any_text.then_some(&text_u);
+        if let Err(e) = r.render(dir.scene, &u, dancer_u.as_ref(), text_arg) {
             eprintln!("render error: {e}");
         }
 
@@ -648,6 +1130,7 @@ fn apply_render(
         Action::Fullscreen
         | Action::LeaveFullscreen
         | Action::TogglePanel
+        | Action::ToggleEditor
         | Action::TimelinePlay
         | Action::TimelineRecord => {}
     }
@@ -661,6 +1144,8 @@ struct App {
     /// GPU handles for the panel, cloned out of the renderer before it moves.
     gpu: Option<Gpu>,
     panel: Option<Panel>,
+    /// Dedicated timeline-editor window (separate from the small panel).
+    editor: Option<editor::Editor>,
     /// Moved into the render thread once the window exists.
     director: Option<Director>,
     dancer: Option<DancerLayer>,
@@ -686,6 +1171,7 @@ struct App {
     render_scale: Option<f32>,
     vsync: bool,
     last_panel_draw: Instant,
+    last_editor_draw: Instant,
     last_title: Instant,
     /// Debounce for the panel toggle — autorepeat and focus churn can both
     /// re-fire it within the same press.
@@ -718,11 +1204,22 @@ impl App {
             return;
         }
         let Some(doc) = tl.doc.as_mut() else { return };
-        let mut beat = doc.beat_at(tl.pos_s).max(0.0);
+        // The cue pins to whichever clip the playhead is inside, on that
+        // clip's beat grid — actions in a gap between songs aren't recorded.
+        let pos = tl.pos_s;
+        let Some((ci, clip)) = doc.clip_at(pos) else {
+            return;
+        };
+        let mut beat = clip.beat_at(pos - clip.offset_s).max(0.0);
         if tl.snap {
             beat = (beat * 4.0).round() / 4.0;
         }
-        doc.cues.push(Cue { beat, kind });
+        doc.cues.push(Cue {
+            clip: ci,
+            beat,
+            beats: 4.0,
+            kind,
+        });
         doc.sort_cues();
         tl.dirty = true;
     }
@@ -779,6 +1276,7 @@ impl App {
                     }
                 }
             }
+            Action::ToggleEditor => self.open_editor(event_loop),
             Action::TimelinePlay => self.send(Msg::Transport(SongCtl::Toggle)),
             Action::TimelineRecord => {
                 if let Some(sh) = &self.shared {
@@ -805,6 +1303,21 @@ impl App {
         }
     }
 
+    /// Show the timeline editor, creating it on first use.
+    fn open_editor(&mut self, event_loop: &ActiveEventLoop) {
+        if let Some(e) = &self.editor {
+            e.window.set_visible(true);
+            e.window.request_redraw();
+            e.window.focus_window();
+            return;
+        }
+        let Some(gpu) = self.gpu.clone() else { return };
+        match editor::Editor::new(event_loop, gpu, self.icon.clone(), self.window.as_deref()) {
+            Ok(e) => self.editor = Some(e),
+            Err(e) => eprintln!("timeline editor failed to open: {e:#}"),
+        }
+    }
+
     fn key(&mut self, event_loop: &ActiveEventLoop, key: &Key) {
         let Some(name) = key_name(key) else { return };
         // Rebinding: the next key press becomes the action's key (Esc cancels).
@@ -823,14 +1336,19 @@ impl App {
             }
             return;
         }
-        let action = self.shared.as_ref().and_then(|sh| lock(&sh.settings).action_for(&name));
+        let action = self
+            .shared
+            .as_ref()
+            .and_then(|sh| lock(&sh.settings).action_for(&name));
         if let Some(action) = action {
             self.apply(action, event_loop);
         }
     }
 
     fn draw_panel(&mut self, event_loop: &ActiveEventLoop) {
-        let Some(shared) = self.shared.clone() else { return };
+        let Some(shared) = self.shared.clone() else {
+            return;
+        };
         let mut status = lock(&shared.status).clone();
         if let Some(w) = &self.window {
             status.fullscreen = w.fullscreen().is_some();
@@ -844,7 +1362,13 @@ impl App {
             if p.window.is_visible() == Some(false) {
                 return;
             }
-            p.run_ui(&mut s, &status, &shared.scene_names, &shared.clip_names, &shared.timeline)
+            p.run_ui(
+                &mut s,
+                &status,
+                &shared.scene_names,
+                &shared.clip_names,
+                &shared.timeline,
+            )
         };
         if let Some(p) = self.panel.as_mut() {
             p.present(frame);
@@ -853,37 +1377,78 @@ impl App {
             self.mark_dirty();
         }
         for c in commands {
-            match c {
-                UiCommand::Do(a) => self.apply(a, event_loop),
-                UiCommand::GoToScene(i) => {
-                    if let Some(name) = shared.scene_names.get(i) {
-                        self.record_cue(CueKind::Scene(name.clone()));
-                    }
-                    self.send(Msg::GoToScene(i));
+            self.ui_command(c, &shared, event_loop);
+        }
+    }
+
+    /// A command from the panel or the editor window.
+    fn ui_command(&mut self, c: UiCommand, shared: &Shared, event_loop: &ActiveEventLoop) {
+        match c {
+            UiCommand::Do(a) => self.apply(a, event_loop),
+            UiCommand::GoToScene(i) => {
+                if let Some(name) = shared.scene_names.get(i) {
+                    self.record_cue(CueKind::Scene(name.clone()));
                 }
-                UiCommand::ShowClip(i) => {
-                    if let Some(name) = shared.clip_names.get(i) {
-                        self.record_cue(CueKind::Clip(name.clone()));
-                    }
-                    self.send(Msg::ShowClip(i));
+                self.send(Msg::GoToScene(i));
+            }
+            UiCommand::ShowClip(i) => {
+                if let Some(name) = shared.clip_names.get(i) {
+                    self.record_cue(CueKind::Clip(name.clone()));
                 }
-                UiCommand::LoadSong(p) => self.send(Msg::LoadSong(p)),
-                UiCommand::LoadTimeline(p) => self.send(Msg::LoadTimeline(p)),
-                UiCommand::Song(ctl) => self.send(Msg::Transport(ctl)),
-                UiCommand::SaveTimeline => {
-                    let mut tl = lock(&shared.timeline);
-                    if let Some(doc) = tl.doc.as_mut() {
-                        doc.sort_cues();
-                        tl.message = match doc.save(&config::timelines_dir()) {
-                            Ok(f) => {
-                                tl.dirty = false;
-                                format!("saved {}", f.display())
-                            }
-                            Err(e) => format!("save failed: {e:#}"),
-                        };
-                    }
+                self.send(Msg::ShowClip(i));
+            }
+            UiCommand::AddSong(p) => self.send(Msg::LoadSong(p)),
+            UiCommand::LoadTimeline(p) => self.send(Msg::LoadTimeline(p)),
+            UiCommand::OpenEditor => self.open_editor(event_loop),
+            // A preview that's also a live action gets recorded like a hotkey.
+            UiCommand::FireCue(kind) => {
+                self.record_cue(kind.clone());
+                self.send(Msg::FireCue(kind));
+            }
+            UiCommand::Song(ctl) => self.send(Msg::Transport(ctl)),
+            UiCommand::Thumb(name) => self.send(Msg::Thumb(name)),
+            UiCommand::SaveTimeline => {
+                let mut tl = lock(&shared.timeline);
+                if let Some(doc) = tl.doc.as_mut() {
+                    doc.sort_cues();
+                    tl.message = match doc.save(&config::timelines_dir()) {
+                        Ok(f) => {
+                            tl.dirty = false;
+                            format!("saved {}", f.display())
+                        }
+                        Err(e) => format!("save failed: {e:#}"),
+                    };
                 }
             }
+        }
+    }
+
+    /// Draw one editor frame — the timeline doc is read under its own lock;
+    /// the GPU present happens after it drops, like the panel.
+    fn draw_editor(&mut self, event_loop: &ActiveEventLoop) {
+        let Some(shared) = self.shared.clone() else {
+            return;
+        };
+        let new_thumbs = std::mem::take(&mut *lock(&shared.thumbs));
+        let (commands, frame) = {
+            let Some(e) = self.editor.as_mut() else {
+                return;
+            };
+            if e.window.is_visible() == Some(false) {
+                return;
+            }
+            e.run_ui(
+                &shared.scene_names,
+                &shared.clip_names,
+                &shared.timeline,
+                &new_thumbs,
+            )
+        };
+        if let Some(e) = self.editor.as_mut() {
+            e.present(frame);
+        }
+        for c in commands {
+            self.ui_command(c, &shared, event_loop);
         }
     }
 }
@@ -942,7 +1507,12 @@ impl ApplicationHandler for App {
             dirty: AtomicBool::new(false),
             quit: AtomicBool::new(false),
             scene_names: r.scene_names(),
-            clip_names: self.dancer.as_ref().map(|d| d.clip_names()).unwrap_or_default(),
+            clip_names: self
+                .dancer
+                .as_ref()
+                .map(|d| d.clip_names())
+                .unwrap_or_default(),
+            thumbs: Mutex::new(Vec::new()),
         });
         self.shared = Some(shared.clone());
         let (tx, rx) = mpsc::channel();
@@ -970,7 +1540,14 @@ impl ApplicationHandler for App {
 
         self.window = Some(window);
         if let Some(p) = self.start_song.take() {
-            self.send(Msg::LoadSong(p));
+            if p.extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| e.eq_ignore_ascii_case("json"))
+            {
+                self.send(Msg::LoadTimeline(p));
+            } else {
+                self.send(Msg::LoadSong(p));
+            }
         }
         if self.settings.show_panel && !self.no_panel {
             self.open_panel(event_loop);
@@ -978,6 +1555,72 @@ impl ApplicationHandler for App {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        let is_editor = self.editor.as_ref().is_some_and(|e| e.window.id() == id);
+        if is_editor {
+            match &event {
+                WindowEvent::CloseRequested => {
+                    if let Some(e) = &self.editor {
+                        e.window.set_visible(false);
+                    }
+                    if let Some(w) = &self.window {
+                        w.focus_window();
+                    }
+                    if let Some(sh) = &self.shared {
+                        // Exiting the editor ends the show. A hidden player
+                        // would keep the audio engine swapped (features
+                        // frozen → every scene looks stuck), borrowed show
+                        // state would stay latched, and preview text never
+                        // fades on its own. Stop is cheap even while Stopped —
+                        // it also restores state a plain scrub borrowed.
+                        lock(&sh.timeline).autosync = false;
+                        self.send(Msg::Transport(SongCtl::Stop));
+                    }
+                    self.send(Msg::FadeText);
+                    return;
+                }
+                WindowEvent::RedrawRequested => {
+                    self.draw_editor(event_loop);
+                    return;
+                }
+                WindowEvent::DroppedFile(path) => {
+                    if song::is_audio_file(path) {
+                        self.send(Msg::LoadSong(path.clone()));
+                    } else if path.extension().and_then(|e| e.to_str()) == Some("json") {
+                        self.send(Msg::LoadTimeline(path.clone()));
+                    }
+                }
+                WindowEvent::KeyboardInput { event, .. } => {
+                    if event.state == ElementState::Pressed && !event.repeat {
+                        let typing = self.editor.as_ref().is_some_and(|e| e.wants_keyboard());
+                        // Space counts as text while a field is focused —
+                        // otherwise it's the editor's play/pause.
+                        let text_like = matches!(event.logical_key, Key::Character(_))
+                            || matches!(
+                                event.logical_key,
+                                Key::Named(winit::keyboard::NamedKey::Space)
+                            );
+                        if typing && text_like {
+                            // fall through to egui
+                        } else if matches!(
+                            event.logical_key,
+                            Key::Named(winit::keyboard::NamedKey::Space)
+                        ) {
+                            self.send(Msg::Transport(SongCtl::Toggle));
+                            return;
+                        } else {
+                            let key = event.logical_key.clone();
+                            self.key(event_loop, &key);
+                            return;
+                        }
+                    }
+                }
+                _ => {}
+            }
+            if let Some(e) = self.editor.as_mut() {
+                e.on_event(&event);
+            }
+            return;
+        }
         let is_panel = self.panel.as_ref().is_some_and(|p| p.window.id() == id);
         if is_panel {
             match &event {
@@ -1008,7 +1651,12 @@ impl ApplicationHandler for App {
                         // Only text-producing keys belong to a focused text
                         // field; function/arrow keys stay global hotkeys, so
                         // F1 toggles even while typing in the scene filter.
-                        let text_like = matches!(event.logical_key, Key::Character(_));
+                        // Space counts as text too — names need it.
+                        let text_like = matches!(event.logical_key, Key::Character(_))
+                            || matches!(
+                                event.logical_key,
+                                Key::Named(winit::keyboard::NamedKey::Space)
+                            );
                         if rebinding || !(typing && text_like) {
                             let key = event.logical_key.clone();
                             self.key(event_loop, &key);
@@ -1052,7 +1700,11 @@ impl ApplicationHandler for App {
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         // If the render thread died, don't sit here ignoring input — exit.
-        if self.shared.as_ref().is_some_and(|sh| sh.quit.load(Ordering::Relaxed)) {
+        if self
+            .shared
+            .as_ref()
+            .is_some_and(|sh| sh.quit.load(Ordering::Relaxed))
+        {
             event_loop.exit();
             return;
         }
@@ -1062,15 +1714,31 @@ impl ApplicationHandler for App {
             self.last_title = Instant::now();
             if let (Some(w), Some(sh)) = (&self.window, &self.shared) {
                 let st = lock(&sh.status);
-                let name = sh.scene_names.get(st.scene).map(String::as_str).unwrap_or("?");
+                let name = sh
+                    .scene_names
+                    .get(st.scene)
+                    .map(String::as_str)
+                    .unwrap_or("?");
                 let mode = lock(&sh.settings).mode;
                 w.set_title(&format!("Trippin — {name} — {:.1} BPM — {mode:?}", st.bpm));
             }
         }
-        // The visuals render on their own thread; the panel needs ~10 fps.
+        // The visuals render on their own thread; the panel needs ~10 fps,
+        // the editor ~30 fps so its playhead and meters move smoothly.
         if let Some(p) = &self.panel {
-            if p.window.is_visible() != Some(false) && self.last_panel_draw.elapsed() > Duration::from_millis(100) {
+            if p.window.is_visible() != Some(false)
+                && self.last_panel_draw.elapsed() > Duration::from_millis(100)
+            {
+                self.last_panel_draw = Instant::now();
                 p.window.request_redraw();
+            }
+        }
+        if let Some(e) = &self.editor {
+            if e.window.is_visible() != Some(false)
+                && self.last_editor_draw.elapsed() > Duration::from_millis(33)
+            {
+                self.last_editor_draw = Instant::now();
+                e.window.request_redraw();
             }
         }
         // Settings changed on the render thread also need flushing to disk.
@@ -1096,12 +1764,17 @@ impl ApplicationHandler for App {
 }
 
 fn arg_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
-    args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).map(String::as_str)
+    args.iter()
+        .position(|a| a == flag)
+        .and_then(|i| args.get(i + 1))
+        .map(String::as_str)
 }
 
 /// Window/taskbar icon, decoded once from the PNG embedded in the exe.
 fn load_icon() -> Option<Icon> {
-    let img = image::load_from_memory(include_bytes!("../logo.png")).ok()?.into_rgba8();
+    let img = image::load_from_memory(include_bytes!("../logo.png"))
+        .ok()?
+        .into_rgba8();
     let (w, h) = img.dimensions();
     Icon::from_rgba(img.into_raw(), w, h).ok()
 }
@@ -1117,6 +1790,7 @@ fn check_shaders() -> Result<()> {
     paths.sort();
     paths.push(dir.join("present.wgsl"));
     paths.push(dir.join("dancer.wgsl"));
+    paths.push(dir.join("text.wgsl"));
     let mut bad = 0;
     for p in &paths {
         let body = std::fs::read_to_string(p)?;
@@ -1178,7 +1852,10 @@ fn main() -> Result<()> {
     }
     if let Some(i) = args.iter().position(|a| a == "--dancer") {
         settings.dancer_enabled = true;
-        if let Some(style) = args.get(i + 1).and_then(|s| dancer::STYLES.iter().position(|n| n == s)) {
+        if let Some(style) = args
+            .get(i + 1)
+            .and_then(|s| dancer::STYLES.iter().position(|n| n == s))
+        {
             settings.dancer_style = Some(style);
         }
         no_save = true;
@@ -1199,7 +1876,11 @@ fn main() -> Result<()> {
     if dancer.clips.is_empty() {
         println!("Dancers: none found (run tools/build_dancer_library.py)");
     } else {
-        let first = dancer.clips.iter().position(|c| !settings.disabled_clips.contains(&c.name)).unwrap_or(0);
+        let first = dancer
+            .clips
+            .iter()
+            .position(|c| !settings.disabled_clips.contains(&c.name))
+            .unwrap_or(0);
         dancer.request(first);
     }
 
@@ -1210,6 +1891,7 @@ fn main() -> Result<()> {
         window: None,
         gpu: None,
         panel: None,
+        editor: None,
         director: Some(Director::new()),
         dancer: Some(dancer),
         settings,
@@ -1227,6 +1909,7 @@ fn main() -> Result<()> {
         render_scale: arg_value(&args, "--scale").and_then(|s| s.parse().ok()),
         vsync: args.iter().any(|a| a == "--vsync"),
         last_panel_draw: Instant::now(),
+        last_editor_draw: Instant::now(),
         last_title: Instant::now(),
         last_panel_toggle: Instant::now() - Duration::from_secs(1),
         icon: load_icon(),
