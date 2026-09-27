@@ -294,6 +294,13 @@ pub struct Settings {
     pub fx_amt: f32,
     /// Raymarched `// @heavy` scenes: Auto follows the detected GPU tier.
     pub heavy_scenes: Tristate,
+    /// AI show builder (BYOAI): provider + endpoint/model/key. Blank fields
+    /// fall back to the provider's defaults; a blank key falls back to the
+    /// provider's usual env var (see `ai::AiProvider::env_keys`).
+    pub ai_provider: crate::ai::AiProvider,
+    pub ai_endpoint: String,
+    pub ai_model: String,
+    pub ai_key: String,
     pub latency_ms: f32,
     pub show_panel: bool,
 }
@@ -321,6 +328,10 @@ impl Default for Settings {
             fx_auto: false,
             fx_amt: 1.0,
             heavy_scenes: Tristate::Auto,
+            ai_provider: Default::default(),
+            ai_endpoint: String::new(),
+            ai_model: String::new(),
+            ai_key: String::new(),
             latency_ms: 30.0,
             show_panel: true,
         }
@@ -388,6 +399,10 @@ impl Settings {
                 Action::TogglePanel,
                 Action::TogglePanel.default_key().to_string(),
             );
+        }
+        // Retired model ids saved by older builds → back to the default.
+        if s.ai_model == "gemini-2.5-flash" {
+            s.ai_model.clear();
         }
         s
     }
