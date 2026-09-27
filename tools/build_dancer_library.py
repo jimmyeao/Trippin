@@ -47,6 +47,30 @@ STOCK = [
      "https://pixabay.com/videos/girl-dancer-dance-silhouette-joy-83833/"),
 ]
 
+# Mixkit (Mixkit Stock Video Free License). The mp4 sits at
+# assets.mixkit.co/videos/<id>/<id>-720.mp4 — the pages need a browser, the
+# asset URLs fetch fine. The last tuple element is extra stock_dancer.py args;
+# saturated-colour backgrounds are dark, so the "dark" matte needs a high
+# threshold to keep the background out of the dancer mask.
+MIXKIT = [
+    ("stock_stripes", "dark", "51279",
+     "https://mixkit.co/free-stock-video/silhouette-of-a-dancer-on-a-colorful-and-bright-background-51279/", []),
+    ("stock_arms", "dark", "51282",
+     "https://mixkit.co/free-stock-video/silhouette-of-a-dancer-on-a-colorful-background-51282/", []),
+    ("stock_lean", "dark", "51283",
+     "https://mixkit.co/free-stock-video/silhouette-of-a-dancer-in-a-performance-on-a-colorful-51283/", []),
+    ("stock_neon", "dark", "861",
+     "https://mixkit.co/free-stock-video/silhouette-of-a-contemporary-dancer-in-studio-861/", []),
+    ("stock_rim", "dark", "33898",
+     "https://mixkit.co/free-stock-video/silhouette-of-urban-dancer-in-smoke-33898/", []),
+    ("stock_red", "dark", "51757",
+     "https://mixkit.co/free-stock-video/silhouette-of-a-dancer-on-a-red-background-51757/",
+     ["--threshold", "0.8", "--softness", "0.08"]),
+    ("stock_purple", "dark", "1250",
+     "https://mixkit.co/free-stock-video/dancing-in-front-of-a-colorful-screen-1250/",
+     ["--threshold", "0.8", "--softness", "0.08"]),
+]
+
 # Choreographed routines (choreo.py), opt-in with --procedural, with the
 # energy auto-pilot uses to match them to the track (breakdown .. drop).
 SHADOW = {"tease": 0.1, "profile": 0.25, "diva": 0.35, "frame": 0.5,
@@ -95,10 +119,13 @@ def fetch_stock(url):
 
 def write_credits():
     lines = ["# Dancer credits", "",
-             "The built-in dancers are silhouettes derived from free stock footage",
-             "on Pixabay (Pixabay Content License), matted, looped and cropped by",
-             "`tools/stock_dancer.py`.", ""]
+             "The built-in dancers are silhouettes derived from free stock footage,",
+             "matted, looped and cropped by `tools/stock_dancer.py`. `*_mir` clips",
+             "are mirrored duplicates made by `tools/mirror_clip.py`.", "",
+             "Pixabay (Pixabay Content License):", ""]
     lines += [f"- `{name}`: {page}" for name, _, _, page in STOCK]
+    lines += ["", "Mixkit (Mixkit Stock Video Free License):", ""]
+    lines += [f"- `{name}`: {page}" for name, _, _, page, _ in MIXKIT]
     (ROOT / "dancers" / "CREDITS.md").write_text("\n".join(lines) + "\n")
 
 
@@ -112,6 +139,11 @@ def main():
         print(f"== {name}")
         subprocess.run([sys.executable, str(TOOLS / "stock_dancer.py"), str(fetch_stock(url)), "--name", name,
                         "--matte", matte, "--source", f"Pixabay: {page}"], check=True)
+    for name, matte, vid, page, extra in MIXKIT:
+        print(f"== {name}")
+        url = f"https://assets.mixkit.co/videos/{vid}/{vid}-720.mp4"
+        subprocess.run([sys.executable, str(TOOLS / "stock_dancer.py"), str(fetch_stock(url)), "--name", name,
+                        "--matte", matte, "--source", f"Mixkit: {page}", *extra], check=True)
     write_credits()
     if args.procedural:
         fetch("05_02")  # choreo.py borrows this take's skeleton

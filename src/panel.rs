@@ -5,28 +5,40 @@
 //! time — Show, Scenes, Dancer, Effects, Keys — so it stays tidy even with
 //! 50+ scenes.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
-use winit::window::{Icon, Window, WindowLevel};
+use winit::window::{Icon, Window};
 
-use crate::config::{in_season, today, Action, Fx, Mode, Seasonal, Settings, Tristate};
+use crate::config::{Action, Fx, Mode, Seasonal, Settings, Tristate, in_season, today};
 use crate::dancer::STYLES;
 use crate::render::Gpu;
+use crate::timeline::{CueKind, PlayMode, SongCtl, Timeline};
 
 /// A fully-tessellated egui frame, ready to be drawn without the settings lock.
-pub struct PanelFrame {
-    prims: Vec<egui::ClippedPrimitive>,
-    textures_delta: egui::TexturesDelta,
-    ppp: f32,
-}
+pub type PanelFrame = crate::egui_win::Frame;
 
 /// Things the panel asks the app to do (beyond editing settings directly).
 pub enum UiCommand {
     Do(Action),
     GoToScene(usize),
     ShowClip(usize),
+    /// Decode an audio file and append it as a clip region on the timeline.
+    AddSong(PathBuf),
+    /// Open a saved timeline `.json`.
+    LoadTimeline(PathBuf),
+    /// Open the dedicated timeline editor window.
+    OpenEditor,
+    /// Save the current timeline under `timelines/<name>.json`.
+    SaveTimeline,
+    /// Fire a cue's effect immediately (editor preview).
+    FireCue(CueKind),
+    /// Transport control for the song player.
+    Song(SongCtl),
+    /// Ask the render thread to produce a scene thumbnail.
+    Thumb(String),
 }
 
 /// Live state shown in the panel's status area, written by the render thread.
@@ -52,11 +64,19 @@ enum Tab {
     Scenes,
     Dancer,
     Effects,
+    Timeline,
     Keys,
 }
 
 impl Tab {
-    const ALL: [Tab; 5] = [Tab::Show, Tab::Scenes, Tab::Dancer, Tab::Effects, Tab::Keys];
+    const ALL: [Tab; 6] = [
+        Tab::Show,
+        Tab::Scenes,
+        Tab::Dancer,
+        Tab::Effects,
+        Tab::Timeline,
+        Tab::Keys,
+    ];
 
     fn label(self) -> &'static str {
         match self {
@@ -64,107 +84,56 @@ impl Tab {
             Tab::Scenes => "Scenes",
             Tab::Dancer => "Dancer",
             Tab::Effects => "Effects",
+            Tab::Timeline => "Timeline",
             Tab::Keys => "Keys",
         }
     }
 }
 
 pub struct Panel {
+    /// Clone of `win.window` — kept as a field so `p.window` keeps working.
     pub window: Arc<Window>,
-    surface: wgpu::Surface<'static>,
-    config: wgpu::SurfaceConfiguration,
-    gpu: Gpu,
-    ctx: egui::Context,
-    state: egui_winit::State,
-    renderer: egui_wgpu::Renderer,
+    win: crate::egui_win::EguiWin,
     /// Waiting for a key press to bind to this action.
     pub rebinding: Option<Action>,
     tab: Tab,
     /// Text filter for the scene list.
     scene_filter: String,
-    /// Throttles configure retries after a failure.
-    last_configure: std::time::Instant,
-    /// False after an acquire failure — retry configure before acquiring again.
-    surface_ok: bool,
-    /// The error epoch this surface has already reconfigured for — see
-    /// `Gpu::surface_epoch`.
-    seen_epoch: u64,
 }
 
 impl Panel {
-    pub fn new(event_loop: &ActiveEventLoop, gpu: Gpu, icon: Option<Icon>, anchor: Option<&Window>) -> anyhow::Result<Self> {
-        let mut attrs = Window::default_attributes()
-            .with_title("Trippin — control")
-            .with_inner_size(winit::dpi::LogicalSize::new(480, 620))
-            .with_window_icon(icon)
-            // A floating console must never hide behind a fullscreen frame.
-            .with_window_level(WindowLevel::AlwaysOnTop);
-        // Spawn on the same monitor as the visuals window — the OS default
-        // position can land on another screen or behind the fullscreen window.
-        if let Some(main) = anchor {
-            if let Some(mon) = main.current_monitor() {
-                let mp = mon.position();
-                let ms = mon.size();
-                attrs = attrs.with_position(winit::dpi::PhysicalPosition::new(
-                    mp.x + ms.width as i32 - 520,
-                    mp.y + 24,
-                ));
-            }
-        }
-        // Deliberately NOT focused: the visuals keep keyboard focus so hotkeys
-        // (incl. F1 itself) behave identically whether the panel is up or not.
-        // Clicking the panel focuses it as usual.
-        let window = Arc::new(event_loop.create_window(attrs)?);
-        let surface = gpu.instance.create_surface(window.clone())?;
-        let size = window.inner_size();
-        let mut config = surface
-            .get_default_config(&gpu.adapter, size.width.max(1), size.height.max(1))
-            .ok_or_else(|| anyhow::anyhow!("panel surface unsupported"))?;
-        // egui outputs gamma-space colours: prefer a non-sRGB target.
-        let caps = surface.get_capabilities(&gpu.adapter);
-        if let Some(f) = caps.formats.iter().find(|f| !f.is_srgb()) {
-            config.format = *f;
-        }
-        config.present_mode = wgpu::PresentMode::AutoVsync;
-        {
-            // The render thread submits continuously; configure must own the
-            // gate so its wait-for-idle can see an empty queue.
-            let _g = gpu.submit_gate.lock().unwrap_or_else(|e| e.into_inner());
-            surface.configure(&gpu.device, &config);
-        }
-
-        let ctx = egui::Context::default();
-        ctx.set_visuals(egui::Visuals::dark());
-        let state = egui_winit::State::new(ctx.clone(), egui::ViewportId::ROOT, &window, None, None, None);
-        let renderer = egui_wgpu::Renderer::new(&gpu.device, config.format, egui_wgpu::RendererOptions::default());
+    pub fn new(
+        event_loop: &ActiveEventLoop,
+        gpu: Gpu,
+        icon: Option<Icon>,
+        anchor: Option<&Window>,
+    ) -> anyhow::Result<Self> {
+        let win = crate::egui_win::EguiWin::new(
+            event_loop,
+            gpu,
+            icon,
+            "Trippin — control",
+            winit::dpi::PhysicalSize::new(480, 620),
+            anchor,
+            true, // floats above a fullscreen visuals window
+        )?;
+        let window = win.window.clone();
         Ok(Self {
             window,
-            surface,
-            config,
-            gpu,
-            ctx,
-            state,
-            renderer,
+            win,
             rebinding: None,
             tab: Tab::Show,
             scene_filter: String::new(),
-            last_configure: std::time::Instant::now(),
-            surface_ok: true,
-            seen_epoch: 0,
         })
     }
 
     /// Feed a window event to egui. Returns true if egui used it.
     pub fn on_event(&mut self, event: &WindowEvent) -> bool {
-        let r = self.state.on_window_event(&self.window, event);
-        if r.repaint {
-            self.window.request_redraw();
-        }
-        r.consumed
+        self.win.on_event(event)
     }
 
     pub fn wants_keyboard(&self) -> bool {
-        self.ctx.egui_wants_keyboard_input()
+        self.win.wants_keyboard()
     }
 
     /// Run the egui UI. Called while the settings lock is held — must not do
@@ -176,120 +145,36 @@ impl Panel {
         status: &Status,
         scenes: &[String],
         clips: &[String],
+        tl_shared: &crate::timeline::Shared,
     ) -> (Vec<UiCommand>, bool, PanelFrame) {
         let mut commands = Vec::new();
         let mut changed = false;
 
-        let raw = self.state.take_egui_input(&self.window);
         let rebinding = &mut self.rebinding;
         let tab = &mut self.tab;
         let scene_filter = &mut self.scene_filter;
-        let mut out = self.ctx.run_ui(raw, |ui| {
+        let frame = self.win.frame(|ui| {
             ui.add_space(6.0);
-            changed |= build_ui(ui, settings, status, scenes, clips, rebinding, tab, scene_filter, &mut commands);
+            changed |= build_ui(
+                ui,
+                settings,
+                status,
+                scenes,
+                clips,
+                tl_shared,
+                rebinding,
+                tab,
+                scene_filter,
+                &mut commands,
+            );
         });
-        self.state.handle_platform_output(&self.window, out.platform_output);
-        let prims = self.ctx.tessellate(out.shapes, out.pixels_per_point);
-        // TexturesDelta must be emptied before it's dropped (debug_assert).
-        let textures_delta = std::mem::take(&mut out.textures_delta);
-        (commands, changed, PanelFrame { prims, textures_delta, ppp: out.pixels_per_point })
+        (commands, changed, frame)
     }
 
     /// Upload textures, acquire a surface frame and present — all without
     /// holding the settings lock.
-    pub fn present(&mut self, frame_data: PanelFrame) {
-        let PanelFrame { prims, mut textures_delta, ppp } = frame_data;
-
-        // The surface must match the window's real size — inner_size() at
-        // creation can return the requested logical size before the window is
-        // realized, and a mismatch makes egui's scissors fail validation.
-        let size = self.window.inner_size();
-        if size.width > 0 && size.height > 0 && (size.width, size.height) != (self.config.width, self.config.height) {
-            self.config.width = size.width;
-            self.config.height = size.height;
-            self.last_configure = std::time::Instant::now();
-            {
-                let _g = self.gpu.submit_gate.lock().unwrap_or_else(|e| e.into_inner());
-                self.surface.configure(&self.gpu.device, &self.config);
-            }
-            self.surface_ok = true;
-        }
-
-        for (id, deltas) in textures_delta.set.drain() {
-            for delta in deltas {
-                self.renderer.update_texture(&self.gpu.device, &self.gpu.queue, id, &delta);
-            }
-        }
-        // Drained up-front so early returns below never drop a non-empty delta.
-        let freed: Vec<egui::TextureId> = textures_delta.free.drain().collect();
-
-        // A failed configure is reported via the device's error callback —
-        // asynchronously, and only drained by poll/submit. Polling here forces
-        // the callback to run before we touch the surface: if configure failed,
-        // the epoch has advanced and we reconfigure instead of calling
-        // get_current_texture on an unconfigured surface (which panics).
-        // catch_unwind below remains only as a last-resort guard.
-        let _ = self.gpu.device.poll(wgpu::PollType::Poll);
-        let epoch = self.gpu.surface_epoch.load(std::sync::atomic::Ordering::Relaxed);
-        if epoch != self.seen_epoch {
-            self.seen_epoch = epoch;
-            self.surface_ok = false;
-        }
-        if !self.surface_ok {
-            if self.last_configure.elapsed() > std::time::Duration::from_millis(250) {
-                self.last_configure = std::time::Instant::now();
-                {
-                    let _g = self.gpu.submit_gate.lock().unwrap_or_else(|e| e.into_inner());
-                    self.surface.configure(&self.gpu.device, &self.config);
-                }
-                self.surface_ok = true;
-            }
-            return;
-        }
-        let acquired = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.surface.get_current_texture()));
-        let frame = match acquired {
-            Ok(wgpu::CurrentSurfaceTexture::Success(f)) | Ok(wgpu::CurrentSurfaceTexture::Suboptimal(f)) => f,
-            _ => {
-                self.surface_ok = false;
-                return;
-            }
-        };
-        let view = frame.texture.create_view(&Default::default());
-        // Size the screen from the acquired frame itself — the egui scissors
-        // can never exceed the render target this way.
-        let screen = egui_wgpu::ScreenDescriptor {
-            size_in_pixels: [frame.texture.width(), frame.texture.height()],
-            pixels_per_point: ppp,
-        };
-        let mut enc = self.gpu.device.create_command_encoder(&Default::default());
-        let extra = self.renderer.update_buffers(&self.gpu.device, &self.gpu.queue, &mut enc, &prims, &screen);
-        {
-            let pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("panel"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.05, g: 0.05, b: 0.06, a: 1.0 }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                ..Default::default()
-            });
-            self.renderer.render(&mut pass.forget_lifetime(), &prims, &screen);
-        }
-        {
-            // Serialize submit/present with surface configure — see
-            // Gpu::submit_gate. Without it a configure can starve forever.
-            let _g = self.gpu.submit_gate.lock().unwrap_or_else(|e| e.into_inner());
-            self.gpu.queue.submit(extra.into_iter().chain([enc.finish()]));
-            self.window.pre_present_notify();
-            self.gpu.queue.present(frame);
-        }
-        for id in freed {
-            self.renderer.free_texture(&id);
-        }
+    pub fn present(&mut self, frame: PanelFrame) {
+        self.win.present(frame);
     }
 }
 
@@ -300,6 +185,7 @@ fn build_ui(
     st: &Status,
     scenes: &[String],
     clips: &[String],
+    tl_shared: &crate::timeline::Shared,
     rebinding: &mut Option<Action>,
     tab: &mut Tab,
     scene_filter: &mut String,
@@ -348,6 +234,7 @@ fn build_ui(
             Tab::Scenes => scenes_tab(ui, s, st, scenes, scene_filter, cmd),
             Tab::Dancer => dancer_tab(ui, s, st, clips, cmd),
             Tab::Effects => effects_tab(ui, s, st),
+            Tab::Timeline => timeline_tab(ui, tl_shared, cmd),
             Tab::Keys => keys_tab(ui, s, rebinding),
         });
 
@@ -390,11 +277,19 @@ fn show_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<UiCo
     });
     ui.checkbox(&mut s.cut_on_drops, "Cut early when a drop lands");
     row(ui, "Output", |ui| {
-        let bo = if st.blackout { "Blackout: ON" } else { "Blackout" };
+        let bo = if st.blackout {
+            "Blackout: ON"
+        } else {
+            "Blackout"
+        };
         if ui.button(bo).clicked() {
             cmd.push(UiCommand::Do(Action::Blackout));
         }
-        let fs = if st.fullscreen { "Leave fullscreen" } else { "Fullscreen" };
+        let fs = if st.fullscreen {
+            "Leave fullscreen"
+        } else {
+            "Fullscreen"
+        };
         if ui.button(fs).clicked() {
             cmd.push(UiCommand::Do(Action::Fullscreen));
         }
@@ -402,10 +297,17 @@ fn show_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<UiCo
     ui.separator();
     ui.label(egui::RichText::new("Sync").strong());
     row(ui, "Latency", |ui| {
-        ui.add(egui::Slider::new(&mut s.latency_ms, -100.0..=200.0).step_by(5.0).suffix(" ms"));
+        ui.add(
+            egui::Slider::new(&mut s.latency_ms, -100.0..=200.0)
+                .step_by(5.0)
+                .suffix(" ms"),
+        );
     });
     ui.small("Raise it if the visuals land after the beat, lower it if they land before.");
-    if ui.button("Mark this beat as the downbeat (the \"one\")").clicked() {
+    if ui
+        .button("Mark this beat as the downbeat (the \"one\")")
+        .clicked()
+    {
         cmd.push(UiCommand::Do(Action::MarkDownbeat));
     }
 }
@@ -424,8 +326,11 @@ fn scenes_tab(
         ui.selectable_value(&mut s.seasonal, Seasonal::Off, "Off");
     });
     let date = today();
-    let in_now: Vec<&str> =
-        scenes.iter().map(String::as_str).filter(|n| in_season(n, date) == Some(true)).collect();
+    let in_now: Vec<&str> = scenes
+        .iter()
+        .map(String::as_str)
+        .filter(|n| in_season(n, date) == Some(true))
+        .collect();
     ui.small(if in_now.is_empty() {
         "Nothing seasonal today.".to_string()
     } else {
@@ -433,7 +338,11 @@ fn scenes_tab(
     });
     ui.horizontal(|ui| {
         ui.label("Filter");
-        ui.add(egui::TextEdit::singleline(filter).desired_width(120.0).hint_text("name…"));
+        ui.add(
+            egui::TextEdit::singleline(filter)
+                .desired_width(120.0)
+                .hint_text("name…"),
+        );
         if ui.small_button("all on").clicked() {
             s.disabled_scenes.clear();
         }
@@ -441,37 +350,53 @@ fn scenes_tab(
             s.disabled_scenes = scenes.to_vec();
         }
     });
-    ui.small(format!("{} of {} scenes in rotation", scenes.len() - s.disabled_scenes.len().min(scenes.len()), scenes.len()));
+    ui.small(format!(
+        "{} of {} scenes in rotation",
+        scenes.len() - s.disabled_scenes.len().min(scenes.len()),
+        scenes.len()
+    ));
     ui.separator();
     let q = filter.to_lowercase();
-    egui::Grid::new("scenes").num_columns(2).striped(true).show(ui, |ui| {
-        for (i, name) in scenes.iter().enumerate() {
-            if !q.is_empty() && !name.to_lowercase().contains(&q) {
-                continue;
-            }
-            let mut on = !s.disabled_scenes.contains(name);
-            let label = match in_season(name, date) {
-                Some(true) => format!("{name} (in season)"),
-                Some(false) => format!("{name} (out of season)"),
-                None => name.clone(),
-            };
-            if ui.checkbox(&mut on, label).changed() {
-                if on {
-                    s.disabled_scenes.retain(|n| n != name);
-                } else {
-                    s.disabled_scenes.push(name.clone());
+    egui::Grid::new("scenes")
+        .num_columns(2)
+        .striped(true)
+        .show(ui, |ui| {
+            for (i, name) in scenes.iter().enumerate() {
+                if !q.is_empty() && !name.to_lowercase().contains(&q) {
+                    continue;
                 }
+                let mut on = !s.disabled_scenes.contains(name);
+                let label = match in_season(name, date) {
+                    Some(true) => format!("{name} (in season)"),
+                    Some(false) => format!("{name} (out of season)"),
+                    None => name.clone(),
+                };
+                if ui.checkbox(&mut on, label).changed() {
+                    if on {
+                        s.disabled_scenes.retain(|n| n != name);
+                    } else {
+                        s.disabled_scenes.push(name.clone());
+                    }
+                }
+                let label = if i == st.scene { "▶" } else { "show" };
+                if ui
+                    .add_enabled(i != st.scene, egui::Button::new(label).small())
+                    .clicked()
+                {
+                    cmd.push(UiCommand::GoToScene(i));
+                }
+                ui.end_row();
             }
-            let label = if i == st.scene { "▶" } else { "show" };
-            if ui.add_enabled(i != st.scene, egui::Button::new(label).small()).clicked() {
-                cmd.push(UiCommand::GoToScene(i));
-            }
-            ui.end_row();
-        }
-    });
+        });
 }
 
-fn dancer_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, clips: &[String], cmd: &mut Vec<UiCommand>) {
+fn dancer_tab(
+    ui: &mut egui::Ui,
+    s: &mut Settings,
+    st: &Status,
+    clips: &[String],
+    cmd: &mut Vec<UiCommand>,
+) {
     ui.checkbox(&mut s.dancer_enabled, "Dancer layer on");
     row(ui, "Look", |ui| {
         ui.selectable_value(&mut s.dancer_style, None, "Auto");
@@ -488,25 +413,38 @@ fn dancer_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, clips: &[String]
     row(ui, "Size", |ui| {
         ui.add(egui::Slider::new(&mut s.dancer_size, 0.4..=1.0));
     });
+    ui.checkbox(
+        &mut s.dancer_trails,
+        "Motion trails (echoes behind the dancer)",
+    );
     ui.separator();
     ui.small("Auto-pilot picks among the ticked routines:");
-    egui::Grid::new("clips").num_columns(2).striped(true).show(ui, |ui| {
-        for (i, name) in clips.iter().enumerate() {
-            let mut on = !s.disabled_clips.contains(name);
-            if ui.checkbox(&mut on, name).changed() {
-                if on {
-                    s.disabled_clips.retain(|n| n != name);
-                } else {
-                    s.disabled_clips.push(name.clone());
+    egui::Grid::new("clips")
+        .num_columns(2)
+        .striped(true)
+        .show(ui, |ui| {
+            for (i, name) in clips.iter().enumerate() {
+                let mut on = !s.disabled_clips.contains(name);
+                if ui.checkbox(&mut on, name).changed() {
+                    if on {
+                        s.disabled_clips.retain(|n| n != name);
+                    } else {
+                        s.disabled_clips.push(name.clone());
+                    }
                 }
+                let showing = st.clip.as_deref() == Some(name.as_str());
+                if ui
+                    .add_enabled(
+                        !showing,
+                        egui::Button::new(if showing { "▶" } else { "show" }).small(),
+                    )
+                    .clicked()
+                {
+                    cmd.push(UiCommand::ShowClip(i));
+                }
+                ui.end_row();
             }
-            let showing = st.clip.as_deref() == Some(name.as_str());
-            if ui.add_enabled(!showing, egui::Button::new(if showing { "▶" } else { "show" }).small()).clicked() {
-                cmd.push(UiCommand::ShowClip(i));
-            }
-            ui.end_row();
-        }
-    });
+        });
 }
 
 fn effects_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status) {
@@ -536,26 +474,292 @@ fn effects_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status) {
 fn keys_tab(ui: &mut egui::Ui, s: &mut Settings, rebinding: &mut Option<Action>) {
     ui.small("Keys work in both windows. Click Rebind, then press the new key.");
     ui.add_space(4.0);
-    egui::Grid::new("keys").num_columns(3).striped(true).show(ui, |ui| {
-        for a in Action::ALL {
-            ui.label(a.label());
-            let key = s.keys.get(&a).cloned().unwrap_or_default();
-            if *rebinding == Some(a) {
-                ui.colored_label(egui::Color32::YELLOW, "press a key…");
-                if ui.button("Cancel").clicked() {
-                    *rebinding = None;
+    egui::Grid::new("keys")
+        .num_columns(3)
+        .striped(true)
+        .show(ui, |ui| {
+            for a in Action::ALL {
+                ui.label(a.label());
+                let key = s.keys.get(&a).cloned().unwrap_or_default();
+                if *rebinding == Some(a) {
+                    ui.colored_label(egui::Color32::YELLOW, "press a key…");
+                    if ui.button("Cancel").clicked() {
+                        *rebinding = None;
+                    }
+                } else {
+                    ui.monospace(if key.is_empty() {
+                        "—".to_string()
+                    } else {
+                        key
+                    });
+                    if ui.button("Rebind").clicked() {
+                        *rebinding = Some(a);
+                    }
                 }
-            } else {
-                ui.monospace(if key.is_empty() { "—".to_string() } else { key });
-                if ui.button("Rebind").clicked() {
-                    *rebinding = Some(a);
-                }
+                ui.end_row();
             }
-            ui.end_row();
-        }
-    });
+        });
     ui.add_space(4.0);
     if ui.button("Reset all keys to defaults").clicked() {
         s.keys = Settings::default().keys;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Timeline tab — load a track, drop cues on its beat grid, play or follow.
+// ---------------------------------------------------------------------------
+
+pub(crate) fn fmt_time(t: f64) -> String {
+    let t = t.max(0.0);
+    format!("{}:{:04.1}", (t / 60.0) as u64, t % 60.0)
+}
+
+pub(crate) fn cue_color(k: &CueKind) -> egui::Color32 {
+    use egui::Color32;
+    match k {
+        CueKind::Scene(_) | CueKind::NextScene | CueKind::PrevScene => {
+            Color32::from_rgb(160, 95, 250)
+        }
+        CueKind::Fx(_) | CueKind::FxAuto(_) => Color32::from_rgb(70, 200, 220),
+        CueKind::Dancer(_)
+        | CueKind::Clip(_)
+        | CueKind::NextClip
+        | CueKind::NextLook
+        | CueKind::Look(_)
+        | CueKind::Trails(_) => Color32::from_rgb(90, 210, 130),
+        CueKind::Canon(_) => Color32::from_rgb(150, 220, 90),
+        CueKind::Blackout(_) => Color32::from_rgb(240, 90, 90),
+        CueKind::Mode(_) => Color32::from_rgb(240, 175, 70),
+        CueKind::Text(_) | CueKind::TextOff(_) => Color32::from_rgb(240, 140, 200),
+    }
+}
+
+/// Pick a string from `opts` — returns true when the value changed.
+fn pick_str(ui: &mut egui::Ui, id: egui::Id, cur: &mut String, opts: &[String]) -> bool {
+    let mut changed = false;
+    egui::ComboBox::from_id_salt(id)
+        .width(110.0)
+        .selected_text(if cur.is_empty() {
+            "pick…"
+        } else {
+            cur.as_str()
+        })
+        .show_ui(ui, |ui| {
+            for o in opts {
+                changed |= ui.selectable_value(cur, o.clone(), o).changed();
+            }
+        });
+    changed
+}
+
+/// Param editors for a cue kind. Returns true when it changed.
+pub(crate) fn cue_param_ui(
+    ui: &mut egui::Ui,
+    kind: &mut CueKind,
+    scenes: &[String],
+    clips: &[String],
+    id: egui::Id,
+) -> bool {
+    match kind {
+        CueKind::Scene(n) => pick_str(ui, id.with("sc"), n, scenes),
+        CueKind::Clip(n) => pick_str(ui, id.with("cl"), n, clips),
+        CueKind::Mode(m) => {
+            ui.selectable_value(m, Mode::Auto, "auto").changed()
+                | ui.selectable_value(m, Mode::Static, "static").changed()
+                | ui.selectable_value(m, Mode::Manual, "manual").changed()
+        }
+        CueKind::Dancer(b) | CueKind::Blackout(b) | CueKind::FxAuto(b) => {
+            ui.checkbox(b, "on").changed()
+        }
+        CueKind::Look(l) => {
+            let mut changed = false;
+            egui::ComboBox::from_id_salt(id.with("lk"))
+                .width(90.0)
+                .selected_text((*l).map(|i| STYLES[i]).unwrap_or("auto"))
+                .show_ui(ui, |ui| {
+                    changed |= ui.selectable_value(l, None, "auto").changed();
+                    for (i, name) in STYLES.iter().enumerate() {
+                        changed |= ui.selectable_value(l, Some(i), *name).changed();
+                    }
+                });
+            changed
+        }
+        CueKind::Canon(t) => {
+            ui.selectable_value(t, Tristate::Auto, "auto").changed()
+                | ui.selectable_value(t, Tristate::On, "on").changed()
+                | ui.selectable_value(t, Tristate::Off, "off").changed()
+        }
+        CueKind::Fx(f) => {
+            let mut changed = false;
+            egui::ComboBox::from_id_salt(id.with("fx"))
+                .width(100.0)
+                .selected_text(f.label())
+                .show_ui(ui, |ui| {
+                    for v in Fx::ALL {
+                        changed |= ui.selectable_value(f, v, v.label()).changed();
+                    }
+                });
+            changed
+        }
+        CueKind::Text(spec) => {
+            use crate::text::{TextPos, TextStyle};
+            let mut changed = ui
+                .add(
+                    egui::TextEdit::singleline(&mut spec.text)
+                        .desired_width(140.0)
+                        .hint_text("text…"),
+                )
+                .changed();
+            egui::ComboBox::from_id_salt(id.with("ts"))
+                .width(80.0)
+                .selected_text(spec.style.label())
+                .show_ui(ui, |ui| {
+                    for v in TextStyle::ALL {
+                        changed |= ui.selectable_value(&mut spec.style, v, v.label()).changed();
+                    }
+                });
+            egui::ComboBox::from_id_salt(id.with("tp"))
+                .width(70.0)
+                .selected_text(spec.pos.label())
+                .show_ui(ui, |ui| {
+                    for v in TextPos::ALL {
+                        changed |= ui.selectable_value(&mut spec.pos, v, v.label()).changed();
+                    }
+                });
+            changed |= ui.selectable_value(&mut spec.lane, 0, "lane 1").changed();
+            changed |= ui.selectable_value(&mut spec.lane, 1, "lane 2").changed();
+            changed
+        }
+        _ => false,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn timeline_tab(ui: &mut egui::Ui, tl_shared: &crate::timeline::Shared, cmd: &mut Vec<UiCommand>) {
+    let mut guard = tl_shared.lock().unwrap_or_else(|e| e.into_inner());
+    let crate::timeline::TimelineState {
+        doc: doc_opt,
+        mode,
+        pos_s,
+        recording,
+        autosync,
+        live_locked,
+        live_score,
+        dirty,
+        message,
+        busy,
+        ..
+    } = &mut *guard;
+
+    ui.horizontal(|ui| {
+        if ui.button("Open timeline editor").clicked() {
+            cmd.push(UiCommand::OpenEditor);
+        }
+        if let Some(doc) = doc_opt.as_mut() {
+            ui.label(egui::RichText::new(&doc.name).strong());
+            ui.small(format!(
+                "{} song{} · {} · {} cues{}",
+                doc.clips.len(),
+                if doc.clips.len() == 1 { "" } else { "s" },
+                fmt_time(doc.end_s()),
+                doc.cues.len(),
+                if *dirty { " · unsaved" } else { "" }
+            ));
+        }
+    });
+
+    // --- Transport ----------------------------------------------------------
+    ui.horizontal(|ui| {
+        let play_label = if *mode == PlayMode::Playing {
+            "⏸ Pause"
+        } else {
+            "▶ Play"
+        };
+        if ui
+            .add_enabled(doc_opt.is_some() && !*busy, egui::Button::new(play_label))
+            .clicked()
+        {
+            cmd.push(UiCommand::Song(SongCtl::Toggle));
+        }
+        if ui
+            .add_enabled(*mode != PlayMode::Stopped, egui::Button::new("⏹"))
+            .clicked()
+        {
+            cmd.push(UiCommand::Song(SongCtl::Stop));
+        }
+        ui.label(format!("{} {}", fmt_time(*pos_s), mode_str(*mode)));
+        if *recording {
+            ui.colored_label(egui::Color32::from_rgb(255, 80, 80), "● REC");
+        }
+        if *autosync {
+            ui.label(if *live_locked {
+                "live: LOCKED"
+            } else {
+                "live: listening…"
+            });
+            ui.small(format!("{:.2}", *live_score));
+        }
+    });
+
+    // --- Songs on the timeline ----------------------------------------------
+    if let Some(doc) = doc_opt.as_mut() {
+        if !doc.clips.is_empty() {
+            ui.add_space(4.0);
+            ui.label("Songs:");
+        }
+        for c in &doc.clips {
+            ui.horizontal(|ui| {
+                ui.small(format!("@{}", fmt_time(c.offset_s)));
+                ui.label(&c.name);
+                ui.small(format!("{} · {:.1} BPM", fmt_time(c.duration_s), c.bpm));
+            });
+        }
+    }
+
+    // --- Save / open ---------------------------------------------------------
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        if let Some(doc) = doc_opt.as_mut() {
+            ui.label("name");
+            ui.add(egui::TextEdit::singleline(&mut doc.name).desired_width(110.0));
+            if ui.button("Save").clicked() {
+                cmd.push(UiCommand::SaveTimeline);
+            }
+        }
+        let saved = Timeline::list(&crate::config::timelines_dir());
+        if !saved.is_empty() {
+            egui::ComboBox::from_id_salt("tl_open")
+                .selected_text("open saved…")
+                .show_ui(ui, |ui| {
+                    for p in saved {
+                        let stem = p
+                            .file_stem()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .to_string();
+                        if ui.selectable_label(false, &stem).clicked() {
+                            cmd.push(UiCommand::LoadTimeline(p.clone()));
+                        }
+                    }
+                });
+        }
+    });
+    ui.small("Add tracks and lay out cues in the editor — or drop an audio file / timeline .json on any window.");
+    if *busy {
+        ui.horizontal(|ui| {
+            ui.spinner();
+            ui.label("decoding — a few seconds");
+        });
+    }
+    if !message.is_empty() {
+        ui.small(message.as_str());
+    }
+}
+
+fn mode_str(m: PlayMode) -> &'static str {
+    match m {
+        PlayMode::Playing => "playing",
+        PlayMode::Paused => "paused",
+        PlayMode::Stopped => "stopped",
     }
 }

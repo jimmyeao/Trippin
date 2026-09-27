@@ -4,6 +4,7 @@ version = "0.4.0"
 edition = "2024"
 
 [dependencies]
+ab_glyph = "0.2.32"
 anyhow = "1.0.104"
 bytemuck = { version = "1.25.2", features = ["derive"] }
 cpal = "0.18.2"
@@ -12,9 +13,11 @@ egui-wgpu = "0.36"
 egui-winit = "0.36"
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 pollster = "1.0.1"
+rfd = "0.17.2"
 rustfft = "6.4.1"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
+symphonia = { version = "=0.6.0", default-features = false, features = ["mp3", "flac", "wav", "vorbis", "aac", "alac", "ogg", "isomp4", "pcm"] }
 wgpu = "30.0.1"
 winit = "0.30.13"
 

@@ -17,7 +17,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let glow = exp(-d * d * 800.0) * 0.35;
 
     let beam = palette(u.hue + 0.33 + uv.x * 0.06);
-    col += beam * (core * 1.8 + glow) * (0.5 + u.energy * 0.9 + abs(w));
+    col += beam * (core * 2.2 + glow * 1.2) * (0.5 + u.energy * 0.9 + abs(w));
 
     // Faint spectrum envelope behind the beam for context.
     let env = 0.5 + (spec(uv.x) - 0.3) * 0.5;
@@ -28,11 +28,15 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let d2 = (uv.y - (0.5 - w)) * 40.0;
     col += beam * exp(-d2 * d2) * 0.22;
 
-    // CRT graticule + centre line.
-    let gx = smoothstep(0.0035, 0.0, abs(fract(uv.x * 10.0 + 0.5) - 0.5) - 0.46);
-    let gy = smoothstep(0.0035, 0.0, abs(fract(uv.y * 8.0 + 0.5) - 0.5) - 0.46);
-    col += vec3<f32>(0.03, 0.06, 0.05) * max(gx, gy);
+    // CRT graticule: thin lines on the 10x8 divisions. In cell space the
+    // distance to the nearest line is 0.5 - abs(fract - 0.5); the previous
+    // version inverted that and filled the cell interiors instead.
+    let gx = smoothstep(0.006, 0.001, 0.5 - abs(fract(uv.x * 10.0) - 0.5));
+    let gy = smoothstep(0.010, 0.002, 0.5 - abs(fract(uv.y * 8.0) - 0.5));
+    col += vec3<f32>(0.05, 0.11, 0.08) * max(gx, gy);
+    // Centre axes slightly brighter, like a real scope.
     col += vec3<f32>(0.05, 0.10, 0.07) * exp(-abs(uv.y - 0.5) * 150.0);
+    col += vec3<f32>(0.05, 0.10, 0.07) * exp(-abs(uv.x - 0.5) * 150.0) * 0.4;
 
     // The whole tube flashes faintly on the kick.
     col += beam * u.kick * 0.05;
