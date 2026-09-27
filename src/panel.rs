@@ -6,7 +6,7 @@
 //! 50+ scenes.
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
@@ -100,6 +100,8 @@ pub struct Panel {
     tl_add: CueKind,
     /// Text field for an explicit song path (drag-drop is the fast path).
     song_path: String,
+    /// Native file-picker result, written by a spawned dialog thread.
+    file_pick: Arc<Mutex<Option<PathBuf>>>,
     /// Throttles configure retries after a failure.
     last_configure: std::time::Instant,
     /// False after an acquire failure — retry configure before acquiring again.
@@ -169,6 +171,7 @@ impl Panel {
             tl_sel: None,
             tl_add: CueKind::NextScene,
             song_path: String::new(),
+            file_pick: Arc::new(Mutex::new(None)),
             last_configure: std::time::Instant::now(),
             surface_ok: true,
             seen_epoch: 0,
@@ -209,11 +212,12 @@ impl Panel {
         let tl_sel = &mut self.tl_sel;
         let tl_add = &mut self.tl_add;
         let song_path = &mut self.song_path;
+        let file_pick = &self.file_pick;
         let mut out = self.ctx.run_ui(raw, |ui| {
             ui.add_space(6.0);
             changed |= build_ui(
                 ui, settings, status, scenes, clips, tl_shared, rebinding, tab, scene_filter,
-                tl_sel, tl_add, song_path, &mut commands,
+                tl_sel, tl_add, song_path, file_pick, &mut commands,
             );
         });
         self.state.handle_platform_output(&self.window, out.platform_output);
@@ -335,6 +339,7 @@ fn build_ui(
     tl_sel: &mut Option<usize>,
     tl_add: &mut CueKind,
     song_path: &mut String,
+    file_pick: &Arc<Mutex<Option<PathBuf>>>,
     cmd: &mut Vec<UiCommand>,
 ) -> bool {
     let before = serde_json::to_string(s).unwrap_or_default();
@@ -380,7 +385,7 @@ fn build_ui(
             Tab::Scenes => scenes_tab(ui, s, st, scenes, scene_filter, cmd),
             Tab::Dancer => dancer_tab(ui, s, st, clips, cmd),
             Tab::Effects => effects_tab(ui, s, st),
-            Tab::Timeline => timeline_tab(ui, tl_shared, scenes, clips, tl_sel, tl_add, song_path, cmd),
+            Tab::Timeline => timeline_tab(ui, tl_shared, scenes, clips, tl_sel, tl_add, song_path, file_pick, cmd),
             Tab::Keys => keys_tab(ui, s, rebinding),
         });
 
@@ -688,6 +693,7 @@ fn timeline_tab(
     sel: &mut Option<usize>,
     add_kind: &mut CueKind,
     song_path: &mut String,
+    file_pick: &Arc<Mutex<Option<PathBuf>>>,
     cmd: &mut Vec<UiCommand>,
 ) {
     use egui::{pos2, vec2, Align2, Color32, FontId, Sense, Shape, Stroke};
@@ -710,9 +716,24 @@ fn timeline_tab(
     } = &mut *guard;
 
     // --- Load ---------------------------------------------------------------
+    // A file picked in the (thread-spawned) native dialog lands here.
+    if let Some(p) = file_pick.lock().unwrap_or_else(|e| e.into_inner()).take() {
+        if crate::song::is_audio_file(&p) {
+            cmd.push(UiCommand::LoadSong(p));
+        } else if p.extension().and_then(|e| e.to_str()) == Some("json") {
+            cmd.push(UiCommand::LoadTimeline(p));
+        }
+    }
     ui.horizontal(|ui| {
-        ui.label("Track");
-        ui.add(egui::TextEdit::singleline(song_path).desired_width(150.0).hint_text("mp3 / flac / wav / m4a…"));
+        if ui.button("Open…").on_hover_text("Pick an audio file or a saved timeline .json").clicked() {
+            let slot = file_pick.clone();
+            std::thread::spawn(move || {
+                *slot.lock().unwrap_or_else(|e| e.into_inner()) = rfd::FileDialog::new()
+                    .add_filter("audio / timeline", &["mp3", "flac", "wav", "m4a", "aac", "ogg", "opus", "aiff", "json"])
+                    .pick_file();
+            });
+        }
+        ui.add(egui::TextEdit::singleline(song_path).desired_width(120.0).hint_text("…or a path"));
         if ui
             .add_enabled(!*busy, egui::Button::new("Load"))
             .on_hover_text("Decode and analyse — a few seconds")

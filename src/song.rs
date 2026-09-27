@@ -36,7 +36,7 @@ pub struct Song {
 }
 
 /// Audio file extensions we try to load.
-pub const AUDIO_EXTS: &[&str] = &["mp3", "flac", "wav", "ogg", "m4a", "aac", "aiff", "aif"];
+pub const AUDIO_EXTS: &[&str] = &["mp3", "flac", "wav", "ogg", "opus", "m4a", "aac", "aiff", "aif"];
 
 pub fn is_audio_file(p: &Path) -> bool {
     p.extension()
