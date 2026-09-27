@@ -47,14 +47,17 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
     let z = u.flow * 3.0;
 
-    // Camera: gentle sway and nod on the beat, drift with the phrase.
+    // Camera: stay inside a corridor lane (cell boundary at x=0 — pillars
+    // sit on cell centres at ±CELL/2). Sway is capped well under half a
+    // cell so the view never points head-on into a column; the kick nod
+    // stays subtle.
     let ro = vec3<f32>(
-        sin(z * 0.05) * 1.1 + sin(u.time * 0.7) * 0.12 * u.kick,
+        sin(z * 0.05) * 0.45 + sin(u.time * 0.7) * 0.08 * u.kick,
         0.15 + sin(u.time * 0.4) * 0.1,
         z);
     // centred() has +y pointing down the screen — negate so up is up.
     var rd = normalize(vec3<f32>(
-        p.x * 0.75 + sin(z * 0.04) * 0.15,
+        p.x * 0.75 + sin(z * 0.04) * 0.1,
         -p.y * 0.75 - 0.05 + 0.04 * beat_pulse(6.0),
         1.0));
     rd = vec3<f32>(rot(sin(u.time * 0.11) * 0.1) * rd.xy, rd.z);

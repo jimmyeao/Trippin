@@ -53,8 +53,9 @@ pub fn load(path: &Path) -> Result<Song> {
     }
     let duration = mono.len() as f64 / sr as f64;
     let fps = sr as f64 / HOP as f64;
-    let onsets = onset_envelope(&mono, sr);
+    let (onsets, bass) = onset_envelope(&mono, sr);
     let (bpm, first_beat) = estimate_bpm(&onsets, fps as f32).unwrap_or((120.0, 0.0));
+    let first_beat = align_downbeat(&bass, fps, bpm, first_beat);
     let overview = make_overview(&mono, 1600);
     let name = path
         .file_stem()
@@ -148,15 +149,18 @@ fn decode(path: &Path) -> Result<(Vec<f32>, u32)> {
 }
 
 /// The same log spectral-flux the live analyser computes — the live-match
-/// correlation needs envelopes measured the same way.
-fn onset_envelope(mono: &[f32], sr: u32) -> Vec<f32> {
+/// correlation needs envelopes measured the same way. Also returns a
+/// low-band (<150 Hz) level envelope for downbeat voting.
+fn onset_envelope(mono: &[f32], sr: u32) -> (Vec<f32>, Vec<f32>) {
     let fft = FftPlanner::new().plan_fft_forward(FFT_SIZE);
     let window: Vec<f32> = (0..FFT_SIZE)
         .map(|i| 0.5 - 0.5 * (2.0 * std::f32::consts::PI * i as f32 / FFT_SIZE as f32).cos())
         .collect();
     let low_bin = ((200.0 / sr as f32 * FFT_SIZE as f32) as usize).clamp(1, FFT_SIZE / 2 - 1);
+    let bass_bin = ((150.0 / sr as f32 * FFT_SIZE as f32) as usize).clamp(1, FFT_SIZE / 2 - 1);
     let mut prev = vec![0.0f32; FFT_SIZE / 2];
     let mut env = Vec::with_capacity(mono.len() / HOP);
+    let mut bass = Vec::with_capacity(mono.len() / HOP);
     let mut spec = vec![Complex::new(0.0f32, 0.0); FFT_SIZE];
     let mut hops = 0usize;
     while hops * HOP + FFT_SIZE <= mono.len() {
@@ -166,18 +170,23 @@ fn onset_envelope(mono: &[f32], sr: u32) -> Vec<f32> {
         }
         fft.process(&mut spec);
         let mut flux = 0.0f32;
+        let mut low = 0.0f32;
         for (i, p) in prev.iter_mut().enumerate() {
             let lm = (1.0 + 100.0 * spec[i].norm() / FFT_SIZE as f32).ln();
             let d = lm - *p;
             if d > 0.0 {
                 flux += d * if i < low_bin { 2.0 } else { 1.0 };
             }
+            if i < bass_bin {
+                low += lm;
+            }
             *p = lm;
         }
         env.push(flux);
+        bass.push(low / bass_bin as f32);
         hops += 1;
     }
-    env
+    (env, bass)
 }
 
 /// Autocorrelate the onset envelope for the tempo (log-Gaussian prior on
@@ -243,6 +252,48 @@ fn estimate_bpm(env: &[f32], fps: f32) -> Option<(f64, f64)> {
         }
     }
     Some((bpm, phase as f64 / fps as f64))
+}
+
+/// Vote which beat-of-4 carries the most low-band energy — kicks and
+/// basslines land on the one — and shift the grid origin so beat 0 is a
+/// downbeat. The comb filter finds where *a* beat falls, not the bar phase:
+/// without this, every bar boundary sits up to 3 beats off (the "¼-bar
+/// early transitions" symptom).
+fn align_downbeat(bass: &[f32], fps: f64, bpm: f64, first_beat: f64) -> f64 {
+    if bass.is_empty() || bpm <= 0.0 {
+        return first_beat;
+    }
+    let period_s = 60.0 / bpm;
+    let mut votes = [0.0f32; 4];
+    let mut n = 0usize;
+    let mut t = first_beat;
+    while t * fps < bass.len() as f64 - 1.0 {
+        if t >= 0.0 {
+            let h = (t * fps).round() as usize;
+            let v = bass[h]
+                .max(bass.get(h.wrapping_sub(1)).copied().unwrap_or(0.0) * 0.9)
+                .max(bass.get(h + 1).copied().unwrap_or(0.0) * 0.9);
+            votes[n % 4] += v;
+        }
+        n += 1;
+        t += period_s;
+    }
+    let slot = (0..4)
+        .max_by(|&a, &b| votes[a].total_cmp(&votes[b]))
+        .unwrap_or(0);
+    // No clear winner (ambient/sparse material): keep the detected origin.
+    let total: f32 = votes.iter().sum();
+    if votes[slot] < total * 0.28 {
+        return first_beat;
+    }
+    // Prefer shifting backward (keeps early intro coverage); wrap forward
+    // if that would land before t=0.
+    let shifted = first_beat + (slot as i64 - 4) as f64 * period_s;
+    if shifted >= 0.0 {
+        shifted
+    } else {
+        shifted + 4.0 * period_s
+    }
 }
 
 fn make_overview(mono: &[f32], points: usize) -> Vec<f32> {
@@ -619,7 +670,7 @@ mod tests {
     fn bpm_estimate_is_stable_on_clean_grid() {
         let sr = 48000u32;
         let mono = click_track(sr, 174.0, 10.0);
-        let env = onset_envelope(&mono, sr);
+        let (env, _bass) = onset_envelope(&mono, sr);
         let (bpm, phase) = estimate_bpm(&env, sr as f32 / HOP as f32).unwrap();
         assert!((bpm - 174.0).abs() < 2.0, "bpm {bpm}");
         assert!(phase < 0.35, "phase {phase}");
