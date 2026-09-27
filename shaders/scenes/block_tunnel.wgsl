@@ -1,3 +1,4 @@
+// @heavy — raymarched; only in rotation when the GPU tier allows.
 // Fly through a curving tunnel whose walls are real boxes jutting inward at
 // random depths, toward a light at the far end. Two looks, picked per cut:
 // red monochrome, or dark metal with glowing neon edges and lit tiles.

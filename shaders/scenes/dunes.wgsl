@@ -1,3 +1,4 @@
+// @heavy — raymarched; only in rotation when the GPU tier allows.
 // Desert dunes at dusk: a slow drift over ridged sand seas under a sinking
 // sun, heat shimmer near the ground, grain sparkle on the highs and a warm
 // haze that thickens as the track drives. Smooth motion on the tempo clock.

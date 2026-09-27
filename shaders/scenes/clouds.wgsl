@@ -1,3 +1,4 @@
+// @heavy — raymarched; only in rotation when the GPU tier allows.
 // Realistic cloud flight: skimming over a sea of volumetric clouds at sunset.
 // Density is 3D noise shaped into a layer; each sample is lit by marching a
 // short way toward the sun, so tops glow warm and undersides fall into shade.

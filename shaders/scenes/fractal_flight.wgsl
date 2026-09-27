@@ -1,3 +1,4 @@
+// @heavy — raymarched; only in rotation when the GPU tier allows.
 // Flight through a ray-marched fractal: a folded, sphere-inverted structure
 // repeated along the flight path, with a tunnel carved through it. Glow
 // accumulates along each ray; speed follows the beat.
