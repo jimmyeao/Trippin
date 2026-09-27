@@ -50,6 +50,20 @@ pub struct Editor {
     sb_grab: Option<f32>,
     /// The text being composed in the palette — dragged on as a Text cue.
     text_draft: crate::text::TextSpec,
+    /// AI show-builder dialog open.
+    ai_open: bool,
+    /// Clear existing cues before applying the generated show.
+    ai_replace: bool,
+    /// Shared state with the AI worker thread (analysis + API call).
+    ai_job: Arc<Mutex<AiJob>>,
+}
+
+/// AI show-builder state shared with its worker thread.
+struct AiJob {
+    busy: bool,
+    status: String,
+    /// Finished build: cues + a summary note, or the error message.
+    result: Option<Result<(Vec<Cue>, String), String>>,
 }
 
 /// What part of a cue block is being dragged.
@@ -96,6 +110,13 @@ impl Editor {
                 text: "TRIPPIN".into(),
                 ..Default::default()
             },
+            ai_open: false,
+            ai_replace: true,
+            ai_job: Arc::new(Mutex::new(AiJob {
+                busy: false,
+                status: String::new(),
+                result: None,
+            })),
         })
     }
 
@@ -119,6 +140,8 @@ impl Editor {
         scenes: &[String],
         routines: &[String],
         tl_shared: &crate::timeline::Shared,
+        settings: &Mutex<crate::config::Settings>,
+        settings_dirty: &std::sync::atomic::AtomicBool,
         new_thumbs: &[(String, u32, u32, Vec<u8>)],
     ) -> (Vec<UiCommand>, Frame) {
         let mut cmd = Vec::new();
@@ -175,6 +198,7 @@ impl Editor {
         let (zoom_fit, scrub, sb_grab) = (&mut self.zoom_fit, &mut self.scrub, &mut self.sb_grab);
         let (thumbs, want_thumbs) = (&mut self.thumbs, &mut self.want_thumbs);
         let text_draft = &mut self.text_draft;
+        let (ai_open, ai_replace, ai_job) = (&mut self.ai_open, &mut self.ai_replace, &self.ai_job);
         let file_pick = &self.file_pick;
 
         let frame = self.win.frame(|ui| {
@@ -235,6 +259,13 @@ impl Editor {
                             .clicked()
                         {
                             cmd.push(UiCommand::SaveTimeline);
+                        }
+                        if ui
+                            .button("✦ AI show…")
+                            .on_hover_text("analyse the tracks and have an LLM write the cue list")
+                            .clicked()
+                        {
+                            *ai_open = !*ai_open;
                         }
                         ui.separator();
                     }
@@ -317,6 +348,173 @@ impl Editor {
                     }
                 });
             });
+
+            // --- AI show builder ------------------------------------------
+            // Poll the worker: apply finished cues into the doc.
+            if let Some(res) = ai_job
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .result
+                .take()
+            {
+                match res {
+                    Ok((cues, note)) => {
+                        if let Some(doc) = doc_opt.as_mut() {
+                            if *ai_replace {
+                                doc.cues.clear();
+                            }
+                            doc.cues.extend(cues);
+                            doc.cues.sort_by(|a, b| {
+                                a.clip.cmp(&b.clip).then_with(|| a.beat.total_cmp(&b.beat))
+                            });
+                            *dirty = true;
+                        }
+                        *message = format!("AI: {note}");
+                    }
+                    Err(e) => *message = format!("AI failed: {e}"),
+                }
+            }
+            if *ai_open {
+                let mut open = true;
+                let mut s_dirty = false;
+                egui::Window::new("✦ AI show builder")
+                    .open(&mut open)
+                    .collapsible(false)
+                    .default_width(430.0)
+                    .show(ui, |ui| {
+                        let mut s = settings.lock().unwrap_or_else(|e| e.into_inner());
+                        ui.horizontal(|ui| {
+                            ui.label("provider");
+                            egui::ComboBox::from_id_salt("ai_prov")
+                                .selected_text(s.ai_provider.label())
+                                .show_ui(ui, |ui| {
+                                    for p in crate::ai::AiProvider::ALL {
+                                        if ui
+                                            .selectable_label(s.ai_provider == p, p.label())
+                                            .clicked()
+                                        {
+                                            s_dirty = true;
+                                            // Reset fields that still hold another
+                                            // provider's defaults.
+                                            if crate::ai::AiProvider::ALL
+                                                .iter()
+                                                .any(|o| s.ai_endpoint == o.default_endpoint())
+                                            {
+                                                s.ai_endpoint.clear();
+                                            }
+                                            if crate::ai::AiProvider::ALL.iter().any(|o| {
+                                                !o.default_model().is_empty()
+                                                    && s.ai_model == o.default_model()
+                                            }) {
+                                                s.ai_model.clear();
+                                            }
+                                            s.ai_provider = p;
+                                        }
+                                    }
+                                });
+                        });
+                        let def_ep = s.ai_provider.default_endpoint();
+                        ui.horizontal(|ui| {
+                            ui.label("endpoint ");
+                            if ui
+                                .add(
+                                    egui::TextEdit::singleline(&mut s.ai_endpoint)
+                                        .hint_text(def_ep)
+                                        .desired_width(330.0),
+                                )
+                                .changed()
+                            {
+                                s_dirty = true;
+                            }
+                        });
+                        let def_model = s.ai_provider.default_model();
+                        ui.horizontal(|ui| {
+                            ui.label("model    ");
+                            if ui
+                                .add(
+                                    egui::TextEdit::singleline(&mut s.ai_model)
+                                        .hint_text(def_model)
+                                        .desired_width(200.0),
+                                )
+                                .changed()
+                            {
+                                s_dirty = true;
+                            }
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("API key  ");
+                            if ui
+                                .add(
+                                    egui::TextEdit::singleline(&mut s.ai_key)
+                                        .password(true)
+                                        .hint_text("or env var")
+                                        .desired_width(240.0),
+                                )
+                                .changed()
+                            {
+                                s_dirty = true;
+                            }
+                        });
+                        ui.small(format!(
+                            "blank key tries {} — saved to trippin.json (gitignored)",
+                            s.ai_provider.env_keys().join(" / ")
+                        ));
+                        ui.checkbox(ai_replace, "replace existing cues");
+                        let busy = ai_job.lock().unwrap_or_else(|e| e.into_inner()).busy;
+                        ui.horizontal(|ui| {
+                            if ui
+                                .add_enabled(
+                                    !busy && doc_opt.is_some(),
+                                    egui::Button::new("Build cues"),
+                                )
+                                .on_hover_text(
+                                    "analyse the tracks locally, then the model\n\
+                                     designs scene/dancer/fx/text cues per section",
+                                )
+                                .clicked()
+                            {
+                                let clips = doc_opt.as_ref().unwrap().clips.clone();
+                                let scenes = scenes.to_vec();
+                                let routines = routines.to_vec();
+                                let conf = crate::ai::AiConf::from_settings(&s);
+                                let job = ai_job.clone();
+                                {
+                                    let mut j = job.lock().unwrap_or_else(|e| e.into_inner());
+                                    j.busy = true;
+                                    j.status = "analysing…".into();
+                                    j.result = None;
+                                }
+                                std::thread::spawn(move || {
+                                    let r =
+                                        crate::ai::build_show(&clips, &scenes, &routines, &conf)
+                                            .map_err(|e| format!("{e:#}"));
+                                    let mut j = job.lock().unwrap_or_else(|e| e.into_inner());
+                                    j.busy = false;
+                                    j.status = match &r {
+                                        Ok((_, n)) => n.clone(),
+                                        Err(e) => e.clone(),
+                                    };
+                                    j.result = Some(r);
+                                });
+                            }
+                            if busy {
+                                ui.spinner();
+                            }
+                            let st = ai_job
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .status
+                                .clone();
+                            if !st.is_empty() {
+                                ui.small(&st);
+                            }
+                        });
+                    });
+                *ai_open = open;
+                if s_dirty {
+                    settings_dirty.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+            }
 
             // --- Palette ----------------------------------------------------
             egui::Panel::left("ed_pal")

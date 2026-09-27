@@ -3,7 +3,7 @@
 //! Usage: trippin [--list-devices] [--device "<name part>"] [--mic] [--scene <name>]
 //!                [--dancer [style]] [--no-dancer] [--canon] [--no-panel]
 //!                [--gpu low] [--scale 0.75] [--fullscreen] [--vsync]
-//!                [--song <audio file>]
+//!                [--song <audio file>] [--analyze <audio file>]
 //!
 //! `--song` (or dropping an audio file / timeline .json on the window) loads a
 //! track for the Timeline tab: waveform + beat grid, draggable cues, record
@@ -24,6 +24,7 @@
 // plain `cargo run` keeps the console for shader errors and logs.
 #![cfg_attr(all(feature = "gui", windows), windows_subsystem = "windows")]
 
+mod ai;
 mod audio;
 mod config;
 mod dancer;
@@ -1456,6 +1457,8 @@ impl App {
                 &shared.scene_names,
                 &shared.clip_names,
                 &shared.timeline,
+                &shared.settings,
+                &shared.dirty,
                 &new_thumbs,
             )
         };
@@ -1609,12 +1612,19 @@ impl ApplicationHandler for App {
                 WindowEvent::KeyboardInput { event, .. } => {
                     if event.state == ElementState::Pressed && !event.repeat {
                         let typing = self.editor.as_ref().is_some_and(|e| e.wants_keyboard());
-                        // Space counts as text while a field is focused —
-                        // otherwise it's the editor's play/pause.
+                        // Text-producing keys plus the editing keys belong to a
+                        // focused field; arrows stay global (scene next/prev).
                         let text_like = matches!(event.logical_key, Key::Character(_))
                             || matches!(
                                 event.logical_key,
-                                Key::Named(winit::keyboard::NamedKey::Space)
+                                Key::Named(
+                                    winit::keyboard::NamedKey::Space
+                                        | winit::keyboard::NamedKey::Backspace
+                                        | winit::keyboard::NamedKey::Delete
+                                        | winit::keyboard::NamedKey::Home
+                                        | winit::keyboard::NamedKey::End
+                                        | winit::keyboard::NamedKey::Tab
+                                )
                             );
                         if typing && text_like {
                             // fall through to egui
@@ -1665,14 +1675,22 @@ impl ApplicationHandler for App {
                     if event.state == ElementState::Pressed && !event.repeat {
                         let rebinding = self.panel.as_ref().is_some_and(|p| p.rebinding.is_some());
                         let typing = self.panel.as_ref().is_some_and(|p| p.wants_keyboard());
-                        // Only text-producing keys belong to a focused text
-                        // field; function/arrow keys stay global hotkeys, so
-                        // F1 toggles even while typing in the scene filter.
-                        // Space counts as text too — names need it.
+                        // Only text-producing + editing keys belong to a
+                        // focused text field; function/arrow keys stay global
+                        // hotkeys, so F1 toggles even while typing in the
+                        // scene filter. Space counts as text too — names
+                        // need it.
                         let text_like = matches!(event.logical_key, Key::Character(_))
                             || matches!(
                                 event.logical_key,
-                                Key::Named(winit::keyboard::NamedKey::Space)
+                                Key::Named(
+                                    winit::keyboard::NamedKey::Space
+                                        | winit::keyboard::NamedKey::Backspace
+                                        | winit::keyboard::NamedKey::Delete
+                                        | winit::keyboard::NamedKey::Home
+                                        | winit::keyboard::NamedKey::End
+                                        | winit::keyboard::NamedKey::Tab
+                                )
                             );
                         if rebinding || !(typing && text_like) {
                             let key = event.logical_key.clone();
@@ -1853,6 +1871,12 @@ fn main() -> Result<()> {
     }
     if args.iter().any(|a| a == "--check-shaders") {
         return check_shaders();
+    }
+    // `--analyze track.mp3` prints the per-bar feature summary the AI show
+    // builder sends to the model — the prompt-tuning / sanity-check path.
+    if let Some(p) = arg_value(&args, "--analyze") {
+        println!("{}", ai::analyze_file(std::path::Path::new(&p))?);
+        return Ok(());
     }
     let device = arg_value(&args, "--device");
     let mic = args.iter().any(|a| a == "--mic");

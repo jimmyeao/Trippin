@@ -18,6 +18,7 @@ rustfft = "6.4.1"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 symphonia = { version = "=0.6.0", default-features = false, features = ["mp3", "flac", "wav", "vorbis", "aac", "alac", "ogg", "isomp4", "pcm"] }
+ureq = { version = "3.4.2", features = ["json"] }
 wgpu = "30.0.1"
 winit = "0.30.13"
 

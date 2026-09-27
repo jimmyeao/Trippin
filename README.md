@@ -197,6 +197,19 @@ waveform, a beat/bar grid and a playhead.
   audio onset envelope against the track's stored envelope, locks on when
   the same song is playing in the room and fires the cues at the matching
   position — a pre-programmed show that follows the DJ's deck.
+- **✦ AI show…** (editor toolbar) writes the cue list for you. Trippin
+  analyses each clip locally — per-bar energy, onset density, a vocal
+  likelihood, >5 kHz "air" — and segments the track into labelled ~4-bar
+  phrase blocks (intro / groove / build / drop / peak / breakdown / outro).
+  The model directs the show block by block (scene, dancer, routine, look,
+  fx, text per phrase), and Trippin expands that plan into cue blocks —
+  enforcing variety itself (a scene can't run longer than ~12 bars, dancer
+  routines rotate, `void` only ever plays a song out). BYOAI: Anthropic,
+  OpenAI, Gemini, or any OpenAI-compatible endpoint (Groq, Mistral,
+  Ollama…); the key lives in `trippin.json` or the provider's usual env var
+  (`ANTHROPIC_API_KEY` etc.). Nothing but the feature summary leaves the
+  machine — no audio is uploaded. Preview the summary with
+  `--analyze <file>`.
 
 ## Silhouette dancers
 

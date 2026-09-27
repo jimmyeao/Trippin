@@ -157,6 +157,12 @@ def clean(clip: Path, args):
             if args.solid > 0:
                 f = np.where(keep & (f > 0.25), np.maximum(f, args.solid), f)
             f = np.where(keep, f, 0.0)
+            # Never emit a dead frame: if cleaning emptied a frame whose raw
+            # mat had real content, keep the raw mat — a faint dancer beats
+            # a black flicker mid-routine.
+            if (f > 0.125).mean() < 0.01 and (stack[i] > 0.125).mean() > 0.02:
+                f = stack[i]
+                keep = f > 0.125
             prev_keep = keep
         cleaned.append(f)
         img = Image.fromarray((f * 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(args.blur))
