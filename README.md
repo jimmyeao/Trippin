@@ -83,6 +83,8 @@ cargo run --release -- --scale 0.6          # scene render resolution, upscaled 
 cargo run --release -- --vsync              # macOS: vsync-gated presents instead of the default
 cargo run --release -- --fullscreen
 cargo run --release -- --song track.wav   # open a track on the Timeline tab
+cargo run --release -- --analyze track.mp3   # print the per-bar feature summary sent to the AI
+cargo run --release -- --ai-build track.mp3  # run the AI show build end-to-end, print the cues
 ```
 
 Drag the visuals window to the projector / LED wall and press **F**. A
@@ -126,7 +128,8 @@ Default keys (all rebindable in the panel):
   portals over a wet reflective floor; the shape and twist change per cut),
   `block_tunnel` (a curving tunnel of jutting boxes, either red monochrome or
   dark metal with neon edges), `fractal_flight`, `portal_zoom` (endless Droste
-  portal zoom), `tunnel` and `synthwave`. These move on `u.flow`, a smooth
+  portal zoom), `ring_runner` (a warp tunnel of glowing gate rings that pulse
+  per band), `tunnel` and `synthwave`. These move on `u.flow`, a smooth
   tempo clock that never jumps, and they have no beat flashes, so the flight
   stays fluid.
 - **Scenery:** `ocean` (sunset sea), `clouds` (sunset cloud flight),
@@ -148,9 +151,17 @@ Default keys (all rebindable in the panel):
 - **Pulse / particle:** `shockwaves`, `pulse_grid`, `rings`, `heartbeat`
   (a scrolling ECG), `bounce`, `stardrive`, `orbiters`, `ribbons`, `ink`,
   `metaballs`, `sparks` (pyro fountains), `sun_rays`, `helix`,
-  `voronoi_pulse`, `chevrons` and `pixel_fall`. Ring bursts ride the beat,
-  onset splats and fountains fire on drops, trails live in the feedback
-  buffer.
+  `voronoi_pulse`, `chevrons`, `pixel_fall`, `glitch_grid` (a tearing LED
+  tile wall), `light_trails` (long-exposure light streaks) and
+  `bokeh_lights` (soft out-of-focus orbs — a mellow breakdown look).
+  Ring bursts ride the beat, onset splats and fountains fire on drops,
+  trails live in the feedback buffer.
+- **Raymarched 3D** (marked `// @heavy`, automatically gated to GPUs that can
+  afford them — override on the Scenes tab): `rave_hall` (a corridor of
+  banded pillars), `gyroid_drift`, `bass_blocks`, `chrome_bloom` (a metal
+  flower that opens on the kick), `prism_field` (a 3D equaliser landscape),
+  `gyro_core` (nested neon rings around a molten core) and `wire_terrain`
+  (a neon wireframe terrain flyover).
 - **Seasonal:** `halloween`, `christmas` and `fireworks` only enter the
   playlist in season (October, December, Bonfire Night and New Year; see
   `Seasonal` in the panel). They're the most audio-reactive scenes:
@@ -178,7 +189,9 @@ combines with everything (a mirrored dancer in canon is five dancers).
 The **Timeline** tab is a Clipchamp-style cue sheet for a track: load a song
 (`--song`, the Load button, or dropping an mp3 / flac / wav / m4a / ogg on
 either window) and it's decoded and analysed offline — the strip shows the
-waveform, a beat/bar grid and a playhead.
+waveform, a beat/bar grid and a playhead. The grid is anchored to the
+musical downbeat (bass-energy voting across the four beat slots), so bar
+boundaries and cue transitions land on the "one", not just on beats.
 
 - **Play** (`T`) plays the track through the speakers *and* the analyser, so
   the visuals react to the song itself; live input resumes when it ends or
@@ -209,7 +222,8 @@ waveform, a beat/bar grid and a playhead.
   Ollama…); the key lives in `trippin.json` or the provider's usual env var
   (`ANTHROPIC_API_KEY` etc.). Nothing but the feature summary leaves the
   machine — no audio is uploaded. Preview the summary with
-  `--analyze <file>`.
+  `--analyze <file>`, or run the whole build without the editor with
+  `--ai-build <file>` (prints every cue).
 
 ## Silhouette dancers
 

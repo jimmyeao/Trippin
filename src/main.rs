@@ -1856,6 +1856,41 @@ fn check_shaders() -> Result<()> {
     Ok(())
 }
 
+/// `trippin --ai-build track.mp3`: analyse + ask the configured provider for
+/// a block plan, expand it, and print every cue. The editor equivalent of
+/// "Build cues" without opening a window.
+fn ai_build(path: &std::path::Path) -> Result<()> {
+    let song = song::load(path)?;
+    let clip = timeline::Clip::from_song(&song, 0.0);
+    let mut scenes: Vec<String> = std::fs::read_dir(render::find_shader_dir()?.join("scenes"))?
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let p = e.path();
+            (p.extension().is_some_and(|x| x == "wgsl"))
+                .then(|| p.file_stem().unwrap().to_string_lossy().into_owned())
+        })
+        .collect();
+    scenes.sort();
+    let routines: Vec<String> = dancer::find_dancer_dir()
+        .map(|d| dancer::list_clips(&d).into_iter().map(|c| c.name).collect())
+        .unwrap_or_default();
+    let conf = ai::AiConf::from_settings(&Settings::load());
+    println!(
+        "{} ({}) — {} at {:.1} BPM, {:.0} beats",
+        conf.provider.label(),
+        conf.model,
+        song.name,
+        song.bpm,
+        (song.duration - song.first_beat) * song.bpm / 60.0
+    );
+    let (cues, note) = ai::build_show(&[clip], &scenes, &routines, &conf)?;
+    println!("{note}");
+    for cue in &cues {
+        println!("  {:>6.1} bt  clip {}  {:?}", cue.beat, cue.clip, cue.kind);
+    }
+    Ok(())
+}
+
 fn main() -> Result<()> {
     // Panics on the render thread must be visible — a silent death leaves the
     // app looking alive while ignoring every command.
@@ -1877,6 +1912,12 @@ fn main() -> Result<()> {
     if let Some(p) = arg_value(&args, "--analyze") {
         println!("{}", ai::analyze_file(std::path::Path::new(&p))?);
         return Ok(());
+    }
+    // `--ai-build track.mp3` runs the whole pipeline end-to-end (analysis,
+    // provider call, cue expansion) and prints the cue list — a preview of
+    // what "Build cues" in the editor would generate.
+    if let Some(p) = arg_value(&args, "--ai-build") {
+        return ai_build(std::path::Path::new(&p));
     }
     let device = arg_value(&args, "--device");
     let mic = args.iter().any(|a| a == "--mic");
