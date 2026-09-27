@@ -564,8 +564,9 @@ time she comes back on so the movement varies — never one routine for the whol
 - drop blocks: the scene change lands ON the drop; an optional \"blackout\":true on the \
 block just before reads well.\n\
 - vocal spans (v in the vocals map): dancer + \"look\":1 (neon) reads well.\n\
-- fx: use sparingly — a transform for a drop or a kaleido for a trippy breakdown, then \
-back to \"off\". Never left on for the whole track.\n\
+- fx: DO use it — a show with no transforms looks flat. \"auto\" on a drop/peak block \
+(and \"off\" a few blocks later), a kaleido for a trippy breakdown stretch, or a mirror \
+for a section are all good. Typically 1-3 fx stretches per track, never the whole song.\n\
 - text: 0-2 cards for the whole track, meaningful words only (song/artist name, a \
 shout-out). NEVER literal labels like \"DROP\" or \"BUILD\". When in doubt, omit.\n\
 - Contrast beats chaos — don't stack dancer+trails+canon+fx on every block.\n\
@@ -999,6 +1000,7 @@ fn expand_plan(
         let mut canon: Option<Tristate> = None;
         let mut fx = Fx::Off;
         let mut fx_auto = false;
+        let mut used_fx = false;
 
         for (bi, (_, from_bar, to_bar)) in a.blocks.iter().enumerate() {
             let beat = (*from_bar * 4) as f64;
@@ -1197,6 +1199,7 @@ fn expand_plan(
             if let Some(f) = it["fx"].as_str() {
                 match f {
                     "auto" => {
+                        used_fx = true;
                         if !fx_auto {
                             fx_auto = true;
                             cues.push(Cue {
@@ -1227,6 +1230,9 @@ fn expand_plan(
                         }
                         if want != fx {
                             fx = want;
+                            if want != Fx::Off {
+                                used_fx = true;
+                            }
                             cues.push(Cue {
                                 clip: a.clip,
                                 beat,
@@ -1260,6 +1266,68 @@ fn expand_plan(
                     Err(e) => warnings.push(format!("plan: {e}")),
                 }
             }
+        }
+
+        // If the plan never touched the fx lane, light it up over the
+        // first high-energy stretch — an unused lane reads as a flat show.
+        if !used_fx && a.blocks.len() >= 4 {
+            let hot = |k: &String| matches!(k.as_str(), "build" | "drop" | "peak");
+            let start = a
+                .blocks
+                .iter()
+                .position(|(k, _, _)| hot(k))
+                .unwrap_or_else(|| {
+                    a.blocks
+                        .iter()
+                        .enumerate()
+                        .max_by(|(_, (_, s1, e1)), (_, (_, s2, e2))| {
+                            let e = |s: usize, t: usize| {
+                                mean(&a.energy[s..=t.min(a.energy.len().saturating_sub(1))])
+                            };
+                            e(*s1, *e1).total_cmp(&e(*s2, *e2))
+                        })
+                        .map(|(i, _)| i)
+                        .unwrap_or(0)
+                });
+            cues.push(Cue {
+                clip: a.clip,
+                beat: (a.blocks[start].1 * 4) as f64,
+                beats: 4.0,
+                kind: CueKind::FxAuto(true),
+            });
+            // Release at the first quiet block after it, else ~4 blocks on.
+            let quiet =
+                |k: &String| matches!(k.as_str(), "intro" | "breakdown" | "outro" | "silent");
+            let end = if start + 1 < a.blocks.len() {
+                a.blocks[start + 1..]
+                    .iter()
+                    .position(|(k, _, _)| quiet(k))
+                    .map(|p| start + 1 + p)
+                    .unwrap_or((start + 4).min(a.blocks.len() - 1))
+            } else {
+                start
+            };
+            let off_beat = if end > start {
+                (a.blocks[end].1 * 4) as f64
+            } else {
+                (a.beats - 4.0).max(0.0)
+            };
+            cues.push(Cue {
+                clip: a.clip,
+                beat: off_beat,
+                beats: 4.0,
+                kind: CueKind::FxAuto(false),
+            });
+            cues.push(Cue {
+                clip: a.clip,
+                beat: off_beat,
+                beats: 4.0,
+                kind: CueKind::Fx(Fx::Off),
+            });
+            warnings.push(format!(
+                "clip {}: plan used no fx — auto-fx over the loud stretch",
+                a.clip
+            ));
         }
     }
 }

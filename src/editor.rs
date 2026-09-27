@@ -696,7 +696,7 @@ const TRACK_H: f32 = 22.0;
 const GUTTER: f32 = 56.0;
 const SCROLL_H: f32 = 12.0;
 /// Cue lanes, in `CueKind::track()` order.
-const TRACK_NAMES: [&str; 6] = ["scenes", "dancer", "fx", "show", "text 1", "text 2"];
+const TRACK_NAMES: [&str; 6] = ["scenes", "dancer", "fx", "mode/flash", "text 1", "text 2"];
 const CUE_H: f32 = TRACK_H * TRACK_NAMES.len() as f32;
 /// Trim zone: this many px *inside* a block's edge plus `EDGE_OUT` px of
 /// overshoot past it, so grabbing an edge doesn't take pixel aim.
