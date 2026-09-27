@@ -292,6 +292,8 @@ pub struct Settings {
     pub fx_auto: bool,
     /// Post effect strength 0..1 — blends the transform in `present.wgsl`.
     pub fx_amt: f32,
+    /// Raymarched `// @heavy` scenes: Auto follows the detected GPU tier.
+    pub heavy_scenes: Tristate,
     pub latency_ms: f32,
     pub show_panel: bool,
 }
@@ -318,6 +320,7 @@ impl Default for Settings {
             fx: Fx::Off,
             fx_auto: false,
             fx_amt: 1.0,
+            heavy_scenes: Tristate::Auto,
             latency_ms: 30.0,
             show_panel: true,
         }

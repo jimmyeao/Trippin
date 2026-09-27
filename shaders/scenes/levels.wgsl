@@ -29,21 +29,13 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     var col = vec3<f32>(0.025, 0.02, 0.03);
     col += palette(0.6) * 0.05 * exp(-abs(uv.y - 0.5) * 2.0) * (0.4 + u.energy);
 
-    // Margin bars on the sides.
-    let frame = step(uv.x, 0.06) + step(0.94, uv.x);
-    col += vec3<f32>(0.08, 0.07, 0.10) * frame * 0.5;
-    col += palette(0.9) * frame * u.kick * 0.15;
-
     col += meter(uv, 0.62, 0.16, u.bass, 0.05);
     col += meter(uv, 0.42, 0.16, u.mid, 0.35);
     col += meter(uv, 0.22, 0.16, u.high, 0.65);
 
-    // Bottom spectrum strip for detail.
-    let strip = step(uv.y, 0.10);
+    // Spectrum strip along the bottom edge for detail.
+    let strip = step(0.90, uv.y);
     col += palette(uv.x * 0.8) * strip * spec(uv.x) * 0.5;
-
-    // Kick flash on the frame.
-    col += vec3<f32>(0.9, 0.95, 1.0) * step(0.965, uv.y) * u.kick * 0.2;
 
     return vec4<f32>(finite(col), 1.0);
 }

@@ -144,6 +144,8 @@ impl Panel {
         settings: &mut Settings,
         status: &Status,
         scenes: &[String],
+        scene_heavy: &[bool],
+        heavy_ok: bool,
         clips: &[String],
         tl_shared: &crate::timeline::Shared,
     ) -> (Vec<UiCommand>, bool, PanelFrame) {
@@ -160,6 +162,8 @@ impl Panel {
                 settings,
                 status,
                 scenes,
+                scene_heavy,
+                heavy_ok,
                 clips,
                 tl_shared,
                 rebinding,
@@ -184,6 +188,8 @@ fn build_ui(
     s: &mut Settings,
     st: &Status,
     scenes: &[String],
+    scene_heavy: &[bool],
+    heavy_ok: bool,
     clips: &[String],
     tl_shared: &crate::timeline::Shared,
     rebinding: &mut Option<Action>,
@@ -231,7 +237,7 @@ fn build_ui(
         .auto_shrink([false, true])
         .show(ui, |ui| match *tab {
             Tab::Show => show_tab(ui, s, st, cmd),
-            Tab::Scenes => scenes_tab(ui, s, st, scenes, scene_filter, cmd),
+            Tab::Scenes => scenes_tab(ui, s, st, scenes, scene_heavy, heavy_ok, scene_filter, cmd),
             Tab::Dancer => dancer_tab(ui, s, st, clips, cmd),
             Tab::Effects => effects_tab(ui, s, st),
             Tab::Timeline => timeline_tab(ui, tl_shared, cmd),
@@ -317,6 +323,8 @@ fn scenes_tab(
     s: &mut Settings,
     st: &Status,
     scenes: &[String],
+    heavy: &[bool],
+    heavy_ok: bool,
     filter: &mut String,
     cmd: &mut Vec<UiCommand>,
 ) {
@@ -325,6 +333,24 @@ fn scenes_tab(
         ui.selectable_value(&mut s.seasonal, Seasonal::Always, "Always");
         ui.selectable_value(&mut s.seasonal, Seasonal::Off, "Off");
     });
+    row(ui, "3D scenes", |ui| {
+        ui.selectable_value(&mut s.heavy_scenes, Tristate::Auto, "Auto");
+        ui.selectable_value(&mut s.heavy_scenes, Tristate::On, "On");
+        ui.selectable_value(&mut s.heavy_scenes, Tristate::Off, "Off");
+    });
+    ui.small(match s.heavy_scenes {
+        Tristate::Auto if heavy_ok => {
+            "Raymarched scenes are in rotation — this GPU can handle them."
+        }
+        Tristate::Auto => "Raymarched scenes are off — this GPU can't keep up. Force them with On.",
+        Tristate::On => "Raymarched scenes forced on — may drop frames on a weak GPU.",
+        Tristate::Off => "Raymarched scenes are off.",
+    });
+    let heavy_on = match s.heavy_scenes {
+        Tristate::Auto => heavy_ok,
+        Tristate::On => true,
+        Tristate::Off => false,
+    };
     let date = today();
     let in_now: Vec<&str> = scenes
         .iter()
@@ -350,9 +376,16 @@ fn scenes_tab(
             s.disabled_scenes = scenes.to_vec();
         }
     });
+    let blocked = (0..scenes.len())
+        .filter(|&i| {
+            heavy.get(i).copied().unwrap_or(false)
+                && !heavy_on
+                && !s.disabled_scenes.contains(&scenes[i])
+        })
+        .count();
     ui.small(format!(
         "{} of {} scenes in rotation",
-        scenes.len() - s.disabled_scenes.len().min(scenes.len()),
+        scenes.len() - s.disabled_scenes.len().min(scenes.len()) - blocked,
         scenes.len()
     ));
     ui.separator();
@@ -365,13 +398,27 @@ fn scenes_tab(
                 if !q.is_empty() && !name.to_lowercase().contains(&q) {
                     continue;
                 }
+                let is_heavy = heavy.get(i).copied().unwrap_or(false);
+                let off_gpu = is_heavy && !heavy_on;
                 let mut on = !s.disabled_scenes.contains(name);
-                let label = match in_season(name, date) {
+                let mut label = match in_season(name, date) {
                     Some(true) => format!("{name} (in season)"),
                     Some(false) => format!("{name} (out of season)"),
                     None => name.clone(),
                 };
-                if ui.checkbox(&mut on, label).changed() {
+                if is_heavy {
+                    label += if off_gpu {
+                        " (3D — needs dGPU)"
+                    } else {
+                        " (3D)"
+                    };
+                }
+                // Greyed out when the GPU can't run it — it can't join
+                // rotation anyway, and "show" would just drop frames.
+                if ui
+                    .add_enabled(!off_gpu, egui::Checkbox::new(&mut on, label))
+                    .changed()
+                {
                     if on {
                         s.disabled_scenes.retain(|n| n != name);
                     } else {
@@ -380,7 +427,7 @@ fn scenes_tab(
                 }
                 let label = if i == st.scene { "▶" } else { "show" };
                 if ui
-                    .add_enabled(i != st.scene, egui::Button::new(label).small())
+                    .add_enabled(i != st.scene && !off_gpu, egui::Button::new(label).small())
                     .clicked()
                 {
                     cmd.push(UiCommand::GoToScene(i));

@@ -1,3 +1,4 @@
+// @heavy — raymarched; only in rotation when the GPU tier allows.
 // Misty mountain valley at dawn: the camera glides down a river-valley
 // corridor between ridged fbm peaks, low sun ahead, fog pooling on the floor.
 // The tempo clock drives the flight; the music warms the light and stirs the

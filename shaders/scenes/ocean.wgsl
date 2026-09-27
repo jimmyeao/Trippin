@@ -1,3 +1,4 @@
+// @heavy — raymarched; only in rotation when the GPU tier allows.
 // Realistic ocean at sunset: layered choppy wave octaves ray-traced as a
 // height field, with Fresnel sky reflections, sun glitter and green-blue
 // light through the crests. The camera glides forward on the tempo clock; the

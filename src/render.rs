@@ -82,6 +82,9 @@ struct Scene {
     path: PathBuf,
     mtime: Option<SystemTime>,
     pipeline: Option<wgpu::RenderPipeline>,
+    /// `// @heavy` in the file header marks a raymarched scene that's only in
+    /// rotation when the GPU tier allows (or the user forces it).
+    heavy: bool,
 }
 
 /// GPU handles shared with the control panel window.
@@ -156,6 +159,8 @@ pub struct Renderer {
     seen_epoch: u64,
     /// Shared submit/configure gate — see `Gpu::submit_gate`.
     submit_gate: Arc<Mutex<()>>,
+    /// The adapter can comfortably raymarch (`@heavy` scenes join rotation).
+    heavy_ok: bool,
 }
 
 pub fn find_shader_dir() -> Result<PathBuf> {
@@ -227,11 +232,22 @@ impl Renderer {
         let scale = scale
             .unwrap_or(if integrated { 0.75 } else { 1.0 })
             .clamp(0.25, 1.0);
+        // `@heavy` scenes raymarch every pixel — keep them off iGPUs that
+        // would drop frames, but Apple Silicon reports "integrated" while
+        // being plenty fast. `--gpu low` always opts out.
+        let heavy_ok = !low_power
+            && match info.device_type {
+                wgpu::DeviceType::DiscreteGpu => true,
+                // Vendor 0x106b = Apple.
+                wgpu::DeviceType::IntegratedGpu => info.vendor == 0x106b,
+                _ => false,
+            };
         println!(
-            "GPU: {} ({:?}), render scale {:.0}%",
+            "GPU: {} ({:?}), render scale {:.0}%, heavy scenes {}",
             info.name,
             info.backend,
-            scale * 100.0
+            scale * 100.0,
+            if heavy_ok { "on" } else { "off" }
         );
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
@@ -466,6 +482,7 @@ impl Renderer {
             surface_epoch,
             seen_epoch: 0,
             submit_gate,
+            heavy_ok,
         };
         r.reload_shaders(true);
         if r.present.pipeline.is_none() {
@@ -634,6 +651,17 @@ impl Renderer {
             .collect()
     }
 
+    /// The adapter can comfortably raymarch (`@heavy` scenes). `false` on
+    /// non-Apple iGPUs and under `--gpu low`.
+    pub fn heavy_ok(&self) -> bool {
+        self.heavy_ok
+    }
+
+    /// Per-scene `@heavy` flags, parallel with `scene_names`.
+    pub fn scene_heavy(&self) -> Vec<bool> {
+        self.scenes.iter().map(|s| s.heavy).collect()
+    }
+
     /// Recompile anything whose file changed (or everything if `force`).
     pub fn reload_shaders(&mut self, force: bool) {
         let common_path = self.shader_dir.join("common.wgsl");
@@ -675,6 +703,10 @@ impl Renderer {
                 continue;
             }
             s.mtime = m;
+            // `// @heavy` in the file header gates the scene to stronger GPUs.
+            if let Ok(body) = std::fs::read_to_string(&s.path) {
+                s.heavy = body.lines().take(8).any(|l| l.contains("@heavy"));
+            }
             match self.compile(&common, &s.path, s.kind) {
                 Ok(p) => {
                     if !force {

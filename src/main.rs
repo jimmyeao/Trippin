@@ -73,6 +73,10 @@ struct Shared {
     quit: AtomicBool,
     /// Fixed after init; the panel lists them.
     scene_names: Vec<String>,
+    /// `@heavy` flags parallel with `scene_names` (raymarched scenes).
+    scene_heavy: Vec<bool>,
+    /// The GPU tier can run `@heavy` scenes (panel greys them otherwise).
+    heavy_ok: bool,
     clip_names: Vec<String>,
     /// Finished scene thumbnails for the editor: (name, w, h, RGBA8).
     /// Produced on the render thread, drained by `draw_editor`.
@@ -110,8 +114,16 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 /// scenes) are in season.
 fn usable_scenes(r: &Renderer, s: &Settings) -> Vec<usize> {
     let names = r.scene_names();
+    let heavy = r.scene_heavy();
     let all = r.usable_scenes();
     let date = today();
+    // `@heavy` (raymarched) scenes need a GPU that can keep up; the user can
+    // force them on or off regardless of the detected tier.
+    let heavy_on = match s.heavy_scenes {
+        Tristate::Auto => r.heavy_ok(),
+        Tristate::On => true,
+        Tristate::Off => false,
+    };
     let on: Vec<usize> = all
         .iter()
         .copied()
@@ -119,6 +131,7 @@ fn usable_scenes(r: &Renderer, s: &Settings) -> Vec<usize> {
         // via an explicit cue, never by autopilot or next/prev.
         .filter(|&i| names[i] != "void")
         .filter(|&i| !s.disabled_scenes.contains(&names[i]))
+        .filter(|&i| heavy_on || !heavy[i])
         .filter(|&i| match (s.seasonal, in_season(&names[i], date)) {
             (_, None) | (Seasonal::Always, _) => true,
             (Seasonal::Off, Some(_)) => false,
@@ -1366,6 +1379,8 @@ impl App {
                 &mut s,
                 &status,
                 &shared.scene_names,
+                &shared.scene_heavy,
+                shared.heavy_ok,
                 &shared.clip_names,
                 &shared.timeline,
             )
@@ -1507,6 +1522,8 @@ impl ApplicationHandler for App {
             dirty: AtomicBool::new(false),
             quit: AtomicBool::new(false),
             scene_names: r.scene_names(),
+            scene_heavy: r.scene_heavy(),
+            heavy_ok: r.heavy_ok(),
             clip_names: self
                 .dancer
                 .as_ref()
