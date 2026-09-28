@@ -184,6 +184,26 @@ sits over the plain frame). **Auto** picks a fresh effect on every scene cut
 It's applied in `present.wgsl` from `u.fx`, so it needs no scene support and
 combines with everything (a mirrored dancer in canon is five dancers).
 
+## Output to other screens (NDI)
+
+The **Show** tab's *Network output* section sends the finished frame — scene,
+dancer, post FX, text, blackout — as an **NDI** source on the LAN. Enable it,
+pick a source name, and it shows up in:
+
+- **OBS** (add an *NDI Source*, pick the Trippin sender — then stream, record,
+  projector fullscreen, or VirtualCam it);
+- Resolume, vMix, MadMapper, NDI Studio Monitor, or another machine running
+  OBS — NDI crosses the network, so a second laptop can do the displaying.
+
+It needs the free **NDI runtime**: `winget install NDI.NDIRuntime` (Windows)
+or NDI Tools on macOS — Trippin loads it dynamically, so the app still works
+fine without it (the panel just shows the error). Resolution (720p/1080p/4K)
+and a 30/60 fps cap are independent of the window size; the render loop never
+blocks on the network — frames drop rather than stall.
+
+`trippin --ndi-monitor [name]` lists sources and counts frames from the first
+match — a quick "is it on the wire?" check with no other tools needed.
+
 ## Timeline
 
 The **Timeline** tab is a Clipchamp-style cue sheet for a track: load a song

@@ -31,6 +31,8 @@ mod dancer;
 mod director;
 mod editor;
 mod egui_win;
+mod ndi;
+mod output;
 mod panel;
 mod render;
 mod song;
@@ -734,6 +736,12 @@ fn render_loop(
         }
         let s = lock(&shared.settings).clone();
         let usable = usable_scenes(&r, &s);
+        // NDI output — a conf change rebuilds it; otherwise a cheap no-op.
+        r.set_output(s.ndi_enabled.then(|| output::Conf {
+            name: s.ndi_name.clone(),
+            height: s.ndi_height,
+            fps: s.ndi_fps,
+        }));
 
         // --- Timeline: loader results, transport state, cue dispatch -------
         // Lock order note: the panel draws under the settings lock and takes
@@ -1073,6 +1081,7 @@ fn render_loop(
                 // Filled in by the event thread — it owns the window state.
                 fullscreen: false,
                 fx: if s.fx_auto { fx_current } else { s.fx },
+                output: r.output_status(),
             };
         }
 
@@ -1918,6 +1927,13 @@ fn main() -> Result<()> {
     // what "Build cues" in the editor would generate.
     if let Some(p) = arg_value(&args, "--ai-build") {
         return ai_build(std::path::Path::new(&p));
+    }
+    // `--ndi-monitor [name]` lists discoverable NDI sources and counts frames
+    // from the first match — checks the send path end-to-end with no NDI
+    // Tools install needed.
+    if args.iter().any(|a| a == "--ndi-monitor") {
+        let name = arg_value(&args, "--ndi-monitor");
+        return ndi::Ndi::load().and_then(|n| n.monitor(name.as_deref(), 12));
     }
     let device = arg_value(&args, "--device");
     let mic = args.iter().any(|a| a == "--mic");

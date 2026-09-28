@@ -303,6 +303,16 @@ pub struct Settings {
     pub ai_key: String,
     pub latency_ms: f32,
     pub show_panel: bool,
+    /// NDI network output — sends the composited frame (FX + text included)
+    /// to OBS/another display. Needs the free NDI runtime installed; a
+    /// missing runtime just shows an error in the panel.
+    pub ndi_enabled: bool,
+    /// The source name receivers see.
+    pub ndi_name: String,
+    /// Output height: 720 / 1080 / 2160 — width follows at 16:9.
+    pub ndi_height: u32,
+    /// Output cadence cap.
+    pub ndi_fps: u32,
 }
 
 impl Default for Settings {
@@ -334,6 +344,10 @@ impl Default for Settings {
             ai_key: String::new(),
             latency_ms: 30.0,
             show_panel: true,
+            ndi_enabled: false,
+            ndi_name: "Trippin".into(),
+            ndi_height: 1080,
+            ndi_fps: 60,
         }
     }
 }
