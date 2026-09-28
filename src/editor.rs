@@ -516,25 +516,165 @@ impl Editor {
                 }
             }
 
-            // --- Palette ----------------------------------------------------
-            egui::Panel::left("ed_pal")
+            // --- Media row (full width, very bottom): effects, actions,
+            // palettes and the text composer as a horizontal strip ---------
+            egui::Panel::bottom("ed_media")
                 .resizable(true)
-                .default_size(240.0)
-                .size_range(190.0..=420.0)
+                .default_size(96.0)
+                .size_range(70.0..=240.0)
+                .show(ui, |ui| {
+                    egui::ScrollArea::horizontal()
+                        .id_salt("ed_media_scroll")
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                // Text composer: edit the draft, drag the card
+                                // onto a text lane (the drop row picks lane 1/2).
+                                ui.vertical(|ui| {
+                                    ui.label(egui::RichText::new("Text").strong());
+                                    ui.add(
+                                        egui::TextEdit::singleline(&mut text_draft.text)
+                                            .desired_width(220.0)
+                                            .hint_text("say something…"),
+                                    );
+                                    ui.horizontal(|ui| {
+                                        egui::ComboBox::from_id_salt("text_style")
+                                            .width(76.0)
+                                            .selected_text(text_draft.style.label())
+                                            .show_ui(ui, |ui| {
+                                                for v in crate::text::TextStyle::ALL {
+                                                    ui.selectable_value(
+                                                        &mut text_draft.style,
+                                                        v,
+                                                        v.label(),
+                                                    );
+                                                }
+                                            });
+                                        for v in crate::text::TextPos::ALL {
+                                            ui.selectable_value(&mut text_draft.pos, v, v.label());
+                                        }
+                                        egui::ComboBox::from_id_salt("text_anim")
+                                            .width(80.0)
+                                            .selected_text(text_draft.anim.label())
+                                            .show_ui(ui, |ui| {
+                                                for v in crate::text::TextAnim::ALL {
+                                                    ui.selectable_value(
+                                                        &mut text_draft.anim,
+                                                        v,
+                                                        v.label(),
+                                                    );
+                                                }
+                                            });
+                                    });
+                                    if !text_draft.text.trim().is_empty() {
+                                        let kind = CueKind::Text(text_draft.clone());
+                                        if palette_item(
+                                            ui,
+                                            &format!("“{}”", text_draft.text),
+                                            &kind,
+                                        ) {
+                                            cmd.push(UiCommand::FireCue(kind));
+                                        }
+                                    } else {
+                                        ui.small("type, then drag onto a text lane");
+                                    }
+                                });
+                                ui.separator();
+
+                                ui.vertical(|ui| {
+                                    ui.label(egui::RichText::new("Effects").strong());
+                                    let mut kinds: Vec<CueKind> =
+                                        Fx::ALL.iter().map(|f| CueKind::Fx(*f)).collect();
+                                    kinds.push(CueKind::FxAuto(true));
+                                    kinds.push(CueKind::FxAuto(false));
+                                    egui::Grid::new("fx_grid").num_columns(4).show(ui, |ui| {
+                                        for (i, kind) in kinds.iter().enumerate() {
+                                            let lbl = match kind {
+                                                CueKind::Fx(f) => f.label(),
+                                                CueKind::FxAuto(true) => "auto FX",
+                                                _ => "auto FX off",
+                                            };
+                                            if palette_item(ui, lbl, kind) {
+                                                cmd.push(UiCommand::FireCue(kind.clone()));
+                                            }
+                                            if i % 4 == 3 {
+                                                ui.end_row();
+                                            }
+                                        }
+                                    });
+                                });
+                                ui.separator();
+
+                                ui.vertical(|ui| {
+                                    ui.label(egui::RichText::new("Actions").strong());
+                                    for (lbl, kind) in [
+                                        ("next scene", CueKind::NextScene),
+                                        ("prev scene", CueKind::PrevScene),
+                                        ("auto mode", CueKind::Mode(crate::config::Mode::Auto)),
+                                        ("static mode", CueKind::Mode(crate::config::Mode::Static)),
+                                        ("manual mode", CueKind::Mode(crate::config::Mode::Manual)),
+                                        ("blackout", CueKind::Blackout(true)),
+                                    ] {
+                                        if palette_item(ui, lbl, &kind) {
+                                            cmd.push(UiCommand::FireCue(kind));
+                                        }
+                                    }
+                                });
+                                ui.separator();
+
+                                ui.vertical(|ui| {
+                                    ui.label(egui::RichText::new("Palettes").strong());
+                                    egui::Grid::new("pal_grid").num_columns(6).show(ui, |ui| {
+                                        for (i, name) in crate::palettes::names().enumerate() {
+                                            let kind = CueKind::Palette(name.to_string());
+                                            if palette_item(ui, name, &kind) {
+                                                cmd.push(UiCommand::FireCue(kind));
+                                            }
+                                            if i % 6 == 5 {
+                                                ui.end_row();
+                                            }
+                                        }
+                                    });
+                                });
+                            });
+                        });
+                });
+
+            // --- Inspector (above the media row) ------------------------------
+            egui::Panel::bottom("ed_insp").show(ui, |ui| {
+                inspector(
+                    ui, doc_opt, scenes, routines, *sel_cue, *sel_clip, *cursor_s, *snap, dirty,
+                    &mut cmd,
+                );
+            });
+
+            // --- Palette: scenes left, dancer right ----------------------------
+            egui::Panel::left("ed_scenes")
+                .resizable(true)
+                .default_size(180.0)
+                .size_range(140.0..=320.0)
                 .show(ui, |ui| {
                     egui::ScrollArea::vertical().show(ui, |ui| {
-                        ui.heading("Drag onto timeline");
-                        ui.small("click = preview");
+                        ui.heading("Scenes");
+                        ui.small("drag onto timeline · click = preview");
                         ui.separator();
-                        ui.label(egui::RichText::new("Scenes").strong());
                         for name in scenes {
                             let kind = CueKind::Scene(name.clone());
                             if palette_item(ui, name, &kind) {
                                 cmd.push(UiCommand::FireCue(kind));
                             }
                         }
+                    });
+                });
+
+            egui::Panel::right("ed_dancer")
+                .resizable(true)
+                .default_size(160.0)
+                .size_range(120.0..=300.0)
+                .show(ui, |ui| {
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        ui.heading("Dancer");
+                        ui.small("drag onto the dancer lane");
                         ui.separator();
-                        ui.label(egui::RichText::new("Dancer").strong());
                         for (lbl, kind) in [
                             ("dancer on", CueKind::Dancer(true)),
                             ("dancer off", CueKind::Dancer(false)),
@@ -550,104 +690,24 @@ impl Editor {
                                 cmd.push(UiCommand::FireCue(kind));
                             }
                         }
+                        ui.separator();
+                        ui.label(egui::RichText::new("Looks").strong());
                         for (i, n) in STYLES.iter().enumerate() {
                             let kind = CueKind::Look(Some(i));
                             if palette_item(ui, n, &kind) {
                                 cmd.push(UiCommand::FireCue(kind));
                             }
                         }
+                        ui.separator();
+                        ui.label(egui::RichText::new("Routines").strong());
                         for name in routines {
                             let kind = CueKind::Clip(name.clone());
                             if palette_item(ui, name, &kind) {
                                 cmd.push(UiCommand::FireCue(kind));
                             }
                         }
-                        ui.separator();
-                        ui.label(egui::RichText::new("Effects").strong());
-                        for f in Fx::ALL {
-                            let kind = CueKind::Fx(f);
-                            if palette_item(ui, f.label(), &kind) {
-                                cmd.push(UiCommand::FireCue(kind));
-                            }
-                        }
-                        let kind = CueKind::FxAuto(true);
-                        if palette_item(ui, "auto FX", &kind) {
-                            cmd.push(UiCommand::FireCue(kind));
-                        }
-                        let kind = CueKind::FxAuto(false);
-                        if palette_item(ui, "auto FX off", &kind) {
-                            cmd.push(UiCommand::FireCue(kind));
-                        }
-                        ui.separator();
-                        ui.label(egui::RichText::new("Actions").strong());
-                        for (lbl, kind) in [
-                            ("next scene", CueKind::NextScene),
-                            ("prev scene", CueKind::PrevScene),
-                            ("auto mode", CueKind::Mode(crate::config::Mode::Auto)),
-                            ("static mode", CueKind::Mode(crate::config::Mode::Static)),
-                            ("manual mode", CueKind::Mode(crate::config::Mode::Manual)),
-                            ("blackout", CueKind::Blackout(true)),
-                        ] {
-                            if palette_item(ui, lbl, &kind) {
-                                cmd.push(UiCommand::FireCue(kind));
-                            }
-                        }
-                        ui.separator();
-                        ui.label(egui::RichText::new("Palettes").strong());
-                        for name in crate::palettes::names() {
-                            let kind = CueKind::Palette(name.to_string());
-                            if palette_item(ui, name, &kind) {
-                                cmd.push(UiCommand::FireCue(kind));
-                            }
-                        }
-                        ui.separator();
-                        ui.label(egui::RichText::new("Text").strong());
-                        ui.add(
-                            egui::TextEdit::singleline(&mut text_draft.text)
-                                .desired_width(ui.available_width() - 8.0)
-                                .hint_text("say something…"),
-                        );
-                        ui.horizontal(|ui| {
-                            egui::ComboBox::from_id_salt("text_style")
-                                .width(76.0)
-                                .selected_text(text_draft.style.label())
-                                .show_ui(ui, |ui| {
-                                    for v in crate::text::TextStyle::ALL {
-                                        ui.selectable_value(&mut text_draft.style, v, v.label());
-                                    }
-                                });
-                            for v in crate::text::TextPos::ALL {
-                                ui.selectable_value(&mut text_draft.pos, v, v.label());
-                            }
-                        });
-                        ui.horizontal(|ui| {
-                            ui.small("in");
-                            egui::ComboBox::from_id_salt("text_anim")
-                                .width(80.0)
-                                .selected_text(text_draft.anim.label())
-                                .show_ui(ui, |ui| {
-                                    for v in crate::text::TextAnim::ALL {
-                                        ui.selectable_value(&mut text_draft.anim, v, v.label());
-                                    }
-                                });
-                            ui.small("· drop on a text lane");
-                        });
-                        if !text_draft.text.trim().is_empty() {
-                            let kind = CueKind::Text(text_draft.clone());
-                            if palette_item(ui, &format!("“{}”", text_draft.text), &kind) {
-                                cmd.push(UiCommand::FireCue(kind));
-                            }
-                        }
                     });
                 });
-
-            // --- Inspector ----------------------------------------------------
-            egui::Panel::bottom("ed_insp").show(ui, |ui| {
-                inspector(
-                    ui, doc_opt, scenes, routines, *sel_cue, *sel_clip, *cursor_s, *snap, dirty,
-                    &mut cmd,
-                );
-            });
 
             // --- Timeline canvas ----------------------------------------------
             egui::CentralPanel::default().show(ui, |ui| {
@@ -684,7 +744,9 @@ impl Editor {
 /// so the click is detected manually: press started inside, released inside,
 /// and the drag never engaged.
 fn palette_item(ui: &mut egui::Ui, label: &str, kind: &CueKind) -> bool {
-    let id = egui::Id::new(("pal", label));
+    // Salt with the kind label: a scene named "ocean" mustn't share a
+    // drag-source id with the "ocean" palette entry.
+    let id = egui::Id::new(("pal", kind.label(), label));
     let resp = ui
         .dnd_drag_source(id, kind.clone(), |ui| {
             ui.colored_label(cue_color(kind), label);
