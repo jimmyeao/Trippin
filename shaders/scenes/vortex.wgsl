@@ -16,7 +16,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     // Depth illusion: centre is a darker, faster-swirling throat.
     let depth = exp(-r * 1.6);
-    var col = palette(sa * 0.05 + r * 0.3 + u.hue) * streak * (0.3 + u.energy);
+    // palette() has period 1 — indexing it by sa/TAU*K (K integer) keeps the
+    // colour continuous across the ±π wrap at screen left (sa*0.05 didn't).
+    var col = palette(sa / TAU * 4.0 + r * 0.3 + u.hue) * streak * (0.3 + u.energy);
     col *= exp(-r * 0.9);
     col += palette(0.5 + u.hue) * exp(-r * 6.0) * (0.5 + u.kick * 2.0);
     col -= vec3<f32>(0.05) * depth; // darken the eye

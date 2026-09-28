@@ -147,12 +147,15 @@ Default keys (all rebindable in the panel):
   of glowing spectrum towers), `scope` (phosphor oscilloscope), `spectrogram`
   (scrolling waterfall), `lissajous`, `vu` (giant bass/mid/high meters),
   `led_wall`, `waveshaper`, `polar_bloom` and `levels`.
-- **Pulse / particle:** `shockwaves`, `pulse_grid`, `rings`, `heartbeat`
-  (a beat-locked ECG trace), `bounce` (orbs hopping on a lit floor),
-  `stardrive`, `orbiters`, `ribbons`, `ink`,
+- **Pulse / particle:** `shockwaves`, `pulse_grid`, `rings`,
+  `bounce` (orbs hopping on a lit floor), `ripple` (beat-spawned water
+  rings), `stardrive`, `orbiters`, `ribbons`, `ink`, `flare_ring`
+  (chromatic ring bursts on the beat), `beam_sweep` (festival searchlights),
   `metaballs`, `sparks` (pyro fountains), `sun_rays` (a blazing sun with a
-  spectrum corona), `helix`, `comets` (arc-tailed comets on the beat),
-  `voronoi_pulse`, `chevrons`, `pixel_fall`, `glitch_grid` (a tearing LED
+  spectrum corona), `helix` (a spiralling strand that breathes wide on the
+  beat), `comets` (arc-tailed comets on the beat),
+  `voronoi_pulse`, `chevrons`, `pixel_fall` (slow glyph rain),
+  `glitch_grid` (a tearing LED
   tile wall), `light_trails` (long-exposure light streaks) and
   `bokeh_lights` (soft out-of-focus orbs — a mellow breakdown look).
   Ring bursts ride the beat, onset splats and fountains fire on drops,
@@ -178,16 +181,15 @@ Default keys (all rebindable in the panel):
   edge), `vortex` (a polar whirlpool) and `plasma`.
 - **Organic / atmospheric:** `nebula` (billowing deep-space gas),
   `caustics` (pool-light shimmer), `sunset_waves` (a retro sea under a
-  striped sun), `rain` (streaks on glass over city bokeh), `lightning`
+  striped sun, sea on the bottom third), `lightning`
   (forked strikes that re-fire on onsets), `confetti` (tumbling bursts),
   `ember_rise` (embers climbing off a fire pit), `fire_wall` (a rising wall
   of flame), `aurora_wave` (northern-light curtains overhead),
   `spiral_galaxy`, `tide_lines` (rolling light swells)
   and `data_fall` (cyber-rain columns).
 - **Pseudo-3D** (projected, no marching — cheap on iGPUs): `cube_spin`
-  (tumbling wireframe cubes),
-  `dna` (a rotating double helix), `grid_city` (a parallax drive past a
-  moonlit skyline) and `dot_wave` (a stadium-crowd wave of dots).
+  (tumbling wireframe cubes), `mesh_wave` (an ocean of glowing nodes
+  heaving with swells) and `dot_wave` (a stadium-crowd wave of dots).
 - **Seasonal:** `halloween`, `christmas` and `fireworks` only enter the
   playlist in season (October, December, Bonfire Night and New Year; see
   `Seasonal` in the panel). They're the most audio-reactive scenes:
