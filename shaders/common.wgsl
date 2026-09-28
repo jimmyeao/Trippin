@@ -42,7 +42,9 @@ struct U {
 @group(0) @binding(3) var pal_tex: texture_2d<f32>;
 // Tileable 64³ RGBA8 noise volume (src/gfx.rs): R Perlin-Worley, G Worley
 // fbm (4 cells), B smooth Perlin fbm (4 cells), A Worley fbm (8 cells).
-// Period 1 in uvw — sample through tnoise().
+// Period 1 in uvw — sample through tnoise(). Measured distributions
+// (p05 / p50 / p95): R .15/.22/.44 (skewed low — billows), G .29/.48/.68,
+// B .37/.50/.64 (narrow — stretch it), A .30/.48/.68.
 @group(0) @binding(4) var noise_tex: texture_3d<f32>;
 // 64² void-and-cluster blue noise (R8) — sample through bluen().
 @group(0) @binding(5) var blue_tex: texture_2d<f32>;

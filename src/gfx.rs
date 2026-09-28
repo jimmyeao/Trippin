@@ -544,3 +544,24 @@ impl Bloom {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn noise_stats() {
+        let n = 32;
+        let v = super::bake_noise3(n);
+        for c in 0..4 {
+            let vals: Vec<f32> = v.chunks(4).map(|p| p[c] as f32 / 255.0).collect();
+            let mean = vals.iter().sum::<f32>() / vals.len() as f32;
+            let mut s = vals.clone();
+            s.sort_by(f32::total_cmp);
+            println!(
+                "ch{c}: mean {mean:.3} p05 {:.3} p50 {:.3} p95 {:.3}",
+                s[s.len() / 20],
+                s[s.len() / 2],
+                s[s.len() * 19 / 20]
+            );
+        }
+    }
+}

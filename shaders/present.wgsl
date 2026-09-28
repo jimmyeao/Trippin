@@ -54,9 +54,11 @@ fn agx(x: vec3<f32>) -> vec3<f32> {
     let v2 = v * v;
     let v4 = v2 * v2;
     v = 15.5 * v4 * v2 - 40.14 * v4 * v + 31.96 * v4 - 6.868 * v2 * v + 0.4298 * v2 + 0.1191 * v - 0.00232;
-    // "Punchy" look: a touch more saturation for club screens.
+    // "Punchy" look (power 1.35, sat 1.4): base AgX lifts the shadows a lot,
+    // which reads as grey on a club screen.
+    v = pow(max(v, vec3<f32>(0.0)), vec3<f32>(1.35));
     let l = dot(v, vec3<f32>(0.2126, 0.7152, 0.0722));
-    v = l + 1.15 * (v - l);
+    v = l + 1.4 * (v - l);
     v = m_out * v;
     // The fit outputs display-encoded values; the surface is sRGB, so undo
     // the 2.2 encode and let the hardware re-apply it.
@@ -82,7 +84,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     }
     let expo = 0.75 + 0.35 * u.intensity;
     if u.tonemap > 0.5 {
-        col = agx(col * expo * 1.6);
+        col = agx(col * expo * 1.25);
     } else {
         col = aces(col * expo);
     }
