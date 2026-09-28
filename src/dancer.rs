@@ -180,12 +180,28 @@ struct Slot {
     loader: Option<mpsc::Receiver<Result<Clip>>>,
     loop_beats: f32,
     loop_bpm: f32,
+    /// Beat index the loop phase is anchored to (lands on a downbeat).
+    anchor: Option<f64>,
+    /// Loop stretch actually in use (1 = original speed).
+    stretch: f32,
+    /// Stretch we'd like once the loop next wraps.
+    stretch_want: f32,
+    last_t: f64,
 }
 
 impl Slot {
+    /// Beats one loop currently spans: `loop_beats` stretched for calm
+    /// sections, rounded up to whole bars so wraps stay on downbeats.
+    fn loop_len(&self) -> f32 {
+        if self.stretch <= 1.01 {
+            return self.loop_beats.max(1.0);
+        }
+        (self.loop_beats * self.stretch / 4.0).round().max(1.0) * 4.0
+    }
+
     /// Frame uniforms for `pos`, re-picking half/double time only when the
     /// tempo really moves so the dancer doesn't jump on BPM jitter.
-    fn uniforms(&mut self, pos: f64, downbeat: u64, bpm: f32) -> SlotUniforms {
+    fn uniforms(&mut self, pos: f64, downbeat: u64, bpm: f32, intensity: f32) -> SlotUniforms {
         let Some(info) = self.loaded.as_ref() else {
             return SlotUniforms::default();
         };
@@ -193,8 +209,22 @@ impl Slot {
             self.loop_bpm = bpm;
             self.loop_beats = loop_beats(info.duration, info.beats, bpm);
         }
+        let anchor = *self.anchor.get_or_insert(downbeat as f64);
+        // Breakdowns want a graceful sway, not a storm: stretch the loop up
+        // to ~2x its beats at dead calm, applied only at a wrap so the phase
+        // never jumps mid-phrase.
+        self.stretch_want = 1.0 + (0.4 - intensity).clamp(0.0, 0.4) * 2.5;
+        if self.stretch < 1.0 {
+            self.stretch = 1.0;
+        }
+        let t = ((pos - anchor) / self.loop_len() as f64).rem_euclid(1.0);
+        if (self.stretch_want - self.stretch).abs() > 0.05 && t < self.last_t {
+            self.stretch = self.stretch_want;
+            self.anchor = Some(pos);
+        }
         // Frame 0 of the clip sits on the downbeat.
-        let t = ((pos - downbeat as f64) / self.loop_beats.max(1.0) as f64).rem_euclid(1.0);
+        let t = ((pos - self.anchor.unwrap()) / self.loop_len() as f64).rem_euclid(1.0);
+        self.last_t = t;
         SlotUniforms {
             frame: (t * info.frames as f64) as f32,
             frames: info.frames as f32,
@@ -360,7 +390,11 @@ impl DancerLayer {
         let current = self.current().and_then(|i| self.clips.get(i));
         let current_ok = current.is_some_and(|c| !disabled.contains(&c.name));
         let energy = current.map_or(0.5, |c| c.energy);
-        if !current_ok || (energy - intensity).abs() > 0.4 || rand() < 0.3 {
+        // Calm sections always want a gentle routine: never let a stormer
+        // ride out a breakdown.
+        let mismatch = (energy - intensity).abs() > 0.3
+            || (intensity < 0.35 && energy > 0.45);
+        if !current_ok || mismatch || rand() < 0.3 {
             let r = rand();
             self.pick_for(intensity, r, disabled);
         }
@@ -406,6 +440,7 @@ impl DancerLayer {
         pos: f64,
         downbeat: u64,
         bpm: f32,
+        intensity: f32,
         dt: f32,
         size: f32,
         trails: bool,
@@ -434,7 +469,7 @@ impl DancerLayer {
         }
         let mut slots = [SlotUniforms::default(); SLOTS];
         for (i, slot) in self.slots.iter_mut().enumerate() {
-            slots[i] = slot.uniforms(pos, downbeat, bpm);
+            slots[i] = slot.uniforms(pos, downbeat, bpm, intensity);
         }
         Some(DancerUniforms {
             slots,

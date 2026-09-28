@@ -1,5 +1,5 @@
 numpy
 pillow
 scipy
-# optional, for roto.py --matte ai
+# optional, for roto.py / ai_dancer.py --matte ai
 # rembg
