@@ -988,6 +988,7 @@ fn render_loop(
             pos,
             f.downbeat,
             f.bpm,
+            dir.intensity,
             dt,
             s.dancer_size,
             s.dancer_trails,
