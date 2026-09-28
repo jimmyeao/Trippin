@@ -224,7 +224,14 @@ fn estimate_bpm(env: &[f32], fps: f32) -> Option<(f64, f64)> {
     } else {
         0.0
     };
-    let period = lag as f32 + off;
+    let mut period = lag as f32 + off;
+    // Octave fix, same rule as the live tracker: a raw estimate above
+    // 144 BPM is nearly always the double-time harmonic — run the grid
+    // at half-tempo (174 → 87). The comb then also picks the beat parity
+    // with the stronger onsets.
+    if 60.0 * fps / period > 144.0 {
+        period *= 2.0;
+    }
     let bpm = 60.0 * fps as f64 / period as f64;
 
     // Comb-filter the whole envelope at that period: the offset with the most
@@ -669,10 +676,20 @@ mod tests {
     #[test]
     fn bpm_estimate_is_stable_on_clean_grid() {
         let sr = 48000u32;
+        // 174 BPM material is reported at half-tempo (>144 octave rule).
         let mono = click_track(sr, 174.0, 10.0);
         let (env, _bass) = onset_envelope(&mono, sr);
         let (bpm, phase) = estimate_bpm(&env, sr as f32 / HOP as f32).unwrap();
-        assert!((bpm - 174.0).abs() < 2.0, "bpm {bpm}");
-        assert!(phase < 0.35, "phase {phase}");
+        assert!((bpm - 87.0).abs() < 1.0, "bpm {bpm}");
+        assert!(phase < 0.7, "phase {phase}");
+    }
+
+    #[test]
+    fn bpm_under_144_is_not_halved() {
+        let sr = 48000u32;
+        let mono = click_track(sr, 140.0, 10.0);
+        let (env, _bass) = onset_envelope(&mono, sr);
+        let (bpm, _phase) = estimate_bpm(&env, sr as f32 / HOP as f32).unwrap();
+        assert!((bpm - 140.0).abs() < 2.0, "bpm {bpm}");
     }
 }
