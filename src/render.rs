@@ -20,6 +20,7 @@ use winit::window::Window;
 use crate::audio::SPECTRUM_BINS;
 use crate::dancer::{Clip, DancerUniforms, SLOTS};
 use crate::output::{self, OUT_FORMAT};
+use crate::palettes;
 use crate::text::{TEXT_SLOTS, TextBitmap, TextUniforms};
 
 const SCENE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
@@ -162,6 +163,10 @@ pub struct Renderer {
     submit_gate: Arc<Mutex<()>>,
     /// The adapter can comfortably raymarch (`@heavy` scenes join rotation).
     heavy_ok: bool,
+    /// Global palette LUT + the name of the palette currently uploaded.
+    pal_tex: wgpu::Texture,
+    pal_view: wgpu::TextureView,
+    pal_name: String,
     /// External output (NDI) — Some(conf) mirrors the panel setting;
     /// `out` is Some only once the runtime loads and resources are built.
     out_conf: Option<output::Conf>,
@@ -339,6 +344,17 @@ impl Renderer {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                // 256×1 palette LUT — see palettes.rs / common.wgsl palette().
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -430,10 +446,52 @@ impl Renderer {
             mapped_at_creation: false,
         });
 
+        // Palette LUT: a 256×1 gradient the user can swap globally.
+        let pal_tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("palette"),
+            size: wgpu::Extent3d {
+                width: palettes::LUT_SIZE as u32,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &pal_tex,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &palettes::lut("rainbow"),
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some((palettes::LUT_SIZE * 4) as u32),
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d {
+                width: palettes::LUT_SIZE as u32,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        let pal_view = pal_tex.create_view(&Default::default());
+
         let (tw, th) = scaled(config.width, config.height, scale);
         let targets = Self::make_targets(&device, tw, th);
-        let bind_groups =
-            Self::make_bind_groups(&device, &layout, &uniform_buf, &sampler, &targets);
+        let bind_groups = Self::make_bind_groups(
+            &device,
+            &layout,
+            &uniform_buf,
+            &sampler,
+            &targets,
+            &pal_view,
+        );
 
         let shader_dir = find_shader_dir()?;
         println!("Shaders: {}", shader_dir.display());
@@ -494,6 +552,9 @@ impl Renderer {
             seen_epoch: 0,
             submit_gate,
             heavy_ok,
+            pal_tex,
+            pal_view,
+            pal_name: "rainbow".to_string(),
             out_conf: None,
             out: None,
             out_err: None,
@@ -538,6 +599,7 @@ impl Renderer {
         uniform_buf: &wgpu::Buffer,
         sampler: &wgpu::Sampler,
         targets: &[wgpu::Texture; 2],
+        pal_view: &wgpu::TextureView,
     ) -> [wgpu::BindGroup; 2] {
         let make = |t: &wgpu::Texture| {
             let view = t.create_view(&Default::default());
@@ -556,6 +618,10 @@ impl Renderer {
                     wgpu::BindGroupEntry {
                         binding: 2,
                         resource: wgpu::BindingResource::Sampler(sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::TextureView(pal_view),
                     },
                 ],
             })
@@ -583,10 +649,45 @@ impl Renderer {
             &self.uniform_buf,
             &self.sampler,
             &self.targets,
+            &self.pal_view,
         );
         if let Some(o) = self.out.as_mut() {
-            o.rebind(&self.device, &self.layout, &self.sampler, &self.targets);
+            o.rebind(
+                &self.device,
+                &self.layout,
+                &self.sampler,
+                &self.targets,
+                &self.pal_view,
+            );
         }
+    }
+
+    /// Swap the global palette — rewrites the LUT in place so every bound
+    /// shader sees it next frame; no pipeline or bind-group churn needed.
+    pub fn set_palette(&mut self, name: &str) {
+        if name.is_empty() || name == self.pal_name {
+            return;
+        }
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.pal_tex,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &palettes::lut(name),
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some((palettes::LUT_SIZE * 4) as u32),
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d {
+                width: palettes::LUT_SIZE as u32,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        self.pal_name = name.to_string();
     }
 
     /// The size the surface was last configured with.
@@ -1250,6 +1351,7 @@ impl Renderer {
             &self.layout,
             &self.sampler,
             &self.targets,
+            &self.pal_view,
             c.clone(),
         ) {
             Ok(o) => {
@@ -1355,6 +1457,7 @@ impl Renderer {
             &self.uniform_buf,
             &self.sampler,
             &targets,
+            &self.pal_view,
         );
         // The present pipeline is built for the surface format (usually
         // Bgra8) — match it and swizzle on readback.

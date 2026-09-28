@@ -188,8 +188,7 @@ Default keys (all rebindable in the panel):
   `spiral_galaxy`, `tide_lines` (rolling light swells)
   and `data_fall` (cyber-rain columns).
 - **Pseudo-3D** (projected, no marching — cheap on iGPUs): `cube_spin`
-  (tumbling wireframe cubes), `mesh_wave` (an ocean of glowing nodes
-  heaving with swells) and `dot_wave` (a stadium-crowd wave of dots).
+  (tumbling wireframe cubes) and `dot_wave` (a stadium-crowd wave of dots).
 - **Seasonal:** `halloween`, `christmas` and `fireworks` only enter the
   playlist in season (October, December, Bonfire Night and New Year; see
   `Seasonal` in the panel). They're the most audio-reactive scenes:
@@ -201,6 +200,18 @@ an RTX 5070 Ti.
 
 When writing a scene, use `u.flow` for camera travel. `u.beat` gets phase
 corrections from the beat tracker, so motion driven by it stutters.
+
+## Palettes
+
+The **Show** tab's *Look* section picks a global colour palette —
+WLED-style named gradients (`rainbow`, `party`, `ocean`, `forest`,
+`sunset`, `lava`, `fire`, `ice`, `breeze`, `cyber`, `magenta`, `coral`,
+`autumn`, `pastel`, `smoke`, `halloween`, `rift`, `gold`). Every scene's
+`palette()` call samples a 256-entry gradient LUT uploaded once to the GPU,
+so the whole show — scenes, dancer glow, and text — restyles instantly;
+the per-cut hue still rotates through whichever palette is active.
+Palettes are defined as colour stops in `src/palettes.rs` — add a line
+there and it appears in the dropdown.
 
 ## Visual effects
 

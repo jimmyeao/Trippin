@@ -33,6 +33,7 @@ mod editor;
 mod egui_win;
 mod ndi;
 mod output;
+mod palettes;
 mod panel;
 mod render;
 mod song;
@@ -736,6 +737,8 @@ fn render_loop(
         }
         let s = lock(&shared.settings).clone();
         let usable = usable_scenes(&r, &s);
+        // Global palette — a no-op while the name is unchanged.
+        r.set_palette(&s.palette);
         // NDI output — a conf change rebuilds it; otherwise a cheap no-op.
         r.set_output(s.ndi_enabled.then(|| output::Conf {
             name: s.ndi_name.clone(),

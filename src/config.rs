@@ -286,6 +286,9 @@ pub struct Settings {
     pub dancer_size: f32,
     /// Ghost echoes of earlier frames trail the dancer's movement.
     pub dancer_trails: bool,
+    /// Global colour palette — a WLED-style named gradient (see
+    /// `palettes::PALETTES`) every scene's `palette()` samples.
+    pub palette: String,
     /// Fixed post effect (ignored while `fx_auto` is on).
     pub fx: Fx,
     /// Pick a fresh post effect on every scene cut.
@@ -334,6 +337,7 @@ impl Default for Settings {
             disabled_clips: Vec::new(),
             dancer_size: 0.85,
             dancer_trails: false,
+            palette: "rainbow".into(),
             fx: Fx::Off,
             fx_auto: false,
             fx_amt: 1.0,
