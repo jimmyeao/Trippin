@@ -2,9 +2,10 @@
   "name": "stock_ember",
   "fps": 30,
   "frames": 239,
-  "beats": 10,
+  "beats": 16,
   "width": 504,
   "height": 512,
   "energy": 0.45,
-  "source": "Mixkit: https://mixkit.co/free-stock-video/boy-with-headphones-dancing-on-a-warm-colored-background-51766/"
+  "source": "Mixkit: https://mixkit.co/free-stock-video/boy-with-headphones-dancing-on-a-warm-colored-background-51766/",
+  "accent": 0.4142
 }

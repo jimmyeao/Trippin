@@ -2,9 +2,10 @@
   "name": "stock_break_mir",
   "fps": 30,
   "frames": 114,
-  "beats": 12,
+  "beats": 8,
   "width": 636,
   "height": 512,
   "energy": 0.8,
-  "source": "Mixkit: https://mixkit.co/free-stock-video/man-breakdancing-452/ (mirrored)"
+  "source": "Mixkit: https://mixkit.co/free-stock-video/man-breakdancing-452/ (mirrored)",
+  "accent": 0.9386
 }
