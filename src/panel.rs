@@ -285,6 +285,39 @@ fn show_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<UiCo
         ui.label("bars");
     });
     ui.checkbox(&mut s.cut_on_drops, "Cut early when a drop lands");
+    ui.separator();
+    ui.label(egui::RichText::new("Look").strong());
+    row(ui, "Palette", |ui| {
+        egui::ComboBox::from_id_salt("pal_pick")
+            .width(110.0)
+            .selected_text(s.palette.as_str())
+            .show_ui(ui, |ui| {
+                for name in crate::palettes::names() {
+                    ui.selectable_value(&mut s.palette, name.to_string(), name);
+                }
+            });
+    });
+    // Gradient preview strip — the actual LUT the GPU gets.
+    {
+        let lut = crate::palettes::lut(&s.palette);
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(190.0, 9.0), egui::Sense::hover());
+        let n = 64usize;
+        for i in 0..n {
+            let c = &lut[i * (crate::palettes::LUT_SIZE / n) * 4..];
+            ui.painter().rect_filled(
+                egui::Rect::from_min_max(
+                    egui::pos2(rect.min.x + rect.width() * i as f32 / n as f32, rect.min.y),
+                    egui::pos2(
+                        rect.min.x + rect.width() * (i + 1) as f32 / n as f32 + 1.0,
+                        rect.max.y,
+                    ),
+                ),
+                0.0,
+                egui::Color32::from_rgb(c[0], c[1], c[2]),
+            );
+        }
+    }
+    ui.small("Applies to every scene — dancer glow and text follow it too.");
     row(ui, "Output", |ui| {
         let bo = if st.blackout {
             "Blackout: ON"

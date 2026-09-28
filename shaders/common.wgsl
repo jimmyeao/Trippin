@@ -33,6 +33,8 @@ struct U {
 @group(0) @binding(0) var<uniform> u: U;
 @group(0) @binding(1) var prev_tex: texture_2d<f32>;
 @group(0) @binding(2) var samp: sampler;
+// 256×1 gradient LUT — the user-selected global palette (WLED-style).
+@group(0) @binding(3) var pal_tex: texture_2d<f32>;
 
 struct VsOut {
     @builtin(position) pos: vec4<f32>,
@@ -109,13 +111,11 @@ fn rot(a: f32) -> mat2x2<f32> {
     return mat2x2<f32>(c, s, -s, c);
 }
 
-// Inigo Quilez cosine palette, shifted by the director's hue.
+// Global palette LUT, shifted by the director's hue. The sampler is
+// MirrorRepeat, so t outside 0..1 ping-pongs back through the gradient —
+// seamless even for non-cyclic palettes.
 fn palette(t: f32) -> vec3<f32> {
-    let a = vec3<f32>(0.5, 0.5, 0.5);
-    let b = vec3<f32>(0.5, 0.5, 0.5);
-    let c = vec3<f32>(1.0, 1.0, 1.0);
-    let d = vec3<f32>(0.0, 0.33, 0.67) + u.hue;
-    return a + b * cos(TAU * (c * t + d));
+    return textureSampleLevel(pal_tex, samp, vec2<f32>(t + u.hue, 0.5), 0.0).rgb;
 }
 
 // Integer PCG hash: stable at any coordinate magnitude (float hashes go

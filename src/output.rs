@@ -71,6 +71,7 @@ impl Output {
         layout: &wgpu::BindGroupLayout,
         sampler: &wgpu::Sampler,
         targets: &[wgpu::Texture; 2],
+        pal_view: &wgpu::TextureView,
         conf: Conf,
     ) -> Result<Output> {
         // Fail cheap: the runtime probe happens before any GPU allocation.
@@ -100,7 +101,7 @@ impl Output {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let bind_groups = Self::bind(device, layout, sampler, targets, &uniform_buf);
+        let bind_groups = Self::bind(device, layout, sampler, targets, pal_view, &uniform_buf);
 
         let row_bytes = (width * 4).div_ceil(256) * 256;
         let buf_size = (row_bytes * height) as u64;
@@ -196,6 +197,7 @@ impl Output {
         layout: &wgpu::BindGroupLayout,
         sampler: &wgpu::Sampler,
         targets: &[wgpu::Texture; 2],
+        pal_view: &wgpu::TextureView,
         uniform_buf: &wgpu::Buffer,
     ) -> [wgpu::BindGroup; 2] {
         let make = |t: &wgpu::Texture| {
@@ -216,6 +218,10 @@ impl Output {
                         binding: 2,
                         resource: wgpu::BindingResource::Sampler(sampler),
                     },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::TextureView(pal_view),
+                    },
                 ],
             })
         };
@@ -229,8 +235,16 @@ impl Output {
         layout: &wgpu::BindGroupLayout,
         sampler: &wgpu::Sampler,
         targets: &[wgpu::Texture; 2],
+        pal_view: &wgpu::TextureView,
     ) {
-        self.bind_groups = Self::bind(device, layout, sampler, targets, &self.uniform_buf);
+        self.bind_groups = Self::bind(
+            device,
+            layout,
+            sampler,
+            targets,
+            pal_view,
+            &self.uniform_buf,
+        );
     }
 
     /// True when enough time has passed for another output frame.

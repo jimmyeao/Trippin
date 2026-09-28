@@ -1,10 +1,17 @@
 // Helix: a double strand spiralling upward — each rung's length is a spectrum
-// band. Bass rungs are thick and slow, high rungs quick and thin.
+// band, and the whole helix breathes horizontally on the beat: the strands
+// flare wide on each kick and relax between beats.
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let uv = in.uv;
-    let p = vec2<f32>((uv.x - 0.5) * aspect(), uv.y);
+    var p = vec2<f32>((uv.x - 0.5) * aspect(), uv.y);
+
+    // Horizontal breathe: expands on the beat then eases back. Pose, not an
+    // integrator, so it can't stutter — it just follows beat_phase.
+    let breathe = 1.0 + exp(-u.beat_phase * 4.5) * (0.25 + u.bass * 0.5)
+                + u.kick * 0.15;
+    p.x /= breathe;
 
     var col = vec3<f32>(0.0);
 
@@ -17,10 +24,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         let band = fi / rungs;
         let v = spec(band * 0.8 + 0.05);
 
-        // Two strands at phase 0 and pi.
+        // Two strands at phase 0 and pi — separation also widens on beats.
         let ph = fi * 0.55 + scroll * 2.0;
-        let x1 = sin(ph) * 0.28;
-        let x2 = sin(ph + PI) * 0.28;
+        let sep = 0.28 * (1.0 + exp(-u.beat_phase * 5.0) * 0.35);
+        let x1 = sin(ph) * sep;
+        let x2 = sin(ph + PI) * sep;
 
         // Strand glow dots.
         let d1 = length(p - vec2<f32>(x1, y0));

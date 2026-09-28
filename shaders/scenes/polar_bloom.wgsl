@@ -7,7 +7,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let r = length(p);
     let a = angle(p) / TAU + 0.5;
 
-    let v = spec(a);
+    // Mirrored spectrum: a=0 and a=1 meet at the left edge, so spec(a)
+    // alone leaves a seam there. Mirroring makes the wrap continuous.
+    let v = spec(abs(a - 0.5) * 2.0);
     let edge_r = 0.22 + v * (0.28 + 0.12 * u.intensity) + u.kick * 0.03;
 
     // Inside the curve: translucent fill, outside: darkness; rim: hot.
@@ -18,8 +20,10 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let lobes = 3.0 + floor(spec(0.5) * 6.0);
     let petal = 0.5 + 0.5 * sin(a * TAU * lobes + u.flow * 0.5);
 
-    var col = palette(a + u.flow * 0.02) * inside * (0.10 + 0.35 * v) * (0.6 + petal * 0.4);
-    col += palette(a + 0.5) * rim * (0.8 + v);
+    // Palette also keys on the mirrored angle so its gradient is seam-free.
+    let am = abs(a - 0.5) * 2.0;
+    var col = palette(am + u.flow * 0.02) * inside * (0.10 + 0.35 * v) * (0.6 + petal * 0.4);
+    col += palette(am + 0.5) * rim * (0.8 + v);
     col += palette(0.5) * smoothstep(0.10, 0.0, r) * (0.5 + u.kick * 1.4); // core
 
     // Slow echo bloom: the previous frame, zoomed slightly out, ghosts the rim.

@@ -1,38 +1,37 @@
-// Bounce: glowing orbs rise with the beat and slam a lit floor — each orb is a
-// spectrum band, so the pattern of heights is the music's shape.
+// Bounce: glowing orbs hop on the beat over a lit floor at the BOTTOM of
+// the frame — each orb is a spectrum band, so the pattern of heights is
+// the music's shape. up = 1 - uv.y (uv.y = 0 is screen top).
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-    let uv = in.uv;
-    let p = vec2<f32>((uv.x - 0.5) * aspect(), uv.y);
+    let up = 1.0 - in.uv.y;
+    let x = in.uv.x;
 
-    var col = vec3<f32>(0.0);
+    var col = vec3<f32>(0.01, 0.008, 0.02) * (0.8 + up * 0.4);
 
-    // Floor.
-    let fy = 0.12;
-    col += palette(0.4) * exp(-abs(uv.y - fy) * 60.0) * (0.3 + u.kick * 0.7);
-    col += palette(0.4) * smoothstep(fy, fy - 0.4, uv.y) * 0.10;
+    // Floor glow at the bottom.
+    let fy = 0.14;
+    col += palette(0.4 + u.hue) * exp(-abs(up - fy) * 50.0) * (0.3 + u.kick * 0.9);
+    col += palette(0.4 + u.hue) * smoothstep(fy, 0.0, up) * 0.12;
 
-    // Eight orbs, one per spectrum octave — phase offset makes them cascade.
+    // Eight orbs, one per spectrum octave — staggered phase = cascade.
     for (var i = 0; i < 8; i++) {
         let fi = f32(i);
         let band = (fi + 0.5) / 8.0;
         let v = spec(band);
-        let x = -0.75 + fi * 0.22;
-        // Height rides the band; the bounce bobs with the beat.
+        let ox = 0.12 + fi * 0.105;
+        // Hop on the beat; height rides the band.
         let hop = abs(sin(u.beat_phase * PI + fi * 0.35));
-        let y = fy + 0.06 + v * 0.55 + hop * 0.10 * (0.3 + v);
-        let orb = exp(-pow(length(vec2<f32>(uv.x - (0.5 + x / aspect()), uv.y - y)) * 22.0, 2.0));
-        col += palette(band + u.hue * 0.3) * orb * (0.6 + v * 1.2);
-
-        // Impact flash on the floor under the orb at the beat's bottom.
-        let impact = exp(-u.beat_phase * 8.0) * smoothstep(0.4, 0.0, uv.y - fy) *
-                     exp(-abs(uv.x - (0.5 + x / aspect())) * 18.0);
-        col += palette(band + 0.5) * impact * v * 0.5;
+        let y = fy + 0.05 + v * (0.45 + u.energy * 0.2) + hop * 0.09 * (0.3 + v);
+        let d = length(vec2<f32>((x - ox) * aspect(), up - y));
+        let r = 0.035 + v * 0.03;
+        let orb = smoothstep(r, r * 0.5, d);
+        let halo = exp(-d * 9.0) * 0.4;
+        col += palette(band + u.hue) * (orb * (0.5 + v * 1.4) + halo * v);
+        // Impact flash at the floor under the orb right after the beat.
+        let impact = exp(-u.beat_phase * 7.0) * exp(-abs(up - fy) * 40.0)
+                   * exp(-abs(x - ox) * aspect() * 6.0);
+        col += palette(band + 0.5 + u.hue) * impact * v;
     }
-
-    // Dust motes in the light.
-    col += vec3<f32>(0.3, 0.4, 0.5) * step(0.996, hash21(floor(uv * 300.0) + floor(u.time * 2.0))) * u.mid * 0.5;
-
     return vec4<f32>(finite(col), 1.0);
 }

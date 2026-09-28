@@ -143,15 +143,19 @@ Default keys (all rebindable in the panel):
   `julia_portal`, `kaleido`, `fluid` and `spectrum_rings`. These still pulse
   with the beat.
 - **Analysers** — scenes that draw the music itself: `eq_bars` (mirrored
-  spectrum bars), `eq_round` (radial analyser), `eq_skyline` (a city skyline
-  of spectrum towers), `scope` (phosphor oscilloscope), `spectrogram`
+  spectrum bars), `eq_round` (radial analyser), `eq_skyline` (a night skyline
+  of glowing spectrum towers), `scope` (phosphor oscilloscope), `spectrogram`
   (scrolling waterfall), `lissajous`, `vu` (giant bass/mid/high meters),
-  `led_wall`, `waveshaper`, `polar_bloom`, `levels` and `terrain`
-  (a wireframe spectrum valley).
-- **Pulse / particle:** `shockwaves`, `pulse_grid`, `rings`, `heartbeat`
-  (a scrolling ECG), `bounce`, `stardrive`, `orbiters`, `ribbons`, `ink`,
-  `metaballs`, `sparks` (pyro fountains), `sun_rays`, `helix`,
-  `voronoi_pulse`, `chevrons`, `pixel_fall`, `glitch_grid` (a tearing LED
+  `led_wall`, `waveshaper`, `polar_bloom` and `levels`.
+- **Pulse / particle:** `shockwaves`, `pulse_grid`, `rings`,
+  `bounce` (orbs hopping on a lit floor), `ripple` (beat-spawned water
+  rings), `stardrive`, `orbiters`, `ribbons`, `ink`, `flare_ring`
+  (chromatic ring bursts on the beat), `beam_sweep` (festival searchlights),
+  `metaballs`, `sparks` (pyro fountains), `sun_rays` (a blazing sun with a
+  spectrum corona), `helix` (a spiralling strand that breathes wide on the
+  beat), `comets` (arc-tailed comets on the beat),
+  `voronoi_pulse`, `chevrons`, `pixel_fall` (slow glyph rain),
+  `glitch_grid` (a tearing LED
   tile wall), `light_trails` (long-exposure light streaks) and
   `bokeh_lights` (soft out-of-focus orbs — a mellow breakdown look).
   Ring bursts ride the beat, onset splats and fountains fire on drops,
@@ -160,8 +164,31 @@ Default keys (all rebindable in the panel):
   afford them — override on the Scenes tab): `rave_hall` (a corridor of
   banded pillars), `gyroid_drift`, `bass_blocks`, `chrome_bloom` (a metal
   flower that opens on the kick), `prism_field` (a 3D equaliser landscape),
-  `gyro_core` (nested neon rings around a molten core) and `wire_terrain`
-  (a neon wireframe terrain flyover).
+  `gyro_core` (nested neon rings around a molten core), `wire_terrain`
+  (a neon wireframe terrain flyover), `crystal_cave` (a jewelled cavern
+  flythrough), `canyon_run` (sprinting through a winding lit canyon),
+  `bubble_room` (a room of floating orbs bobbing on the beat), `lattice`
+  (an infinite
+  glowing cube lattice), `arch_run` (a cathedral vault of arches) and
+  `torus_dance` (a band-lit torus knot spinning centre-screen).
+- **Graphic / LED-wall:** `dot_field` (a spectrum-driven LED wall),
+  `grid_flash` (an LED dancefloor), `warp_grid` (a tron horizon rush),
+  `strobe_bars` (a wall of light towers that grow with their band),
+  `stripes_flow`,
+  `moire` (interference rings), `sunburst` (a rotating ray fan), `pinwheel`,
+  `hypno` (a spinning hypnosis disc), `arc_sweep` (radar rings), `barcode`
+  (a living spectrum barcode), `led_chase` (chase lights around the frame
+  edge), `vortex` (a polar whirlpool) and `plasma`.
+- **Organic / atmospheric:** `nebula` (billowing deep-space gas),
+  `caustics` (pool-light shimmer), `sunset_waves` (a retro sea under a
+  striped sun, sea on the bottom third), `lightning`
+  (forked strikes that re-fire on onsets), `confetti` (tumbling bursts),
+  `ember_rise` (embers climbing off a fire pit), `fire_wall` (a rising wall
+  of flame), `aurora_wave` (northern-light curtains overhead),
+  `spiral_galaxy`, `tide_lines` (rolling light swells)
+  and `data_fall` (cyber-rain columns).
+- **Pseudo-3D** (projected, no marching — cheap on iGPUs): `cube_spin`
+  (tumbling wireframe cubes) and `dot_wave` (a stadium-crowd wave of dots).
 - **Seasonal:** `halloween`, `christmas` and `fireworks` only enter the
   playlist in season (October, December, Bonfire Night and New Year; see
   `Seasonal` in the panel). They're the most audio-reactive scenes:
@@ -173,6 +200,18 @@ an RTX 5070 Ti.
 
 When writing a scene, use `u.flow` for camera travel. `u.beat` gets phase
 corrections from the beat tracker, so motion driven by it stutters.
+
+## Palettes
+
+The **Show** tab's *Look* section picks a global colour palette —
+WLED-style named gradients (`rainbow`, `party`, `ocean`, `forest`,
+`sunset`, `lava`, `fire`, `ice`, `breeze`, `cyber`, `magenta`, `coral`,
+`autumn`, `pastel`, `smoke`, `halloween`, `rift`, `gold`). Every scene's
+`palette()` call samples a 256-entry gradient LUT uploaded once to the GPU,
+so the whole show — scenes, dancer glow, and text — restyles instantly;
+the per-cut hue still rotates through whichever palette is active.
+Palettes are defined as colour stops in `src/palettes.rs` — add a line
+there and it appears in the dropdown.
 
 ## Visual effects
 
