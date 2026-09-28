@@ -160,8 +160,30 @@ Default keys (all rebindable in the panel):
   afford them — override on the Scenes tab): `rave_hall` (a corridor of
   banded pillars), `gyroid_drift`, `bass_blocks`, `chrome_bloom` (a metal
   flower that opens on the kick), `prism_field` (a 3D equaliser landscape),
-  `gyro_core` (nested neon rings around a molten core) and `wire_terrain`
-  (a neon wireframe terrain flyover).
+  `gyro_core` (nested neon rings around a molten core), `wire_terrain`
+  (a neon wireframe terrain flyover), `crystal_cave` (a jewelled cavern
+  flythrough), `canyon_run` (sprinting through a winding lit canyon),
+  `bubble_room` (a room of floating orbs bobbing on the beat), `gear_world`
+  (a clockwork chamber whose gears count the beat), `lattice` (an infinite
+  glowing cube lattice), `arch_run` (a cathedral vault of arches) and
+  `torus_dance` (a band-lit torus knot spinning centre-screen).
+- **Graphic / LED-wall:** `dot_field` (a spectrum-driven LED wall),
+  `hex_pulse` (a honeycomb strobe), `checkers` (a flag-wobble op-art board),
+  `grid_flash` (an LED dancefloor), `stripes_flow`, `moire` (interference
+  rings), `sunburst` (a rotating ray fan), `pinwheel`, `hypno` (a spinning
+  hypnosis disc), `arc_sweep` (radar rings), `barcode` (a living spectrum
+  barcode), `led_chase` (chase lights around the frame edge), `plasma` and
+  `mandel_zoom` (a deep Mandelbrot dive).
+- **Organic / atmospheric:** `nebula` (billowing deep-space gas),
+  `caustics` (pool-light shimmer), `sunset_waves` (a retro sea under a
+  striped sun), `rain` (streaks on glass over city bokeh), `lightning`
+  (forked strikes that re-fire on onsets), `confetti` (tumbling bursts),
+  `flower_field` (blooming geometric petals), `spiral_galaxy`, `signal_noise`
+  (a corrupted broadcast) and `data_fall` (cyber-rain columns).
+- **Pseudo-3D** (projected, no marching — cheap on iGPUs): `cube_spin`
+  (tumbling wireframe cubes), `sphere_bounce` (orbs hopping on the beat),
+  `dna` (a rotating double helix), `saturn` (a ringed planet) and
+  `grid_city` (a neon rooftop flyover).
 - **Seasonal:** `halloween`, `christmas` and `fireworks` only enter the
   playlist in season (October, December, Bonfire Night and New Year; see
   `Seasonal` in the panel). They're the most audio-reactive scenes:
