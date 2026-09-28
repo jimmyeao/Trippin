@@ -2,9 +2,10 @@
   "name": "stock_ruins_mir",
   "fps": 30,
   "frames": 120,
-  "beats": 12,
+  "beats": 8,
   "width": 436,
   "height": 512,
   "energy": 0.35,
-  "source": "Mixkit: https://mixkit.co/free-stock-video/woman-dancing-in-an-old-abandoned-place-43210/ (mirrored)"
+  "source": "Mixkit: https://mixkit.co/free-stock-video/woman-dancing-in-an-old-abandoned-place-43210/ (mirrored)",
+  "accent": 0.1917
 }

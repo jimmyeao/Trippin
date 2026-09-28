@@ -2,9 +2,10 @@
   "name": "stock_heels",
   "fps": 30,
   "frames": 228,
-  "beats": 20,
+  "beats": 16,
   "width": 488,
   "height": 512,
   "energy": 0.33,
-  "source": "Pixabay: https://pixabay.com/videos/girl-dancer-leisure-silhouette-147813/"
+  "source": "Pixabay: https://pixabay.com/videos/girl-dancer-leisure-silhouette-147813/",
+  "accent": 0.4956
 }

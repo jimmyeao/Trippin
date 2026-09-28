@@ -24,6 +24,11 @@ struct ClipMeta {
     /// 0 = slow and graceful (breakdowns) .. 1 = energetic (drops).
     #[serde(default = "default_energy")]
     energy: f32,
+    /// Loop phase (0..1) of the clip's sharpest motion accent — the shader
+    /// clock adds it so the accent lands on the downbeat. Written by
+    /// tools/beat_align.py; 0 = accent already at loop start.
+    #[serde(default)]
+    accent: f32,
 }
 
 fn default_energy() -> f32 {
@@ -42,6 +47,8 @@ pub struct Clip {
     pub height: u32,
     /// Seconds the loop lasts at its original speed.
     pub duration: f32,
+    /// Loop phase (0..1) of the clip's sharpest motion accent.
+    pub accent: f32,
     pub beats: f32,
     /// One 8-bit mask per frame, `width * height` bytes each.
     pub frames: Vec<Vec<u8>>,
@@ -145,6 +152,7 @@ pub fn load_clip(dir: &Path) -> Result<Clip> {
         width,
         height,
         duration: meta.frames as f32 / meta.fps,
+        accent: meta.accent,
         beats: meta.beats,
         frames,
     })
@@ -170,6 +178,8 @@ pub struct ClipInfo {
     pub beats: f32,
     pub frames: usize,
     pub aspect: f32,
+    /// Loop phase of the clip's motion accent (lands on the downbeat).
+    pub accent: f32,
 }
 
 /// One dancer: which routine it shows, its background load, and its tempo mapping.
@@ -225,8 +235,11 @@ impl Slot {
             self.stretch = self.stretch_want;
             self.anchor = Some(pos);
         }
-        // Frame 0 of the clip sits on the downbeat.
-        let t = ((pos - self.anchor.unwrap()) / self.loop_len() as f64).rem_euclid(1.0);
+        // The clip's sharpest accent lands on the downbeat: the loop's own
+        // seamless seam stays where the generator put it.
+        let t = ((pos - self.anchor.unwrap()) / self.loop_len() as f64
+            + info.accent as f64)
+            .rem_euclid(1.0);
         self.last_t = t;
         SlotUniforms {
             frame: (t * info.frames as f64) as f32,
@@ -249,6 +262,9 @@ pub struct DancerLayer {
     slots: [Slot; SLOTS],
     opacity: f32,
     rng: u64,
+    /// True once we've swapped to a gentle routine for the current calm
+    /// spell; re-arms when the track picks up again.
+    calm_swap: bool,
 }
 
 impl DancerLayer {
@@ -265,6 +281,7 @@ impl DancerLayer {
             slots: Default::default(),
             opacity: 0.0,
             rng: 0x9E37_79B9_7F4A_7C15,
+            calm_swap: false,
         }
     }
 
@@ -427,6 +444,7 @@ impl DancerLayer {
                         beats: clip.beats,
                         frames: clip.frames.len(),
                         aspect: clip.width as f32 / clip.height as f32,
+                        accent: clip.accent,
                     });
                     slot.loop_bpm = 0.0;
                     done.push((i, clip));
@@ -469,6 +487,23 @@ impl DancerLayer {
             if clash {
                 self.refresh_companions(disabled);
             }
+        }
+        // Calm-section watchdog: on_cut only fires on phrase boundaries, so
+        // an energetic routine could otherwise ride out a whole breakdown.
+        // Swap once per calm spell, never while a load is in flight.
+        if intensity > 0.45 {
+            self.calm_swap = false;
+        } else if intensity < 0.35
+            && !self.calm_swap
+            && self.slots[0].loader.is_none()
+            && self
+                .current()
+                .and_then(|i| self.clips.get(i))
+                .is_some_and(|c| c.energy > 0.45)
+        {
+            self.calm_swap = true;
+            let r = self.rand();
+            self.pick_for(intensity * 0.8, r, disabled);
         }
         let mut slots = [SlotUniforms::default(); SLOTS];
         for (i, slot) in self.slots.iter_mut().enumerate() {

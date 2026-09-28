@@ -2,9 +2,10 @@
   "name": "stock_scarlet",
   "fps": 30,
   "frames": 167,
-  "beats": 16,
+  "beats": 12,
   "width": 580,
   "height": 512,
   "energy": 0.3,
-  "source": "Mixkit: https://mixkit.co/free-stock-video/silhouette-of-a-man-dancing-intensely-with-red-background-51756/"
+  "source": "Mixkit: https://mixkit.co/free-stock-video/silhouette-of-a-man-dancing-intensely-with-red-background-51756/",
+  "accent": 0.2275
 }

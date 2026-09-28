@@ -1,15 +1,11 @@
-"""Beat-align a dancer clip's loop: put the sharpest accent on frame 0 and
-rewrite clip.json's `beats` to the footage's own onset tempo.
+"""Beat-align a dancer clip by timing, not pixels: find the loop's sharpest
+motion accent and write its position into clip.json as `accent` (a 0..1
+loop phase). At runtime the shader clock subtracts it, so the accent lands
+exactly on the downbeat — while the clip's own seamless seam stays where
+the generator put it. No frames are modified.
 
     py tools/beat_align.py dancers/stock_ruby
     py tools/beat_align.py            # every clip under dancers/
-
-The runtime stretches a clip's loop to span `beats` live beats, so if the
-footage's dancer actually hits K accents during the loop, setting
-beats = K maps every one of her hits onto a live beat. Rotating the loop so
-its strongest accent sits at frame 0 lands a pose-snap right on the
-downbeat — and moves the seam to the fastest-motion point, where a little
-mismatch is invisible anyway (the new seam gets a short crossfade too).
 """
 import json
 import sys
@@ -19,80 +15,24 @@ import numpy as np
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parent.parent
-FPS = 30.0
-# Plausible footage tempo: an onset every 0.3–2 s of source frames.
-MIN_P, MAX_P = int(0.3 * FPS), int(2.0 * FPS)
 
 
-def load_frames(clip: Path) -> np.ndarray:
-    files = sorted((clip / "frames").glob("*.png"))
-    return np.stack(
-        [np.asarray(Image.open(f).convert("L"), np.float32) / 255.0 for f in files]
-    )
-
-
-def motion(frames: np.ndarray) -> np.ndarray:
-    """E[i] = mean |mask[i+1] - mask[i]|, lightly smoothed."""
-    e = np.abs(frames[1:] - frames[:-1]).mean(axis=(1, 2))
-    k = np.ones(3) / 3.0
-    return np.convolve(np.concatenate([e, e[:1]]), k, mode="same")[: len(e)]
-
-
-def onset_period(e: np.ndarray) -> float | None:
-    """Dominant onset period in frames via autocorrelation, or None if flat."""
-    x = e - e.mean()
-    if x.std() < 1e-4:
-        return None
-    ac = np.correlate(x, x, "full")[len(x) - 1 :]
-    ac = ac / (ac[0] + 1e-9)
-    lo, hi = MIN_P, min(MAX_P, len(ac) // 2)
-    if hi <= lo:
-        return None
-    lag = lo + int(np.argmax(ac[lo:hi]))
-    # Sub-sample refine with the parabola through the peak.
-    if 0 < lag < len(ac) - 1:
-        d = ac[lag - 1] - 2 * ac[lag] + ac[lag + 1]
-        if abs(d) > 1e-9:
-            lag += 0.5 * (ac[lag - 1] - ac[lag + 1]) / d
-    return float(lag) if ac[min(int(round(lag)), len(ac) - 1)] > 0.15 else None
-
-
-def crossfade(seq: np.ndarray, w: int = 8) -> None:
-    """Blend the tail into the head so the rotated seam stays seamless."""
-    w = min(w, len(seq) // 4)
-    for i in range(w):
-        a = (i + 1) / (w + 1)
-        j = len(seq) - w + i
-        seq[j] = seq[j] * (1 - a) + seq[i % w] * a
-
-
-def align(clip: Path, dry: bool = False) -> None:
+def accent_phase(clip: Path) -> float | None:
     meta = json.loads((clip / "clip.json").read_text())
     n = int(meta["frames"])
-    frames = load_frames(clip)
-    e = motion(frames)
-    # Accent = arrival pose after the sharpest motion; keep it off the very
-    # ends so a little room survives for the seam crossfade.
-    k = int(np.argmax(e[: n - 1]))
-    rot = np.concatenate([frames[k + 1 :], frames[: k + 1]])
-    crossfade(rot)
-    period = onset_period(e)
-    beats = meta.get("beats", 8)
-    if period:
-        # Snap to a whole bar count — a non-multiple-of-4 loop restarts
-        # mid-bar, which reads as a stutter off the downbeat.
-        beats = int(round(n / period / 4.0)) * 4
-        beats = max(4, min(24, beats))
-    print(
-        f"{clip.name}: accent at frame {k} ({e[k]:.3f}), "
-        f"onset period {period and round(period, 1)} f -> beats {meta.get('beats')} -> {beats}"
+    files = sorted((clip / "frames").glob("*.png"))[:n]
+    frames = np.stack(
+        [np.asarray(Image.open(f).convert("L"), np.float32) / 255.0 for f in files]
     )
-    if dry:
-        return
-    meta["beats"] = beats
-    (clip / "clip.json").write_text(json.dumps(meta, indent=2) + "\n")
-    for i, f in enumerate(sorted((clip / "frames").glob("*.png"))):
-        Image.fromarray((rot[i] * 255).astype(np.uint8), "L").save(f)
+    # Motion between consecutive frames, including the wrap -> frame 0 hop.
+    e = np.abs(frames[1:] - frames[:-1]).mean(axis=(1, 2))
+    wrap = np.abs(frames[0] - frames[-1]).mean()
+    e = np.concatenate([e, [wrap]])
+    # Lightly smooth, then take the sharpest accent. The accent pose is the
+    # frame AFTER the fast change, so phase = (k+1)/n.
+    e = np.convolve(np.concatenate([e, e[:2]]), np.ones(3) / 3.0, "same")[: len(e)]
+    k = int(np.argmax(e))
+    return (k + 1) / n, e[k]
 
 
 def main() -> None:
@@ -101,8 +41,13 @@ def main() -> None:
     clips = [Path(a) for a in args] or sorted(
         p for p in (ROOT / "dancers").iterdir() if (p / "clip.json").exists()
     )
-    for c in clips:
-        align(c, dry)
+    for clip in clips:
+        (phase, strength) = accent_phase(clip)
+        meta = json.loads((clip / "clip.json").read_text())
+        print(f"{clip.name}: accent {phase:.2f} of loop (motion {strength:.3f})")
+        if not dry:
+            meta["accent"] = round(phase, 4)
+            (clip / "clip.json").write_text(json.dumps(meta, indent=2) + "\n")
 
 
 if __name__ == "__main__":
