@@ -211,14 +211,17 @@ impl Slot {
         }
         let anchor = *self.anchor.get_or_insert(downbeat as f64);
         // Breakdowns want a graceful sway, not a storm: stretch the loop up
-        // to ~2x its beats at dead calm, applied only at a wrap so the phase
-        // never jumps mid-phrase.
-        self.stretch_want = 1.0 + (0.4 - intensity).clamp(0.0, 0.4) * 2.5;
+        // to ~1.5x its beats at dead calm (more reads as a slideshow on
+        // 30 fps footage), applied only at a wrap so the phase never jumps
+        // mid-phrase.
+        self.stretch_want = 1.0 + (0.3 - intensity).clamp(0.0, 0.3) * 1.67;
         if self.stretch < 1.0 {
             self.stretch = 1.0;
         }
         let t = ((pos - anchor) / self.loop_len() as f64).rem_euclid(1.0);
-        if (self.stretch_want - self.stretch).abs() > 0.05 && t < self.last_t {
+        // Only a real wrap (t fell ~1.0 -> 0.0) may apply a pending stretch —
+        // a small backward jitter of pos mustn't re-anchor mid-loop.
+        if (self.stretch_want - self.stretch).abs() > 0.05 && t + 0.5 < self.last_t {
             self.stretch = self.stretch_want;
             self.anchor = Some(pos);
         }

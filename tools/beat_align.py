@@ -79,7 +79,9 @@ def align(clip: Path, dry: bool = False) -> None:
     period = onset_period(e)
     beats = meta.get("beats", 8)
     if period:
-        beats = int(round(n / period))
+        # Snap to a whole bar count — a non-multiple-of-4 loop restarts
+        # mid-bar, which reads as a stutter off the downbeat.
+        beats = int(round(n / period / 4.0)) * 4
         beats = max(4, min(24, beats))
     print(
         f"{clip.name}: accent at frame {k} ({e[k]:.3f}), "
