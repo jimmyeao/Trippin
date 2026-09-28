@@ -163,7 +163,7 @@ fn stop_song(
 /// The live rig's settings the first time a timeline takes over — the show
 /// borrows mode/dancer/fx while it plays, and they must be handed back (and
 /// never persisted) when it stops, or the live show looks "stuck" afterwards.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct ShowBaseline {
     mode: Mode,
     dancer_enabled: bool,
@@ -172,6 +172,7 @@ struct ShowBaseline {
     canon: Tristate,
     fx: Fx,
     fx_auto: bool,
+    palette: String,
     scene: usize,
     blackout: bool,
     dancer_showing: bool,
@@ -188,6 +189,7 @@ impl ShowBaseline {
             canon: s.canon,
             fx: s.fx,
             fx_auto: s.fx_auto,
+            palette: s.palette.clone(),
             scene: dir.scene,
             blackout,
             dancer_showing: dancer.showing,
@@ -221,6 +223,7 @@ fn end_show(
             s.canon = b.canon;
             s.fx = b.fx;
             s.fx_auto = b.fx_auto;
+            s.palette = b.palette.clone();
         }
         *blackout = b.blackout;
         dancer.showing = b.dancer_showing;
@@ -290,6 +293,11 @@ fn fire_cue(
             s.fx = *f;
         }
         CueKind::FxAuto(b) => s.fx_auto = *b,
+        CueKind::Palette(n) => {
+            if crate::palettes::names().any(|p| p == n) {
+                s.palette = n.clone();
+            }
+        }
         CueKind::Text(spec) => {
             let lane = spec.lane as usize % text::TEXT_SLOTS;
             if spec.text.trim().is_empty() {
@@ -362,6 +370,9 @@ fn apply_playhead(
         s.canon = st.canon;
         s.fx = st.fx;
         s.fx_auto = st.fx_auto;
+        if let Some(p) = &st.palette {
+            s.palette = p.clone();
+        }
         *blackout = st.blackout;
     }
 
@@ -1060,7 +1071,8 @@ fn render_loop(
                 born: ts.born,
                 life: 0.0,
                 hue: (slot as f32) * 0.37 + ts.spec.style.index() * 0.11,
-                _pad: [0.0; 2],
+                anim: ts.spec.anim.index(),
+                _pad: 0.0,
             };
             any_text = true;
         }

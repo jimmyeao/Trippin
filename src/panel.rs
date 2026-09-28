@@ -640,6 +640,7 @@ pub(crate) fn cue_color(k: &CueKind) -> egui::Color32 {
         CueKind::Canon(_) => Color32::from_rgb(150, 220, 90),
         CueKind::Blackout(_) => Color32::from_rgb(240, 90, 90),
         CueKind::Mode(_) => Color32::from_rgb(240, 175, 70),
+        CueKind::Palette(_) => Color32::from_rgb(235, 60, 160),
         CueKind::Text(_) | CueKind::TextOff(_) => Color32::from_rgb(240, 140, 200),
     }
 }
@@ -711,8 +712,12 @@ pub(crate) fn cue_param_ui(
                 });
             changed
         }
+        CueKind::Palette(n) => {
+            let opts: Vec<String> = crate::palettes::names().map(String::from).collect();
+            pick_str(ui, id.with("pal"), n, &opts)
+        }
         CueKind::Text(spec) => {
-            use crate::text::{TextPos, TextStyle};
+            use crate::text::{TextAnim, TextPos, TextStyle};
             let mut changed = ui
                 .add(
                     egui::TextEdit::singleline(&mut spec.text)
@@ -734,6 +739,14 @@ pub(crate) fn cue_param_ui(
                 .show_ui(ui, |ui| {
                     for v in TextPos::ALL {
                         changed |= ui.selectable_value(&mut spec.pos, v, v.label()).changed();
+                    }
+                });
+            egui::ComboBox::from_id_salt(id.with("ta"))
+                .width(70.0)
+                .selected_text(spec.anim.label())
+                .show_ui(ui, |ui| {
+                    for v in TextAnim::ALL {
+                        changed |= ui.selectable_value(&mut spec.anim, v, v.label()).changed();
                     }
                 });
             changed |= ui.selectable_value(&mut spec.lane, 0, "lane 1").changed();

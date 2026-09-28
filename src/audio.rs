@@ -20,6 +20,10 @@ pub(crate) const HOP: usize = 512;
 const ENV_SECONDS: f32 = 8.0;
 const MIN_BPM: f32 = 70.0;
 const MAX_BPM: f32 = 180.0;
+/// DJ convention: detected tempos above this are almost always a
+/// double-time read (DnB, hard techno) — the tracker runs them at
+/// half-tempo so visuals breathe on the half-time pulse.
+const HALF_TEMPO_ABOVE: f32 = 144.0;
 
 /// Snapshot of the analysis, shared with the renderer.
 #[derive(Clone, Debug)]
@@ -652,7 +656,12 @@ impl Analyzer {
         } else {
             0.0
         };
-        let period = lag as f32 + offset;
+        let mut period = lag as f32 + offset;
+        // Octave fix: a raw estimate above 144 BPM is nearly always the
+        // double-time harmonic — drop to half-tempo (174 → 87).
+        if 60.0 * self.fps / period > HALF_TEMPO_ABOVE {
+            period *= 2.0;
+        }
         let conf = (acs[lag] / zero.max(1e-12)).clamp(0.0, 1.0);
         self.confidence += (conf - self.confidence) * 0.3;
 

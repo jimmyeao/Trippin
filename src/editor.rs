@@ -203,6 +203,17 @@ impl Editor {
 
         let frame = self.win.frame(|ui| {
             ui.spacing_mut().item_spacing = egui::vec2(6.0, 4.0);
+            // Editor sits at reading distance — bump the widget fonts a step
+            // over egui defaults (the strip's painted text has its own sizes).
+            ui.style_mut()
+                .text_styles
+                .insert(egui::TextStyle::Body, egui::FontId::proportional(15.0));
+            ui.style_mut()
+                .text_styles
+                .insert(egui::TextStyle::Button, egui::FontId::proportional(15.0));
+            ui.style_mut()
+                .text_styles
+                .insert(egui::TextStyle::Small, egui::FontId::proportional(12.0));
 
             // --- Toolbar ----------------------------------------------------
             egui::Panel::top("ed_tool").show(ui, |ui| {
@@ -516,24 +527,165 @@ impl Editor {
                 }
             }
 
-            // --- Palette ----------------------------------------------------
-            egui::Panel::left("ed_pal")
-                .resizable(false)
-                .exact_size(172.0)
+            // --- Media row (full width, very bottom): effects, actions,
+            // palettes and the text composer as a horizontal strip ---------
+            egui::Panel::bottom("ed_media")
+                .resizable(true)
+                .default_size(96.0)
+                .size_range(70.0..=240.0)
+                .show(ui, |ui| {
+                    egui::ScrollArea::horizontal()
+                        .id_salt("ed_media_scroll")
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                // Text composer: edit the draft, drag the card
+                                // onto a text lane (the drop row picks lane 1/2).
+                                ui.vertical(|ui| {
+                                    ui.label(egui::RichText::new("Text").strong());
+                                    ui.add(
+                                        egui::TextEdit::singleline(&mut text_draft.text)
+                                            .desired_width(220.0)
+                                            .hint_text("say something…"),
+                                    );
+                                    ui.horizontal(|ui| {
+                                        egui::ComboBox::from_id_salt("text_style")
+                                            .width(76.0)
+                                            .selected_text(text_draft.style.label())
+                                            .show_ui(ui, |ui| {
+                                                for v in crate::text::TextStyle::ALL {
+                                                    ui.selectable_value(
+                                                        &mut text_draft.style,
+                                                        v,
+                                                        v.label(),
+                                                    );
+                                                }
+                                            });
+                                        for v in crate::text::TextPos::ALL {
+                                            ui.selectable_value(&mut text_draft.pos, v, v.label());
+                                        }
+                                        egui::ComboBox::from_id_salt("text_anim")
+                                            .width(80.0)
+                                            .selected_text(text_draft.anim.label())
+                                            .show_ui(ui, |ui| {
+                                                for v in crate::text::TextAnim::ALL {
+                                                    ui.selectable_value(
+                                                        &mut text_draft.anim,
+                                                        v,
+                                                        v.label(),
+                                                    );
+                                                }
+                                            });
+                                    });
+                                    if !text_draft.text.trim().is_empty() {
+                                        let kind = CueKind::Text(text_draft.clone());
+                                        if palette_item(
+                                            ui,
+                                            &format!("“{}”", text_draft.text),
+                                            &kind,
+                                        ) {
+                                            cmd.push(UiCommand::FireCue(kind));
+                                        }
+                                    } else {
+                                        ui.small("type, then drag onto a text lane");
+                                    }
+                                });
+                                ui.separator();
+
+                                ui.vertical(|ui| {
+                                    ui.label(egui::RichText::new("Effects").strong());
+                                    let mut kinds: Vec<CueKind> =
+                                        Fx::ALL.iter().map(|f| CueKind::Fx(*f)).collect();
+                                    kinds.push(CueKind::FxAuto(true));
+                                    kinds.push(CueKind::FxAuto(false));
+                                    egui::Grid::new("fx_grid").num_columns(4).show(ui, |ui| {
+                                        for (i, kind) in kinds.iter().enumerate() {
+                                            let lbl = match kind {
+                                                CueKind::Fx(f) => f.label(),
+                                                CueKind::FxAuto(true) => "auto FX",
+                                                _ => "auto FX off",
+                                            };
+                                            if palette_item(ui, lbl, kind) {
+                                                cmd.push(UiCommand::FireCue(kind.clone()));
+                                            }
+                                            if i % 4 == 3 {
+                                                ui.end_row();
+                                            }
+                                        }
+                                    });
+                                });
+                                ui.separator();
+
+                                ui.vertical(|ui| {
+                                    ui.label(egui::RichText::new("Actions").strong());
+                                    for (lbl, kind) in [
+                                        ("next scene", CueKind::NextScene),
+                                        ("prev scene", CueKind::PrevScene),
+                                        ("auto mode", CueKind::Mode(crate::config::Mode::Auto)),
+                                        ("static mode", CueKind::Mode(crate::config::Mode::Static)),
+                                        ("manual mode", CueKind::Mode(crate::config::Mode::Manual)),
+                                        ("blackout", CueKind::Blackout(true)),
+                                    ] {
+                                        if palette_item(ui, lbl, &kind) {
+                                            cmd.push(UiCommand::FireCue(kind));
+                                        }
+                                    }
+                                });
+                                ui.separator();
+
+                                ui.vertical(|ui| {
+                                    ui.label(egui::RichText::new("Palettes").strong());
+                                    egui::Grid::new("pal_grid").num_columns(6).show(ui, |ui| {
+                                        for (i, name) in crate::palettes::names().enumerate() {
+                                            let kind = CueKind::Palette(name.to_string());
+                                            if palette_item(ui, name, &kind) {
+                                                cmd.push(UiCommand::FireCue(kind));
+                                            }
+                                            if i % 6 == 5 {
+                                                ui.end_row();
+                                            }
+                                        }
+                                    });
+                                });
+                            });
+                        });
+                });
+
+            // --- Inspector (above the media row) ------------------------------
+            egui::Panel::bottom("ed_insp").show(ui, |ui| {
+                inspector(
+                    ui, doc_opt, scenes, routines, *sel_cue, *sel_clip, *cursor_s, *snap, dirty,
+                    &mut cmd,
+                );
+            });
+
+            // --- Palette: scenes left, dancer right ----------------------------
+            egui::Panel::left("ed_scenes")
+                .resizable(true)
+                .default_size(180.0)
+                .size_range(140.0..=320.0)
                 .show(ui, |ui| {
                     egui::ScrollArea::vertical().show(ui, |ui| {
-                        ui.heading("Drag onto timeline");
-                        ui.small("click = preview");
+                        ui.heading("Scenes");
+                        ui.small("drag onto timeline · click = preview");
                         ui.separator();
-                        ui.label(egui::RichText::new("Scenes").strong());
                         for name in scenes {
                             let kind = CueKind::Scene(name.clone());
                             if palette_item(ui, name, &kind) {
                                 cmd.push(UiCommand::FireCue(kind));
                             }
                         }
+                    });
+                });
+
+            egui::Panel::right("ed_dancer")
+                .resizable(true)
+                .default_size(160.0)
+                .size_range(120.0..=300.0)
+                .show(ui, |ui| {
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        ui.heading("Dancer");
+                        ui.small("drag onto the dancer lane");
                         ui.separator();
-                        ui.label(egui::RichText::new("Dancer").strong());
                         for (lbl, kind) in [
                             ("dancer on", CueKind::Dancer(true)),
                             ("dancer off", CueKind::Dancer(false)),
@@ -549,89 +701,24 @@ impl Editor {
                                 cmd.push(UiCommand::FireCue(kind));
                             }
                         }
+                        ui.separator();
+                        ui.label(egui::RichText::new("Looks").strong());
                         for (i, n) in STYLES.iter().enumerate() {
                             let kind = CueKind::Look(Some(i));
                             if palette_item(ui, n, &kind) {
                                 cmd.push(UiCommand::FireCue(kind));
                             }
                         }
+                        ui.separator();
+                        ui.label(egui::RichText::new("Routines").strong());
                         for name in routines {
                             let kind = CueKind::Clip(name.clone());
                             if palette_item(ui, name, &kind) {
                                 cmd.push(UiCommand::FireCue(kind));
                             }
                         }
-                        ui.separator();
-                        ui.label(egui::RichText::new("Effects").strong());
-                        for f in Fx::ALL {
-                            let kind = CueKind::Fx(f);
-                            if palette_item(ui, f.label(), &kind) {
-                                cmd.push(UiCommand::FireCue(kind));
-                            }
-                        }
-                        let kind = CueKind::FxAuto(true);
-                        if palette_item(ui, "auto FX", &kind) {
-                            cmd.push(UiCommand::FireCue(kind));
-                        }
-                        let kind = CueKind::FxAuto(false);
-                        if palette_item(ui, "auto FX off", &kind) {
-                            cmd.push(UiCommand::FireCue(kind));
-                        }
-                        ui.separator();
-                        ui.label(egui::RichText::new("Actions").strong());
-                        for (lbl, kind) in [
-                            ("next scene", CueKind::NextScene),
-                            ("prev scene", CueKind::PrevScene),
-                            ("auto mode", CueKind::Mode(crate::config::Mode::Auto)),
-                            ("static mode", CueKind::Mode(crate::config::Mode::Static)),
-                            ("manual mode", CueKind::Mode(crate::config::Mode::Manual)),
-                            ("blackout", CueKind::Blackout(true)),
-                        ] {
-                            if palette_item(ui, lbl, &kind) {
-                                cmd.push(UiCommand::FireCue(kind));
-                            }
-                        }
-                        ui.separator();
-                        ui.label(egui::RichText::new("Text").strong());
-                        ui.add(
-                            egui::TextEdit::singleline(&mut text_draft.text)
-                                .desired_width(ui.available_width() - 8.0)
-                                .hint_text("say something…"),
-                        );
-                        ui.horizontal(|ui| {
-                            egui::ComboBox::from_id_salt("text_style")
-                                .width(76.0)
-                                .selected_text(text_draft.style.label())
-                                .show_ui(ui, |ui| {
-                                    for v in crate::text::TextStyle::ALL {
-                                        ui.selectable_value(&mut text_draft.style, v, v.label());
-                                    }
-                                });
-                            for v in crate::text::TextPos::ALL {
-                                ui.selectable_value(&mut text_draft.pos, v, v.label());
-                            }
-                        });
-                        ui.horizontal(|ui| {
-                            ui.small("lane");
-                            ui.selectable_value(&mut text_draft.lane, 0, "1");
-                            ui.selectable_value(&mut text_draft.lane, 1, "2");
-                        });
-                        if !text_draft.text.trim().is_empty() {
-                            let kind = CueKind::Text(text_draft.clone());
-                            if palette_item(ui, &format!("“{}”", text_draft.text), &kind) {
-                                cmd.push(UiCommand::FireCue(kind));
-                            }
-                        }
                     });
                 });
-
-            // --- Inspector ----------------------------------------------------
-            egui::Panel::bottom("ed_insp").show(ui, |ui| {
-                inspector(
-                    ui, doc_opt, scenes, routines, *sel_cue, *sel_clip, *cursor_s, *snap, dirty,
-                    &mut cmd,
-                );
-            });
 
             // --- Timeline canvas ----------------------------------------------
             egui::CentralPanel::default().show(ui, |ui| {
@@ -668,7 +755,9 @@ impl Editor {
 /// so the click is detected manually: press started inside, released inside,
 /// and the drag never engaged.
 fn palette_item(ui: &mut egui::Ui, label: &str, kind: &CueKind) -> bool {
-    let id = egui::Id::new(("pal", label));
+    // Salt with the kind label: a scene named "ocean" mustn't share a
+    // drag-source id with the "ocean" palette entry.
+    let id = egui::Id::new(("pal", kind.label(), label));
     let resp = ui
         .dnd_drag_source(id, kind.clone(), |ui| {
             ui.colored_label(cue_color(kind), label);
@@ -689,19 +778,27 @@ fn palette_item(ui: &mut egui::Ui, label: &str, kind: &CueKind) -> bool {
 // The strip: ruler + clip regions + cue lane + playhead.
 // ---------------------------------------------------------------------------
 
-const RULER_H: f32 = 20.0;
-const CLIP_H: f32 = 56.0;
-const TRACK_H: f32 = 22.0;
+const RULER_H: f32 = 26.0;
+const CLIP_H: f32 = 68.0;
+const TRACK_H: f32 = 30.0;
 /// Resolve-style track header column at the left of the strip.
-const GUTTER: f32 = 56.0;
+const GUTTER: f32 = 78.0;
 const SCROLL_H: f32 = 12.0;
 /// Cue lanes, in `CueKind::track()` order.
-const TRACK_NAMES: [&str; 6] = ["scenes", "dancer", "fx", "mode/flash", "text 1", "text 2"];
+const TRACK_NAMES: [&str; 6] = ["scenes", "dancer", "fx", "show", "text 1", "text 2"];
 const CUE_H: f32 = TRACK_H * TRACK_NAMES.len() as f32;
 /// Trim zone: this many px *inside* a block's edge plus `EDGE_OUT` px of
 /// overshoot past it, so grabbing an edge doesn't take pixel aim.
 const EDGE: f32 = 8.0;
 const EDGE_OUT: f32 = 5.0;
+
+/// Which text lane a strip-space y lands on — the two text tracks are the
+/// last `TEXT_SLOTS` rows; anything higher clamps to lane 0.
+fn text_lane_at(y: f32, cue_lane_top: f32) -> u8 {
+    let row = ((y - cue_lane_top) / TRACK_H) as i32;
+    let first = TRACK_NAMES.len() as i32 - crate::text::TEXT_SLOTS as i32;
+    (row - first).clamp(0, crate::text::TEXT_SLOTS as i32 - 1) as u8
+}
 
 /// Edge-trim vs move for a press at pointer-x `px` on a block spanning
 /// `x0..=x1`: the nearer edge wins inside the trim zone (which overshoots
@@ -838,7 +935,7 @@ fn canvas(
                 pos2(x + 3.0, ruler.top() + 3.0),
                 Align2::LEFT_TOP,
                 fmt_time(t),
-                FontId::proportional(10.0),
+                FontId::proportional(11.5),
                 faint,
             );
         }
@@ -856,19 +953,19 @@ fn canvas(
         Stroke::new(1.0, Color32::from_gray(70)),
     );
     painter.text(
-        pos2(gutter.left() + 5.0, clip_lane.center().y),
+        pos2(gutter.left() + 6.0, clip_lane.center().y),
         Align2::LEFT_CENTER,
         "audio",
-        FontId::proportional(9.5),
+        FontId::proportional(12.0),
         faint,
     );
     for (i, name) in TRACK_NAMES.iter().enumerate() {
         let ty = cue_lane.top() + i as f32 * TRACK_H;
         painter.text(
-            pos2(gutter.left() + 5.0, ty + TRACK_H * 0.5),
+            pos2(gutter.left() + 6.0, ty + TRACK_H * 0.5),
             Align2::LEFT_CENTER,
             *name,
-            FontId::proportional(9.5),
+            FontId::proportional(12.0),
             faint,
         );
         if i > 0 {
@@ -885,7 +982,7 @@ fn canvas(
             clip_lane.center(),
             Align2::CENTER_CENTER,
             "open a song or drop one here to start a timeline",
-            FontId::proportional(13.0),
+            FontId::proportional(15.0),
             faint,
         );
         return;
@@ -947,7 +1044,7 @@ fn canvas(
             pos2(r.left() + 5.0, r.top() + 4.0),
             Align2::LEFT_TOP,
             format!("{} · {:.0} BPM", c.name, c.bpm),
-            FontId::proportional(10.5),
+            FontId::proportional(12.5),
             white,
         );
     }
@@ -999,7 +1096,7 @@ fn canvas(
                         pos2(x + 3.0, clip_lane.top() + 4.0),
                         Align2::LEFT_TOP,
                         format!("{}", b / 4 + 1),
-                        FontId::proportional(9.5),
+                        FontId::proportional(11.0),
                         faint,
                     );
                 }
@@ -1100,11 +1197,16 @@ fn canvas(
                 if snap {
                     beat = (beat * 4.0).round() / 4.0;
                 }
+                let mut kind = (*payload).clone();
+                // Text drops pick their lane from the row they land on.
+                if let CueKind::Text(spec) = &mut kind {
+                    spec.lane = text_lane_at(pos.y, cue_lane.top());
+                }
                 doc.cues.push(Cue {
                     clip: ci,
                     beat: beat.max(0.0),
                     beats: 4.0,
-                    kind: (*payload).clone(),
+                    kind,
                 });
                 doc.sort_cues();
                 *dirty = true;
@@ -1202,7 +1304,7 @@ fn canvas(
                 // Text: rasterise the same mask the GPU gets — the block's
                 // thumbnail shows the real lettering.
                 if want_thumbs.insert(key.clone()) {
-                    if let Some((w, h, px)) = crate::text::rasterize_rgba(&spec.text, 28.0) {
+                    if let Some((w, h, px)) = crate::text::rasterize_rgba(&spec.text, 40.0) {
                         let img =
                             egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &px);
                         thumbs.insert(
@@ -1224,7 +1326,7 @@ fn canvas(
                 pos2(text_x, r.center().y),
                 Align2::LEFT_CENTER,
                 cue.kind.text(),
-                FontId::proportional(10.5),
+                FontId::proportional(12.0),
                 Color32::WHITE,
             );
         }
@@ -1354,6 +1456,14 @@ fn canvas(
                             if let Some(cue) = doc.cues.get_mut(i) {
                                 cue.clip = ci;
                                 cue.beat = beat.max(0.0);
+                                // Text blocks ride either text lane — a drag
+                                // across the lanes retargets the slot.
+                                if let CueKind::Text(spec) = &mut cue.kind {
+                                    let lane = text_lane_at(p.y, cue_lane.top());
+                                    if spec.lane != lane {
+                                        spec.lane = lane;
+                                    }
+                                }
                                 *dirty = true;
                             }
                         }

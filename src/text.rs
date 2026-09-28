@@ -28,6 +28,55 @@ pub struct TextSpec {
     /// Which text lane the block rides on (0 or 1) — drives `track()`.
     #[serde(default)]
     pub lane: u8,
+    /// Entrance animation — how the card comes in (block end always fades).
+    #[serde(default)]
+    pub anim: TextAnim,
+}
+
+/// Video-editor-style entrance animation — see `shaders/text.wgsl`.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TextAnim {
+    /// Plain opacity fade-in (the previous behaviour).
+    #[default]
+    Fade,
+    /// Slides up into place.
+    Rise,
+    /// Drops down into place.
+    Drop,
+    /// Slides in from the left.
+    Slide,
+    /// Pops from small to full size.
+    Zoom,
+    /// Left-to-right reveal with a blinking caret.
+    Type,
+}
+
+impl TextAnim {
+    pub const ALL: [TextAnim; 6] = [
+        Self::Fade,
+        Self::Rise,
+        Self::Drop,
+        Self::Slide,
+        Self::Zoom,
+        Self::Type,
+    ];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Fade => "fade",
+            Self::Rise => "rise",
+            Self::Drop => "drop",
+            Self::Slide => "slide",
+            Self::Zoom => "zoom",
+            Self::Type => "type",
+        }
+    }
+
+    /// Shader-side index — keep in sync with `text.wgsl`.
+    pub fn index(&self) -> f32 {
+        *self as usize as f32
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -118,7 +167,9 @@ pub struct TextSlotU {
     pub life: f32,
     /// Colour seed so sibling slots don't share a hue.
     pub hue: f32,
-    pub _pad: [f32; 2],
+    /// `TextAnim::index()` — entrance animation.
+    pub anim: f32,
+    pub _pad: f32,
 }
 
 /// Both slots — must match `T` in `shaders/text.wgsl`.

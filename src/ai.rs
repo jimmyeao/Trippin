@@ -541,8 +541,9 @@ in order, covering EVERY block of every clip:\n\
   \"look\": 0|1|2,   // optional: 0=shadow, 1=neon, 2=strobe\n\
   \"trails\": true|false, \"canon\": \"auto\"|\"on\"|\"off\", // optional dancer extras\n\
   \"fx\": \"off\"|\"mirror_x\"|\"mirror_y\"|\"quad\"|\"kaleido6\"|\"kaleido8\"|\"auto\", // optional\n\
+  \"palette\": \"PALETTE_NAME\", // optional: global colour palette, latches\n\
   \"blackout\": true, // optional: 1-beat dip to black just before the block starts\n\
-  \"text\": {\"text\":\"...\",\"style\":\"neon|fire|wave|glitch|pulse|chrome\",\"pos\":\"top|middle|bottom\",\"lane\":0|1}\n\
+  \"text\": {\"text\":\"...\",\"style\":\"neon|fire|wave|glitch|pulse|chrome\",\"pos\":\"top|middle|bottom\",\"lane\":0|1,\"anim\":\"fade|rise|drop|slide|zoom|type\"}\n\
 }\n\
 Omit optional fields when there's nothing to change — they all latch.\n\
 \n\
@@ -567,6 +568,8 @@ block just before reads well.\n\
 - fx: DO use it — a show with no transforms looks flat. \"auto\" on a drop/peak block \
 (and \"off\" a few blocks later), a kaleido for a trippy breakdown stretch, or a mirror \
 for a section are all good. Typically 1-3 fx stretches per track, never the whole song.\n\
+- palette: recolours the WHOLE look — use a change to mark a big section shift \
+(drop, breakdown) rather than every block. 1-3 switches per track, tops.\n\
 - text: 0-2 cards for the whole track, meaningful words only (song/artist name, a \
 shout-out). NEVER literal labels like \"DROP\" or \"BUILD\". When in doubt, omit.\n\
 - Contrast beats chaos — don't stack dancer+trails+canon+fx on every block.\n\
@@ -661,6 +664,7 @@ fn user_prompt(analyses: &[ClipAnalysis], scenes: &[String], routines: &[String]
     serde_json::to_string(&json!({
         "scenes": scenes,
         "routines": routines,
+        "palettes": crate::palettes::names().collect::<Vec<_>>(),
         "note": "flow/vocals are one char per bar: energy . - + * # and v for vocals. \
                  blocks are the ~4-bar phrases you plan against — every block needs an entry.",
         "clips": clips,
@@ -1001,6 +1005,7 @@ fn expand_plan(
         let mut fx = Fx::Off;
         let mut fx_auto = false;
         let mut used_fx = false;
+        let mut pal = String::new(); // current palette — empty until first cue
 
         for (bi, (_, from_bar, to_bar)) in a.blocks.iter().enumerate() {
             let beat = (*from_bar * 4) as f64;
@@ -1244,6 +1249,23 @@ fn expand_plan(
                 }
             }
 
+            // --- palette: latches like scene — emit only on change
+            if let Some(n) = it["palette"].as_str() {
+                match crate::palettes::names().find(|p| p.eq_ignore_ascii_case(n)) {
+                    Some(p) if p != pal => {
+                        pal = p.to_string();
+                        cues.push(Cue {
+                            clip: a.clip,
+                            beat,
+                            beats: 4.0,
+                            kind: CueKind::Palette(p.to_string()),
+                        });
+                    }
+                    None => warnings.push(format!("plan: unknown palette {n:?} at block {bi}")),
+                    _ => {}
+                }
+            }
+
             // --- one-shots
             if it["blackout"].as_bool() == Some(true) {
                 cues.push(Cue {
@@ -1419,6 +1441,19 @@ fn raw_to_cue(item: &Value, clips: &[Clip], scenes: &[String], routines: &[Strin
             },
         ),
         "fx_auto" | "auto_fx" => CueKind::FxAuto(on()),
+        "palette" | "palette_change" => CueKind::Palette(
+            crate::palettes::names()
+                .find(|p| {
+                    p.eq_ignore_ascii_case(
+                        &get("name")
+                            .or_else(|| get("palette"))
+                            .and_then(Value::as_str)
+                            .unwrap_or_default(),
+                    )
+                })
+                .ok_or_else(|| anyhow!("unknown palette"))?
+                .to_string(),
+        ),
         "text" | "text_card" => {
             let text = get("text")
                 .and_then(Value::as_str)
@@ -1446,6 +1481,14 @@ fn raw_to_cue(item: &Value, clips: &[Clip], scenes: &[String], routines: &[Strin
                     .and_then(as_f64)
                     .map(|l| (l as u8) % crate::text::TEXT_SLOTS as u8)
                     .unwrap_or(0),
+                anim: match str_field(get("anim")).as_deref() {
+                    Some("rise") => crate::text::TextAnim::Rise,
+                    Some("drop") => crate::text::TextAnim::Drop,
+                    Some("slide") => crate::text::TextAnim::Slide,
+                    Some("zoom") => crate::text::TextAnim::Zoom,
+                    Some("type" | "typewriter") => crate::text::TextAnim::Type,
+                    _ => crate::text::TextAnim::Fade,
+                },
             })
         }
         other => return Err(anyhow!("unknown kind {other:?}")),
