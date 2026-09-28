@@ -71,7 +71,7 @@ impl Output {
         layout: &wgpu::BindGroupLayout,
         sampler: &wgpu::Sampler,
         targets: &[wgpu::Texture; 2],
-        pal_view: &wgpu::TextureView,
+        res: &crate::render::FrameRes,
         conf: Conf,
     ) -> Result<Output> {
         // Fail cheap: the runtime probe happens before any GPU allocation.
@@ -101,7 +101,7 @@ impl Output {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let bind_groups = Self::bind(device, layout, sampler, targets, pal_view, &uniform_buf);
+        let bind_groups = Self::bind(device, layout, sampler, targets, res, &uniform_buf);
 
         let row_bytes = (width * 4).div_ceil(256) * 256;
         let buf_size = (row_bytes * height) as u64;
@@ -197,11 +197,12 @@ impl Output {
         layout: &wgpu::BindGroupLayout,
         sampler: &wgpu::Sampler,
         targets: &[wgpu::Texture; 2],
-        pal_view: &wgpu::TextureView,
+        res: &crate::render::FrameRes,
         uniform_buf: &wgpu::Buffer,
     ) -> [wgpu::BindGroup; 2] {
         let make = |t: &wgpu::Texture| {
             let view = t.create_view(&Default::default());
+            let [e3, e4, e5, e6, e7] = res.entries();
             device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("ndi"),
                 layout,
@@ -218,10 +219,11 @@ impl Output {
                         binding: 2,
                         resource: wgpu::BindingResource::Sampler(sampler),
                     },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::TextureView(pal_view),
-                    },
+                    e3,
+                    e4,
+                    e5,
+                    e6,
+                    e7,
                 ],
             })
         };
@@ -235,14 +237,14 @@ impl Output {
         layout: &wgpu::BindGroupLayout,
         sampler: &wgpu::Sampler,
         targets: &[wgpu::Texture; 2],
-        pal_view: &wgpu::TextureView,
+        res: &crate::render::FrameRes,
     ) {
         self.bind_groups = Self::bind(
             device,
             layout,
             sampler,
             targets,
-            pal_view,
+            res,
             &self.uniform_buf,
         );
     }

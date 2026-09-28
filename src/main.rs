@@ -30,12 +30,14 @@ mod config;
 mod dancer;
 mod director;
 mod editor;
+mod gfx;
 mod egui_win;
 mod ndi;
 mod output;
 mod palettes;
 mod panel;
 mod render;
+mod snap;
 mod song;
 #[cfg(target_os = "macos")]
 mod sysaudio;
@@ -1040,6 +1042,11 @@ fn render_loop(
             fx_amt: s.fx_amt,
             spectrum,
             waveform,
+            // The renderer fills these from the scene header.
+            bloom: 0.0,
+            tonemap: 0.0,
+            frame: 0.0,
+            _pad: 0.0,
         };
         // Text overlays: fade in over 0.35 s, out over 0.5 s; a faded-out
         // slot drops off (its texture stays bound but the shader skips it).
@@ -1928,6 +1935,10 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--list-devices") {
         return audio::list_devices();
+    }
+    // `--snap <scenes|all>` renders scenes headless to PNG and times them.
+    if args.iter().any(|a| a == "--snap") {
+        return snap::run(&args);
     }
     if args.iter().any(|a| a == "--check-shaders") {
         return check_shaders();
