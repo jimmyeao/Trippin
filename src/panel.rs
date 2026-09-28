@@ -56,6 +56,9 @@ pub struct Status {
     pub fullscreen: bool,
     /// The post effect actually on screen (the auto-pilot's pick in auto mode).
     pub fx: Fx,
+    /// External output status line (NDI receiver count / error) — Some while
+    /// output is enabled.
+    pub output: Option<String>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -315,6 +318,33 @@ fn show_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<UiCo
         .clicked()
     {
         cmd.push(UiCommand::Do(Action::MarkDownbeat));
+    }
+    ui.separator();
+    ui.label(egui::RichText::new("Network output").strong());
+    row(ui, "NDI", |ui| {
+        ui.checkbox(&mut s.ndi_enabled, "Send");
+        ui.label("as");
+        ui.add(egui::TextEdit::singleline(&mut s.ndi_name).desired_width(110.0));
+    });
+    row(ui, "Size", |ui| {
+        for h in [720u32, 1080, 2160] {
+            ui.selectable_value(&mut s.ndi_height, h, format!("{h}p"));
+        }
+        ui.label("at");
+        for f in [30u32, 60] {
+            ui.selectable_value(&mut s.ndi_fps, f, format!("{f} fps"));
+        }
+    });
+    match &st.output {
+        Some(line) => {
+            ui.small(line);
+        }
+        None => {
+            ui.small(
+                "Sends the composited frame to OBS / other displays. \
+                 Needs the free NDI runtime installed (NDI Tools).",
+            );
+        }
     }
 }
 

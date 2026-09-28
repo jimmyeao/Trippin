@@ -19,6 +19,7 @@ use winit::window::Window;
 
 use crate::audio::SPECTRUM_BINS;
 use crate::dancer::{Clip, DancerUniforms, SLOTS};
+use crate::output::{self, OUT_FORMAT};
 use crate::text::{TEXT_SLOTS, TextBitmap, TextUniforms};
 
 const SCENE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
@@ -161,6 +162,16 @@ pub struct Renderer {
     submit_gate: Arc<Mutex<()>>,
     /// The adapter can comfortably raymarch (`@heavy` scenes join rotation).
     heavy_ok: bool,
+    /// External output (NDI) — Some(conf) mirrors the panel setting;
+    /// `out` is Some only once the runtime loads and resources are built.
+    out_conf: Option<output::Conf>,
+    out: Option<output::Output>,
+    /// Last init failure + when — a missing runtime is re-probed every 5s,
+    /// not every frame.
+    out_err: Option<(output::Conf, Instant, String)>,
+    /// present/text recompiled for the output texture format.
+    out_present: Option<wgpu::RenderPipeline>,
+    out_text: Option<wgpu::RenderPipeline>,
 }
 
 pub fn find_shader_dir() -> Result<PathBuf> {
@@ -483,6 +494,11 @@ impl Renderer {
             seen_epoch: 0,
             submit_gate,
             heavy_ok,
+            out_conf: None,
+            out: None,
+            out_err: None,
+            out_present: None,
+            out_text: None,
         };
         r.reload_shaders(true);
         if r.present.pipeline.is_none() {
@@ -568,6 +584,9 @@ impl Renderer {
             &self.sampler,
             &self.targets,
         );
+        if let Some(o) = self.out.as_mut() {
+            o.rebind(&self.device, &self.layout, &self.sampler, &self.targets);
+        }
     }
 
     /// The size the surface was last configured with.
@@ -713,6 +732,24 @@ impl Renderer {
                         println!("reloaded {}", s.name);
                     }
                     s.pipeline = Some(p);
+                    // The output tap re-runs present/text into a BGRA target —
+                    // keep sibling pipelines at OUT_FORMAT alongside.
+                    let (layout, blend) = match s.kind {
+                        Kind::Present => (&self.pipeline_layout, None),
+                        Kind::Text => (
+                            &self.text_pipeline_layout,
+                            Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                        ),
+                        _ => continue,
+                    };
+                    match self.compile_into(&common, &s.path, layout, OUT_FORMAT, blend) {
+                        Ok(p) => match s.kind {
+                            Kind::Present => self.out_present = Some(p),
+                            Kind::Text => self.out_text = Some(p),
+                            _ => {}
+                        },
+                        Err(e) => eprintln!("shader {} (output) failed:\n{e}", s.name),
+                    }
                 }
                 // Keep the last good pipeline so a typo never blanks the screen.
                 Err(e) => eprintln!("shader {} failed:\n{e}", s.name),
@@ -740,6 +777,19 @@ impl Renderer {
                 Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
             ),
         };
+        self.compile_into(common, path, layout, format, blend)
+    }
+
+    /// Compile `path` for an explicit target format — used for the output
+    /// tap's sibling present/text pipelines at `output::OUT_FORMAT`.
+    fn compile_into(
+        &self,
+        common: &str,
+        path: &Path,
+        layout: &wgpu::PipelineLayout,
+        format: wgpu::TextureFormat,
+        blend: Option<wgpu::BlendState>,
+    ) -> Result<wgpu::RenderPipeline> {
         let body = std::fs::read_to_string(path)?;
         let src = format!("{common}\n{body}");
         // Validate with naga first to get readable errors instead of a panic.
@@ -1092,6 +1142,70 @@ impl Renderer {
                 pass.draw(0..3, 0..1);
             }
         }
+
+        // External output (NDI): re-run present (+text) into the BGRA tap
+        // texture and queue an async readback — same submit, so the render
+        // thread never waits on the network or the map.
+        let out_i = if let Some(o) = self.out.as_mut() {
+            if o.due() { o.free_staging() } else { None }
+        } else {
+            None
+        };
+        if let (Some(o), Some(i)) = (self.out.as_ref(), out_i) {
+            let mut ou = *u;
+            ou.res_x = o.width as f32;
+            ou.res_y = o.height as f32;
+            self.queue
+                .write_buffer(&o.uniform_buf, 0, bytemuck::bytes_of(&ou));
+            if let Some(pipe) = self.out_present.as_ref() {
+                let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("output"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &o.view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    ..Default::default()
+                });
+                pass.set_pipeline(pipe);
+                pass.set_bind_group(0, &o.bind_groups[self.current], &[]);
+                pass.draw(0..3, 0..1);
+                if let (Some(_), Some(tp), Some(tbg)) =
+                    (text, self.out_text.as_ref(), self.text_bg.as_ref())
+                {
+                    pass.set_pipeline(tp);
+                    pass.set_bind_group(0, &o.bind_groups[self.current], &[]);
+                    pass.set_bind_group(1, tbg, &[]);
+                    pass.draw(0..3, 0..1);
+                }
+            }
+            enc.copy_texture_to_buffer(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &o.tex,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &o.staging[i],
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(o.row_bytes),
+                        rows_per_image: Some(o.height),
+                    },
+                },
+                wgpu::Extent3d {
+                    width: o.width,
+                    height: o.height,
+                    depth_or_array_layers: 1,
+                },
+            );
+            self.out.as_mut().unwrap().mark_pending(i);
+        }
         // Notify before presenting, but outside the gate: on macOS this call
         // dispatches synchronously to the main thread, and the main thread
         // can be waiting on `submit_gate` in the panel — holding it here
@@ -1104,7 +1218,67 @@ impl Renderer {
             self.queue.submit([enc.finish()]);
             self.queue.present(frame);
         }
+        // Kick the async readback maps now the submit has landed; the
+        // callbacks fire on the next `device.poll` at the top of render().
+        if let Some(o) = self.out.as_mut() {
+            o.map_pending();
+        }
         Ok(())
+    }
+
+    /// Enable/disable/reconfigure the external output. Cheap to call every
+    /// frame — rebuilds only on a conf change or a throttled error retry.
+    pub fn set_output(&mut self, conf: Option<output::Conf>) {
+        if conf == self.out_conf {
+            let settled = self.out.is_some() == conf.is_some();
+            let retry_due = self
+                .out_err
+                .as_ref()
+                .is_some_and(|(_, at, _)| at.elapsed() > Duration::from_secs(5));
+            if settled && !retry_due {
+                return;
+            }
+        }
+        self.out_conf = conf.clone();
+        self.out = None;
+        let Some(c) = conf else {
+            self.out_err = None;
+            return;
+        };
+        match output::Output::new(
+            &self.device,
+            &self.layout,
+            &self.sampler,
+            &self.targets,
+            c.clone(),
+        ) {
+            Ok(o) => {
+                println!("output: {}", o.status());
+                self.out = Some(o);
+                self.out_err = None;
+            }
+            Err(e) => {
+                let msg = format!("{e:#}");
+                // One line per distinct failure — the retry loop would
+                // otherwise spam the log every 5s.
+                if self.out_err.as_ref().map(|(_, _, m)| m) != Some(&msg) {
+                    eprintln!("output: {msg}");
+                }
+                self.out_err = Some((c, Instant::now(), msg));
+            }
+        }
+    }
+
+    /// Panel status line — None while output is off.
+    pub fn output_status(&self) -> Option<String> {
+        self.out_conf.as_ref()?;
+        if let Some(o) = &self.out {
+            return Some(o.status());
+        }
+        self.out_err
+            .as_ref()
+            .map(|(_, _, e)| format!("NDI: {e}"))
+            .or_else(|| Some("NDI: starting…".into()))
     }
 
     /// Render one scene once into a small RGBA8 image — the editor's cue

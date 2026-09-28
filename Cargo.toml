@@ -12,6 +12,7 @@ egui = "0.36"
 egui-wgpu = "0.36"
 egui-winit = "0.36"
 image = { version = "0.25.10", default-features = false, features = ["png"] }
+libloading = "0.8.9"
 pollster = "1.0.1"
 rfd = "0.17.2"
 rustfft = "6.4.1"
