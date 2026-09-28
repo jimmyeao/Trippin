@@ -518,8 +518,9 @@ impl Editor {
 
             // --- Palette ----------------------------------------------------
             egui::Panel::left("ed_pal")
-                .resizable(false)
-                .exact_size(172.0)
+                .resizable(true)
+                .default_size(240.0)
+                .size_range(190.0..=420.0)
                 .show(ui, |ui| {
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         ui.heading("Drag onto timeline");
@@ -592,6 +593,14 @@ impl Editor {
                             }
                         }
                         ui.separator();
+                        ui.label(egui::RichText::new("Palettes").strong());
+                        for name in crate::palettes::names() {
+                            let kind = CueKind::Palette(name.to_string());
+                            if palette_item(ui, name, &kind) {
+                                cmd.push(UiCommand::FireCue(kind));
+                            }
+                        }
+                        ui.separator();
                         ui.label(egui::RichText::new("Text").strong());
                         ui.add(
                             egui::TextEdit::singleline(&mut text_draft.text)
@@ -612,9 +621,16 @@ impl Editor {
                             }
                         });
                         ui.horizontal(|ui| {
-                            ui.small("lane");
-                            ui.selectable_value(&mut text_draft.lane, 0, "1");
-                            ui.selectable_value(&mut text_draft.lane, 1, "2");
+                            ui.small("in");
+                            egui::ComboBox::from_id_salt("text_anim")
+                                .width(80.0)
+                                .selected_text(text_draft.anim.label())
+                                .show_ui(ui, |ui| {
+                                    for v in crate::text::TextAnim::ALL {
+                                        ui.selectable_value(&mut text_draft.anim, v, v.label());
+                                    }
+                                });
+                            ui.small("· drop on a text lane");
                         });
                         if !text_draft.text.trim().is_empty() {
                             let kind = CueKind::Text(text_draft.clone());
@@ -696,12 +712,20 @@ const TRACK_H: f32 = 22.0;
 const GUTTER: f32 = 56.0;
 const SCROLL_H: f32 = 12.0;
 /// Cue lanes, in `CueKind::track()` order.
-const TRACK_NAMES: [&str; 6] = ["scenes", "dancer", "fx", "mode/flash", "text 1", "text 2"];
+const TRACK_NAMES: [&str; 6] = ["scenes", "dancer", "fx", "show", "text 1", "text 2"];
 const CUE_H: f32 = TRACK_H * TRACK_NAMES.len() as f32;
 /// Trim zone: this many px *inside* a block's edge plus `EDGE_OUT` px of
 /// overshoot past it, so grabbing an edge doesn't take pixel aim.
 const EDGE: f32 = 8.0;
 const EDGE_OUT: f32 = 5.0;
+
+/// Which text lane a strip-space y lands on — the two text tracks are the
+/// last `TEXT_SLOTS` rows; anything higher clamps to lane 0.
+fn text_lane_at(y: f32, cue_lane_top: f32) -> u8 {
+    let row = ((y - cue_lane_top) / TRACK_H) as i32;
+    let first = TRACK_NAMES.len() as i32 - crate::text::TEXT_SLOTS as i32;
+    (row - first).clamp(0, crate::text::TEXT_SLOTS as i32 - 1) as u8
+}
 
 /// Edge-trim vs move for a press at pointer-x `px` on a block spanning
 /// `x0..=x1`: the nearer edge wins inside the trim zone (which overshoots
@@ -1100,11 +1124,16 @@ fn canvas(
                 if snap {
                     beat = (beat * 4.0).round() / 4.0;
                 }
+                let mut kind = (*payload).clone();
+                // Text drops pick their lane from the row they land on.
+                if let CueKind::Text(spec) = &mut kind {
+                    spec.lane = text_lane_at(pos.y, cue_lane.top());
+                }
                 doc.cues.push(Cue {
                     clip: ci,
                     beat: beat.max(0.0),
                     beats: 4.0,
-                    kind: (*payload).clone(),
+                    kind,
                 });
                 doc.sort_cues();
                 *dirty = true;
@@ -1354,6 +1383,14 @@ fn canvas(
                             if let Some(cue) = doc.cues.get_mut(i) {
                                 cue.clip = ci;
                                 cue.beat = beat.max(0.0);
+                                // Text blocks ride either text lane — a drag
+                                // across the lanes retargets the slot.
+                                if let CueKind::Text(spec) = &mut cue.kind {
+                                    let lane = text_lane_at(p.y, cue_lane.top());
+                                    if spec.lane != lane {
+                                        spec.lane = lane;
+                                    }
+                                }
                                 *dirty = true;
                             }
                         }

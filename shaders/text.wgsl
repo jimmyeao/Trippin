@@ -12,7 +12,7 @@ struct TS {
     born: f32,         // u.time when the block started
     life: f32,         // block length in seconds (0 = untimed)
     hue: f32,          // colour seed
-    _p0: f32,
+    anim: f32,         // 0 fade · 1 rise · 2 drop · 3 slide · 4 zoom · 5 type
     _p1: f32,
 };
 
@@ -48,6 +48,23 @@ fn shade(slot: i32, p: vec2<f32>) -> vec4<f32> {
     var luv = (p - s.quad.xy) / s.quad.zw * 0.5 + 0.5;
     let lt = u.time - s.born;
     let style = i32(s.style + 0.5);
+    let anim = i32(s.anim + 0.5);
+
+    // Entrance animation (video-editor style): warps the sampled mask during
+    // the first ~0.7 s. luv is mask-space, so +y shifts the glyph UP-screen.
+    if anim >= 1 && anim <= 4 {
+        let e = 1.0 - pow(1.0 - clamp(lt / 0.7, 0.0, 1.0), 3.0);
+        if anim == 1 { // rise: slides up into place
+            luv.y -= (1.0 - e) * 0.55;
+        } else if anim == 2 { // drop: falls from above
+            luv.y += (1.0 - e) * 0.55;
+        } else if anim == 3 { // slide: in from the left
+            luv.x += (1.0 - e) * 0.7;
+        } else { // zoom: pops from small to full
+            let sc = 0.3 + 0.7 * e;
+            luv = (luv - 0.5) / sc + 0.5;
+        }
+    }
 
     // uv warps first — they move the whole glyph, not the shading.
     if style == 2 {
@@ -122,6 +139,19 @@ fn shade(slot: i32, p: vec2<f32>) -> vec4<f32> {
         col = metal * m * (0.8 + 0.6 * u.energy);
         col += vec3<f32>(0.9, 0.95, 1.0) * edge * 0.9;
         a = max(m, edge * 0.5);
+    }
+
+    // Typewriter: left-to-right reveal with a blinking caret. Runs on the
+    // final colour/alpha so it composes with every style above.
+    if anim == 5 {
+        let rev = clamp(lt / 1.2, 0.0, 1.0);
+        let vis = 1.0 - smoothstep(rev - 0.02, rev + 0.02, luv.x);
+        let caret = (1.0 - smoothstep(0.0, 0.012, abs(luv.x - rev)))
+                  * step(rev, 0.995)
+                  * step(0.15, luv.y) * step(luv.y, 0.85)
+                  * step(0.5, fract(lt * 1.6));
+        col = col * vis + palette(s.hue + 0.5) * caret * 1.6;
+        a = max(a * vis, caret * 0.9);
     }
 
     a *= s.opacity * u.master;

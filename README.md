@@ -255,11 +255,17 @@ boundaries and cue transitions land on the "one", not just on beats.
 - **Play** (`T`) plays the track through the speakers *and* the analyser, so
   the visuals react to the song itself; live input resumes when it ends or
   you stop it. Click/drag empty strip space to scrub the edit cursor.
-- **Cues** are dropped on the strip with the type picker + `+ at cursor`,
-  then dragged along the timeline, snapped to quarter-beats (the `snap`
-  toggle), edited below, or right-clicked to delete. A cue can cut to a
-  scene, step scenes, switch modes, toggle the dancer / canon / blackout,
-  pick a routine or look, or set the post effect.
+- **Cues** are dragged from the editor's left palette onto the strip,
+  snapped to quarter-beats (the `snap` toggle), edited below, or
+  right-clicked to delete. A cue can cut to a scene, step scenes, switch
+  modes, toggle the dancer / canon / blackout, pick a routine or look,
+  set the post effect, or switch the global colour **palette** — palette
+  cues latch until the next one, restyling every scene/text/dancer glow.
+- **Text** cards live on the two bottom lanes: drag a card onto a lane,
+  then drag it between `text 1` / `text 2` to move lanes. Alongside the
+  look (neon/fire/wave/glitch/pulse/chrome) each card gets an
+  editor-style entrance — fade, rise, drop, slide, zoom, or type
+  (typewriter reveal with caret).
 - **Record** (`G`) arms recording: while the timeline is playing, every
   hotkey and panel action lands on the strip as a cue — perform the show
   once, then save.
@@ -274,7 +280,7 @@ boundaries and cue transitions land on the "one", not just on beats.
   likelihood, >5 kHz "air" — and segments the track into labelled ~4-bar
   phrase blocks (intro / groove / build / drop / peak / breakdown / outro).
   The model directs the show block by block (scene, dancer, routine, look,
-  fx, text per phrase), and Trippin expands that plan into cue blocks —
+  fx, palette, text per phrase), and Trippin expands that plan into cue blocks —
   enforcing variety itself (a scene can't run longer than ~12 bars, dancer
   routines rotate, `void` only ever plays a song out). BYOAI: Anthropic,
   OpenAI, Gemini, or any OpenAI-compatible endpoint (Groq, Mistral,

@@ -125,6 +125,8 @@ pub enum CueKind {
     /// Apply a transform (also turns auto-pick off).
     Fx(Fx),
     FxAuto(bool),
+    /// Switch the global colour palette (latches until the next palette cue).
+    Palette(String),
     /// Show a text overlay (lane 0/1 chooses which of the two text tracks).
     Text(crate::text::TextSpec),
     /// Internal: fired when a Text block's end passes — fades that lane out.
@@ -148,6 +150,7 @@ impl CueKind {
             Self::Blackout(_) => "Blackout",
             Self::Fx(_) => "Transform",
             Self::FxAuto(_) => "Auto FX",
+            Self::Palette(_) => "Palette",
             Self::Text(_) => "Text",
             Self::TextOff(_) => "Text off",
         }
@@ -166,7 +169,7 @@ impl CueKind {
             | Self::Trails(_)
             | Self::Canon(_) => 1,
             Self::Fx(_) | Self::FxAuto(_) => 2,
-            Self::Mode(_) | Self::Blackout(_) => 3,
+            Self::Mode(_) | Self::Blackout(_) | Self::Palette(_) => 3,
             Self::Text(s) => 4 + (s.lane as usize % crate::text::TEXT_SLOTS),
             Self::TextOff(lane) => 4 + (*lane as usize % crate::text::TEXT_SLOTS),
         }
@@ -201,6 +204,7 @@ impl CueKind {
                 Some(i) => format!("look {}", i + 1),
                 None => "auto look".into(),
             },
+            Self::Palette(n) => format!("palette {n}"),
             Self::Text(s) => format!("\"{}\"", s.text),
             _ => self.label().to_lowercase(),
         }
@@ -260,6 +264,8 @@ pub struct PlayheadState {
     pub blackout: bool,
     pub fx: Fx,
     pub fx_auto: bool,
+    /// Last palette cue, if any — `None` leaves the user's pick alone.
+    pub palette: Option<String>,
     /// Live text card per lane.
     pub text: [Option<crate::text::TextSpec>; crate::text::TEXT_SLOTS],
 }
@@ -280,6 +286,7 @@ impl Default for PlayheadState {
             blackout: false,
             fx: Fx::Off,
             fx_auto: false,
+            palette: None,
             text: Default::default(),
         }
     }
@@ -473,6 +480,7 @@ impl Timeline {
                     st.fx_auto = false;
                 }
                 CueKind::FxAuto(b) => st.fx_auto = b,
+                CueKind::Palette(n) => st.palette = Some(n),
                 CueKind::Text(spec) => {
                     let lane = spec.lane as usize % crate::text::TEXT_SLOTS;
                     st.text[lane] = Some(spec);
@@ -938,11 +946,14 @@ mod tests {
         assert_eq!(CueKind::Fx(Fx::Quad).end_kind(), None);
         assert_eq!(CueKind::FxAuto(true).end_kind(), None);
         assert_eq!(CueKind::Scene("x".into()).end_kind(), None);
+        // Palette cues latch too — no revert at the block end.
+        assert_eq!(CueKind::Palette("fire".into()).end_kind(), None);
         // Tracks stay fixed per kind.
         assert_eq!(CueKind::Scene("x".into()).track(), 0);
         assert_eq!(CueKind::Canon(Tristate::On).track(), 1);
         assert_eq!(CueKind::FxAuto(true).track(), 2);
         assert_eq!(CueKind::Blackout(true).track(), 3);
+        assert_eq!(CueKind::Palette("fire".into()).track(), 3);
     }
 
     #[test]
@@ -963,6 +974,34 @@ mod tests {
         let st = d.state_at(200.0);
         assert!(st.dancer);
         assert_eq!(st.scene_steps, 1);
+    }
+
+    #[test]
+    fn palette_cues_latch_through_state_at() {
+        let mut d = doc();
+        d.cues.push(Cue {
+            clip: 0,
+            beat: 12.0, // 120 BPM + first_beat 0.5 → global t = 6.5 s
+            beats: 4.0,
+            kind: CueKind::Palette("fire".into()),
+        });
+        d.sort_cues();
+        // Before the cue: no opinion — the user's live pick stays.
+        assert_eq!(d.state_at(0.0).palette, None);
+        assert_eq!(d.state_at(6.0).palette, None);
+        // After it: latched, and still latched well past the block end.
+        assert_eq!(d.state_at(7.0).palette.as_deref(), Some("fire"));
+        assert_eq!(d.state_at(200.0).palette.as_deref(), Some("fire"));
+        // And it survives JSON.
+        let dir = std::env::temp_dir().join("trippin_tl_pal");
+        let path = d.save(&dir).unwrap();
+        let back = Timeline::load(&path).unwrap();
+        assert!(
+            back.cues
+                .iter()
+                .any(|c| c.kind == CueKind::Palette("fire".into()))
+        );
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
