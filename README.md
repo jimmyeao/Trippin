@@ -85,7 +85,15 @@ cargo run --release -- --fullscreen
 cargo run --release -- --song track.wav   # open a track on the Timeline tab
 cargo run --release -- --analyze track.mp3   # print the per-bar feature summary sent to the AI
 cargo run --release -- --ai-build track.mp3  # run the AI show build end-to-end, print the cues
+cargo run --release -- --snap storm_front,deep_blue --snap-size 1920x1080  # headless PNG + ms/frame
 ```
+
+`--snap <scenes|all>` renders scenes offscreen through the real scene → bloom
+→ present chain with a synthetic 126 BPM groove, writes PNGs to `snaps/`
+(`--snap-out`), and times each scene (`--snap-bench N` frames, results also in
+`snaps/bench.tsv`). `--snap-at 2,6` picks the capture times in seconds and
+`--palette` picks the palette. There's no window and no audio device, so it
+works for GPU budgeting on any machine.
 
 Drag the visuals window to the projector / LED wall and press **F**. A
 **control panel** window opens alongside it (F1 shows/hides it), organised
@@ -171,6 +179,26 @@ Default keys (all rebindable in the panel):
   (an infinite
   glowing cube lattice), `arch_run` (a cathedral vault of arches) and
   `torus_dance` (a band-lit torus knot spinning centre-screen).
+- **2026 tier** (photoreal, all `@heavy`; they use the bloom pass, AgX tone
+  mapping and the baked noise volumes). `salt_flats`: a mirror-still salt
+  flat under the Milky Way with a spectrum-display monolith. `orbit_night`:
+  low orbit before dawn, with city lights, storms flashing on the kicks and a
+  scattering atmosphere limb. `chrome_ferro`: a liquid-chrome ferrofluid blob
+  whose spike rings follow the spectrum, in a photo studio. `warehouse_haze`:
+  moving-head beams in haze inside a concrete warehouse, using analytic
+  volumetric beams. `stage_rig`: a festival main stage from the crowd, with
+  an LED wall, a beam rig, flame jets on the drops and backlit hands.
+  `event_horizon`: a lensed black hole accretion disk. `glass_monoliths`:
+  refracting glass slabs with RGB dispersion in front of a spectrum light
+  wall. `storm_front`: a volumetric supercell over the sea, with lightning
+  inside the cloud on the big hits. `neon_alley`: a rain-soaked brick alley
+  with blade neon signs and puddle reflections. `deep_blue`: underwater,
+  with caustics, god rays, marine snow and pulsing jellyfish. `glacier_cave`:
+  a scalloped ice tunnel lit through the ice. `megastructure`: a dusk canyon
+  through an endless brutalist structure with spectrum windows. Each is
+  ≤1 ms/frame at 1080p on an RTX 5070 Ti. Scaling by FP32 throughput, that
+  estimates ~3 ms on an RTX 3060 and ~12 ms on an M2, so they should hold
+  60 fps on the floor hardware at full res.
 - **Graphic / LED-wall:** `dot_field` (a spectrum-driven LED wall),
   `grid_flash` (an LED dancefloor), `warp_grid` (a tron horizon rush),
   `strobe_bars` (a wall of light towers that grow with their band),
@@ -362,7 +390,10 @@ tools/build_dancer_library.py  downloads CMU dance takes and renders the built-i
 tools/roto.py            video -> silhouette clip (rembg / luma / chroma matte, via ffmpeg)
 tools/contact_sheet.py   quick preview strip of a clip
 shaders/common.wgsl      uniforms + helpers, prepended to every shader
-shaders/present.wgsl     post: chromatic aberration, ACES tonemap, vignette, flash, grain
+shaders/present.wgsl     post: chromatic aberration, bloom, ACES / AgX tonemap, vignette, flash, grain
+shaders/bloom.wgsl       13-tap Karis downsample / tent upsample chain (embedded, not hot-reloaded)
+src/gfx.rs               baked 64³ noise volume + blue noise, bloom chain
+src/snap.rs              --snap headless render + bench
 shaders/scenes/*.wgsl    one file per scene; new files are picked up live
 ```
 
@@ -375,6 +406,22 @@ Everything in `common.wgsl` is available: `u.bass/mid/high/energy`, `u.kick`,
 for feedback), `palette(t)`, `fbm`, `noise`, `rot`. Output is HDR, and the present
 pass tonemaps it. Save the file to reload it. A compile error is printed and the
 last good version keeps running.
+
+Header tags go in the first 8 lines of a scene:
+- `// @heavy` gates the scene to dGPU and Apple Silicon.
+- `// @bloom 0.7` runs the bloom chain for that scene (0 or absent means no
+  bloom passes at all).
+- `// @tonemap agx` uses AgX (with a punchy look) instead of ACES.
+
+Older scenes carry none of these, so they render exactly as before.
+
+The 2026 helpers are:
+- `tnoise(p)`: the four channels of a tileable 64³ noise volume, one fetch.
+  R is Perlin-Worley, G is Worley fbm, B is smooth Perlin and A is finer
+  Worley. The measured value ranges are in common.wgsl.
+- `bluen(frag)`: per-frame blue noise for dithering ray-march starts.
+- `fresnel`, `ggx`, and `cam_ray(p, ro, ta, roll, focal)`, which handles the
+  y-down flip.
 
 ## Roadmap
 1. **Milestone 1 (done):** audio analysis, 5 shader scenes, feedback, auto-pilot, fullscreen.
