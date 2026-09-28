@@ -80,7 +80,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     if u.bloom > 0.0 {
         // The chain sums 6 levels; normalise, then blend (energy-conserving).
         let b = finite(textureSampleLevel(bloom_tex, samp, uv, 0.0).rgb) / 6.0;
-        col = mix(col, b, clamp(u.bloom, 0.0, 1.0) * 0.25);
+        col = mix(col, b, clamp(u.bloom, 0.0, 1.0) * 0.12);
     }
     let expo = 0.75 + 0.35 * u.intensity;
     if u.tonemap > 0.5 {
