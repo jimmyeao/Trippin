@@ -203,6 +203,17 @@ impl Editor {
 
         let frame = self.win.frame(|ui| {
             ui.spacing_mut().item_spacing = egui::vec2(6.0, 4.0);
+            // Editor sits at reading distance — bump the widget fonts a step
+            // over egui defaults (the strip's painted text has its own sizes).
+            ui.style_mut()
+                .text_styles
+                .insert(egui::TextStyle::Body, egui::FontId::proportional(15.0));
+            ui.style_mut()
+                .text_styles
+                .insert(egui::TextStyle::Button, egui::FontId::proportional(15.0));
+            ui.style_mut()
+                .text_styles
+                .insert(egui::TextStyle::Small, egui::FontId::proportional(12.0));
 
             // --- Toolbar ----------------------------------------------------
             egui::Panel::top("ed_tool").show(ui, |ui| {
@@ -767,11 +778,11 @@ fn palette_item(ui: &mut egui::Ui, label: &str, kind: &CueKind) -> bool {
 // The strip: ruler + clip regions + cue lane + playhead.
 // ---------------------------------------------------------------------------
 
-const RULER_H: f32 = 20.0;
-const CLIP_H: f32 = 56.0;
-const TRACK_H: f32 = 22.0;
+const RULER_H: f32 = 26.0;
+const CLIP_H: f32 = 68.0;
+const TRACK_H: f32 = 30.0;
 /// Resolve-style track header column at the left of the strip.
-const GUTTER: f32 = 56.0;
+const GUTTER: f32 = 78.0;
 const SCROLL_H: f32 = 12.0;
 /// Cue lanes, in `CueKind::track()` order.
 const TRACK_NAMES: [&str; 6] = ["scenes", "dancer", "fx", "show", "text 1", "text 2"];
@@ -924,7 +935,7 @@ fn canvas(
                 pos2(x + 3.0, ruler.top() + 3.0),
                 Align2::LEFT_TOP,
                 fmt_time(t),
-                FontId::proportional(10.0),
+                FontId::proportional(11.5),
                 faint,
             );
         }
@@ -942,19 +953,19 @@ fn canvas(
         Stroke::new(1.0, Color32::from_gray(70)),
     );
     painter.text(
-        pos2(gutter.left() + 5.0, clip_lane.center().y),
+        pos2(gutter.left() + 6.0, clip_lane.center().y),
         Align2::LEFT_CENTER,
         "audio",
-        FontId::proportional(9.5),
+        FontId::proportional(12.0),
         faint,
     );
     for (i, name) in TRACK_NAMES.iter().enumerate() {
         let ty = cue_lane.top() + i as f32 * TRACK_H;
         painter.text(
-            pos2(gutter.left() + 5.0, ty + TRACK_H * 0.5),
+            pos2(gutter.left() + 6.0, ty + TRACK_H * 0.5),
             Align2::LEFT_CENTER,
             *name,
-            FontId::proportional(9.5),
+            FontId::proportional(12.0),
             faint,
         );
         if i > 0 {
@@ -971,7 +982,7 @@ fn canvas(
             clip_lane.center(),
             Align2::CENTER_CENTER,
             "open a song or drop one here to start a timeline",
-            FontId::proportional(13.0),
+            FontId::proportional(15.0),
             faint,
         );
         return;
@@ -1033,7 +1044,7 @@ fn canvas(
             pos2(r.left() + 5.0, r.top() + 4.0),
             Align2::LEFT_TOP,
             format!("{} · {:.0} BPM", c.name, c.bpm),
-            FontId::proportional(10.5),
+            FontId::proportional(12.5),
             white,
         );
     }
@@ -1085,7 +1096,7 @@ fn canvas(
                         pos2(x + 3.0, clip_lane.top() + 4.0),
                         Align2::LEFT_TOP,
                         format!("{}", b / 4 + 1),
-                        FontId::proportional(9.5),
+                        FontId::proportional(11.0),
                         faint,
                     );
                 }
@@ -1293,7 +1304,7 @@ fn canvas(
                 // Text: rasterise the same mask the GPU gets — the block's
                 // thumbnail shows the real lettering.
                 if want_thumbs.insert(key.clone()) {
-                    if let Some((w, h, px)) = crate::text::rasterize_rgba(&spec.text, 28.0) {
+                    if let Some((w, h, px)) = crate::text::rasterize_rgba(&spec.text, 40.0) {
                         let img =
                             egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &px);
                         thumbs.insert(
@@ -1315,7 +1326,7 @@ fn canvas(
                 pos2(text_x, r.center().y),
                 Align2::LEFT_CENTER,
                 cue.kind.text(),
-                FontId::proportional(10.5),
+                FontId::proportional(12.0),
                 Color32::WHITE,
             );
         }
