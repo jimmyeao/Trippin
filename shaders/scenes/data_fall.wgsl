@@ -8,7 +8,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let cols = 48.0;
     let cx = floor(p.x * cols);
     let hx = hash21(vec2<f32>(cx, 11.0));
-    let speed = 0.15 + hx * 0.45 + u.onset * 0.3;
+    let speed = 0.07 + hx * 0.22; // slower, steady — onsets light cells, not speed
 
     // Column stream scrolling down (+p.y = down-screen).
     let rows = 26.0;

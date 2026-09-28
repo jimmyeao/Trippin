@@ -1,9 +1,11 @@
 // @heavy — infinite cube lattice flythrough: the camera rides through a
-// repeating lattice of glowing cube frames. Bass expands the cell size,
+// repeating lattice of glowing cube frames. Bass feeds the frame glow,
 // onsets flash whole cells at once.
 
 fn map(p: vec3<f32>) -> vec2<f32> {
-    let s = 1.4 + u.bass * 0.4;
+    // Fixed cell size — putting bass in the world scale made the geometry
+    // visibly lurch. Bass lives in the glow instead.
+    let s = 1.6;
     let id = floor(p / s + 0.5);
     let h = hash21(id.xz + id.y * 3.0);
     let c = p - id * s;
@@ -38,7 +40,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     if t < 30.0 {
         let fade = exp(-t * 0.2);
         let flash = step(0.8, fract(hit + u.beat * 0.125)) * u.onset * 2.0;
-        col = mix(col, palette(hit * 1.3 + u.hue) * (0.5 + u.energy + flash), fade);
+        col = mix(col, palette(hit * 1.3 + u.hue) * (0.4 + u.energy + u.bass * 0.5 + flash), fade);
     }
     // Distance fog toward the vanishing point.
     col += palette(0.7 + u.hue) * (1.0 - exp(-t * 0.1)) * 0.15;

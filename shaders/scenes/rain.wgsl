@@ -20,14 +20,14 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let cols = 60.0;
     let cx = floor(p.x * cols);
     let hx = hash21(vec2<f32>(cx, 3.0));
-    let speed = 0.4 + hx * 0.9 + u.energy * 0.3;
+    let speed = 0.4 + hx * 0.9; // fixed per column — audio in brightness, not motion
     let y = p.y + u.flow * speed; // screen-down scroll
     let dy = fract(y * 3.0 + hx * 7.0);
     let dx = fract(p.x * cols) - 0.5;
     let streak = exp(-dx * dx * 120.0) * smoothstep(0.0, 0.15, dy) * smoothstep(1.0, 0.85, dy);
     let head = exp(-dx * dx * 160.0) * exp(-(dy - 0.9) * (dy - 0.9) * 40.0);
 
-    col += palette(hx + u.hue) * streak * 0.25;
+    col += palette(hx + u.hue) * streak * (0.15 + u.energy * 0.35);
     col += vec3<f32>(0.7, 0.8, 1.0) * head * (0.5 + u.high * 1.5);
     col += prev(in.uv) * 0.2;
     return vec4<f32>(col, 1.0);

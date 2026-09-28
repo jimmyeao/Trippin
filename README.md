@@ -146,8 +146,7 @@ Default keys (all rebindable in the panel):
   spectrum bars), `eq_round` (radial analyser), `eq_skyline` (a city skyline
   of spectrum towers), `scope` (phosphor oscilloscope), `spectrogram`
   (scrolling waterfall), `lissajous`, `vu` (giant bass/mid/high meters),
-  `led_wall`, `waveshaper`, `polar_bloom`, `levels` and `terrain`
-  (a wireframe spectrum valley).
+  `led_wall`, `waveshaper`, `polar_bloom` and `levels`.
 - **Pulse / particle:** `shockwaves`, `pulse_grid`, `rings`, `heartbeat`
   (a scrolling ECG), `bounce`, `stardrive`, `orbiters`, `ribbons`, `ink`,
   `metaballs`, `sparks` (pyro fountains), `sun_rays`, `helix`,
@@ -168,22 +167,23 @@ Default keys (all rebindable in the panel):
   glowing cube lattice), `arch_run` (a cathedral vault of arches) and
   `torus_dance` (a band-lit torus knot spinning centre-screen).
 - **Graphic / LED-wall:** `dot_field` (a spectrum-driven LED wall),
-  `hex_pulse` (a honeycomb strobe), `checkers` (a flag-wobble op-art board),
-  `grid_flash` (an LED dancefloor), `stripes_flow`, `moire` (interference
-  rings), `sunburst` (a rotating ray fan), `pinwheel`, `hypno` (a spinning
-  hypnosis disc), `arc_sweep` (radar rings), `barcode` (a living spectrum
-  barcode), `led_chase` (chase lights around the frame edge), `plasma` and
-  `mandel_zoom` (a deep Mandelbrot dive).
+  `hex_pulse` (a honeycomb strobe), `grid_flash` (an LED dancefloor),
+  `strobe_bars` (a wall of strobes sequencing the beat), `stripes_flow`,
+  `moire` (interference rings), `sunburst` (a rotating ray fan), `pinwheel`,
+  `hypno` (a spinning hypnosis disc), `arc_sweep` (radar rings), `barcode`
+  (a living spectrum barcode), `led_chase` (chase lights around the frame
+  edge), `vortex` (a polar whirlpool) and `plasma`.
 - **Organic / atmospheric:** `nebula` (billowing deep-space gas),
   `caustics` (pool-light shimmer), `sunset_waves` (a retro sea under a
   striped sun), `rain` (streaks on glass over city bokeh), `lightning`
   (forked strikes that re-fire on onsets), `confetti` (tumbling bursts),
-  `flower_field` (blooming geometric petals), `spiral_galaxy`, `signal_noise`
-  (a corrupted broadcast) and `data_fall` (cyber-rain columns).
+  `ember_rise` (embers climbing off a fire pit), `flower_field` (blooming
+  geometric petals), `spiral_galaxy`, `tide_lines` (rolling light swells)
+  and `data_fall` (cyber-rain columns).
 - **Pseudo-3D** (projected, no marching — cheap on iGPUs): `cube_spin`
   (tumbling wireframe cubes), `sphere_bounce` (orbs hopping on the beat),
-  `dna` (a rotating double helix), `saturn` (a ringed planet) and
-  `grid_city` (a neon rooftop flyover).
+  `dna` (a rotating double helix), `grid_city` (a neon drive-by skyline)
+  and `dot_wave` (a stadium-crowd wave of dots).
 - **Seasonal:** `halloween`, `christmas` and `fireworks` only enter the
   playlist in season (October, December, Bonfire Night and New Year; see
   `Seasonal` in the panel). They're the most audio-reactive scenes:
