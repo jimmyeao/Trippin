@@ -1,57 +1,48 @@
-// Skyline equaliser: a layered city whose tower tops ARE the spectrum.
-// uv.y = 0 is screen TOP — `up = 1.0 - uv.y` is used throughout so towers
-// rise from the bottom edge. Back rows sit dimmer behind the front row;
-// windows are warm sodium light, the horizon glows with the bass.
-
-fn tower_h(x: f32, layer: f32) -> f32 {
-    let i = floor(x * 20.0 + layer * 13.0);
-    let fx = fract((i + 0.5) / 20.0);
-    let v = spec(fx);
-    let jit = 0.55 + 0.45 * hash21(vec2<f32>(i, layer));
-    return 0.08 + v * jit * (0.55 + 0.25 * u.intensity);
-}
+// A smooth spectrum skyline — continuous towers of light rising out of a
+// dark horizon, drawn soft rather than blocky: wide columns with glowing
+// crowns, a floor reflection, and atmospheric haze instead of a starfield.
+// up = 1 - uv.y.
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let up = 1.0 - in.uv.y;
-    let x = in.uv.x;
 
-    // Sky: deep dusk above, warm smog glow sinking to the horizon.
-    var col = mix(vec3<f32>(0.012, 0.008, 0.03), palette(u.hue) * 0.35,
-                  pow(1.0 - up, 2.0));
-    col += palette(0.05 + u.hue) * exp(-up * 5.0) * (0.3 + u.bass * 0.7);
-    // Heat-lightning wash on drops.
-    col += palette(0.6 + u.hue) * u.onset * 0.25 * exp(-up * 1.5);
+    // Night gradient with city glow pooling on the horizon.
+    var col = mix(vec3<f32>(0.004, 0.006, 0.02), vec3<f32>(0.02, 0.008, 0.04),
+                  up);
+    col += vec3<f32>(0.4, 0.12, 0.05) * exp(-up * 9.0) * 0.5;
 
-    // Back row of towers — taller spread, dimmer, hue-shifted.
-    let h2 = tower_h(x, 1.0) * 1.15;
-    if up < h2 {
-        let edge2 = smoothstep(0.012, 0.0, h2 - up);
-        col = vec3<f32>(0.03, 0.02, 0.05);
-        col += palette(0.4 + u.hue) * edge2 * 0.5;
-        let win2 = step(0.75, hash21(floor(vec2<f32>(x * 80.0, up * 60.0)) + 7.0));
-        col += vec3<f32>(0.6, 0.5, 0.3) * win2 * 0.15 * step(0.05, up);
-    }
+    // Towers: smooth wide columns, height = spectrum at their x.
+    let n = 22.0;
+    let cx = floor(in.uv.x * n);
+    let fx = fract(in.uv.x * n);
+    let band = spec((cx + 0.5) / n);
+    let wob = hash21(vec2<f32>(cx, 5.0));
+    let h = 0.12 + band * (0.4 + u.energy * 0.3) + wob * 0.08;
 
-    // Front row — darker silhouettes, lit windows, glowing rooflines.
-    let h = tower_h(x, 0.0);
-    if up < h {
-        col = vec3<f32>(0.012, 0.008, 0.022);
-        // Windows: warm panes that flicker with the band under them.
-        let wx = floor(x * 90.0);
-        let wy = floor(up * 70.0);
-        let v = spec(fract((wx + 0.5) / 90.0));
-        let lit = step(0.62, hash21(vec2<f32>(wx, wy)) * (0.5 + v * 0.9));
-        let pane = step(0.15, fract(x * 90.0)) * step(fract(x * 90.0), 0.7)
-                 * step(0.2, fract(up * 70.0)) * step(fract(up * 70.0), 0.8);
-        col += mix(vec3<f32>(1.0, 0.72, 0.3), palette(u.hue + 0.2), 0.25)
-               * pane * lit * (0.35 + u.energy * 0.9);
-        // Hot roofline riding the spectrum.
-        let roof = smoothstep(0.014, 0.0, h - up);
-        col += palette(v + u.hue) * roof * (0.8 + u.kick * 1.5 + v);
-    }
+    // Tower body: soft-edged silhouette slightly darker than the sky.
+    let body = smoothstep(0.0, 0.1, fx) * smoothstep(1.0, 0.9, fx)
+             * step(up, h);
+    col = mix(col, vec3<f32>(0.008, 0.01, 0.028), body * 0.9);
 
-    // Street-level haze strip at the very bottom.
-    col += palette(0.1 + u.hue) * exp(-up * 30.0) * (0.15 + u.bass * 0.3);
+    // Lit crown: the top of each tower glows with its band.
+    let crown = exp(-abs(up - h) * 40.0) * smoothstep(0.0, 0.1, fx)
+              * smoothstep(1.0, 0.9, fx);
+    col += palette(cx / n + u.hue) * crown * (0.7 + band * 1.5 + u.kick);
+
+    // Vertical light wash inside each tower — smooth, not panes.
+    let wash = exp(-abs(fx - 0.5) * 6.0) * step(up, h)
+             * (0.2 + band * 0.8) * up / max(h, 0.01);
+    col += palette(cx / n + u.hue) * wash * 0.4;
+
+    // Flare spiking above the crown on loud bands.
+    let spike = exp(-max(up - h, 0.0) * 18.0) * step(h, up)
+              * exp(-abs(fx - 0.5) * 5.0);
+    col += palette(cx / n + u.hue) * spike * band * 0.6;
+
+    // Reflection: mirrored smear below the horizon line.
+    let refl = exp(-up * 3.0) * 0.08 * band;
+    col += palette(cx / n + u.hue) * refl;
+
     return vec4<f32>(finite(col), 1.0);
 }

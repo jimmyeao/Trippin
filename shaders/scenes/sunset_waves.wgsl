@@ -15,7 +15,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     // Sun: a disc on the horizon, pulsing on the beat, striped like the
     // classic retro sun.
-    let sun_p = p - vec2<f32>(0.0, -0.12);
+    let sun_p = p - vec2<f32>(0.0, -0.02);
     let sun_r = length(sun_p);
     let sun = smoothstep(0.42, 0.40, sun_r);
     let stripes = smoothstep(0.0, 0.02, abs(fract(sun_p.y * 12.0 + u.time * 0.3) - 0.5) - 0.28);
@@ -23,14 +23,15 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     col = mix(col, sun_col * (0.6 + beat_pulse(3.0) * 0.8), sun * stripes);
     col += palette(0.9 + u.hue) * exp(-sun_r * 4.0) * 0.4 * (0.5 + u.bass);
 
-    // Wave layers: near-dark silhouettes stacking toward the viewer.
+    // Wave layers: a low band of surf at the frame bottom — the sky gets
+    // most of the screen so the sun and gradient carry the scene.
     for (var i = 0; i < 4; i++) {
         let fi = f32(i);
         let depth = fi / 4.0;
-        let amp = 0.04 + depth * 0.05 + u.bass * 0.05;
+        let amp = 0.03 + depth * 0.03 + u.bass * 0.04;
         let wv = sin(p.x * (5.0 - fi) + u.flow * (0.6 + fi * 0.4) + fi * 2.0) * amp
                + sin(p.x * 11.0 - u.flow * (0.9 + fi * 0.3)) * amp * 0.4;
-        let level = -0.15 + depth * 0.5;
+        let level = -0.45 + depth * 0.35;
         let below = smoothstep(level + wv + 0.005, level + wv - 0.005, up);
         let layer_col = mix(palette(0.55 + u.hue) * 0.25, vec3<f32>(0.005, 0.002, 0.015), depth);
         // Sheen on the wave tops.

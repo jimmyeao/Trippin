@@ -143,13 +143,15 @@ Default keys (all rebindable in the panel):
   `julia_portal`, `kaleido`, `fluid` and `spectrum_rings`. These still pulse
   with the beat.
 - **Analysers** — scenes that draw the music itself: `eq_bars` (mirrored
-  spectrum bars), `eq_round` (radial analyser), `eq_skyline` (a city skyline
-  of spectrum towers), `scope` (phosphor oscilloscope), `spectrogram`
+  spectrum bars), `eq_round` (radial analyser), `eq_skyline` (a night skyline
+  of glowing spectrum towers), `scope` (phosphor oscilloscope), `spectrogram`
   (scrolling waterfall), `lissajous`, `vu` (giant bass/mid/high meters),
   `led_wall`, `waveshaper`, `polar_bloom` and `levels`.
 - **Pulse / particle:** `shockwaves`, `pulse_grid`, `rings`, `heartbeat`
-  (a scrolling ECG), `bounce`, `stardrive`, `orbiters`, `ribbons`, `ink`,
-  `metaballs`, `sparks` (pyro fountains), `sun_rays`, `helix`,
+  (a beat-locked ECG trace), `bounce` (orbs hopping on a lit floor),
+  `stardrive`, `orbiters`, `ribbons`, `ink`,
+  `metaballs`, `sparks` (pyro fountains), `sun_rays` (a blazing sun with a
+  spectrum corona), `helix`, `comets` (arc-tailed comets on the beat),
   `voronoi_pulse`, `chevrons`, `pixel_fall`, `glitch_grid` (a tearing LED
   tile wall), `light_trails` (long-exposure light streaks) and
   `bokeh_lights` (soft out-of-focus orbs — a mellow breakdown look).
@@ -162,13 +164,14 @@ Default keys (all rebindable in the panel):
   `gyro_core` (nested neon rings around a molten core), `wire_terrain`
   (a neon wireframe terrain flyover), `crystal_cave` (a jewelled cavern
   flythrough), `canyon_run` (sprinting through a winding lit canyon),
-  `bubble_room` (a room of floating orbs bobbing on the beat), `gear_world`
-  (a clockwork chamber whose gears count the beat), `lattice` (an infinite
+  `bubble_room` (a room of floating orbs bobbing on the beat), `lattice`
+  (an infinite
   glowing cube lattice), `arch_run` (a cathedral vault of arches) and
   `torus_dance` (a band-lit torus knot spinning centre-screen).
 - **Graphic / LED-wall:** `dot_field` (a spectrum-driven LED wall),
-  `hex_pulse` (a honeycomb strobe), `grid_flash` (an LED dancefloor),
-  `strobe_bars` (a wall of strobes sequencing the beat), `stripes_flow`,
+  `grid_flash` (an LED dancefloor), `warp_grid` (a tron horizon rush),
+  `strobe_bars` (a wall of light towers that grow with their band),
+  `stripes_flow`,
   `moire` (interference rings), `sunburst` (a rotating ray fan), `pinwheel`,
   `hypno` (a spinning hypnosis disc), `arc_sweep` (radar rings), `barcode`
   (a living spectrum barcode), `led_chase` (chase lights around the frame
@@ -177,13 +180,14 @@ Default keys (all rebindable in the panel):
   `caustics` (pool-light shimmer), `sunset_waves` (a retro sea under a
   striped sun), `rain` (streaks on glass over city bokeh), `lightning`
   (forked strikes that re-fire on onsets), `confetti` (tumbling bursts),
-  `ember_rise` (embers climbing off a fire pit), `flower_field` (blooming
-  geometric petals), `spiral_galaxy`, `tide_lines` (rolling light swells)
+  `ember_rise` (embers climbing off a fire pit), `fire_wall` (a rising wall
+  of flame), `aurora_wave` (northern-light curtains overhead),
+  `spiral_galaxy`, `tide_lines` (rolling light swells)
   and `data_fall` (cyber-rain columns).
 - **Pseudo-3D** (projected, no marching — cheap on iGPUs): `cube_spin`
-  (tumbling wireframe cubes), `sphere_bounce` (orbs hopping on the beat),
-  `dna` (a rotating double helix), `grid_city` (a neon drive-by skyline)
-  and `dot_wave` (a stadium-crowd wave of dots).
+  (tumbling wireframe cubes),
+  `dna` (a rotating double helix), `grid_city` (a parallax drive past a
+  moonlit skyline) and `dot_wave` (a stadium-crowd wave of dots).
 - **Seasonal:** `halloween`, `christmas` and `fireworks` only enter the
   playlist in season (October, December, Bonfire Night and New Year; see
   `Seasonal` in the panel). They're the most audio-reactive scenes:
