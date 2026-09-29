@@ -1,0 +1,11 @@
+{
+  "name": "stock_vibe",
+  "fps": 30,
+  "frames": 120,
+  "beats": 8,
+  "width": 780,
+  "height": 512,
+  "energy": 0.6,
+  "source": "Mixkit: https://mixkit.co/free-stock-video/urban-girl-dancing-in-front-of-a-wall-with-graffiti-33907/",
+  "accent": 0.1333
+}

@@ -29,7 +29,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         let halo = exp(-d * 9.0) * 0.4;
         col += palette(band + u.hue) * (orb * (0.5 + v * 1.4) + halo * v);
         // Impact flash at the floor under the orb right after the beat.
-        let impact = exp(-u.beat_phase * 7.0) * exp(-abs(up - fy) * 40.0)
+        let impact = beat_pulse(7.0) * exp(-abs(up - fy) * 40.0)
                    * exp(-abs(x - ox) * aspect() * 6.0);
         col += palette(band + 0.5 + u.hue) * impact * v;
     }

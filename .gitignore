@@ -8,3 +8,4 @@ __pycache__/
 /trippin.json
 /dist
 /tools/.stock_cache
+/snaps/

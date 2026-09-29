@@ -51,6 +51,13 @@ pub struct Features {
     /// True when there is effectively no signal.
     pub silent: bool,
     pub tempo_confidence: f32,
+    /// How steadily drum hits (kicks) are landing, 0..1 over the last few
+    /// seconds — high in a four-on-the-floor section, ~0 when the drums drop.
+    pub groove: f32,
+    /// Breakdown state, 0 = beats playing, 1 = breakdown (no drums: pads,
+    /// vocals, pure instrumental). Hysteretic and smoothed, so it never
+    /// flickers; falls fast when the drums come back in (the drop).
+    pub calm: f32,
 }
 
 impl Default for Features {
@@ -72,6 +79,8 @@ impl Default for Features {
             downbeat: 0,
             silent: true,
             tempo_confidence: 0.0,
+            groove: 0.0,
+            calm: 1.0,
         }
     }
 }
@@ -355,6 +364,10 @@ struct Analyzer {
     gains: [AutoGain; 3],
     spec_gain: AutoGain,
     flux_gain: AutoGain,
+    /// Level-independent kick detection: low-band flux against its own
+    /// recent peak and mean.
+    bass_gain: AutoGain,
+    bass_hist: VecDeque<f32>,
     /// Onset strength envelope at `fps`, newest last.
     env: VecDeque<f32>,
     /// Optional tap so the timeline matcher can watch the same envelope.
@@ -375,6 +388,14 @@ struct Analyzer {
     f: Features,
     energy_slow: f32,
     energy_fast: f32,
+    /// Times (s, analysis clock) of recent kick hits — the groove detector.
+    kick_times: VecDeque<f32>,
+    /// Analysis clock in seconds.
+    clock: f32,
+    /// Breakdown target the smoothed `calm` eases toward (hysteresis).
+    calm_target: f32,
+    /// Seconds the groove has sat below the breakdown threshold.
+    quiet_for: f32,
 }
 
 impl Analyzer {
@@ -407,6 +428,8 @@ impl Analyzer {
             ],
             spec_gain: AutoGain::new(1e-4),
             flux_gain: AutoGain::new(1e-4),
+            bass_gain: AutoGain::new(1e-3),
+            bass_hist: VecDeque::new(),
             env: VecDeque::new(),
             tap,
             bass_env: VecDeque::new(),
@@ -423,6 +446,10 @@ impl Analyzer {
             f: Features::default(),
             energy_slow: 0.0,
             energy_fast: 0.0,
+            kick_times: VecDeque::new(),
+            clock: 0.0,
+            calm_target: 1.0,
+            quiet_for: 0.0,
         }
     }
 
@@ -506,8 +533,24 @@ impl Analyzer {
         if !silent && flux > mean * 1.5 && fnorm > 0.3 {
             self.f.onset = self.f.onset.max(fnorm);
         }
-        if !silent && bass_flux > 0.15 && raw[0] > 0.0 {
-            self.f.kick = self.f.kick.max((bass_flux * 2.0).min(1.0));
+        self.clock += 1.0 / self.fps;
+        // Kicks: a low-band jump well above the recent average *and* strong
+        // relative to this track's own peaks. The old fixed threshold
+        // (bass_flux > 0.15) depended on playback volume — a pop mix played
+        // at a normal level never cleared it, so no kicks, no groove, and the
+        // show sat in breakdown mode.
+        push_capped(&mut self.bass_hist, bass_flux, (0.5 * self.fps) as usize);
+        let bass_mean = self.bass_hist.iter().sum::<f32>() / self.bass_hist.len() as f32;
+        let bnorm = self.bass_gain.apply(bass_flux);
+        if !silent && bass_flux > bass_mean * 1.8 && bnorm > 0.3 && raw[0] > 1e-6 {
+            let hit = (bnorm * 1.2).min(1.0);
+            // A fresh hit (not the tail of the last one): log it for the
+            // groove detector, with a 0.2 s refractory period.
+            let last = self.kick_times.back().copied().unwrap_or(-1.0);
+            if hit > 0.3 && hit > self.f.kick * 1.5 && self.clock - last > 0.2 {
+                self.kick_times.push_back(self.clock);
+            }
+            self.f.kick = self.f.kick.max(hit);
         }
 
         // Levels, smoothed with fast attack / slower release.
@@ -524,6 +567,38 @@ impl Analyzer {
         self.energy_fast += (energy - self.energy_fast) * (1.0 / (1.5 * self.fps));
         self.energy_slow += (energy - self.energy_slow) * (1.0 / (12.0 * self.fps));
         self.f.build = ((self.energy_fast - self.energy_slow) * 4.0).clamp(-1.0, 1.0);
+
+        // Groove: kick hits in the last 2.5 s against the beats expected at
+        // the current tempo — ~1 for four-on-the-floor, ~0.5 for half-time
+        // or broken beats, ~0 when the drums drop out (pads and vocals barely
+        // move the low-band flux).
+        let hop_s = 1.0 / self.fps;
+        const WIN: f32 = 2.5;
+        while self.kick_times.front().is_some_and(|&k| self.clock - k > WIN) {
+            self.kick_times.pop_front();
+        }
+        let expected = WIN * self.f.bpm.clamp(60.0, 200.0) / 60.0;
+        let raw_groove = (self.kick_times.len() as f32 / expected * 1.6).clamp(0.0, 1.0);
+        self.f.groove += (raw_groove - self.f.groove) * (hop_s / 0.25).min(1.0);
+        // Hysteresis: enter a breakdown only after two bars (8 beats) of low
+        // groove — techno drops the kick for a bar or two before a drop and
+        // that mustn't flip the whole show; leave as soon as it's back.
+        if silent {
+            self.calm_target = 1.0;
+        } else if self.f.groove < 0.22 {
+            self.quiet_for += hop_s;
+            if self.quiet_for > 8.0 * 60.0 / self.f.bpm.clamp(60.0, 200.0) {
+                self.calm_target = 1.0;
+            }
+        } else {
+            self.quiet_for = 0.0;
+            if self.f.groove > 0.38 {
+                self.calm_target = 0.0;
+            }
+        }
+        // Ease in over ~1.5 s, out over ~0.3 s (the drop should hit hard).
+        let rate = if self.calm_target > self.f.calm { 1.5 } else { 0.3 };
+        self.f.calm += (self.calm_target - self.f.calm) * (hop_s / rate).min(1.0);
 
         // Log-spaced spectrum bins for shaders.
         let mut peak = 0.0f32;
@@ -745,4 +820,106 @@ fn push_capped(q: &mut VecDeque<f32>, v: f32, cap: usize) {
 fn smooth(v: &mut f32, target: f32, attack: f32, release: f32) {
     let k = if target > *v { attack } else { release };
     *v += (target - *v) * k;
+}
+
+/// `trippin --groove-test track.mp3`: run the live analyser over a file
+/// (as fast as possible) and print tempo, groove, calm and kick counts every
+/// few seconds — for tuning the beats/breakdown detector on real music.
+pub fn groove_test(path: &std::path::Path) -> anyhow::Result<()> {
+    let song = crate::song::load(path)?;
+    let (_tx, rx) = mpsc::channel();
+    let shared: SharedFeatures = Arc::new(Mutex::new(Features::default()));
+    let mut a = Analyzer::new(song.sr as f32, shared, rx, None);
+    let mut next_print = 0.0f32;
+    let mut kicks = 0usize;
+    let mut last_kick_len = 0usize;
+    println!("{} — {:.1} BPM (file analysis)", song.name, song.bpm);
+    println!("   t    bpm  groove  calm  kicks/2s  energy");
+    for (i, &s) in song.mono.iter().enumerate() {
+        a.buf.push_back(s);
+        if a.buf.len() > FFT_SIZE {
+            a.buf.pop_front();
+        }
+        a.since_hop += 1;
+        if a.since_hop >= HOP && a.buf.len() == FFT_SIZE {
+            a.since_hop = 0;
+            a.frame();
+            if a.kick_times.len() > last_kick_len {
+                kicks += a.kick_times.len() - last_kick_len;
+            }
+            last_kick_len = a.kick_times.len();
+            let t = i as f32 / song.sr as f32;
+            if t >= next_print {
+                println!(
+                    "{:5.0}s {:6.1} {:6.2} {:5.2} {:6} {:8.2}{}",
+                    t, a.f.bpm, a.f.groove, a.f.calm, kicks, a.f.energy,
+                    if a.f.calm > 0.5 { "  BREAKDOWN" } else { "" }
+                );
+                kicks = 0;
+                next_print += 2.0;
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Beats (kick + pad) → breakdown (pad only) → drop (kick + pad):
+    /// `calm` must follow, entering slowly and leaving fast.
+    #[test]
+    fn groove_detects_breakdown_and_drop() {
+        let sr = 48000.0f32;
+        let (_tx, rx) = mpsc::channel();
+        let shared: SharedFeatures = Arc::new(Mutex::new(Features::default()));
+        let mut a = Analyzer::new(sr, shared, rx, None);
+        let bpm = 124.0;
+        let spb = 60.0 / bpm;
+        let total = 48.0;
+        let mut t = 0.0f32;
+        let mut log = Vec::new();
+        let mut rng = 1u32;
+        while t < total {
+            let with_drums = !(16.0..32.0).contains(&t);
+            // Pad: a soft chord with slow swell, plus a little noise.
+            let mut s = 0.08 * ((t * 220.0 * TAU_F).sin() + (t * 277.2 * TAU_F).sin() + (t * 329.6 * TAU_F).sin()) / 3.0
+                * (0.7 + 0.3 * (t * 0.5).sin());
+            rng ^= rng << 13;
+            rng ^= rng >> 17;
+            rng ^= rng << 5;
+            s += (rng as f32 / u32::MAX as f32 - 0.5) * 0.01;
+            if with_drums {
+                let ph = (t % spb) / spb;
+                let kt = ph * spb;
+                // 909-ish kick: pitch-dropping sine with a fast decay.
+                let f = 50.0 + 120.0 * (-kt * 30.0).exp();
+                s += 0.6 * (kt * f * TAU_F).sin() * (-kt * 9.0).exp();
+            }
+            a.buf.push_back(s);
+            if a.buf.len() > FFT_SIZE {
+                a.buf.pop_front();
+            }
+            a.since_hop += 1;
+            if a.since_hop >= HOP && a.buf.len() == FFT_SIZE {
+                a.since_hop = 0;
+                a.frame();
+                log.push((t, a.f.groove, a.f.calm));
+            }
+            t += 1.0 / sr;
+        }
+        let at = |x: f32| log.iter().find(|e| e.0 >= x).copied().unwrap();
+        for x in [8.0, 15.0, 17.0, 19.0, 24.0, 31.0, 32.5, 33.0, 34.0, 40.0] {
+            let e = at(x);
+            println!("t={:5.1}s groove={:.2} calm={:.2}", e.0, e.1, e.2);
+        }
+        assert!(at(12.0).2 < 0.1, "beats should read as beats");
+        assert!(at(17.0).2 < 0.5, "one missing bar mustn't trip a breakdown");
+        assert!(at(29.0).2 > 0.9, "a drumless section is a breakdown");
+        assert!(at(33.5).2 < 0.3, "the drop must be caught fast");
+        assert!(at(44.0).2 < 0.05);
+    }
+
+    const TAU_F: f32 = std::f32::consts::TAU;
 }

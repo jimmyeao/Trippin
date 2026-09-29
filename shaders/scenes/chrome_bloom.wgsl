@@ -1,64 +1,124 @@
-// @heavy — raymarched. A chrome bloom: a metal flower whose petals are
-// ripples carved into a sphere, turning under two studio lights. The kick
-// opens the bloom a little; the spectrum rolls colour across the metal.
+// @heavy — raymarched. @bloom 0.6
+// A chrome flower that unfolds and folds: three rings of hinged, cupped
+// metal petals open from a tight bud into full bloom and close again over
+// an 8-bar cycle, inner rings trailing the outer ones. The track's
+// intensity pushes it wider open, petals flutter on the kick, and the core
+// glows with the bass. All motion is a pose of the smooth tempo clock (the
+// old version jerked back every bar because it used bar_phase directly).
 
-fn map(p: vec3<f32>) -> f32 {
-    var q = p;
-    // Slow tumble; the whole bloom nods with the phrase.
-    let a = u.time * 0.15 + u.bar_phase * 0.6;
-    q = vec3<f32>(rot(a) * q.xy, q.z);
-    q = vec3<f32>(q.x, rot(a * 0.7 + 0.8) * q.yz);
-    let np = normalize(q);
-    let az = angle(q.xz);
-    let pol = acos(clamp(np.y, -1.0, 1.0));
-    // Petals: lobes around the equator modulated over the pole angle.
-    let petal = sin(az * 6.0 + u.flow * 0.9) * (0.5 + 0.5 * sin(pol * 3.0 - u.time * 0.6));
-    let r = 1.05 + petal * (0.16 + 0.10 * u.kick) + u.bass * 0.03;
-    return (length(q) - r) * 0.75;
+const RINGS: i32 = 3;
+
+// How open the flower is, 0 = bud, 1 = full bloom — smooth, never jumps.
+fn bloom_amt() -> f32 {
+    let cyc = 0.5 - 0.5 * cos(u.flow * TAU / 32.0);
+    return clamp(cyc * (0.8 + 0.25 * u.intensity), 0.0, 1.0);
+}
+
+fn ring_n(k: i32) -> f32 {
+    return select(select(11.0, 8.0, k == 1), 5.0, k == 0);
+}
+
+// Hinge angle (from vertical) of ring k's petals.
+fn open_angle(k: i32) -> f32 {
+    let fk = f32(k);                               // 0 = inner
+    let b = smoothstep(0.0, 1.0, clamp(bloom_amt() * 1.3 - (2.0 - fk) * 0.15, 0.0, 1.0));
+    let closed = 0.02 + fk * 0.07;
+    let open = 0.9 + fk * 0.35;
+    return mix(closed, open, b) + 0.06 * u.kick * (0.5 + fk * 0.3);
+}
+
+struct Hit {
+    d: f32,
+    part: f32,     // ring index, 3 = core, 4 = stem
+};
+
+fn petal(p: vec3<f32>, k: i32) -> f32 {
+    let fk = f32(k);
+    let n = ring_n(k);
+    let sector = TAU / n;
+    let spin = u.flow * 0.03 + fk * 0.35;
+    // Polar domain repetition around the stem axis (y).
+    let a = angle(p.xz) + spin;
+    let ai = round(a / sector);
+    let la = a - ai * sector;
+    let r = length(p.xz);
+    let rad = r * cos(la);                         // radial coord
+    let tan_ = r * sin(la);                        // tangential (petal width)
+    let th = open_angle(k);
+    let dir = vec2<f32>(sin(th), cos(th));         // petal axis in (radial, y)
+    let nrm = vec2<f32>(cos(th), -sin(th));
+    let base = vec2<f32>(0.18 + fk * 0.06, 0.05);
+    let q2 = vec2<f32>(rad, p.y) - base;
+    let along = dot(q2, dir);
+    var thick = dot(q2, nrm);
+    let len = 0.7 + fk * 0.28;
+    let wid = 0.26 + fk * 0.06;
+    // Cup the petal (curve its sides up) and taper it to a point.
+    let s = clamp(along / len, 0.0, 1.0);
+    thick += 0.9 * tan_ * tan_ / (wid + 0.1) - 0.08 * sin(s * PI);
+    let w = wid * sin(clamp(s, 0.0, 1.0) * PI * 0.9 + 0.15);
+    let e = vec3<f32>((along - len * 0.5) / (len * 0.5), tan_ / max(w, 0.02), thick / 0.025);
+    let d = (length(e) - 1.0) * min(0.025, w);
+    return d;
+}
+
+fn map(p: vec3<f32>) -> Hit {
+    var h: Hit;
+    // Core (pistil).
+    h.d = length(p - vec3<f32>(0.0, 0.12, 0.0)) - (0.16 + 0.03 * u.bass);
+    h.part = 3.0;
+    // Stem.
+    let stem = max(length(p.xz) - 0.05, p.y);
+    if stem < h.d {
+        h.d = stem;
+        h.part = 4.0;
+    }
+    for (var k = 0; k < RINGS; k++) {
+        let d = petal(p, k);
+        if d < h.d {
+            h.d = d;
+            h.part = f32(k);
+        }
+    }
+    return h;
 }
 
 fn normal_at(p: vec3<f32>) -> vec3<f32> {
-    let e = vec2<f32>(0.004, 0.0);
-    return normalize(vec3<f32>(
-        map(p + e.xyy) - map(p - e.xyy),
-        map(p + e.yxy) - map(p - e.yxy),
-        map(p + e.yyx) - map(p - e.yyx)));
+    let e = 0.002;
+    let k = vec2<f32>(1.0, -1.0);
+    return normalize(k.xyy * map(p + k.xyy * e).d + k.yyx * map(p + k.yyx * e).d + k.yxy * map(p + k.yxy * e).d + k.xxx * map(p + k.xxx * e).d);
 }
 
-// Studio-strip environment: metal reflects broad soft bands keyed to the mix.
+// Studio environment for the chrome: soft palette gradient, a big warm key
+// softbox above and a cool rim strip behind.
 fn env(d: vec3<f32>) -> vec3<f32> {
     let band = d.y * 0.5 + 0.5;
     var c = mix(palette(0.0 + u.hue), palette(0.5 + u.hue), band);
-    // Squared palette for saturated metal, not milk.
-    c *= c;
-    // Two softboxes: one warm key, one cool fill.
-    c += vec3<f32>(1.0, 0.85, 0.6) * pow(max(d.y, 0.0), 8.0) * 0.9;
-    c += palette(0.75) * pow(max(-d.y, 0.0), 6.0) * (0.3 + 0.5 * u.mid);
+    c = c * c * 0.6 + 0.02;
+    c += vec3<f32>(1.0, 0.9, 0.75) * smoothstep(0.75, 0.95, d.y) * 2.0;
+    let az = angle(d.xz);
+    c += palette(0.75 + u.hue) * smoothstep(0.25, 0.05, abs(fract(az / TAU + u.flow * 0.01) - 0.5) - 0.2) * smoothstep(0.5, 0.0, abs(d.y - 0.1)) * (0.8 + 1.2 * u.mid);
     return c;
 }
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
-    let drift = u.time * 0.13 + u.flow * 0.08;
-    let ro = vec3<f32>(sin(drift) * 3.0, sin(u.time * 0.19) * 0.8, cos(drift) * 3.0);
-    let fw = normalize(-ro);
-    let rt = normalize(cross(vec3<f32>(0.0, 1.0, 0.0), fw));
-    let up = cross(fw, rt);
-    // centred() has +y pointing down the screen — negate so up is up.
-    let rd = normalize(fw * 1.5 + rt * p.x - up * p.y);
+    let drift = u.flow * 0.025 + u.seed;
+    let elev = 0.75 + 0.2 * sin(u.flow * 0.02);
+    let ro = vec3<f32>(sin(drift) * cos(elev), sin(elev), cos(drift) * cos(elev)) * 3.2;
+    let rd = cam_ray(p, ro, vec3<f32>(0.0, 0.25, 0.0), 0.0, 1.6);
 
-    var t = 0.0;
+    var t = 0.5;
     var hit = false;
-    var steps = 0.0;
-    for (var i = 0; i < 80; i++) {
-        let d = map(ro + rd * t);
-        steps = f32(i);
-        if d < 0.002 * (1.0 + t) {
+    var h: Hit;
+    for (var i = 0; i < 90; i++) {
+        h = map(ro + rd * t);
+        if h.d < 0.0008 * t {
             hit = true;
             break;
         }
-        t += max(d * 0.55, 0.01);
+        t += h.d * 0.8;
         if t > 8.0 {
             break;
         }
@@ -68,27 +128,24 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     if hit {
         let pos = ro + rd * t;
         let n = normal_at(pos);
-        // Chrome: shade by the reflected ray's environment, rim-lit.
         let rdir = reflect(rd, n);
-        col = env(rdir) * (0.55 + 0.45 * u.intensity);
-        // Sharp key-light specular so it reads as metal.
-        let lit_dir = normalize(vec3<f32>(0.5, 0.8, 0.6));
-        col += vec3<f32>(1.0, 0.95, 0.85) * pow(max(dot(rdir, lit_dir), 0.0), 60.0) * 1.6;
-        let fres = pow(1.0 - max(dot(n, -rd), 0.0), 4.0);
-        col += palette(0.6 + u.hue) * fres * (0.7 + u.high * 0.8);
-        // Darken the petal valleys so the lobes read.
-        var q = pos;
-        let a = u.time * 0.15 + u.bar_phase * 0.6;
-        q = vec3<f32>(rot(a) * q.xy, q.z);
-        q = vec3<f32>(q.x, rot(a * 0.7 + 0.8) * q.yz);
-        let np = normalize(q);
-        let az = angle(q.xz);
-        let pol = acos(clamp(np.y, -1.0, 1.0));
-        let petal = sin(az * 6.0 + u.flow * 0.9) * (0.5 + 0.5 * sin(pol * 3.0 - u.time * 0.6));
-        col *= 0.55 + 0.45 * (petal * 0.5 + 0.5);
+        // Cheap AO: petals crowding in the bud stay darker.
+        let ao = clamp(map(pos + n * 0.06).d / 0.06, 0.2, 1.0);
+        if h.part == 3.0 {
+            col = mix(vec3<f32>(1.0, 0.8, 0.4), palette(0.1 + u.hue), 0.4) * (0.6 + 2.2 * u.bass);
+        } else if h.part == 4.0 {
+            col = env(rdir) * 0.3 * ao;
+        } else {
+            let tint = mix(vec3<f32>(1.0), palette(h.part * 0.25 + u.hue), 0.35);
+            let fres = fresnel(0.6, dot(n, -rd));
+            col = env(rdir) * tint * fres * ao * (0.7 + 0.5 * u.intensity);
+            col += vec3<f32>(1.0, 0.95, 0.85) * pow(max(dot(rdir, normalize(vec3<f32>(0.4, 0.9, 0.3))), 0.0), 80.0) * 2.0 * ao;
+            // Core light reflected in the inner petals.
+            col += mix(vec3<f32>(1.0, 0.8, 0.4), palette(0.1 + u.hue), 0.4) * u.bass * 0.6 * exp(-length(pos - vec3<f32>(0.0, 0.12, 0.0)) * 4.0);
+        }
     }
-    // Aura behind the bloom.
-    col += palette(0.55) * exp(-length(p) * 2.4) * 0.08 * (0.4 + u.energy);
-    col += prev(uncentred(centred(in.uv) * 0.99)) * 0.12;
+    // Aura behind the bloom, swelling as it opens.
+    col += palette(0.55 + u.hue) * exp(-length(p) * 2.2) * (0.04 + 0.08 * bloom_amt()) * (0.5 + u.energy);
+    col += (bluen(in.pos.xy) - 0.5) * 0.003;
     return vec4<f32>(col, 1.0);
 }

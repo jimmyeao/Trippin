@@ -28,6 +28,11 @@ struct U {
     fx_amt: f32,      // post effect strength 0..1 (uv blend in present.wgsl)
     spectrum: array<vec4<f32>, 8>,
     wave: array<vec4<f32>, 16>,   // 64 time-domain samples, -1..1 (scope scenes)
+    // Set by the renderer from the scene header, not the director:
+    bloom: f32,       // `// @bloom <amt>` — 0 = off (older scenes unchanged)
+    tonemap: f32,     // `// @tonemap agx` — 0 ACES, 1 AgX
+    frame: f32,       // frame counter (wraps) — animates blue-noise dither
+    calm: f32,        // 0 = beats playing, 1 = breakdown (no drums); smoothed
 };
 
 @group(0) @binding(0) var<uniform> u: U;
@@ -35,6 +40,18 @@ struct U {
 @group(0) @binding(2) var samp: sampler;
 // 256×1 gradient LUT — the user-selected global palette (WLED-style).
 @group(0) @binding(3) var pal_tex: texture_2d<f32>;
+// Tileable 64³ RGBA8 noise volume (src/gfx.rs): R Perlin-Worley, G Worley
+// fbm (4 cells), B smooth Perlin fbm (4 cells), A Worley fbm (8 cells).
+// Period 1 in uvw — sample through tnoise(). Measured distributions
+// (p05 / p50 / p95): R .15/.22/.44 (skewed low — billows), G .29/.48/.68,
+// B .37/.50/.64 (narrow — stretch it), A .30/.48/.68.
+@group(0) @binding(4) var noise_tex: texture_3d<f32>;
+// 64² void-and-cluster blue noise (R8) — sample through bluen().
+@group(0) @binding(5) var blue_tex: texture_2d<f32>;
+// Repeat-addressed linear sampler for the noise volumes.
+@group(0) @binding(6) var rsamp: sampler;
+// Half-res bloom of the previous stage (present.wgsl adds it back).
+@group(0) @binding(7) var bloom_tex: texture_2d<f32>;
 
 struct VsOut {
     @builtin(position) pos: vec4<f32>,
@@ -102,8 +119,12 @@ fn wave(x: f32) -> f32 {
     return mix(a, b, fract(f));
 }
 
-// Sharp pulse at each beat, decaying through it.
-fn beat_pulse(sharpness: f32) -> f32 { return exp(-u.beat_phase * sharpness); }
+// Sharp pulse at each beat, decaying through it. In a breakdown (no drums)
+// the beat clock keeps ticking, but flashing to it looks wrong — the pulse
+// melts into a slow, steady level instead.
+fn beat_pulse(sharpness: f32) -> f32 {
+    return mix(exp(-u.beat_phase * sharpness), 0.25, u.calm);
+}
 
 fn rot(a: f32) -> mat2x2<f32> {
     let c = cos(a);
@@ -157,4 +178,43 @@ fn fbm(p_in: vec2<f32>) -> f32 {
         a *= 0.5;
     }
     return v;
+}
+
+// ---- 2026 tier helpers ----------------------------------------------------
+
+// All four noise channels at p (period 1). One fetch ≈ 8 hash-noise calls.
+fn tnoise(p: vec3<f32>) -> vec4<f32> {
+    return textureSampleLevel(noise_tex, rsamp, p, 0.0);
+}
+
+// Blue-noise value 0..1 at a pixel, re-rolled each frame by a golden-ratio
+// offset — dither ray-march start offsets with this instead of white hash
+// noise: far less visible grain for the same step count.
+fn bluen(frag: vec2<f32>) -> f32 {
+    let t = textureLoad(blue_tex, vec2<i32>(frag) & vec2<i32>(63), 0).r;
+    return fract(t + u.frame * 0.61803398875);
+}
+
+// Schlick Fresnel with base reflectance f0.
+fn fresnel(f0: f32, cos_t: f32) -> f32 {
+    return f0 + (1.0 - f0) * pow(1.0 - clamp(cos_t, 0.0, 1.0), 5.0);
+}
+
+// GGX normal distribution × approximate visibility: a compact specular lobe
+// for analytic lights (n·h, n·l, roughness).
+fn ggx(nh: f32, nl: f32, rough: f32) -> f32 {
+    let a = rough * rough;
+    let a2 = a * a;
+    let d = nh * nh * (a2 - 1.0) + 1.0;
+    return a2 / (PI * d * d) * nl * 0.25 / max(0.25 * a + 0.75 * nl, 1e-3);
+}
+
+// Camera basis: ray through screen point p (centred(), y-DOWN — flipped here)
+// from ro looking at ta, focal length fl.
+fn cam_ray(p: vec2<f32>, ro: vec3<f32>, ta: vec3<f32>, roll: f32, fl: f32) -> vec3<f32> {
+    let f = normalize(ta - ro);
+    let up = vec3<f32>(sin(roll), cos(roll), 0.0);
+    let r = normalize(cross(up, f));
+    let v = cross(f, r);
+    return normalize(r * p.x - v * p.y + f * fl);
 }

@@ -59,6 +59,9 @@ pub struct Status {
     /// External output status line (NDI receiver count / error) — Some while
     /// output is enabled.
     pub output: Option<String>,
+    /// Groove 0..1 and breakdown state 0..1 (see audio.rs `Features`).
+    pub groove: f32,
+    pub calm: f32,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -211,6 +214,19 @@ fn build_ui(
         ui.label(format!("{:.1} BPM", st.bpm));
         ui.separator();
         ui.label(format!("beat {}/4", st.beat_in_bar + 1));
+        ui.separator();
+        // Beats vs breakdown — what the visuals are reacting as.
+        if st.calm > 0.5 {
+            ui.colored_label(egui::Color32::from_rgb(140, 170, 255), "breakdown");
+        } else {
+            ui.colored_label(egui::Color32::from_rgb(120, 230, 140), "beats");
+        }
+        ui.add(
+            egui::ProgressBar::new(st.groove)
+                .desired_width(50.0)
+                .desired_height(8.0),
+        )
+        .on_hover_text("Groove: how steadily kicks are landing. Below ~20% for a couple of seconds = breakdown mode.");
         if st.silent {
             ui.colored_label(egui::Color32::from_rgb(255, 160, 60), "no signal");
         }
@@ -268,6 +284,15 @@ fn show_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<UiCo
         Mode::Auto => "Cuts scenes on phrases (and drops); the dancer follows the track.",
         Mode::Static => "Holds the current scene; the dancer still changes with the phrases.",
         Mode::Manual => "Nothing changes unless you change it.",
+    });
+    row(ui, "Breakdowns", |ui| {
+        ui.selectable_value(&mut s.breakdown_mode, true, "Detect");
+        ui.selectable_value(&mut s.breakdown_mode, false, "Off");
+    });
+    ui.small(if s.breakdown_mode {
+        "When the drums drop out, visuals calm down (no beat flashes, slower camera, gentle dancer)."
+    } else {
+        "Always react as if the beat is playing."
     });
     row(ui, "Scene", |ui| {
         if ui.button("◀ Prev").clicked() {
@@ -414,6 +439,15 @@ fn scenes_tab(
         Tristate::On => true,
         Tristate::Off => false,
     };
+    row(ui, "2D scenes", |ui| {
+        ui.selectable_value(&mut s.flat_scenes, true, "On");
+        ui.selectable_value(&mut s.flat_scenes, false, "Off");
+    });
+    ui.small(match (s.flat_scenes, heavy_on) {
+        (true, _) => "Flat (2D) scenes are in rotation.",
+        (false, true) => "Flat (2D) scenes are off — only 3D scenes play.",
+        (false, false) => "2D and 3D are both off — every scene plays as a fallback.",
+    });
     let date = today();
     let in_now: Vec<&str> = scenes
         .iter()
@@ -441,8 +475,8 @@ fn scenes_tab(
     });
     let blocked = (0..scenes.len())
         .filter(|&i| {
-            heavy.get(i).copied().unwrap_or(false)
-                && !heavy_on
+            let is_heavy = heavy.get(i).copied().unwrap_or(false);
+            ((is_heavy && !heavy_on) || (!is_heavy && !s.flat_scenes))
                 && !s.disabled_scenes.contains(&scenes[i])
         })
         .count();
@@ -463,6 +497,7 @@ fn scenes_tab(
                 }
                 let is_heavy = heavy.get(i).copied().unwrap_or(false);
                 let off_gpu = is_heavy && !heavy_on;
+                let off_flat = !is_heavy && !s.flat_scenes;
                 let mut on = !s.disabled_scenes.contains(name);
                 let mut label = match in_season(name, date) {
                     Some(true) => format!("{name} (in season)"),
@@ -475,11 +510,13 @@ fn scenes_tab(
                     } else {
                         " (3D)"
                     };
+                } else if off_flat {
+                    label += " (2D — off)";
                 }
                 // Greyed out when the GPU can't run it — it can't join
                 // rotation anyway, and "show" would just drop frames.
                 if ui
-                    .add_enabled(!off_gpu, egui::Checkbox::new(&mut on, label))
+                    .add_enabled(!off_gpu && !off_flat, egui::Checkbox::new(&mut on, label))
                     .changed()
                 {
                     if on {

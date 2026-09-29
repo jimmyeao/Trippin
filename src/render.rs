@@ -19,11 +19,12 @@ use winit::window::Window;
 
 use crate::audio::SPECTRUM_BINS;
 use crate::dancer::{Clip, DancerUniforms, SLOTS};
+use crate::gfx;
 use crate::output::{self, OUT_FORMAT};
 use crate::palettes;
 use crate::text::{TEXT_SLOTS, TextBitmap, TextUniforms};
 
-const SCENE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+pub const SCENE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
 #[repr(C)]
 #[derive(Clone, Copy, Default, bytemuck::Pod, bytemuck::Zeroable)]
@@ -65,6 +66,14 @@ pub struct Uniforms {
     /// Time-domain trace: 64 samples (16×vec4), consumed by scope scenes.
     /// (`[f32; 64]` isn't `Pod`, so it's packed as vec4s to match WGSL.)
     pub waveform: [[f32; 4]; 16],
+    /// Bloom strength — set by the renderer from the scene's `// @bloom`.
+    pub bloom: f32,
+    /// 0 ACES, 1 AgX — set by the renderer from `// @tonemap agx`.
+    pub tonemap: f32,
+    /// Frame counter (wraps) — animates blue-noise dither.
+    pub frame: f32,
+    /// Breakdown state 0 = beats, 1 = breakdown (no drums) — see audio.rs.
+    pub calm: f32,
 }
 
 #[derive(Default, Clone, Copy, PartialEq)]
@@ -87,6 +96,118 @@ struct Scene {
     /// `// @heavy` in the file header marks a raymarched scene that's only in
     /// rotation when the GPU tier allows (or the user forces it).
     heavy: bool,
+    /// `// @bloom <amount>` in the header (0 = no bloom passes at all).
+    bloom: f32,
+    /// `// @tonemap agx` → 1.0, else ACES (0.0).
+    tonemap: f32,
+}
+
+/// Parse the `// @tag value` header directives of a scene file.
+pub fn header_tags(body: &str) -> (bool, f32, f32) {
+    let head: Vec<&str> = body.lines().take(8).collect();
+    let heavy = head.iter().any(|l| l.contains("@heavy"));
+    let value = |tag: &str| {
+        head.iter().find_map(|l| {
+            let i = l.find(tag)?;
+            l[i + tag.len()..].split_whitespace().next().map(str::to_string)
+        })
+    };
+    let bloom = value("@bloom")
+        .and_then(|v| v.parse::<f32>().ok())
+        .unwrap_or(0.0)
+        .clamp(0.0, 4.0);
+    let tonemap = if value("@tonemap").is_some_and(|v| v.starts_with("agx")) {
+        1.0
+    } else {
+        0.0
+    };
+    (heavy, bloom, tonemap)
+}
+
+/// Everything group(0) binds besides the uniforms and the feedback texture.
+pub struct FrameRes<'a> {
+    pub pal: &'a wgpu::TextureView,
+    pub noise3: &'a wgpu::TextureView,
+    pub blue: &'a wgpu::TextureView,
+    pub repeat: &'a wgpu::Sampler,
+    pub bloom: &'a wgpu::TextureView,
+}
+
+impl FrameRes<'_> {
+    /// Bind group entries 3..=7 (after uniforms, feedback and sampler).
+    pub fn entries(&self) -> [wgpu::BindGroupEntry<'_>; 5] {
+        [
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: wgpu::BindingResource::TextureView(self.pal),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: wgpu::BindingResource::TextureView(self.noise3),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: wgpu::BindingResource::TextureView(self.blue),
+            },
+            wgpu::BindGroupEntry {
+                binding: 6,
+                resource: wgpu::BindingResource::Sampler(self.repeat),
+            },
+            wgpu::BindGroupEntry {
+                binding: 7,
+                resource: wgpu::BindingResource::TextureView(self.bloom),
+            },
+        ]
+    }
+}
+
+fn tex_entry(binding: u32, dim: wgpu::TextureViewDimension) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Texture {
+            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+            view_dimension: dim,
+            multisampled: false,
+        },
+        count: None,
+    }
+}
+
+/// The group(0) layout every scene / present / dancer / text shader shares.
+pub fn frame_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    use wgpu::TextureViewDimension::{D2, D3};
+    let sampler = |binding| wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+        count: None,
+    };
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("frame"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            tex_entry(1, D2),
+            sampler(2),
+            // 256×1 palette LUT — see palettes.rs / common.wgsl palette().
+            tex_entry(3, D2),
+            // Noise volume, blue noise, repeat sampler — see gfx.rs.
+            tex_entry(4, D3),
+            tex_entry(5, D2),
+            sampler(6),
+            // Half-res bloom result.
+            tex_entry(7, D2),
+        ],
+    })
 }
 
 /// GPU handles shared with the control panel window.
@@ -167,6 +288,12 @@ pub struct Renderer {
     pal_tex: wgpu::Texture,
     pal_view: wgpu::TextureView,
     pal_name: String,
+    /// Noise volumes (gfx.rs) and the bloom chain.
+    statics: gfx::Statics,
+    bloom: gfx::Bloom,
+    /// Eased bloom strength — scene cuts don't pop the glow on/off.
+    bloom_amt: f32,
+    frame: u32,
     /// External output (NDI) — Some(conf) mirrors the panel setting;
     /// `out` is Some only once the runtime loads and resources are built.
     out_conf: Option<output::Conf>,
@@ -315,48 +442,7 @@ impl Renderer {
             surface.configure(&device, &config);
         }
         println!("Surface: {:?}, {:?}", config.present_mode, config.format);
-        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("frame"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-                // 256×1 palette LUT — see palettes.rs / common.wgsl palette().
-                wgpu::BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-            ],
-        });
+        let layout = frame_layout(&device);
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("frame"),
             bind_group_layouts: &[Some(&layout)],
@@ -484,13 +570,21 @@ impl Renderer {
 
         let (tw, th) = scaled(config.width, config.height, scale);
         let targets = Self::make_targets(&device, tw, th);
+        let statics = gfx::Statics::new(&device, &queue);
+        let bloom = gfx::Bloom::new(&device, tw, th);
         let bind_groups = Self::make_bind_groups(
             &device,
             &layout,
             &uniform_buf,
             &sampler,
             &targets,
-            &pal_view,
+            &FrameRes {
+                pal: &pal_view,
+                noise3: &statics.noise3_view,
+                blue: &statics.blue_view,
+                repeat: &statics.repeat,
+                bloom: bloom.view(),
+            },
         );
 
         let shader_dir = find_shader_dir()?;
@@ -555,6 +649,10 @@ impl Renderer {
             pal_tex,
             pal_view,
             pal_name: "rainbow".to_string(),
+            statics,
+            bloom,
+            bloom_amt: 0.0,
+            frame: 0,
             out_conf: None,
             out: None,
             out_err: None,
@@ -571,7 +669,7 @@ impl Renderer {
         Ok(r)
     }
 
-    fn make_targets(device: &wgpu::Device, w: u32, h: u32) -> [wgpu::Texture; 2] {
+    pub fn make_targets(device: &wgpu::Device, w: u32, h: u32) -> [wgpu::Texture; 2] {
         let make = |label| {
             device.create_texture(&wgpu::TextureDescriptor {
                 label: Some(label),
@@ -593,16 +691,17 @@ impl Renderer {
         [make("frame a"), make("frame b")]
     }
 
-    fn make_bind_groups(
+    pub fn make_bind_groups(
         device: &wgpu::Device,
         layout: &wgpu::BindGroupLayout,
         uniform_buf: &wgpu::Buffer,
         sampler: &wgpu::Sampler,
         targets: &[wgpu::Texture; 2],
-        pal_view: &wgpu::TextureView,
+        res: &FrameRes,
     ) -> [wgpu::BindGroup; 2] {
         let make = |t: &wgpu::Texture| {
             let view = t.create_view(&Default::default());
+            let [e3, e4, e5, e6, e7] = res.entries();
             device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: None,
                 layout,
@@ -619,10 +718,11 @@ impl Renderer {
                         binding: 2,
                         resource: wgpu::BindingResource::Sampler(sampler),
                     },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::TextureView(pal_view),
-                    },
+                    e3,
+                    e4,
+                    e5,
+                    e6,
+                    e7,
                 ],
             })
         };
@@ -643,22 +743,24 @@ impl Renderer {
         self.surface_ok = true;
         let (tw, th) = scaled(w, h, self.scale);
         self.targets = Self::make_targets(&self.device, tw, th);
+        self.bloom.resize(&self.device, tw, th);
+        let res = FrameRes {
+            pal: &self.pal_view,
+            noise3: &self.statics.noise3_view,
+            blue: &self.statics.blue_view,
+            repeat: &self.statics.repeat,
+            bloom: self.bloom.view(),
+        };
         self.bind_groups = Self::make_bind_groups(
             &self.device,
             &self.layout,
             &self.uniform_buf,
             &self.sampler,
             &self.targets,
-            &self.pal_view,
+            &res,
         );
         if let Some(o) = self.out.as_mut() {
-            o.rebind(
-                &self.device,
-                &self.layout,
-                &self.sampler,
-                &self.targets,
-                &self.pal_view,
-            );
+            o.rebind(&self.device, &self.layout, &self.sampler, &self.targets, &res);
         }
     }
 
@@ -823,9 +925,10 @@ impl Renderer {
                 continue;
             }
             s.mtime = m;
-            // `// @heavy` in the file header gates the scene to stronger GPUs.
+            // `// @heavy` in the file header gates the scene to stronger GPUs;
+            // `@bloom` / `@tonemap` pick its post settings.
             if let Ok(body) = std::fs::read_to_string(&s.path) {
-                s.heavy = body.lines().take(8).any(|l| l.contains("@heavy"));
+                (s.heavy, s.bloom, s.tonemap) = header_tags(&body);
             }
             match self.compile(&common, &s.path, s.kind) {
                 Ok(p) => {
@@ -891,56 +994,7 @@ impl Renderer {
         format: wgpu::TextureFormat,
         blend: Option<wgpu::BlendState>,
     ) -> Result<wgpu::RenderPipeline> {
-        let body = std::fs::read_to_string(path)?;
-        let src = format!("{common}\n{body}");
-        // Validate with naga first to get readable errors instead of a panic.
-        let module = wgpu::naga::front::wgsl::parse_str(&src)
-            .map_err(|e| anyhow!(e.emit_to_string(&src)))?;
-        wgpu::naga::valid::Validator::new(
-            wgpu::naga::valid::ValidationFlags::all(),
-            wgpu::naga::valid::Capabilities::all(),
-        )
-        .validate(&module)
-        .map_err(|e| anyhow!(e.emit_to_string(&src)))?;
-
-        let scope = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let shader = self
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: path.to_str(),
-                source: wgpu::ShaderSource::Wgsl(src.into()),
-            });
-        let pipeline = self
-            .device
-            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: path.to_str(),
-                layout: Some(layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: Some("vs_main"),
-                    compilation_options: Default::default(),
-                    buffers: &[],
-                },
-                primitive: Default::default(),
-                depth_stencil: None,
-                multisample: Default::default(),
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: Some("fs_main"),
-                    compilation_options: Default::default(),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format,
-                        blend,
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                }),
-                multiview_mask: None,
-                cache: None,
-            });
-        if let Some(e) = pollster::block_on(scope.pop()) {
-            return Err(anyhow!("{e}"));
-        }
-        Ok(pipeline)
+        compile_pipeline(&self.device, common, path, layout, format, blend)
     }
 
     /// Upload a dancer clip's masks as a texture array into `slot`
@@ -1120,6 +1174,22 @@ impl Renderer {
         dancer: Option<&DancerUniforms>,
         text: Option<&TextUniforms>,
     ) -> Result<()> {
+        let (want_bloom, tonemap) = self
+            .scenes
+            .get(scene)
+            .map_or((0.0, 0.0), |s| (s.bloom, s.tonemap));
+        // Ease toward the scene's bloom so cuts cross-fade the glow.
+        let k = (u.dt * 4.0).clamp(0.0, 1.0);
+        self.bloom_amt += (want_bloom - self.bloom_amt) * k;
+        if want_bloom == 0.0 && self.bloom_amt < 0.01 {
+            self.bloom_amt = 0.0;
+        }
+        self.frame = self.frame.wrapping_add(1);
+        let mut uu = *u;
+        uu.bloom = self.bloom_amt;
+        uu.tonemap = tonemap;
+        uu.frame = (self.frame % 4096) as f32;
+        let u = &uu;
         self.queue
             .write_buffer(&self.uniform_buf, 0, bytemuck::bytes_of(u));
         if let Some(d) = dancer {
@@ -1213,6 +1283,10 @@ impl Renderer {
             }
             drop(pass);
             self.current = next;
+            if self.bloom_amt > 0.0 {
+                let src = self.targets[next].create_view(&Default::default());
+                self.bloom.encode(&self.device, &mut enc, &src);
+            }
         }
 
         let view = frame.texture.create_view(&Default::default());
@@ -1351,7 +1425,13 @@ impl Renderer {
             &self.layout,
             &self.sampler,
             &self.targets,
-            &self.pal_view,
+            &FrameRes {
+                pal: &self.pal_view,
+                noise3: &self.statics.noise3_view,
+                blue: &self.statics.blue_view,
+                repeat: &self.statics.repeat,
+                bloom: self.bloom.view(),
+            },
             c.clone(),
         ) {
             Ok(o) => {
@@ -1425,6 +1505,10 @@ impl Renderer {
             fx_amt: 1.0,
             spectrum,
             waveform,
+            bloom: 0.0,
+            tonemap: self.scenes[scene].tonemap,
+            frame: 0.0,
+            calm: 0.0,
         };
         self.queue
             .write_buffer(&self.uniform_buf, 0, bytemuck::bytes_of(&u));
@@ -1457,7 +1541,13 @@ impl Renderer {
             &self.uniform_buf,
             &self.sampler,
             &targets,
-            &self.pal_view,
+            &FrameRes {
+                pal: &self.pal_view,
+                noise3: &self.statics.noise3_view,
+                blue: &self.statics.blue_view,
+                repeat: &self.statics.repeat,
+                bloom: self.bloom.view(),
+            },
         );
         // The present pipeline is built for the surface format (usually
         // Bgra8) — match it and swizzle on readback.
@@ -1558,4 +1648,61 @@ impl Renderer {
         }
         Some(px)
     }
+}
+
+/// Compile `common + path` into a fullscreen-triangle pipeline for `format`.
+pub fn compile_pipeline(
+device: &wgpu::Device,
+    common: &str,
+    path: &Path,
+    layout: &wgpu::PipelineLayout,
+    format: wgpu::TextureFormat,
+    blend: Option<wgpu::BlendState>,
+) -> Result<wgpu::RenderPipeline> {
+    let body = std::fs::read_to_string(path)?;
+    let src = format!("{common}\n{body}");
+    // Validate with naga first to get readable errors instead of a panic.
+    let module = wgpu::naga::front::wgsl::parse_str(&src)
+        .map_err(|e| anyhow!(e.emit_to_string(&src)))?;
+    wgpu::naga::valid::Validator::new(
+        wgpu::naga::valid::ValidationFlags::all(),
+        wgpu::naga::valid::Capabilities::all(),
+    )
+    .validate(&module)
+    .map_err(|e| anyhow!(e.emit_to_string(&src)))?;
+
+    let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: path.to_str(),
+            source: wgpu::ShaderSource::Wgsl(src.into()),
+        });
+    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: path.to_str(),
+            layout: Some(layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            primitive: Default::default(),
+            depth_stencil: None,
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+    if let Some(e) = pollster::block_on(scope.pop()) {
+        return Err(anyhow!("{e}"));
+    }
+    Ok(pipeline)
 }

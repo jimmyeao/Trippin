@@ -28,7 +28,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // Colour pulse: hue sweeps slowly, brightness swells on each beat and
     // with the column's band.
     let hue_shift = sin(u.beat_phase * TAU) * 0.04;
-    let pulse = 0.25 + v * 0.9 + exp(-u.beat_phase * 5.0) * 0.7;
+    let pulse = 0.25 + v * 0.9 + beat_pulse(5.0) * 0.7;
     var col = palette(band + 0.15 + hue_shift) * glyph * (trail + head) * pulse;
 
     // Ghost of last frame drifting down at stream speed (flow ≈ bpm/60 beats/s).
