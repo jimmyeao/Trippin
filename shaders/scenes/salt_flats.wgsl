@@ -26,7 +26,8 @@ fn mono_c(k: i32) -> vec3<f32> {
 
 fn mono_half(k: i32) -> vec3<f32> {
     let s = 1.0 - f32(k) * 0.06;
-    return vec3<f32>(0.85, 2.4, 0.18) * s;
+    // Shape: each monolith grows with its own band.
+    return vec3<f32>(0.85, 2.4 * (0.75 + 0.5 * spec(f32(k) * 0.14 + 0.05)), 0.18) * s;
 }
 
 // Ray vs all monoliths. Returns (t, face, index); t < 0 = miss.
@@ -172,9 +173,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // Orbit the main monolith; slow, with a gentle height drift.
     // Swing ±~45° around the front of the display (either face, by seed).
     let side = select(0.0, PI, fract(u.seed * 0.37) > 0.5);
-    let ang = sin(u.flow * 0.011 + u.seed) * 0.7 + side;
-    let rad = 10.0 + sin(u.flow * 0.021) * 2.0;
-    let ro = vec3<f32>(sin(ang) * rad, 0.38 + 0.1 * sin(u.flow * 0.017), -cos(ang) * rad);
+    let ang = sin(u.clock4.x * 0.011 + u.seed) * 0.7 + side;
+    let rad = 10.0 + sin(u.clock4.x * 0.021) * 2.0;
+    let ro = vec3<f32>(sin(ang) * rad, 0.38 + 0.1 * sin(u.clock4.x * 0.017), -cos(ang) * rad);
     let ta = vec3<f32>(0.0, 1.7, 0.0);
     let rd = cam_ray(p, ro, ta, 0.0, 1.6);
 

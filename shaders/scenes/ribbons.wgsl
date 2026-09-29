@@ -18,9 +18,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
         // The strip's centre line: a travelling wave, amplitude driven by
         // its band plus a slow communal sway.
-        let ph = u.flow * (0.5 + fi * 0.17) + fi * 1.9;
+        // Direction + energy: the waves travel one way, then back.
+        let ph = 6.0 * sin(u.clock4.x * 0.02 + fi * 0.3) + u.clock4.x * (0.2 + fi * 0.07) + fi * 1.9;
         let yc = 0.22 + fi * 0.19
-            + sin(uv.x * (2.2 + fi * 0.7) + ph) * (0.03 + v * 0.10)
+            // Shape: swells grow with bass presence.
+            + sin(uv.x * (2.2 + fi * 0.7) + ph) * (0.02 + v * 0.10 + 0.06 * u.pres4.x)
             + sin(uv.x * (5.5 + fi) - ph * 1.4 + 2.0) * 0.015;
         let d = uv.y - yc;
 

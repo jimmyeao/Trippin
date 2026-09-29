@@ -15,7 +15,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     // Onset rings from two mirrored side points (hi-hats feel placed).
     for (var i = 0; i < 2; i++) {
-        let side = select(-0.55, 0.55, i == 1);
+        // Shape: the two sources spread apart as the bass builds, and
+        // their pair tilts one way then the other (direction).
+        let side = select(-1.0, 1.0, i == 1) * (0.35 + 0.35 * u.pres4.x);
         let o = vec2<f32>(side * aspect() * 0.5, -0.1);
         let or_ = u.onset * u.onset * 0.9;
         let oring = exp(-abs(length(p - o) - or_) * 90.0) * u.onset;

@@ -26,7 +26,7 @@ fn city(uv: vec2<f32>, sharp: f32) -> vec3<f32> {
             }
             let ctr = cell + 0.5 + (hash22(cell + 5.0) - 0.5) * 0.9;
             let band = fract(h.y * 7.3);
-            let rad = mix(0.75 - fl * 0.18, 0.12, sharp) * (0.7 + 0.6 * h.y) * (1.0 + 0.1 * u.kick);
+            let rad = mix(0.75 - fl * 0.18, 0.12, sharp) * (0.7 + 0.6 * h.y) * (0.85 + 0.35 * u.pres4.x + 0.12 * u.hits4.x);
             let d = length(g - ctr);
             let edge = mix(0.05, 0.03, sharp);
             let disc = smoothstep(rad, rad - edge, d);
@@ -88,7 +88,8 @@ fn beads(uv: vec2<f32>, t: f32) -> vec3<f32> {
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let uv = in.uv;
-    let t = u.time;
+    // Energy: drops slide faster as the track drives (smooth clock).
+    let t = u.clock4.x * 0.5;
     let density = 0.25 + 0.4 * u.energy;
     let d1 = drops(uv, t, 2.0, density);
     let d2 = drops(uv * 1.4 + 0.3, t * 1.1, 3.3, density);

@@ -27,7 +27,8 @@ fn zone_at(z: f32) -> Zone {
         zn.ceil = 5.5;
         zn.station = 1.0;
     } else {
-        zn.hw = 2.3;
+        // Shape: the tunnel walls breathe with bass presence.
+        zn.hw = 2.1 + 0.5 * u.pres4.x;
         zn.ceil = 4.2;
         zn.station = 0.0;
     }
@@ -113,11 +114,11 @@ fn light_col(k: f32) -> vec3<f32> {
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
-    let z = u.flow * SPEED;
+    let z = u.clock4.x * SPEED;
     // Cab sway and a little track judder (poses of the beat clock).
-    let ro = vec3<f32>(-0.6 + sin(u.flow * 0.2) * 0.05, 1.7 + sin(u.flow * PI * 2.0) * 0.008, z);
-    let ta = ro + vec3<f32>(sin(u.flow * 0.13) * 0.06, -0.06, 1.0);
-    let rd = cam_ray(p, ro, ta, sin(u.flow * 0.17) * 0.012, 1.25);
+    let ro = vec3<f32>(-0.6 + sin(u.clock4.x * 0.2) * 0.05, 1.7 + sin(u.clock4.x * PI * 2.0) * 0.008, z);
+    let ta = ro + vec3<f32>(sin(u.clock4.x * 0.13) * 0.06, -0.06, 1.0);
+    let rd = cam_ray(p, ro, ta, sin(u.clock4.x * 0.17) * 0.012, 1.25);
     let drive = 0.5 + 0.8 * u.intensity;
     let blur = SPEED * u.bpm / 60.0 * (1.0 / 60.0) * 0.8;   // metres per frame of shutter
 
@@ -197,7 +198,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // a coloured line racing into the distance.
     if abs(h.n.x) > 0.5 && zn_st < 0.5 {
         let strip = smoothstep(0.05, 0.015, abs(hp.y - 0.9));
-        let band = fract(hp.z * 0.004 - u.flow * 0.05);
+        let band = fract(hp.z * 0.004 - u.clock4.x * 0.05);
         col += palette(band + select(0.0, 0.5, hp.x > 0.0)) * strip * (0.4 + 1.6 * u.bass) * drive;
     }
     // Station ceiling strip lights.

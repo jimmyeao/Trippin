@@ -4,11 +4,13 @@
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv) * 0.6;
-    let r = length(p);
+    // Shape: rings buckle into lobes with mid presence, jolt on kicks.
+    let r = length(p) * (1.0 + 0.08 * u.pres4.y * sin(angle(p) * 3.0 + u.clock4.z * 0.2)) - 0.02 * u.hits4.x;
     let a = angle(p) / TAU + 0.5;
 
     // Rings drift outward continuously; speed doubles while the kick lands.
-    let scroll = u.flow * 0.12 + u.kick * 0.02;
+    // Direction: rings flow outward, then back in; energy sets pace.
+    let scroll = 1.5 * sin(u.clock4.x * 0.03) + u.clock4.x * 0.06;
     let n = 9.0;
     let cell = fract(r * n - scroll);
     let ring_i = floor(r * n - scroll);
@@ -19,7 +21,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let warp = sin(a * TAU * (2.0 + ring_i)) * v * 0.02;
     let wr = length(p + vec2<f32>(warp));
 
-    var col = palette(a + ring_i / n + u.flow * 0.01) * line * (0.25 + v * 1.1);
+    // Mirrored angle: no colour seam where the angle wraps.
+    var col = palette(abs(a - 0.5) * 2.0 + ring_i / n + u.clock4.w * 0.005) * line * (0.25 + v * 1.1);
 
     // Ripple the ring spacing with the band energy.
     let ripple = smoothstep(0.1, 0.0, abs(fract(wr * n - scroll) - 0.5) - 0.38);
