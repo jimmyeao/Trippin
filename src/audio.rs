@@ -364,6 +364,10 @@ struct Analyzer {
     gains: [AutoGain; 3],
     spec_gain: AutoGain,
     flux_gain: AutoGain,
+    /// Level-independent kick detection: low-band flux against its own
+    /// recent peak and mean.
+    bass_gain: AutoGain,
+    bass_hist: VecDeque<f32>,
     /// Onset strength envelope at `fps`, newest last.
     env: VecDeque<f32>,
     /// Optional tap so the timeline matcher can watch the same envelope.
@@ -424,6 +428,8 @@ impl Analyzer {
             ],
             spec_gain: AutoGain::new(1e-4),
             flux_gain: AutoGain::new(1e-4),
+            bass_gain: AutoGain::new(1e-3),
+            bass_hist: VecDeque::new(),
             env: VecDeque::new(),
             tap,
             bass_env: VecDeque::new(),
@@ -528,8 +534,16 @@ impl Analyzer {
             self.f.onset = self.f.onset.max(fnorm);
         }
         self.clock += 1.0 / self.fps;
-        if !silent && bass_flux > 0.15 && raw[0] > 0.0 {
-            let hit = (bass_flux * 2.0).min(1.0);
+        // Kicks: a low-band jump well above the recent average *and* strong
+        // relative to this track's own peaks. The old fixed threshold
+        // (bass_flux > 0.15) depended on playback volume — a pop mix played
+        // at a normal level never cleared it, so no kicks, no groove, and the
+        // show sat in breakdown mode.
+        push_capped(&mut self.bass_hist, bass_flux, (0.5 * self.fps) as usize);
+        let bass_mean = self.bass_hist.iter().sum::<f32>() / self.bass_hist.len() as f32;
+        let bnorm = self.bass_gain.apply(bass_flux);
+        if !silent && bass_flux > bass_mean * 1.8 && bnorm > 0.3 && raw[0] > 1e-6 {
+            let hit = (bnorm * 1.2).min(1.0);
             // A fresh hit (not the tail of the last one): log it for the
             // groove detector, with a 0.2 s refractory period.
             let last = self.kick_times.back().copied().unwrap_or(-1.0);

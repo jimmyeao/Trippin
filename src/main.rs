@@ -450,6 +450,8 @@ fn render_loop(
     let mut fps = 0.0f32;
     let mut flow = 0.0f64;
     let mut flow_bpm = 120.0f32;
+    let groove_log = std::env::var_os("TRIPPIN_GROOVE_LOG").is_some();
+    let mut last_groove_log = Instant::now();
     // Camera-clock speed: eases to ~0.55x in breakdowns (floaty), back to 1x
     // with the drums. Integrated into `flow`, so it never jumps.
     let mut flow_speed = 1.0f32;
@@ -963,6 +965,15 @@ fn render_loop(
         }
 
         let mut f = audio.features.lock().map(|f| f.clone()).unwrap_or_default();
+        // TRIPPIN_GROOVE_LOG=1: print the beats/breakdown detector once a
+        // second (tuning aid for live audio).
+        if groove_log && now - last_groove_log > Duration::from_secs(1) {
+            last_groove_log = now;
+            println!(
+                "groove {:.2} calm {:.2} kick {:.2} bass {:.2} bpm {:.1}",
+                f.groove, f.calm, f.kick, f.bass, f.bpm
+            );
+        }
         if !s.breakdown_mode {
             f.calm = 0.0;
         }
