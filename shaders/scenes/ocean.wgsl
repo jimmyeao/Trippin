@@ -24,7 +24,8 @@ fn sea_height(p: vec3<f32>, iters: i32) -> f32 {
     var amp = 0.6 + 0.25 * u.intensity;
     var choppy = 4.0;
     var uv = p.xz * vec2<f32>(0.75, 1.0);
-    let sea_time = 1.0 + u.time * 0.8;
+    // Energy: the swell churns faster as the track drives.
+    let sea_time = 1.0 + u.clock4.x * 0.4;
     let m = mat2x2<f32>(1.6, 1.2, -1.2, 1.6);
     var h = 0.0;
     for (var i = 0; i < iters; i++) {
@@ -52,10 +53,11 @@ fn sky(dir: vec3<f32>, sun: vec3<f32>) -> vec3<f32> {
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
     let sun = normalize(vec3<f32>(0.0, 0.12, 1.0));
-    let ro = vec3<f32>(0.0, 3.2, u.flow * 1.5);
+    let ro = vec3<f32>(0.0, 3.2 - 0.8 * u.pres4.x, u.clock4.x * 1.5);
     // Yaw pans the view along the horizon without tilting it; a slow pitch
     // bob breathes. Rolling the camera made the sea line slant.
-    let yaw = sin(u.time * 0.11) * 0.1;
+    // Direction: turns along the coast one way, then back.
+    let yaw = sin(u.clock4.x * 0.02) * 0.35;
     let dxz = rot(yaw) * vec2<f32>(p.x, 1.6);
     let rd = normalize(vec3<f32>(dxz.x, -p.y - 0.12 + sin(u.time * 0.07) * 0.02, dxz.y));
 

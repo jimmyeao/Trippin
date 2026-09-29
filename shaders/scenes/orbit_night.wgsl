@@ -47,7 +47,7 @@ fn stars(rd: vec3<f32>) -> vec3<f32> {
 // Surface colour at unit-sphere point n (world) with sun direction sd.
 fn ground(n: vec3<f32>, rd: vec3<f32>, sd: vec3<f32>, foot: f32) -> vec3<f32> {
     // Surface coordinates rotate under us (the camera "moves").
-    let a = u.flow * 0.0016 + u.seed * 0.1;
+    let a = u.clock4.x * 0.0016 + u.seed * 0.1;
     let q = vec3<f32>(n.x, n.y * cos(a) - n.z * sin(a), n.y * sin(a) + n.z * cos(a));
     let cont = tnoise(q * 0.45 + 0.13).b + (tnoise(q * 1.3 + 0.4).r - 0.22) * 0.35;
     let land = smoothstep(0.5, 0.515, cont);
@@ -96,8 +96,10 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let alt = 0.068;
     let ro = vec3<f32>(0.0, R + alt, 0.0);
     // Look ahead toward the horizon, gently yawing and rolling.
-    let yaw = sin(u.flow * 0.009) * 0.25;
-    let pitch = -0.2 + sin(u.flow * 0.013) * 0.04;
+    // Direction: the view swings along the horizon; it dips toward the
+    // planet as the bass builds.
+    let yaw = sin(u.clock4.x * 0.012) * 0.45;
+    let pitch = -0.2 + sin(u.clock4.x * 0.013) * 0.04 - 0.08 * u.pres4.x;
     let fwd = vec3<f32>(sin(yaw) * cos(pitch), sin(pitch), cos(yaw) * cos(pitch));
     let rd = cam_ray(p, ro, ro + fwd, sin(u.flow * 0.007) * 0.06, 1.35);
 

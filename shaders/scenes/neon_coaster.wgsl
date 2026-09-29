@@ -259,7 +259,7 @@ fn facade(p: vec3<f32>, n: vec3<f32>, cell: vec2<f32>, hgt: f32) -> vec3<f32> {
     let h = hash21(wc + cell * 7.3 + n.xz * 3.0);
     var lit = step(0.8, h);
     let band = fract(cell.x * 0.13 + cell.y * 0.07);
-    let wave = smoothstep(0.7, 1.0, sin(length(cell) * 0.5 - u.flow * 0.5) * 0.5 + 0.5);
+    let wave = smoothstep(0.7, 1.0, sin(length(cell) * 0.5 - u.clock4.z * 0.5) * 0.5 + 0.5);
     lit = max(lit, step(0.45, h) * wave * spec(band * 0.8) * 1.5 * u.intensity);
     let tone = mix(vec3<f32>(0.3, 0.9, 1.0), vec3<f32>(1.0, 0.3, 0.8), step(0.5, hash21(wc + 3.3)));
     c += tone * lit * pane * 0.7;
@@ -310,7 +310,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let drive = 0.5 + 0.8 * u.intensity;
 
     // --- Where the car is ------------------------------------------------------
-    let phi = fract(u.flow / LAP_BEATS + u.seed * 0.0137);
+    // Energy: the ride runs on the energy clock — it lingers on the lift
+    // in a breakdown and flies on the drop (still smooth, never jumps).
+    let phi = fract(u.clock4.x / LAP_BEATS + u.seed * 0.0137);
     let w = warp(phi);
     let hc = harm(w.x);
     let cpos = track(hc);

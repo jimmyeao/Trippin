@@ -10,7 +10,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // Mirrored spectrum: a=0 and a=1 meet at the left edge, so spec(a)
     // alone leaves a seam there. Mirroring makes the wrap continuous.
     let v = spec(abs(a - 0.5) * 2.0);
-    let edge_r = 0.22 + v * (0.28 + 0.12 * u.intensity) + u.kick * 0.03;
+    let edge_r = 0.22 + v * (0.28 + 0.12 * u.intensity) + u.hits4.x * 0.05;
 
     // Inside the curve: translucent fill, outside: darkness; rim: hot.
     let inside = smoothstep(0.02, -0.02, r - edge_r);
@@ -18,7 +18,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     // Petal modulation: sharper lobes when highs are loud.
     let lobes = 3.0 + floor(spec(0.5) * 6.0);
-    let petal = 0.5 + 0.5 * sin(a * TAU * lobes + u.flow * 0.5);
+    // Direction: the petals turn one way, then the other.
+    let petal = 0.5 + 0.5 * sin(a * TAU * lobes + 5.0 * sin(u.clock4.x * 0.03));
 
     // Palette also keys on the mirrored angle so its gradient is seam-free.
     let am = abs(a - 0.5) * 2.0;

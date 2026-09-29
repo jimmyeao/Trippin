@@ -11,7 +11,8 @@ fn shape_n() -> f32 {
 }
 
 fn twist() -> f32 {
-    return (floor(u.seed * 7.0) % 3.0) * 0.12;
+    // Shape: the portal twist deepens with mid presence.
+    return (floor(u.seed * 7.0) % 3.0) * 0.12 + 0.12 * u.pres4.y;
 }
 
 // Signed distance to a regular n-gon with apothem r (after Inigo Quilez).
@@ -78,9 +79,11 @@ fn march_glow(ro: vec3<f32>, rd: vec3<f32>, tmax: f32, steps: i32) -> vec3<f32> 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
-    let travel = u.flow * SPACING;
+    let travel = u.clock4.x * SPACING;
     let ro = vec3<f32>(0.0, 0.05, travel);
-    let rd = normalize(vec3<f32>(p.x, -p.y, 1.7));
+    // Direction: a slow roll that swings one way, then the other.
+    let pr = rot(0.45 * sin(u.clock4.x * 0.02)) * vec2<f32>(p.x, -p.y);
+    let rd = normalize(vec3<f32>(pr, 1.7));
 
     let haze = mix(vec3<f32>(0.005, 0.008, 0.03), vec3<f32>(0.04, 0.05, 0.15), exp(-abs(rd.y) * 5.0));
     var col = haze;

@@ -14,11 +14,12 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // speed. uv.y grows DOWN-screen, so the scroll must subtract flow —
     // adding made the pixels climb. Audio drives brightness, not rate.
     let speed = 0.02 + hash21(vec2<f32>(cx, u.seed)) * 0.05;
-    let y = fract(uv.y * 1.5 - u.flow * speed + hash21(vec2<f32>(cx, 7.0)));
+    // Energy: fall rate follows the smooth energy clock.
+    let y = fract(uv.y * 1.5 - u.clock4.x * speed + hash21(vec2<f32>(cx, 7.0)));
 
     // Glyph cells scroll at the same rate as the stream so the characters
     // ride the rain instead of strobing in place.
-    let grow = floor(uv.y * rows - u.flow * speed * 1.5 * rows);
+    let grow = floor(uv.y * rows - u.clock4.x * speed * 1.5 * rows);
     let glyph = step(0.45, hash21(vec2<f32>(cx, grow)));
 
     // Head is bright, tail fades upward — softer contrast for the eyes.
