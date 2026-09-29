@@ -101,25 +101,25 @@ fn march(ro: vec3<f32>, rd: vec3<f32>, tmax: f32, steps: i32) -> f32 {
 // The studio: black cyclorama, a huge overhead softbox, two tall coloured
 // strip lights either side, a faint warm kicker behind.
 fn env(rd: vec3<f32>) -> vec3<f32> {
-    var c = vec3<f32>(0.006, 0.006, 0.008) * (0.5 + 0.5 * rd.y);
+    var c = vec3<f32>(0.02, 0.02, 0.026) * (0.5 + 0.5 * rd.y);
     // Seamless cyclorama: the sweep where wall meets floor catches light,
     // giving the chrome a horizon line to read its curvature by.
-    c += vec3<f32>(0.09, 0.09, 0.1) * exp(-abs(rd.y + 0.02) * 9.0);
-    c += vec3<f32>(0.02, 0.02, 0.025) * smoothstep(-0.2, 0.6, rd.y);
+    c += vec3<f32>(0.22, 0.22, 0.25) * exp(-abs(rd.y + 0.02) * 7.0);
+    c += vec3<f32>(0.06, 0.06, 0.07) * smoothstep(-0.2, 0.6, rd.y);
     // Overhead softbox: a rounded rectangle high above.
     let top = rd.xz / max(rd.y, 0.05);
-    let sb = max(abs(top.x) - 0.32, abs(top.y) - 0.2);
-    c += vec3<f32>(1.0, 0.97, 0.92) * 2.2 * smoothstep(0.06, -0.02, sb) * step(0.0, rd.y);
+    let sb = max(abs(top.x) - 0.45, abs(top.y) - 0.3);
+    c += vec3<f32>(1.0, 0.97, 0.92) * (2.6 + 1.5 * u.kick * u.intensity) * smoothstep(0.06, -0.02, sb) * step(0.0, rd.y);
     // Strip lights: vertical bars at fixed world azimuths.
     let az = angle(rd.xz);
     let drive = 0.6 + 0.9 * u.intensity;
-    for (var i = 0; i < 2; i++) {
-        let a0 = select(-2.3, 0.75, i == 1);
+    for (var i = 0; i < 4; i++) {
+        let a0 = f32(i) * 1.5708 + 0.75;
         let da = abs(fract((az - a0) / TAU + 0.5) - 0.5) * TAU;
         let bar = smoothstep(0.12, 0.06, da) * smoothstep(0.8, 0.6, abs(rd.y - 0.2));
-        let col = palette(0.15 + f32(i) * 0.45);
-        let lvl = drive * (0.7 + 0.8 * spec(0.2 + f32(i) * 0.4));
-        c += col * bar * 4.0 * lvl;
+        let col = palette(0.15 + f32(i) * 0.22);
+        let lvl = drive * (0.8 + 1.4 * spec(0.1 + f32(i) * 0.2));
+        c += col * bar * 5.0 * lvl;
     }
     // Kicker behind the camera side.
     let ka = abs(fract((az - 2.2) / TAU + 0.5) - 0.5) * TAU;
