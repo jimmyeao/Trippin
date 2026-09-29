@@ -20,7 +20,7 @@ fn map(p: vec3<f32>) -> vec2<f32> {
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
-    let z = u.flow * 3.0;
+    let z = u.clock4.x * 3.0;
     let ro = vec3<f32>(sin(z * 0.06) * 0.7, -0.7 + sin(z * 0.05) * 0.3, z);
     var rd = normalize(vec3<f32>(p.x * 0.8, -p.y * 0.7, 1.0));
     rd = vec3<f32>(rot(sin(z * 0.04) * 0.15) * rd.xy, rd.z);

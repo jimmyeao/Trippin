@@ -7,13 +7,13 @@ const SCALE: f32 = 3.0;   // lattice frequency
 
 fn gyr(p: vec3<f32>) -> f32 {
     // Wall thickness swells with the bass so the lattice inflates on kicks.
-    let th = 0.06 + 0.14 * u.bass;
+    let th = 0.06 + 0.14 * u.pres4.x;
     return abs(dot(sin(p), cos(p.zxy))) * 0.55 - th;
 }
 
 fn tumbling(p: vec3<f32>) -> vec3<f32> {
     // The sculpture tumbles slowly and rolls a little with each phrase.
-    let a = u.time * 0.09 + u.bar_phase * 0.5;
+    let a = u.clock4.z * 0.045 + bpm_sin(4.0) * 0.5;
     var q = p;
     q = vec3<f32>(rot(a) * q.xy, q.z);
     return vec3<f32>(q.x, rot(a * 0.6 + 0.9) * q.yz);
@@ -34,7 +34,7 @@ fn normal_at(p: vec3<f32>) -> vec3<f32> {
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
-    let drift = u.time * 0.11 + u.flow * 0.10;
+    let drift = u.clock4.x * 0.2;
     let ro = vec3<f32>(sin(drift) * 3.6, sin(u.time * 0.17) * 1.1, cos(drift) * 3.6);
     let fw = normalize(-ro);
     let rt = normalize(cross(vec3<f32>(0.0, 1.0, 0.0), fw));

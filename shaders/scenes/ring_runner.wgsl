@@ -20,7 +20,7 @@ fn ring_hue(z: f32) -> f32 {
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
-    let z = u.flow * 4.0;
+    let z = u.clock4.x * 4.0;
     let squeeze = clamp(u.build, 0.0, 1.0);
 
     // Camera: gentle sway, always well inside the ring bore.

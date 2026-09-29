@@ -30,13 +30,14 @@ fn polygon_factor(a: f32, n: f32) -> f32 {
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
     let n = 5.0 + floor(u.seed % 4.0);
-    let spin = u.time * 0.05 + u.flow * 0.05;
+    let spin = u.clock4.z * 0.08;
     let q = rot(spin) * p;
     let a = angle(q);
     let r = max(length(q), 1e-4) / polygon_factor(a, n);
 
     // One portal per bar, gliding smoothly.
-    let zoom = (u.flow / 4.0) * P;
+    // Zoom speed follows the energy clock — the dive quickens on drops.
+    let zoom = (u.clock4.x / 4.0) * P;
     let lr = log(r) + zoom;
     let level = floor(lr / P);
     let f = lr / P - level;               // 0 at a portal's inner edge, 1 at its outer

@@ -5,7 +5,7 @@
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     var p = centred(in.uv);
-    p = rot(u.time * 0.04) * p;
+    p = rot(u.clock4.z * 0.02) * p;
 
     // Six-fold mirror for the mandala look.
     let seg = TAU / 6.0;
@@ -46,7 +46,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         // Fast escapes stay dark; only the boundary filaments light up.
         let sm = f32(i) - log2(max(log2(dot(z, z)), 1e-4)) + 4.0;
         let t = clamp(sm / 40.0, 0.0, 1.0);
-        col = palette(sm * 0.04 + u.time * 0.03) * pow(t, 2.2) * 2.0;
+        col = palette(sm * 0.04 + u.clock4.w * 0.015) * pow(t, 2.2) * 2.0;
     }
     col *= 0.7 + 0.6 * u.intensity + 0.5 * beat_pulse(6.0) * u.bass;
     col += prev(uncentred(rot(0.004) * centred(in.uv) * 0.99)) * 0.15;
