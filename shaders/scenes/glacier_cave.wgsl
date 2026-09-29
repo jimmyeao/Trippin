@@ -2,12 +2,12 @@
 // Inside a glacier: a winding ice tunnel with scalloped walls, lit through
 // the ice itself — thin ceilings glow cyan-white, thick walls sink to deep
 // blue — and by daylight pouring in from the mouth ahead. Wet ice catches
-// sharp highlights; meltwater drips sparkle past the camera.
+// sharp highlights.
 // Fake subsurface: transmitted light = sky·e^(−k·thickness), with thickness
 // from the baked noise (ceilings thinner than walls). Tetrahedral normals and
 // 80 steps keep it inside an M2 budget.
 // The flight follows the tempo clock along the tunnel's centreline; the
-// music deepens the glow and the highs trigger the sparkle.
+// music deepens the glow.
 
 fn centre(z: f32) -> vec2<f32> {
     return vec2<f32>(sin(z * 0.11) * 2.2 + sin(z * 0.047) * 3.0, sin(z * 0.08) * 0.5);
@@ -119,16 +119,6 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // Glare from the mouth.
     col += sky * pow(toward, 200.0) * 1.5 * drive;
 
-    // Meltwater drips: sparse falling specks that glint on the highs.
-    for (var l = 0; l < 2; l++) {
-        let fl = f32(l) + 1.0;
-        let g = vec2<f32>(p.x * 22.0 * fl, p.y * 4.0 * fl - u.time * 1.5 / fl);
-        let cell = floor(g);
-        let h = hash22(cell + fl * 17.0);
-        let fy = fract(g.y);
-        let d = length(vec2<f32>((fract(g.x) - 0.5 - (h.y - 0.5) * 0.6) * 4.0, (fy - 0.5) * 1.0));
-        col += vec3<f32>(0.7, 0.9, 1.0) * step(0.93, h.x) * smoothstep(0.25, 0.0, d) * (0.1 + 0.6 * u.high) / fl;
-    }
     col += (bluen(in.pos.xy) - 0.5) * 0.003;
     return vec4<f32>(col, 1.0);
 }

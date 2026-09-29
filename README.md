@@ -202,8 +202,7 @@ Default keys (all rebindable in the panel):
   a bokeh city seen through rain-streaked glass, with drops as little
   lenses (not `@heavy`). `glow_surf`: bioluminescent surf that flares on
   the kick. `cathedral`: stained-glass light shafts in incense haze, an
-  LED organ and a spectrum rose window. `volcano`: lava rivers, a lit ash
-  plume with lightning inside, and lava bombs on the drops.
+  LED organ and a spectrum rose window.
   `desert_highway`: a night drive with one road dash per beat and a
   horizon storm. `firefly_forest`: moonbeams through the canopy and
   fireflies blinking in time. `rooftop_city`: a megacity from a rooftop,
