@@ -10,13 +10,11 @@ Pixabay (Pixabay Content License):
 - `stock_skirt`: https://pixabay.com/videos/dancer-girl-dancing-movement-75329/
 - `stock_dress`: https://pixabay.com/videos/dancer-performance-dance-dancing-75547/
 - `stock_hat`: https://pixabay.com/videos/girl-dancer-dance-silhouette-joy-83833/
+- `stock_wave`: https://pixabay.com/videos/dancer-dancing-woman-dancing-happy-108612/ (AI-matted)
 
 Mixkit (Mixkit Stock Video Free License):
 
-- `stock_stripes`: https://mixkit.co/free-stock-video/silhouette-of-a-dancer-on-a-colorful-and-bright-background-51279/
-- `stock_arms`: https://mixkit.co/free-stock-video/silhouette-of-a-dancer-on-a-colorful-background-51282/
-- `stock_lean`: https://mixkit.co/free-stock-video/silhouette-of-a-dancer-in-a-performance-on-a-colorful-51283/
-- `stock_red`: https://mixkit.co/free-stock-video/silhouette-of-a-dancer-on-a-red-background-51757/
+- `stock_red`: https://mixkit.co/free-stock-video/silhouette-of-a-dancer-on-a-red-background-51757/ (AI-matted)
 - `stock_lilac`: https://mixkit.co/free-stock-video/a-young-woman-wearing-white-clothes-and-flickering-rgb-headphones-51750/ (AI-matted via `tools/ai_dancer.py`)
 - `stock_pink`: https://mixkit.co/free-stock-video/a-young-woman-clad-in-white-clothes-and-flickering-rgb-51748/ (AI-matted)
 - `stock_ember`: https://mixkit.co/free-stock-video/boy-with-headphones-dancing-on-a-warm-colored-background-51766/ (AI-matted)
@@ -25,3 +23,5 @@ Mixkit (Mixkit Stock Video Free License):
 - `stock_duet`: https://mixkit.co/free-stock-video/pair-of-girls-dancing-back-to-back-under-colored-lights-33900/ (AI-matted)
 - `stock_ruby`: https://mixkit.co/free-stock-video/black-silhouette-of-a-dancer-on-a-red-background-51758/ (AI-matted)
 - `stock_scarlet`: https://mixkit.co/free-stock-video/silhouette-of-a-man-dancing-intensely-with-red-background-51756/ (AI-matted)
+- `stock_shadow`: https://mixkit.co/free-stock-video/shadow-of-a-talented-dancer-on-red-background-51759/ (AI-matted)
+- `stock_amber`: https://mixkit.co/free-stock-video/cheerful-dancing-of-a-young-man-on-an-orange-background-51754/ (AI-matted)

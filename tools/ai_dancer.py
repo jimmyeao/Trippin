@@ -79,6 +79,14 @@ def main():
         clean[i] = np.where(lab == sizes.argmax(), m, 0.0)
     masks = clean
 
+    # Frames where the subject is cropped by the *source* footage — a loop
+    # baked from these shows a hard cut-off at the frame edge, so pick a
+    # --start/--len window where this count is ~0.
+    edge_hit = lambda m: (m[0, :] > 0.5).any() or (m[-1, :] > 0.5).any() \
+        or (m[:, 0] > 0.5).any() or (m[:, -1] > 0.5).any()
+    clipped = sum(int(edge_hit(m)) for m in masks if m.max() > 0.5)
+    print(f"{clipped}/{len(masks)} scan frames have the subject touching the source edge")
+
     blend = 8
     lengths = sorted({int(round(b * 60 / sd.REF_BPM * FPS * k))
                       for b in args.beats for k in np.linspace(0.96, 1.04, 9)})
@@ -90,6 +98,10 @@ def main():
     print(f"loop: {s / FPS:.2f}s + {L / FPS:.2f}s ({beats} beats), seam cost {cost:.3f}")
 
     loop = masks[s:s + L].copy()
+    loop_edge = sum(int(edge_hit(m)) for m in loop)
+    if loop_edge:
+        print(f"WARNING: {loop_edge}/{L} loop frames touch the source edge — "
+              f"dancer will be visibly cut off; pick a different --start/--len")
     for i in range(blend):
         w = (i + 1) / (blend + 1)
         w = w * w * (3 - 2 * w)
