@@ -274,7 +274,7 @@ fn fire_cue(
         }
         CueKind::Clip(name) => {
             if let Some(i) = shared.clip_names.iter().position(|n| n == name) {
-                dancer.request(i);
+                dancer.pin(i);
             }
             dancer.showing = true;
             s.dancer_enabled = true;
@@ -403,7 +403,7 @@ fn apply_playhead(
             let n = shared.clip_names.len().max(1) as i64;
             let idx = ((i as i64 + st.clip_steps).rem_euclid(n)) as usize;
             if dancer.current() != Some(idx) {
-                dancer.request(idx);
+                dancer.pin(idx);
             }
         }
     }
@@ -507,7 +507,7 @@ fn render_loop(
                 Msg::Resize(w, h) => r.note_size(w, h),
                 Msg::GoToScene(i) => dir.cut_to(i),
                 Msg::ShowClip(i) => {
-                    dancer.request(i);
+                    dancer.pin(i);
                     dancer.showing = true;
                 }
                 Msg::Act(a) => apply_render(
@@ -1015,6 +1015,7 @@ fn render_loop(
             s.dancer_size,
             s.dancer_trails,
             &s.disabled_clips,
+            s.mode != Mode::Manual,
         );
         if ev.cut && s.fx_auto {
             let seed = dir.rand();
