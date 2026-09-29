@@ -170,8 +170,8 @@ Default keys (all rebindable in the panel):
   trails live in the feedback buffer.
 - **Raymarched 3D** (marked `// @heavy`, automatically gated to GPUs that can
   afford them — override on the Scenes tab): `rave_hall` (a corridor of
-  banded pillars), `gyroid_drift`, `bass_blocks`, `chrome_bloom` (a metal
-  flower that opens on the kick), `prism_field` (a 3D equaliser landscape),
+  banded pillars), `gyroid_drift`, `bass_blocks`, `chrome_bloom` (a chrome
+  lotus that unfolds and folds over 8 bars), `prism_field` (a 3D equaliser landscape),
   `gyro_core` (nested neon rings around a molten core), `wire_terrain`
   (a neon wireframe terrain flyover), `crystal_cave` (a jewelled cavern
   flythrough), `canyon_run` (sprinting through a winding lit canyon),
