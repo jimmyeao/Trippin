@@ -30,11 +30,11 @@ FPS = sd.FPS
 MAX_FRAMES = 240  # GPU texture-array limit is 256 layers
 
 
-def ai_matte(video, start, seconds, work_h=448):
+def ai_matte(video, start, seconds, work_h=448, model="u2net_human_seg"):
     """Person mask per frame (N,H,W float 0..1) over a scan window."""
     from rembg import new_session, remove
 
-    session = new_session("u2net_human_seg")
+    session = new_session(model)
     w0, h0 = sd.video_size(video)
     w = max(2, int(round(w0 * work_h / h0 / 2)) * 2)
     raw = __import__("subprocess").run(
@@ -63,12 +63,16 @@ def main():
     ap.add_argument("--beats", type=int, nargs="+", default=[16, 12, 8])
     ap.add_argument("--energy", type=float)
     ap.add_argument("--source", default="", help="credit / origin, stored in clip.json")
+    ap.add_argument("--model", default="u2net_human_seg",
+                    help="rembg session model — try isnet-general-use for flowing clothes")
     args = ap.parse_args()
 
-    masks = ai_matte(args.video, args.start, args.seconds)
+    masks = ai_matte(args.video, args.start, args.seconds, model=args.model)
 
-    # Largest person per frame — kill stray second people / debris.
-    from scipy.ndimage import label as cc_label, binary_closing
+    # Largest person per frame — kill stray second people / debris, but keep
+    # parts of the same subject the matte split off (a skirt mid-spin, a
+    # flicked arm): anything within ~50px of the main body counts as her.
+    from scipy.ndimage import label as cc_label, binary_closing, binary_dilation
     clean = np.empty_like(masks)
     for i, m in enumerate(masks):
         b = binary_closing(m > 0.5, structure=np.ones((7, 7)), iterations=2)
@@ -76,7 +80,9 @@ def main():
         if n == 0:
             continue
         sizes = np.bincount(lab.ravel()); sizes[0] = 0
-        clean[i] = np.where(lab == sizes.argmax(), m, 0.0)
+        near = binary_dilation(lab == sizes.argmax(), iterations=12)
+        keep = np.isin(lab, np.unique(lab[near & (lab > 0)]))
+        clean[i] = np.where(keep, m, 0.0)
     masks = clean
 
     # Frames where the subject is cropped by the *source* footage — a loop

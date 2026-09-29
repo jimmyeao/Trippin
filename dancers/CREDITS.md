@@ -10,7 +10,6 @@ Pixabay (Pixabay Content License):
 - `stock_skirt`: https://pixabay.com/videos/dancer-girl-dancing-movement-75329/
 - `stock_dress`: https://pixabay.com/videos/dancer-performance-dance-dancing-75547/
 - `stock_hat`: https://pixabay.com/videos/girl-dancer-dance-silhouette-joy-83833/
-- `stock_wave`: https://pixabay.com/videos/dancer-dancing-woman-dancing-happy-108612/ (AI-matted)
 
 Mixkit (Mixkit Stock Video Free License):
 
@@ -30,4 +29,3 @@ Mixkit (Mixkit Stock Video Free License):
 - `stock_floor`: https://mixkit.co/free-stock-video/urban-dancer-dancing-breakdance-3628/ (AI-matted)
 - `stock_glide`: https://mixkit.co/free-stock-video/breakdancer-practicing-488/ (AI-matted)
 - `stock_storm`: https://mixkit.co/free-stock-video/young-woman-dancing-and-spinning-in-a-dark-studio-39881/ (AI-matted)
-- `stock_vibe`: https://mixkit.co/free-stock-video/urban-girl-dancing-in-front-of-a-wall-with-graffiti-33907/ (AI-matted)
