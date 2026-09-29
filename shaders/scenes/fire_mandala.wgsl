@@ -21,15 +21,18 @@ fn ridged(p_in: vec2<f32>) -> f32 {
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p0 = centred(in.uv) * 1.05;
-    let p = rot(u.time * 0.03) * p0;
+    // Direction: the mandala turns one way, then the other.
+    let p = rot(1.5 * sin(u.clock4.x * 0.02)) * p0;
     let r = length(p);
     // Mirror into one wedge so the pattern is symmetrical like a mandala.
     let wedge = TAU / SEG;
     let a = abs(((angle(p) % wedge) + wedge) % wedge - wedge * 0.5);
-    let t = u.time;
+    // Energy: flames churn faster as the mids drive.
+    let t = u.clock4.z * 0.5;
 
     // --- Fire ring -------------------------------------------------------
-    let fire_r = 0.40 + 0.03 * u.bass;
+    // Shape: the fire ring swells with bass presence, jolts on kicks.
+    let fire_r = 0.34 + 0.12 * u.pres4.x + 0.04 * u.hits4.x;
     let fq = vec2<f32>(a * 5.0, (r - t * 0.06) * 10.0);
     let warp = vec2<f32>(fbm(fq * 0.7 + t * 0.15), fbm(fq * 0.7 - t * 0.12 + 4.0));
     let flame = ridged(fq + warp * 1.6);

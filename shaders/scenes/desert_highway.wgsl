@@ -15,7 +15,8 @@ fn mesas(rd: vec3<f32>) -> f32 {
     let a = angle(rd.xz);
     let n = tnoise(vec3<f32>(cos(a) * 0.9, sin(a) * 0.9, 0.3)).b;
     // Flat-topped buttes: a quantised, clipped noise profile.
-    let top = smoothstep(0.5, 0.56, n) * 0.05 + smoothstep(0.58, 0.61, n) * 0.035;
+    // Shape: the mesas rise on the horizon as the bass builds.
+    let top = (smoothstep(0.5, 0.56, n) * 0.05 + smoothstep(0.58, 0.61, n) * 0.035) * (0.6 + 0.8 * u.pres4.x);
     return top + 0.004;
 }
 
@@ -43,10 +44,12 @@ fn sky(rd: vec3<f32>, flash: f32, storm_dir: vec3<f32>) -> vec3<f32> {
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
-    let z = u.flow * DASH;
+    // Energy: the drive speeds up with the mix.
+    let z = u.clock4.x * DASH;
     let lane = 1.8;
-    let ro = vec3<f32>(lane + sin(u.flow * 0.03) * 0.15, 1.25, z);
-    let ta = ro + vec3<f32>(sin(u.flow * 0.011) * 0.12, -0.08, 1.0);
+    // Direction: drifts between lanes, looking where it's heading.
+    let ro = vec3<f32>(lane + sin(u.clock4.x * 0.02) * 1.4, 1.25, z);
+    let ta = ro + vec3<f32>(cos(u.clock4.x * 0.02) * 0.35, -0.08, 1.0);
     let rd = cam_ray(p, ro, ta, sin(u.flow * 0.02) * 0.01, 1.3);
     let drive = 0.5 + 0.8 * u.intensity;
     let storm_dir = normalize(vec3<f32>(-0.6, 0.0, 1.0));

@@ -5,13 +5,15 @@
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv) * 0.55;
     let r = length(p);
-    let a = angle(p) / TAU + 0.5; // 0..1 around the circle, bass at the bottom
+    // Direction: the ring turns one way, then back.
+    let a = fract(angle(p) / TAU + 0.5 + 0.08 * sin(u.clock4.x * 0.03)); // 0..1 around the circle
 
     // Mirror the spectrum across the circle: left half = reversed right half.
     let fx = abs(a * 2.0 - 1.0);
     let v = spec(fx);
 
-    let r0 = 0.16 + 0.03 * u.kick;               // core radius pumps
+    // Shape: the core swells with bass presence and jolts on kicks.
+    let r0 = 0.12 + 0.07 * u.pres4.x + 0.03 * u.hits4.x;
     let reach = 0.42 + 0.10 * u.intensity;
     let len = v * reach;
 

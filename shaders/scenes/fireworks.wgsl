@@ -36,7 +36,7 @@ fn sky_and_bursts(q: vec2<f32>, asp: f32, secs_per_beat: f32) -> vec3<f32> {
         let centre = vec2<f32>((hash21(vec2<f32>(k, 1.0)) - 0.5) * 1.4 * asp, -0.15 - 0.5 * hash21(vec2<f32>(k, 2.0)));
         let colour = burst_colour(k);
         // Kicks make the burst bigger; drops add a multi-shell bloom.
-        let size = (0.28 + 0.18 * hash21(vec2<f32>(k, 3.0))) * (1.0 + 0.35 * u.kick + 0.15 * u.intensity);
+        let size = (0.28 + 0.18 * hash21(vec2<f32>(k, 3.0))) * (1.0 + 0.3 * u.pres4.x + 0.25 * u.hits4.x + 0.15 * u.intensity);
         let tsec = age_beats * secs_per_beat;
         let climb = clamp(age_beats / 0.5, 0.0, 1.0);
         if age_beats < 0.5 {

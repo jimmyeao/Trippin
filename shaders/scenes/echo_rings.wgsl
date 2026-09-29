@@ -5,11 +5,16 @@
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     var p = centred(in.uv);
-    p = rot(sin(u.time * 0.07) * 0.15) * p;
+    // Direction: the whole field tilts one way then the other; kicks
+    // squash it (shape).
+    p = rot(sin(u.clock4.x * 0.03) * 0.4) * p;
+    p = p * vec2<f32>(1.0 + 0.12 * u.hits4.x, 1.0 - 0.12 * u.hits4.x);
     let r = length(p);
 
     // Ring train: phase advances a ring outward each beat.
-    let phase = r * 1.4 - u.beat * 0.5;
+    // Shape: ring spacing tightens as the bass builds; energy: they
+    // travel faster.
+    let phase = r * (1.1 + 0.8 * u.pres4.x) - u.clock4.x * 0.5;
     let ring = exp(-abs(fract(phase) - 0.12) * 14.0);
     let ring2 = exp(-abs(fract(phase * 0.5) - 0.1) * 10.0) * 0.5;
 

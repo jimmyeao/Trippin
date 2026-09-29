@@ -14,11 +14,14 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     // Towers: smooth wide columns, height = spectrum at their x.
     let n = 22.0;
-    let cx = floor(in.uv.x * n);
-    let fx = fract(in.uv.x * n);
+    // Direction: the skyline pans left, then right, across a phrase.
+    let sx = in.uv.x + 0.25 * sin(u.clock4.x * 0.02);
+    let cx = floor(sx * n);
+    let fx = fract(sx * n);
     let band = spec((cx + 0.5) / n);
     let wob = hash21(vec2<f32>(cx, 5.0));
-    let h = 0.12 + band * (0.4 + u.energy * 0.3) + wob * 0.08;
+    // Shape: towers lean their crowns into a wave with mid presence.
+    let h = 0.12 + band * (0.4 + u.energy * 0.3) + wob * 0.08 + 0.06 * u.pres4.y * sin(cx * 0.6 + u.clock4.z * 0.3);
 
     // Tower body: soft-edged silhouette slightly darker than the sky.
     let body = smoothstep(0.0, 0.1, fx) * smoothstep(1.0, 0.9, fx)

@@ -8,7 +8,8 @@ fn dune_h(x: f32, z: f32) -> f32 {
     // Crests run roughly across x, warped so they wind and merge.
     let warp = fbm(vec2<f32>(x * 0.05, z * 0.05)) * 2.0;
     let crest = 1.0 - abs(sin(x * 0.35 + warp + z * 0.06));
-    var h = crest * crest * 1.6;
+    // Shape: crests steepen as the bass builds.
+    var h = crest * crest * (1.2 + 0.9 * u.pres4.x);
     h += fbm(vec2<f32>(x * 0.12, z * 0.12)) * 2.4;
     // Fine ripples running down the slip faces.
     h += noise(vec2<f32>(x * 6.0, z * 1.2)) * 0.05 * crest;
@@ -40,10 +41,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
          * smoothstep(-0.1, 0.6, p.y) * (0.6 + 0.8 * u.energy);
 
     let sun = normalize(vec3<f32>(0.0, 0.1, 1.0));
-    let cz = u.flow * 1.4;
+    let cz = u.clock4.x * 1.4;
     let cx = sin(cz * 0.04) * 3.0;
     let ro = vec3<f32>(cx, dune_h(cx, cz) + 1.1 + sin(u.time * 0.09) * 0.1, cz);
-    let yaw = sin(u.time * 0.05) * 0.1;
+    // Direction: banking turns across the dune sea.
+    let yaw = sin(u.clock4.x * 0.025) * 0.3;
     let dxz = rot(yaw) * vec2<f32>(p.x, 1.7);
     let rd = normalize(vec3<f32>(dxz.x, -p.y - 0.14, dxz.y));
 

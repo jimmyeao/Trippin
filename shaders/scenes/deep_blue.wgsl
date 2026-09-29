@@ -30,7 +30,7 @@ fn caustic(x: vec2<f32>) -> f32 {
 
 fn jelly_pos(i: i32) -> vec3<f32> {
     let fi = f32(i);
-    let z = floor(u.flow * 0.35 / 14.0 + fi * 0.37) * 14.0 + fi * 4.7 + 10.0;
+    let z = floor(u.clock4.x * 0.35 / 14.0 + fi * 0.37) * 14.0 + fi * 4.7 + 10.0;
     let h = hash21(vec2<f32>(floor(z / 14.0), fi));
     return vec3<f32>((h - 0.5) * 9.0 + sin(u.time * 0.2 + fi) * 0.4, 3.8 + fi * 0.9 + sin(u.time * 0.3 + fi * 2.0) * 0.3, z);
 }
@@ -38,9 +38,11 @@ fn jelly_pos(i: i32) -> vec3<f32> {
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
-    let z = u.flow * 0.35;
+    // Energy: glide speed follows the mix.
+    let z = u.clock4.x * 0.35;
     let ro = vec3<f32>(sin(u.flow * 0.015) * 2.0, 4.2 + sin(u.flow * 0.02) * 0.5, z);
-    let ta = ro + vec3<f32>(sin(u.flow * 0.011) * 0.4, -0.28, 1.0);
+    // Direction: the gaze swings across the seabed and back.
+    let ta = ro + vec3<f32>(sin(u.clock4.x * 0.025) * 0.9, -0.28, 1.0);
     let rd = cam_ray(p, ro, ta, sin(u.flow * 0.009) * 0.04, 1.5);
     let sun = normalize(vec3<f32>(0.25, 1.0, 0.35));
 
@@ -134,7 +136,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         var tent = 0.0;
         for (var k = 0; k < 5; k++) {
             let fx = (f32(k) - 2.0) * 0.18 * pulse;
-            let wav = sin(q.y * 6.0 + u.time * 2.0 + f32(k) * 1.7) * 0.05 * (-q.y);
+            // Shape: tentacles stream wider as the mids build.
+            let wav = sin(q.y * 6.0 + u.clock4.z + f32(k) * 1.7) * (0.03 + 0.09 * u.pres4.y) * (-q.y);
             let dx = abs(q.x - fx - wav);
             tent += exp(-dx * 90.0) * smoothstep(0.0, -0.1, q.y) * smoothstep(-2.2, -0.3, q.y);
         }
