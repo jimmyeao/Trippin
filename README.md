@@ -294,6 +294,14 @@ abstract scenes built on this vocabulary:
   the energy.
 - `flow_field`: sparks streaking along a curl-noise flow, seeded per band,
   with a burst ring on the kick.
+- `chrome_spheres`: an infinite mirror-sphere lattice with band-lit lamp
+  spheres.
+- `cymatics`: Chladni sand figures whose mode follows the dominant band,
+  shaken by the kick (2D).
+- `tentacle_bloom`: a bioluminescent anemone with light waves running up
+  its tentacles on bass hits.
+- `aurora_veil`: volumetric aurora curtains, each height layer driven by
+  its own band.
 
 Scenes can read `u.calm` directly for their own breakdown looks. Preview
 one with `--snap <scene> --snap-calm 1`.
