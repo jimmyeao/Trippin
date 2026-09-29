@@ -11,7 +11,7 @@
 //    high hits; the core pulses with the bass level.
 
 const NT: i32 = 14;          // tentacles
-const SEG: i32 = 10;         // segments per tentacle
+const SEG: i32 = 8;         // segments per tentacle
 
 // Point along tentacle k at parameter s in 0..1.
 fn tent(k: i32, s: f32) -> vec3<f32> {
@@ -47,6 +47,15 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     // Tentacles: segment-by-segment closest approach of the ray.
     for (var k = 0; k < NT; k++) {
+        // Bounding sphere around tentacle k (base..tip + max bend): skip the
+        // whole tentacle if the ray passes nowhere near it.
+        let mid = tent(k, 0.5);
+        let tip = tent(k, 1.0);
+        let br = max(length(tip - mid), length(mid)) + 0.9;
+        let tb = dot(mid - ro, rd);
+        if length(ro + rd * tb - mid) > br {
+            continue;
+        }
         let tcol = palette(hue + f32(k) / f32(NT) * 0.35);
         var a = tent(k, 0.0);
         for (var i = 1; i <= SEG; i++) {
@@ -63,6 +72,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
             let dist = length(ro + rd * tt - pt);
             let s = s1 - (1.0 - sp) / f32(SEG);
             let thick = 0.09 * (1.0 - s * 0.8);
+            // Far from this segment: nothing to add (skip the glow maths).
+            if dist > thick * 14.0 || tt < 0.0 {
+                a = b;
+                continue;
+            }
             // Wave of light running base -> tip after each bass hit.
             let wave = exp(-abs(s - (1.0 - u.hits4.x)) * 10.0) * u.hits4.x;
             // Beads along the tube.
