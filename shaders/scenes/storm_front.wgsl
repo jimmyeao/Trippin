@@ -5,9 +5,12 @@
 // Volumetric: 44 blue-noise-jittered steps through a Perlin-Worley density
 // built from the baked 3D noise (2 fetches/step + 1 for the light sample),
 // so it stays inside an M2 budget at the default 75% scale.
-// Forward flight follows the tempo clock; lightning fires on onsets while
-// the track is driving — each strike's position is hashed per beat and its
-// brightness is a decay envelope of the beat phase (pose, not integrator).
+// Forward flight follows the tempo clock. Sheet lightning glows inside the
+// cloud on every kick (hi-hats flicker the off-beats), the base smoulders
+// with the bass, rain thickens with energy and the swell rises with the
+// bass. Full bolts fire on onsets, more often the harder the track
+// drives. Each strike's position is hashed per beat and its brightness is a
+// decay envelope of the beat phase (pose, not integrator).
 
 const BASE: f32 = 2.4;
 const TOP: f32 = 9.0;
@@ -21,11 +24,19 @@ fn strike_pos(beat: f32) -> vec3<f32> {
 fn strike_amt() -> f32 {
     let b = floor(u.beat);
     let roll = hash21(vec2<f32>(b, 9.1));
-    let chance = smoothstep(0.45, 0.95, u.intensity) * 0.8 + u.onset * 0.1;
+    let chance = 0.15 + smoothstep(0.3, 0.9, u.intensity) * 0.75 + u.onset * 0.15;
     let on = step(roll, chance);
     // Double-flicker decay, like a real return stroke.
     let ph = u.beat_phase;
     return on * (exp(-ph * 9.0) + 0.6 * exp(-abs(ph - 0.12) * 40.0));
+}
+
+// Sheet lightning: every kick lights the cloud from inside at a spot hashed
+// per beat, and the hi-hats flicker a second spot on the off-beat. Both are
+// decay envelopes of the beat phase — pose, never accumulated.
+fn sheet_pos(k: f32) -> vec3<f32> {
+    let h = hash22(vec2<f32>(k, 5.3));
+    return vec3<f32>((h.x - 0.5) * 30.0, 4.5 + h.y * 3.0, u.flow * 0.6 + 18.0 + h.y * 22.0);
 }
 
 fn density(p: vec3<f32>) -> f32 {
@@ -60,7 +71,7 @@ fn rain(p: vec3<f32>) -> f32 {
     let wall = smoothstep(10.0, 22.0, p.z - u.flow * 0.6);
     let n = tnoise(vec3<f32>(p.x * 0.05, 0.1, p.z * 0.05));
     let streak = tnoise(vec3<f32>(p.x * 0.6, p.y * 0.02 + u.time * 0.05, p.z * 0.6)).a;
-    return smoothstep(0.52, 0.7, n.b) * wall * (0.5 + streak) * 0.25 * (0.6 + 0.6 * u.intensity);
+    return smoothstep(0.52 - u.energy * 0.08, 0.7, n.b) * wall * (0.5 + streak) * 0.25 * (0.5 + 0.5 * u.intensity + 0.6 * u.energy);
 }
 
 fn sky(rd: vec3<f32>) -> vec3<f32> {
@@ -83,13 +94,18 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let strike = strike_amt();
     let sp = strike_pos(floor(u.beat));
     let bolt_col = vec3<f32>(0.75, 0.8, 1.0);
+    let sheet_k = u.kick * (0.5 + 0.8 * u.energy);
+    let sp_k = sheet_pos(floor(u.beat));
+    let off = fract(u.beat + 0.5);
+    let sheet_h = exp(-off * 10.0) * smoothstep(0.25, 0.6, u.high) * 0.7;
+    let sp_h = sheet_pos(floor(u.beat + 0.5) + 100.0);
 
     // --- Sea ---------------------------------------------------------------
     var bg = sky(rd);
     let t_sea = select(1e5, -ro.y / rd.y, rd.y < 0.0);
     if t_sea < 1e4 {
         let hp = ro + rd * t_sea;
-        let w = (tnoise(vec3<f32>(hp.xz * 0.08, u.time * 0.05)).b - 0.5) + (tnoise(vec3<f32>(hp.xz * 0.35, u.time * 0.09)).b - 0.5) * 0.5;
+        let w = ((tnoise(vec3<f32>(hp.xz * 0.08, u.time * 0.05)).b - 0.5) + (tnoise(vec3<f32>(hp.xz * 0.35, u.time * 0.09)).b - 0.5) * 0.5) * (0.8 + 1.2 * u.bass);
         let n = normalize(vec3<f32>(w * 0.25, 1.0, (tnoise(vec3<f32>(hp.xz * 0.08 + 0.5, u.time * 0.05)).b - 0.5) * 0.25));
         let rr = reflect(rd, n);
         let fr = fresnel(0.02, dot(-rd, n));
@@ -97,6 +113,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         bg = refl * fr * 0.8 + vec3<f32>(0.004, 0.006, 0.008) * (1.0 - fr);
         // Lightning glints on the water.
         bg += bolt_col * strike * 0.3 * fr * exp(-length(hp.xz - sp.xz) * 0.08);
+        bg += bolt_col * sheet_k * 0.08 * fr * exp(-length(hp.xz - sp_k.xz) * 0.05);
     }
 
     // --- Volume ------------------------------------------------------------
@@ -126,6 +143,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
             var l = sun_col * light * (0.25 + 0.75 * hf) * (0.4 + 0.6 * powder) + amb_top * (0.12 + 0.88 * hf * hf);
             let ld = length(pos - sp);
             l += bolt_col * strike * 9.0 / (1.0 + ld * ld * 0.25);
+            let dk = length(pos - sp_k);
+            let dhh = length(pos - sp_h);
+            l += vec3<f32>(0.7, 0.72, 1.0) * (sheet_k * 3.0 / (1.0 + dk * dk * 0.06) + sheet_h * 2.0 / (1.0 + dhh * dhh * 0.1));
+            // The base of the storm smoulders with the bass.
+            l += vec3<f32>(0.35, 0.3, 0.45) * u.bass * 0.25 * (1.0 - hf) * (0.5 + u.intensity);
             let a = 1.0 - exp(-dsum * dt * 0.9);
             acc += trans * a * l;
             trans *= 1.0 - a;
