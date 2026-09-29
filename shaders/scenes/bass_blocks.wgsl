@@ -24,8 +24,10 @@ struct Hit {
 
 fn map(p: vec3<f32>) -> Hit {
     var h: Hit;
+    // The street plane is intersected analytically in fs_main — marching a
+    // flat plane at grazing angles crawls and gave up long before the towers.
     h.ground = true;
-    h.d = p.y + 0.02; // street plane
+    h.d = 1e3;
     // Only the blocks beside the street lane exist: columns |id.x| > 0.
     let id = floor(p.xz / CELL);
     if abs(id.x + 0.5) > 0.5 {
@@ -69,11 +71,13 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     var rd = normalize(vec3<f32>(p.x * 0.8, -p.y * 0.7 + 0.12, 1.0));
     rd = vec3<f32>(rot(sin(u.time * 0.09) * 0.04) * rd.xy, rd.z);
 
+    let t_ground = select(1e5, (-0.02 - ro.y) / rd.y, rd.y < 0.0);
+    let t_max = min(t_ground, 90.0);
     var t = 0.0;
     var glow = vec3<f32>(0.0);
     var hit = false;
     var h: Hit;
-    for (var i = 0; i < 80; i++) {
+    for (var i = 0; i < 90; i++) {
         h = map(ro + rd * t);
         if !h.ground {
             glow += palette(hash21(h.id + 31.0)) * exp(-max(h.d, 0.0) * 14.0) * 0.008;
@@ -83,9 +87,15 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
             break;
         }
         t += clamp(h.d * 0.9, 0.03, 0.8);
-        if t > 60.0 {
+        if t > t_max {
             break;
         }
+    }
+    if !hit && t_ground < 90.0 {
+        // Reached the street without meeting a tower.
+        hit = true;
+        t = t_ground;
+        h.ground = true;
     }
 
     let pulse = 0.75 + 0.6 * u.intensity;
