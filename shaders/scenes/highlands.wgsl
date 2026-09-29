@@ -44,7 +44,10 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     var col = sky(rd, sun);
 
-    if rd.y < 0.0 {
+    // Trace every ray, not just downward ones: the peaks rise above the
+    // camera, so rays looking up at them must hit too (tracing only
+    // rd.y < 0 left just sky and haze — the mountains never appeared).
+    {
         // March the heightfield: growing steps out, then bisect the hit.
         var t = 0.0;
         var prev_h = field(ro);
@@ -57,7 +60,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
                 break;
             }
             prev_h = h;
-            if t > 160.0 {
+            // Above every peak and still climbing: this ray only sees sky.
+            if t > 160.0 || (rd.y > 0.0 && ro.y + rd.y * t > 12.0) {
                 break;
             }
         }
@@ -91,7 +95,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
             col = alb * (vec3<f32>(1.0, 0.6, 0.4) * dif * warm + vec3<f32>(0.1, 0.14, 0.22) * (0.5 + 0.5 * n.y));
 
             // Valley mist: thick on the floor, thinning with height and range.
-            let mist = exp(-hi * 0.045) * (0.5 + 0.5 * exp(-hp.y * 0.5));
+            let mist = exp(-hi * 0.028) * (0.7 + 0.3 * exp(-hp.y * 0.5));
             let mist_c = mix(vec3<f32>(0.5, 0.5, 0.62), vec3<f32>(0.95, 0.6, 0.4),
                              pow(max(dot(rd, sun), 0.0), 3.0));
             col = mix(mist_c * (0.55 + 0.3 * u.energy), col, mist);
