@@ -196,7 +196,22 @@ Default keys (all rebindable in the panel):
   with blade neon signs and puddle reflections. `deep_blue`: underwater,
   with caustics, god rays, marine snow and pulsing jellyfish. `glacier_cave`:
   a scalloped ice tunnel lit through the ice. `megastructure`: a dusk canyon
-  through an endless brutalist structure with spectrum windows. Each is
+  through an endless brutalist structure with spectrum windows.
+  `infinity_room`: a Kusama mirror room traced as a mirrored lattice,
+  with band-lit LED points and a ripple of light every bar. `rain_window`:
+  a bokeh city seen through rain-streaked glass, with drops as little
+  lenses (not `@heavy`). `glow_surf`: bioluminescent surf that flares on
+  the kick. `cathedral`: stained-glass light shafts in incense haze, an
+  LED organ and a spectrum rose window. `volcano`: lava rivers, a lit ash
+  plume with lightning inside, and lava bombs on the drops.
+  `desert_highway`: a night drive with one road dash per beat and a
+  horizon storm. `firefly_forest`: moonbeams through the canopy and
+  fireflies blinking in time. `rooftop_city`: a megacity from a rooftop,
+  with spectrum windows, billboards and helicopter searchlights.
+  `laser_cavern`: laser formations that change each bar over a mirror
+  pool. `subway_rush`: a cab ride with LED guide strips and a station
+  every 16 beats. `stage_rig`'s screens rotate audio-reactive
+  programmes: a kick-punch tunnel, an analyser and a live scope. Each is
   ≤1 ms/frame at 1080p on an RTX 5070 Ti. Scaling by FP32 throughput, that
   estimates ~3 ms on an RTX 3060 and ~12 ms on an M2, so they should hold
   60 fps on the floor hardware at full res.
