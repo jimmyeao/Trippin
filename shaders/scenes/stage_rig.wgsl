@@ -47,16 +47,83 @@ fn box_t(ro: vec3<f32>, rd: vec3<f32>, c: vec3<f32>, h: vec3<f32>) -> f32 {
 }
 
 // What the LED wall is playing: a slow palette tunnel with spectrum rings.
-fn wall_video(q: vec2<f32>) -> vec3<f32> {
-    let c = q - vec2<f32>(0.0, 8.5);
-    let r = length(c) / 8.0;
-    let a = angle(c);
-    let z = 1.0 / max(r, 0.05) + u.flow * 0.5;
-    let rings = smoothstep(0.35, 0.0, abs(fract(z * 0.5) - 0.5)) * (0.4 + 1.2 * spec(fract(z * 0.1)));
-    let spokes = smoothstep(0.8, 1.0, sin(a * 8.0 + z * 0.4));
-    var col = palette(z * 0.05 + a / TAU) * (rings + spokes * 0.3) * smoothstep(0.0, 0.3, r);
-    col += palette(0.5) * exp(-r * 6.0) * 1.5;
+// --- What the screens play -----------------------------------------------
+// n: screen coords, x ±aspect, y −1..1 (up). Three audio-driven programmes.
+
+// A: a tunnel that punches in on every kick, rings lit by their own band.
+fn prog_tunnel(n: vec2<f32>) -> vec3<f32> {
+    let punch = 1.0 - 0.22 * u.kick;
+    let r = length(n) * punch;
+    let a = angle(n);
+    let z = 1.0 / max(r, 0.04) + u.flow * 0.5;
+    let band = fract(z * 0.1);
+    let rings = smoothstep(0.35, 0.0, abs(fract(z * 0.5) - 0.5)) * (0.2 + 2.2 * spec(band) * spec(band));
+    let spokes = smoothstep(0.85, 1.0, sin(a * 8.0 + z * 0.4 + u.bar_phase * TAU)) * (0.3 + u.high);
+    var col = palette(z * 0.05 + a / TAU) * (rings + spokes * 0.4) * smoothstep(0.0, 0.25, r);
+    col += palette(0.5) * exp(-r * (7.0 - 4.0 * u.bass)) * (0.6 + 2.5 * u.bass);
+    return col;
+}
+
+// B: a mirrored spectrum analyser with falling peak caps and a floor mirror.
+fn prog_bars(n: vec2<f32>) -> vec3<f32> {
+    let cols = 40.0;
+    let x = abs(n.x) / 1.9;                             // mirrored about centre
+    let id = floor(x * cols);
+    let f = fract(x * cols);
+    let v = spec(clamp(id / cols, 0.0, 1.0) * 0.9);
+    let hgt = v * 1.5 * (0.7 + 0.5 * u.intensity);
+    let y = n.y + 0.85;                                 // bars stand on y = −0.85
+    let lit = step(0.0, y) * step(y, hgt) * smoothstep(0.45, 0.35, abs(f - 0.5));
+    let seg = smoothstep(0.1, 0.25, fract(y * 18.0));   // LED segments
+    let cap = smoothstep(0.03, 0.0, abs(y - hgt - 0.05)) * smoothstep(0.45, 0.35, abs(f - 0.5));
+    let refl = step(y, 0.0) * step(-hgt * 0.5, y) * smoothstep(0.45, 0.35, abs(f - 0.5)) * 0.25 * (1.0 + y / max(hgt * 0.5, 0.01));
+    let c = palette(id / cols * 0.8 + y * 0.15);
+    var col = c * (lit * seg * 1.4 + refl) + vec3<f32>(1.0) * cap * 1.2;
+    col += c * 0.05 * exp(-abs(y - hgt) * 4.0) * step(0.0, y);
+    return col * (0.6 + 0.8 * u.energy);
+}
+
+// C: an oscilloscope of the live waveform, with a shockwave ring per kick.
+fn prog_scope(n: vec2<f32>) -> vec3<f32> {
+    let x = n.x / 1.9 * 0.5 + 0.5;
+    let w = wave(clamp(x, 0.0, 1.0)) * (0.5 + 0.6 * u.intensity);
+    let d = abs(n.y - w * 0.8);
+    var col = palette(0.1 + x * 0.6) * (exp(-d * 60.0) * 2.0 + exp(-d * 8.0) * 0.35);
+    let ring_r = u.beat_phase * 2.2;
+    let ring = exp(-abs(length(n) - ring_r) * 18.0) * (1.0 - u.beat_phase) * u.kick;
+    col += palette(0.6) * ring * 1.5;
+    // Grid.
+    let g = abs(fract(n * 4.0) - 0.5);
+    col += vec3<f32>(0.03, 0.05, 0.05) * smoothstep(0.47, 0.5, max(g.x, g.y));
+    return col;
+}
+
+fn prog(k: i32, n: vec2<f32>) -> vec3<f32> {
+    let m = ((k % 3) + 3) % 3;
+    if m == 0 {
+        return prog_tunnel(n);
+    }
+    if m == 1 {
+        return prog_bars(n);
+    }
+    return prog_scope(n);
+}
+
+// Programme changes every 16 beats with a one-beat crossfade; `shift` lets
+// the side screens run a different programme from the main wall.
+fn wall_video_n(n: vec2<f32>, shift: i32) -> vec3<f32> {
+    let slot = u.flow / 16.0;
+    let k = i32(floor(slot)) + shift;
+    let fade = smoothstep(15.0 / 16.0, 1.0, fract(slot));
+    var col = prog(k, n);
+    if fade > 0.0 {
+        col = mix(col, prog(k + 1, n), fade);
+    }
     return col * (0.5 + 0.9 * u.intensity);
+}
+
+fn wall_video(q: vec2<f32>) -> vec3<f32> {
+    return wall_video_n((q - vec2<f32>(0.0, 8.5)) / 6.5, 0);
 }
 
 fn sky(rd: vec3<f32>) -> vec3<f32> {
@@ -193,7 +260,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         let cx = f32(s) * 21.0;
         if abs(wp.x - cx) < 4.0 && wp.y > 5.0 && wp.y < 11.0 && tw < t_hit + 1.0 {
             t_hit = tw;
-            col = wall_video(vec2<f32>((wp.x - cx) * 2.5, (wp.y - 8.0) * 2.0 + 8.5)) * 0.8;
+            col = wall_video_n(vec2<f32>((wp.x - cx) / 3.0, (wp.y - 8.0) / 3.0) * vec2<f32>(1.4, 1.0), 1) * 0.8;
         }
     }
     // Stage deck.
