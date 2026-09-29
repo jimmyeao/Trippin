@@ -4,7 +4,8 @@
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
-    var q = p * 3.0 + vec2<f32>(u.flow * 0.06, u.flow * 0.04);
+    // Direction: the water drifts one way then back; energy speeds it.
+    var q = p * 3.0 + vec2<f32>(2.0 * sin(u.clock4.x * 0.02) + u.clock4.x * 0.03, u.clock4.x * 0.04);
 
     // Iterated interference — the caustic filament pattern.
     var v = 0.0;
@@ -12,7 +13,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     var t = 0.0;
     for (var i = 0; i < 4; i++) {
         let fi = f32(i);
-        q += vec2<f32>(sin(q.y * 1.7 + t) * 0.35, cos(q.x * 1.5 + t) * 0.35) * amp;
+        // Shape: the filaments knot tighter with bass presence.
+        let warp = 0.25 + 0.3 * u.pres4.x;
+        q += vec2<f32>(sin(q.y * 1.7 + t) * warp, cos(q.x * 1.5 + t) * warp) * amp;
         v += abs(sin(q.x) * sin(q.y)) * amp;
         t += 1.7 + u.mid;
         amp *= 0.65;

@@ -17,15 +17,20 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     for (var i = 0; i < 3; i++) {
         let fi = f32(i);
-        let scale = 0.35 + fi * 0.28 - u.kick * 0.1;
-        let rx = u.flow * (0.4 + fi * 0.15);
-        let ry = u.flow * (0.3 + fi * 0.2);
+        // Shape: cubes swell with presence and punch on kicks.
+        let scale = (0.35 + fi * 0.28) * (0.85 + 0.3 * u.pres4.x) - 0.08 * u.hits4.x;
+        // Energy + direction: tumble rate rides the energy clock; the yaw
+        // swings back and forth, each cube out of step.
+        let rx = u.clock4.z * (0.4 + fi * 0.15);
+        let ry = 2.5 * sin(u.clock4.x * 0.04 + fi * 2.0) + u.clock4.x * (0.1 + fi * 0.05);
+        // Shape: each axis stretches with a different band.
+        let stretch = vec3<f32>(0.8 + 0.45 * u.pres4.x, 0.8 + 0.45 * u.pres4.y, 0.8 + 0.45 * u.pres4.w);
 
         // Rotate 3D cube verts and project.
         var pts: array<vec2<f32>, 8>;
         for (var v = 0; v < 8; v++) {
             let b = vec3<f32>(
-                f32(v & 1) - 0.5, f32((v >> 1) & 1) - 0.5, f32((v >> 2) & 1) - 0.5) * 2.0 * scale;
+                f32(v & 1) - 0.5, f32((v >> 1) & 1) - 0.5, f32((v >> 2) & 1) - 0.5) * 2.0 * scale * stretch;
             // Yaw then pitch (note: world up stays +y of the vertex).
             let vxy = rot(ry) * vec2<f32>(b.x, b.z);
             let vyz = rot(rx) * vec2<f32>(b.y, vxy.y);

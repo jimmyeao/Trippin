@@ -15,7 +15,8 @@ const BAY: f32 = 5.0;         // column spacing
 const SPRING: f32 = 8.0;      // vault springline height
 
 fn sun_dir() -> vec3<f32> {
-    return normalize(vec3<f32>(1.0, -0.55, 0.3));   // travelling into the nave
+    // Direction: the sun (and its shafts) swing slowly across the nave.
+    return normalize(vec3<f32>(1.0, -0.55 + 0.15 * sin(u.clock4.x * 0.01), 0.3 + 0.35 * sin(u.clock4.x * 0.013)));
 }
 
 // Real stained glass is mostly cobalt and ruby, with emerald, amethyst and
@@ -170,10 +171,12 @@ fn end_wall(p: vec3<f32>) -> vec3<f32> {
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
-    let z = u.flow * 0.3;
+    let z = u.clock4.x * 0.3;
     let ro = vec3<f32>(sin(u.flow * 0.01) * 1.2, 1.7 + 0.1 * sin(u.flow * 0.02), z);
     let end_z = z + 38.0;
-    let ta = vec3<f32>(sin(u.flow * 0.008) * 1.0, 4.0 + sin(u.flow * 0.011) * 1.0, z + 10.0);
+    // Direction: the gaze swings between the aisles, up to the vault on
+    // big sections.
+    let ta = vec3<f32>(sin(u.clock4.x * 0.03) * 2.2, 4.0 + sin(u.clock4.x * 0.011) * 1.0 + 2.0 * u.pres4.x, z + 10.0);
     let rd = cam_ray(p, ro, ta, 0.0, 1.2);
     let L = sun_dir();
     let drive = 0.5 + 0.8 * u.intensity;

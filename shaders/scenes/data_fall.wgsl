@@ -6,18 +6,21 @@
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
     let cols = 48.0;
-    let cx = floor(p.x * cols);
+    // Shape: the streams bend into waves with mid presence.
+    let px = p.x + 0.05 * sin(p.y * 2.0 + u.clock4.z * 0.2) * u.pres4.y;
+    let cx = floor(px * cols);
     let hx = hash21(vec2<f32>(cx, 11.0));
     let speed = 0.07 + hx * 0.22; // slower, steady — onsets light cells, not speed
 
     // Column stream scrolling down (+p.y = down-screen).
     let rows = 26.0;
-    let y = p.y - u.flow * speed;
+    // Energy: fall speed follows the smooth energy clock.
+    let y = p.y - u.clock4.x * speed;
     let cy = floor(y * rows);
-    let glyph = hash21(vec2<f32>(cx, cy + floor(u.flow * speed * 2.0)));
+    let glyph = hash21(vec2<f32>(cx, cy + floor(u.clock4.x * speed * 2.0)));
     let lit = step(glyph, 0.6 + u.bass * 0.3);
     // Cell shading: notch the cell so it reads as stacked blocks.
-    let local = fract(vec2<f32>(p.x * cols, y * rows));
+    let local = fract(vec2<f32>(px * cols, y * rows));
     let block = smoothstep(0.0, 0.08, local.x) * smoothstep(1.0, 0.92, local.x)
               * smoothstep(0.0, 0.12, local.y) * smoothstep(1.0, 0.88, local.y);
 

@@ -21,7 +21,8 @@ fn wall_light(z: f32, y: f32, side: f32) -> vec3<f32> {
     // colour walks the palette. They sit low on the walls.
     let seg = floor(z / 2.6);
     let sz = fract(z / 2.6);                            // 0..1 within a segment
-    let sign_h = 0.5 + 0.5 * hash21(vec2<f32>(seg, side * 7.0));
+    // Shape: each sign stretches with its own spectrum band.
+    let sign_h = (0.5 + 0.5 * hash21(vec2<f32>(seg, side * 7.0))) * (0.6 + 0.8 * spec(hash21(vec2<f32>(seg, side * 5.0)) * 0.9));
     let y0 = 0.55 + 0.35 * hash21(vec2<f32>(seg * 3.0, side));
     let in_sign = step(0.12, sz) * step(sz, 0.88) * step(abs(y - y0), sign_h * 0.22);
     // Not every segment has a sign; some flicker with the kick.
@@ -43,8 +44,10 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let road = 1.6;                                   // half-width of the canyon
 
     // Camera: chest height, drifting down the street on the tempo clock.
-    let ro = vec3<f32>(sin(u.time * 0.07) * 0.4, 1.15 + sin(u.time * 0.11) * 0.05, u.flow * 0.8);
-    let yaw = sin(u.time * 0.05) * 0.06;
+    // Energy: walking pace follows the mix; direction: the gaze swings
+    // from one side of the street to the other.
+    let ro = vec3<f32>(sin(u.clock4.x * 0.03) * 0.5, 1.15 + sin(u.time * 0.11) * 0.05, u.clock4.x * 0.8);
+    let yaw = sin(u.clock4.x * 0.025) * 0.18;
     let dxz = rot(yaw) * vec2<f32>(p.x, 1.9);
     let rd = normalize(vec3<f32>(dxz.x, -p.y * 0.75 - 0.04, dxz.y));
 
@@ -95,8 +98,10 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     for (var i = 0; i < 2; i++) {
         let fi = f32(i) + 1.0;
         let cells = 90.0 * fi;
-        let cx = floor((p.x + p.y * 0.08) * cells);
-        let ry = fract(p.y * 2.2 * fi + u.time * speed * 0.13 / fi + hash21(vec2<f32>(cx, fi * 4.0)));
+        // Direction: the wind (rain slant) swings side to side. The fall
+        // rides the smooth high clock (raw energy here made it lurch).
+        let cx = floor((p.x + p.y * 0.2 * sin(u.clock4.x * 0.02)) * cells);
+        let ry = fract(p.y * 2.2 * fi + u.clock4.w * 5.0 / fi + hash21(vec2<f32>(cx, fi * 4.0)));
         let dash = step(0.5, hash21(vec2<f32>(cx, fi))) * smoothstep(0.12, 0.0, abs(ry - 0.5)) * 0.12 / fi;
         col += vec3<f32>(0.5, 0.6, 0.7) * dash * (0.4 + 0.6 * u.intensity);
     }

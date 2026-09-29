@@ -11,7 +11,8 @@ fn map(p: vec3<f32>) -> vec2<f32> {
     let id = floor(p * 2.2);
     let h = hash21(id.xy + id.z);
     let c = fract(p * 2.2) - 0.5;
-    let gem = length(c) - 0.13 * (0.4 + h);
+    // Shape: each crystal grows with its own band and pops on kicks.
+    let gem = length(c) - 0.13 * (0.4 + h) * (0.55 + 0.45 * spec(h)) - 0.015 * u.hits4.x;
     let in_shell = wall_d + 0.35; // crystals live just inside the rock face
     d = min(d, max(gem, -in_shell));
     return vec2<f32>(d, h);
@@ -20,10 +21,12 @@ fn map(p: vec3<f32>) -> vec2<f32> {
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
-    let z = u.flow * 2.5;
+    let z = u.clock4.x * 2.5;
     let ro = vec3<f32>(sin(z * 0.1) * 0.5, -cos(z * 0.07) * 0.35, z);
     // -p.y is up: rays at the top of the screen point up.
     var rd = normalize(vec3<f32>(p.x * 0.7, -p.y * 0.7, 1.0));
+    // Direction: the view rolls one way, then back.
+    rd = vec3<f32>(rot(0.35 * sin(u.clock4.z * 0.02)) * rd.xy, rd.z);
     rd = vec3<f32>(rot(sin(z * 0.05) * 0.2) * rd.xy, rd.z);
 
     var t = 0.0;
