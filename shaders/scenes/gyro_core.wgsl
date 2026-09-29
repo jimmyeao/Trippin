@@ -13,14 +13,20 @@ fn sd_torus(p: vec3<f32>, r: f32) -> f32 {
     return length(vec2<f32>(length(p.xz) - r, p.y));
 }
 
-// Ring k's local frame: tilt + spin (poses of the tempo clock).
+// Ring k's local frame. Each torus lies in its local xz plane, so spinning
+// it about y would be invisible — instead each ring *tumbles* about an axis
+// across its diameter (like a gimbal), at its own speed and direction, and
+// the whole assembly precesses slowly. All poses of the tempo clock.
 fn ring_local(p: vec3<f32>, k: i32) -> vec3<f32> {
     let fk = f32(k);
-    let tilt = fk * 0.63 + 0.2;
-    let spin = u.flow * (0.25 + 0.12 * fk) * select(1.0, -1.0, (k & 1) == 1);
-    var q = vec3<f32>(rot(tilt) * p.xy, p.z);
+    let dir = select(1.0, -1.0, (k & 1) == 1);
+    // Slow precession of the whole gyroscope about world y.
+    var q = vec3<f32>(rot(u.flow * 0.08) * p.xz, p.y).xzy;
+    // Each ring's gimbal axis sits at its own azimuth.
     q = vec3<f32>(rot(fk * 1.1) * q.xz, q.y).xzy;
-    q = vec3<f32>(rot(spin) * q.xz, q.y).xzy;
+    // Tumble about the local x axis.
+    let tumble = u.flow * (0.45 + 0.13 * fk) * dir + fk * 0.63;
+    q = vec3<f32>(q.x, rot(tumble) * q.yz);
     return q;
 }
 
@@ -47,9 +53,22 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // and the ring angle there (for the chasing pulses).
     var dmin = array<f32, 5>(9.0, 9.0, 9.0, 9.0, 9.0);
     var amin = array<f32, 5>(0.0, 0.0, 0.0, 0.0, 0.0);
+    // Only march inside the gyroscope's bounding sphere (rings + halo);
+    // rays that miss it keep dmin = 9 and cost nothing.
+    let bb = dot(ro, rd);
+    let bc = dot(ro, ro) - 2.4 * 2.4;
+    let bh = bb * bb - bc;
     var t = 0.0;
+    var t_end = -1.0;
+    if bh > 0.0 {
+        t = max(-bb - sqrt(bh), 0.0);
+        t_end = -bb + sqrt(bh);
+    }
     var hit_core = false;
-    for (var i = 0; i < 56; i++) {
+    for (var i = 0; i < 80; i++) {
+        if t > t_end {
+            break;
+        }
         let pos = ro + rd * t;
         var d = length(pos) - core_r();
         if d < 0.002 {
@@ -66,7 +85,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
             d = min(d, dr);
         }
         // Small steps near the rings so the minimum is accurate.
-        t += clamp(d * 0.75, 0.006, 0.25);
+        t += clamp(d * 0.75, 0.006, 0.12);
         if t > 9.0 {
             break;
         }
