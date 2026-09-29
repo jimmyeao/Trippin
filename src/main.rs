@@ -138,6 +138,7 @@ fn usable_scenes(r: &Renderer, s: &Settings) -> Vec<usize> {
         .filter(|&i| names[i] != "void")
         .filter(|&i| !s.disabled_scenes.contains(&names[i]))
         .filter(|&i| heavy_on || !heavy[i])
+        .filter(|&i| s.flat_scenes || heavy[i])
         .filter(|&i| match (s.seasonal, in_season(&names[i], date)) {
             (_, None) | (Seasonal::Always, _) => true,
             (Seasonal::Off, Some(_)) => false,

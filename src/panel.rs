@@ -414,6 +414,15 @@ fn scenes_tab(
         Tristate::On => true,
         Tristate::Off => false,
     };
+    row(ui, "2D scenes", |ui| {
+        ui.selectable_value(&mut s.flat_scenes, true, "On");
+        ui.selectable_value(&mut s.flat_scenes, false, "Off");
+    });
+    ui.small(match (s.flat_scenes, heavy_on) {
+        (true, _) => "Flat (2D) scenes are in rotation.",
+        (false, true) => "Flat (2D) scenes are off — only 3D scenes play.",
+        (false, false) => "2D and 3D are both off — every scene plays as a fallback.",
+    });
     let date = today();
     let in_now: Vec<&str> = scenes
         .iter()
@@ -441,8 +450,8 @@ fn scenes_tab(
     });
     let blocked = (0..scenes.len())
         .filter(|&i| {
-            heavy.get(i).copied().unwrap_or(false)
-                && !heavy_on
+            let is_heavy = heavy.get(i).copied().unwrap_or(false);
+            ((is_heavy && !heavy_on) || (!is_heavy && !s.flat_scenes))
                 && !s.disabled_scenes.contains(&scenes[i])
         })
         .count();
@@ -463,6 +472,7 @@ fn scenes_tab(
                 }
                 let is_heavy = heavy.get(i).copied().unwrap_or(false);
                 let off_gpu = is_heavy && !heavy_on;
+                let off_flat = !is_heavy && !s.flat_scenes;
                 let mut on = !s.disabled_scenes.contains(name);
                 let mut label = match in_season(name, date) {
                     Some(true) => format!("{name} (in season)"),
@@ -475,11 +485,13 @@ fn scenes_tab(
                     } else {
                         " (3D)"
                     };
+                } else if off_flat {
+                    label += " (2D — off)";
                 }
                 // Greyed out when the GPU can't run it — it can't join
                 // rotation anyway, and "show" would just drop frames.
                 if ui
-                    .add_enabled(!off_gpu, egui::Checkbox::new(&mut on, label))
+                    .add_enabled(!off_gpu && !off_flat, egui::Checkbox::new(&mut on, label))
                     .changed()
                 {
                     if on {

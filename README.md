@@ -181,14 +181,15 @@ Default keys (all rebindable in the panel):
   `torus_dance` (a band-lit torus knot spinning centre-screen).
 - **2026 tier** (photoreal, all `@heavy`; they use the bloom pass, AgX tone
   mapping and the baked noise volumes). `salt_flats`: a mirror-still salt
-  flat under the Milky Way with a spectrum-display monolith. `orbit_night`:
+  flat ringed by mountains, with an avenue of spectrum-display monoliths,
+  low mist and an aurora driven by the mids. `orbit_night`:
   low orbit before dawn, with city lights, storms flashing on the kicks and a
   scattering atmosphere limb. `chrome_ferro`: a liquid-chrome ferrofluid blob
   whose spike rings follow the spectrum, in a photo studio. `warehouse_haze`:
   moving-head beams in haze inside a concrete warehouse, using analytic
   volumetric beams. `stage_rig`: a festival main stage from the crowd, with
   an LED wall, a beam rig, flame jets on the drops and backlit hands.
-  `event_horizon`: a lensed black hole accretion disk. `glass_monoliths`:
+  `glass_monoliths`:
   refracting glass slabs with RGB dispersion in front of a spectrum light
   wall. `storm_front`: a volumetric supercell over the sea, with lightning
   inside the cloud on the big hits. `neon_alley`: a rain-soaked brick alley
@@ -199,6 +200,10 @@ Default keys (all rebindable in the panel):
   ≤1 ms/frame at 1080p on an RTX 5070 Ti. Scaling by FP32 throughput, that
   estimates ~3 ms on an RTX 3060 and ~12 ms on an M2, so they should hold
   60 fps on the floor hardware at full res.
+- **2D vs 3D:** on the Scenes tab, **3D scenes** (Auto/On/Off) gates the
+  `@heavy` raymarched scenes, and **2D scenes** (On/Off) gates everything
+  else. Turning 2D off gives an all-3D show. Explicit cues and "show" still
+  play any scene.
 - **Graphic / LED-wall:** `dot_field` (a spectrum-driven LED wall),
   `grid_flash` (an LED dancefloor), `warp_grid` (a tron horizon rush),
   `strobe_bars` (a wall of light towers that grow with their band),

@@ -297,6 +297,8 @@ pub struct Settings {
     pub fx_amt: f32,
     /// Raymarched `// @heavy` scenes: Auto follows the detected GPU tier.
     pub heavy_scenes: Tristate,
+    /// 2D (non-`@heavy`) scenes in rotation — off leaves only the 3D ones.
+    pub flat_scenes: bool,
     /// AI show builder (BYOAI): provider + endpoint/model/key. Blank fields
     /// fall back to the provider's defaults; a blank key falls back to the
     /// provider's usual env var (see `ai::AiProvider::env_keys`).
@@ -342,6 +344,7 @@ impl Default for Settings {
             fx_auto: false,
             fx_amt: 1.0,
             heavy_scenes: Tristate::Auto,
+            flat_scenes: true,
             ai_provider: Default::default(),
             ai_endpoint: String::new(),
             ai_model: String::new(),
