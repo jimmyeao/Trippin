@@ -455,6 +455,10 @@ fn render_loop(
     // Camera-clock speed: eases to ~0.55x in breakdowns (floaty), back to 1x
     // with the drums. Integrated into `flow`, so it never jumps.
     let mut flow_speed = 1.0f32;
+    // Energy clocks (see Uniforms::clock4) and the smoothed levels driving
+    // them — ~0.35 s smoothing, so a kick is a surge, never a jolt.
+    let mut clock4 = [0.0f64; 4];
+    let mut clock_lvl = [0.0f32; 4];
     let mut blackout = false;
     let mut master = 1.0f32;
     // The post effect showing now — the auto-pilot's pick when `fx_auto` is on.
@@ -1027,6 +1031,18 @@ fn render_loop(
         let speed_target = 1.0 - 0.45 * f.calm;
         flow_speed += (speed_target - flow_speed) * (dt * 0.8).min(1.0);
         flow = (flow + dt as f64 * flow_bpm as f64 / 60.0 * flow_speed as f64) % 4096.0;
+        // Energy clocks: whole mix, bass, mid, high (mid-high folds into
+        // high). Rate in beats/s = tempo x (0.3 + 2.4 x level^1.6): about
+        // 0.4x in a breakdown, ~1.1x on a drop (measured on real tracks).
+        let whole = (f.lvl4[0] * 0.45 + f.lvl4[1] * 0.3 + f.lvl4[2] * 0.15 + f.lvl4[3] * 0.1).min(1.0);
+        let src = [whole, f.lvl4[0], f.lvl4[1], f.lvl4[2].max(f.lvl4[3])];
+        let k = (dt / 0.35).min(1.0);
+        for i in 0..4 {
+            let target = if f.silent { 0.0 } else { src[i] };
+            clock_lvl[i] += (target - clock_lvl[i]) * k;
+            let rate = 0.3 + 2.4 * clock_lvl[i].powf(1.6);
+            clock4[i] = (clock4[i] + dt as f64 * flow_bpm as f64 / 60.0 * rate as f64) % 4096.0;
+        }
         let target = if blackout { 0.0 } else { 1.0 };
         master += (target - master) * (dt * 3.0).min(1.0);
 
@@ -1072,6 +1088,10 @@ fn render_loop(
             tonemap: 0.0,
             frame: 0.0,
             calm: f.calm,
+            lvl4: f.lvl4,
+            hits4: f.hits4,
+            pres4: f.pres4,
+            clock4: clock4.map(|c| c as f32),
         };
         // Text overlays: fade in over 0.35 s, out over 0.5 s; a faded-out
         // slot drops off (its texture stays bound but the shader skips it).

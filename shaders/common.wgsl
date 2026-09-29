@@ -33,6 +33,16 @@ struct U {
     tonemap: f32,     // `// @tonemap agx` — 0 ACES, 1 AgX
     frame: f32,       // frame counter (wraps) — animates blue-noise dither
     calm: f32,        // 0 = beats playing, 1 = breakdown (no drums); smoothed
+    // Synesthesia-style four-band vocabulary. Components are
+    // (bass 20-150 Hz, mid 150 Hz-2 kHz, mid-high 2-6 kHz, high 6-16 kHz).
+    lvl4: vec4<f32>,  // loudness 0..1
+    hits4: vec4<f32>, // transient spikes 0..1, decaying ~0.15 s
+    pres4: vec4<f32>, // slow presence 0..1 (~1.5 s): swells, not notes
+    // Energy clocks, in beats: x whole mix, y bass, z mid, w high. They run
+    // at tempo speed scaled by how loud the band is — crawl in quiet parts,
+    // surge on the drop. Smooth (built from smoothed levels): safe to drive
+    // camera travel, rotation and flow with. Like u.flow, wrap at 4096.
+    clock4: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> u: U;
@@ -117,6 +127,25 @@ fn wave(x: f32) -> f32 {
     let j = min(i + 1u, 63u);
     let b = u.wave[j / 4u][j % 4u];
     return mix(a, b, fract(f));
+}
+
+// Beat-locked LFOs on the smooth tempo clock: 0..1, one cycle per `beats`
+// beats (1, 2, 4, 8...). Sine and triangle.
+fn bpm_sin(beats: f32) -> f32 {
+    return 0.5 - 0.5 * cos(TAU * u.flow / beats);
+}
+
+fn bpm_tri(beats: f32) -> f32 {
+    return 1.0 - abs(fract(u.flow / beats) * 2.0 - 1.0);
+}
+
+// A fresh random 0..1 each beat, and a 0/1 that flips each beat.
+fn random_on_beat() -> f32 {
+    return hash21(vec2<f32>(floor(u.beat), 91.7));
+}
+
+fn toggle_on_beat() -> f32 {
+    return f32(i32(floor(u.beat)) & 1);
 }
 
 // Sharp pulse at each beat, decaying through it. In a breakdown (no drums)

@@ -74,6 +74,13 @@ pub struct Uniforms {
     pub frame: f32,
     /// Breakdown state 0 = beats, 1 = breakdown (no drums) — see audio.rs.
     pub calm: f32,
+    /// Four-band vocabulary (bass, mid, mid-high, high) — see audio.rs.
+    pub lvl4: [f32; 4],
+    pub hits4: [f32; 4],
+    pub pres4: [f32; 4],
+    /// Energy clocks (beats): (whole mix, bass, mid, high) — advance faster
+    /// the louder the band. Integrated in main.rs from smoothed levels.
+    pub clock4: [f32; 4],
 }
 
 #[derive(Default, Clone, Copy, PartialEq)]
@@ -1509,6 +1516,10 @@ impl Renderer {
             tonemap: self.scenes[scene].tonemap,
             frame: 0.0,
             calm: 0.0,
+            lvl4: [0.6, 0.5, 0.45, 0.4],
+            hits4: [1.0, 0.5, 0.3, 0.3],
+            pres4: [0.6, 0.5, 0.45, 0.4],
+            clock4: [8.0, 8.0, 8.0, 8.0],
         };
         self.queue
             .write_buffer(&self.uniform_buf, 0, bytemuck::bytes_of(&u));

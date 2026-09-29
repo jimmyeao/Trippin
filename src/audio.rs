@@ -58,6 +58,15 @@ pub struct Features {
     /// vocals, pure instrumental). Hysteretic and smoothed, so it never
     /// flickers; falls fast when the drums come back in (the drop).
     pub calm: f32,
+    /// Synesthesia-style four-band vocabulary: bass (20-150 Hz), mid
+    /// (150 Hz-2 kHz), mid-high (2-6 kHz), high (6-16 kHz).
+    /// `lvl4`: loudness 0..1 (auto-gained, fast attack / slower release).
+    pub lvl4: [f32; 4],
+    /// `hits4`: 0..1 spikes on transients in each band, decaying (~0.15 s).
+    pub hits4: [f32; 4],
+    /// `pres4`: slow (~1.5 s) rise/fall of each band — builds and swells,
+    /// not individual notes.
+    pub pres4: [f32; 4],
 }
 
 impl Default for Features {
@@ -81,6 +90,9 @@ impl Default for Features {
             tempo_confidence: 0.0,
             groove: 0.0,
             calm: 1.0,
+            lvl4: [0.0; 4],
+            hits4: [0.0; 4],
+            pres4: [0.0; 4],
         }
     }
 }
@@ -368,6 +380,11 @@ struct Analyzer {
     /// recent peak and mean.
     bass_gain: AutoGain,
     bass_hist: VecDeque<f32>,
+    /// Four-band vocabulary state (see `Features::lvl4`).
+    gains4: [AutoGain; 4],
+    hit_gains4: [AutoGain; 4],
+    prev_log4: [f32; 4],
+    flux_mean4: [f32; 4],
     /// Onset strength envelope at `fps`, newest last.
     env: VecDeque<f32>,
     /// Optional tap so the timeline matcher can watch the same envelope.
@@ -430,6 +447,20 @@ impl Analyzer {
             flux_gain: AutoGain::new(1e-4),
             bass_gain: AutoGain::new(1e-3),
             bass_hist: VecDeque::new(),
+            gains4: [
+                AutoGain::new(1e-3),
+                AutoGain::new(1e-4),
+                AutoGain::new(1e-5),
+                AutoGain::new(1e-5),
+            ],
+            hit_gains4: [
+                AutoGain::new(1e-3),
+                AutoGain::new(1e-3),
+                AutoGain::new(1e-3),
+                AutoGain::new(1e-3),
+            ],
+            prev_log4: [0.0; 4],
+            flux_mean4: [0.0; 4],
             env: VecDeque::new(),
             tap,
             bass_env: VecDeque::new(),
@@ -562,6 +593,32 @@ impl Analyzer {
         smooth(&mut self.f.bass, levels[0], 0.6, 0.15);
         smooth(&mut self.f.mid, levels[1], 0.5, 0.1);
         smooth(&mut self.f.high, levels[2], 0.5, 0.1);
+        // Four-band vocabulary: level, hits (transients) and presence.
+        let raw4 = [
+            raw[0],
+            raw[1],
+            band(2000.0, 6000.0, self),
+            band(6000.0, 16000.0, self),
+        ];
+        let hop = 1.0 / self.fps;
+        let hit_decay = (-hop / 0.15).exp();
+        for b in 0..4 {
+            let lv = self.gains4[b].apply(raw4[b]);
+            smooth(&mut self.f.lvl4[b], lv, 0.5, 0.08);
+            // Transient: rise in log band energy, relative to this band's
+            // running mean rise and its own auto-gained peak (volume-free).
+            let lg = (1.0 + 200.0 * raw4[b]).ln();
+            let fl = (lg - self.prev_log4[b]).max(0.0);
+            self.prev_log4[b] = lg;
+            self.flux_mean4[b] += (fl - self.flux_mean4[b]) * (hop / 0.4).min(1.0);
+            let fnorm = self.hit_gains4[b].apply(fl);
+            self.f.hits4[b] *= hit_decay;
+            if !silent && fl > self.flux_mean4[b] * 2.0 && fnorm > 0.25 {
+                self.f.hits4[b] = self.f.hits4[b].max(fnorm.min(1.0));
+            }
+            // Presence: level smoothed over ~1.5 s.
+            self.f.pres4[b] += (lv - self.f.pres4[b]) * (hop / 1.5).min(1.0);
+        }
         let energy = (levels[0] * 0.5 + levels[1] * 0.3 + levels[2] * 0.2).min(1.0);
         smooth(&mut self.f.energy, energy, 0.3, 0.08);
         self.energy_fast += (energy - self.energy_fast) * (1.0 / (1.5 * self.fps));
@@ -834,7 +891,12 @@ pub fn groove_test(path: &std::path::Path) -> anyhow::Result<()> {
     let mut kicks = 0usize;
     let mut last_kick_len = 0usize;
     println!("{} — {:.1} BPM (file analysis)", song.name, song.bpm);
-    println!("   t    bpm  groove  calm  kicks/2s  energy");
+    println!("   t    bpm  groove  calm  kicks/2s  energy   lvl4(b m mh h)        hits/2s(b m mh h)  clock rate x tempo");
+    let mut hit_n = [0u32; 4];
+    let mut prev_hit = [0.0f32; 4];
+    let mut clk = 0.0f32;
+    let mut rate_acc = 0.0f32;
+    let mut rate_n = 0u32;
     for (i, &s) in song.mono.iter().enumerate() {
         a.buf.push_back(s);
         if a.buf.len() > FFT_SIZE {
@@ -848,14 +910,31 @@ pub fn groove_test(path: &std::path::Path) -> anyhow::Result<()> {
                 kicks += a.kick_times.len() - last_kick_len;
             }
             last_kick_len = a.kick_times.len();
+            for b in 0..4 {
+                if a.f.hits4[b] > prev_hit[b] + 0.2 {
+                    hit_n[b] += 1;
+                }
+                prev_hit[b] = a.f.hits4[b];
+            }
+            // Same clock-rate maths as main.rs (whole-mix clock).
+            let l = &a.f.lvl4;
+            let whole = (l[0] * 0.45 + l[1] * 0.3 + l[2] * 0.15 + l[3] * 0.1).min(1.0);
+            clk += (whole - clk) * ((1.0 / a.fps) / 0.35).min(1.0);
+            rate_acc += 0.3 + 2.4 * clk.powf(1.6);
+            rate_n += 1;
             let t = i as f32 / song.sr as f32;
             if t >= next_print {
                 println!(
-                    "{:5.0}s {:6.1} {:6.2} {:5.2} {:6} {:8.2}{}",
+                    "{:5.0}s {:6.1} {:6.2} {:5.2} {:6} {:8.2}   {:.2} {:.2} {:.2} {:.2}   {:3} {:3} {:3} {:3}   {:.2}{}",
                     t, a.f.bpm, a.f.groove, a.f.calm, kicks, a.f.energy,
+                    l[0], l[1], l[2], l[3], hit_n[0], hit_n[1], hit_n[2], hit_n[3],
+                    rate_acc / rate_n.max(1) as f32,
                     if a.f.calm > 0.5 { "  BREAKDOWN" } else { "" }
                 );
                 kicks = 0;
+                hit_n = [0; 4];
+                rate_acc = 0.0;
+                rate_n = 0;
                 next_print += 2.0;
             }
         }
