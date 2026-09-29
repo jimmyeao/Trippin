@@ -64,68 +64,108 @@ fn sky(rd: vec3<f32>) -> vec3<f32> {
     return mix(vec3<f32>(0.012, 0.01, 0.022), vec3<f32>(0.002, 0.002, 0.006), sqrt(h));
 }
 
-// Crowd silhouettes in screen space: three parallax rows of heads and
-// shoulders (irregular spacing and height), with raised arms swaying on the
-// beat. Returns (coverage, rim).
 fn smin(a: f32, b: f32, k: f32) -> f32 {
     let h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
     return mix(b, a, h) - k * h * (1.0 - h);
 }
 
-fn crowd(p: vec2<f32>, sway: f32) -> vec2<f32> {
-    var cov = 0.0;
-    var rim = 0.0;
-    // Front row first so its coverage hides the rims of the rows behind.
-    for (var row = 2; row >= 0; row--) {
-        let fr = f32(row);
-        let scale = 0.15 + fr * 0.1;               // nearer rows are bigger
-        let base = 0.5 + fr * 0.2;                 // screen y of shoulders (y-down)
-        let x = (p.x + sway * (0.3 + fr * 0.5) + fr * 0.37) / scale;
+fn seg(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
+    let pa = p - a;
+    let ba = b - a;
+    let h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+    return length(pa - ba * h);
+}
+
+// One person in local units (1 = shoulder width-ish; y DOWN, 0 = shoulder
+// line). Returns (distance, phone-screen emission).
+fn person(q: vec2<f32>, h1: f32, h2: f32, h3: f32) -> vec2<f32> {
+    let hw = 0.9 + 0.25 * h3;                        // build
+    // Head: slightly tall ellipse; some have a bun, cap or long hair.
+    let hq = q - vec2<f32>((h1 - 0.5) * 0.08, -0.78);
+    var head = length(hq * vec2<f32>(1.0, 0.86)) - 0.26;
+    let style = fract(h3 * 7.3);
+    if style < 0.25 {
+        head = smin(head, length(hq - vec2<f32>(0.05, -0.27)) - 0.11, 0.06);       // bun
+    } else if style < 0.45 {
+        head = smin(head, max(abs(hq.x) - 0.3, abs(hq.y + 0.12) - 0.05), 0.04);   // cap brim
+    } else if style < 0.7 {
+        head = smin(head, max(abs(hq.x) - 0.24, abs(hq.y - 0.28) - 0.3) - 0.04, 0.1); // long hair
+    }
+    let neck = seg(q, vec2<f32>(0.0, -0.55), vec2<f32>(0.0, -0.3)) - 0.1;
+    // Sloped shoulders and a torso that widens slightly downward.
+    let sh = seg(q, vec2<f32>(-0.36 * hw, -0.12), vec2<f32>(0.36 * hw, -0.12)) - 0.17;
+    let torso = max(abs(q.x) - 0.42 * hw - max(q.y, 0.0) * 0.08, -(q.y + 0.1)) - 0.04;
+    var d = smin(smin(head, neck, 0.07), smin(sh, torso, 0.1), 0.1);
+    var phone = 0.0;
+    // Arms: most people have at least one hand up on the drop; the rest keep
+    // them low. Upper arm + forearm with an elbow, swaying on the beat.
+    let ups = h2 * (0.4 + 0.8 * u.intensity);
+    for (var a = 0; a < 2; a++) {
+        let side = select(-1.0, 1.0, a == 1);
+        let raised = step(0.45 + f32(a) * 0.25, ups);
+        if raised < 0.5 {
+            continue;
+        }
+        let sw = sin(u.beat * PI + h1 * 6.0 + f32(a) * 1.3) * 0.22 * (0.3 + u.intensity);
+        let s0 = vec2<f32>(side * 0.4 * hw, -0.15);
+        let el = s0 + vec2<f32>(side * (0.3 + 0.1 * h3) + sw * 0.3, -0.62);
+        let hand = el + vec2<f32>(side * (-0.1 + 0.15 * h1) + sw, -0.62 - h3 * 0.2);
+        let arm = min(seg(q, s0, el) - 0.1, seg(q, el, hand) - 0.075);
+        d = smin(d, arm, 0.05);
+        d = min(d, length(q - hand - vec2<f32>(0.0, -0.06)) - 0.1);
+        // Phone held up: a small glowing screen.
+        if a == 1 && fract(h1 * 13.1) > 0.72 {
+            let pq = q - hand - vec2<f32>(0.0, -0.2);
+            let scr = max(abs(pq.x) - 0.08, abs(pq.y) - 0.13);
+            d = min(d, scr);
+            phone = smoothstep(0.01, -0.02, scr + 0.015);
+        }
+    }
+    return vec2<f32>(d, phone);
+}
+
+// The crowd, composited over `col` in screen space: five parallax rows,
+// back (small, hazy, stage-tinted) to front (big, black, slightly soft),
+// everyone bouncing on the beat with their own timing, top edges rim-lit by
+// the stage, some phones up.
+fn crowd(p: vec2<f32>, sway: f32, col_in: vec3<f32>, rim_c: vec3<f32>) -> vec3<f32> {
+    var col = col_in;
+    for (var row = 0; row < 5; row++) {
+        let fr = f32(row) / 4.0;
+        let scale = mix(0.06, 0.34, fr * fr);          // nearer rows are bigger
+        let base = mix(0.36, 1.02, fr);                // shoulder line (y-down)
+        let x = (p.x + sway * (0.2 + fr * 0.8) + f32(row) * 0.37) / (scale * 1.05);
         var d = 1e3;
-        // Check this cell and both neighbours so shoulders can overlap.
+        var ph = 0.0;
+        var d_up = 1e3;
+        let e = 2.5 / (u.res_y * scale);               // ~2.5 px in local units
         for (var k = -1; k <= 1; k++) {
             let cell = floor(x) + f32(k);
-            let h1 = hash21(vec2<f32>(cell, fr * 13.0));
-            let h2 = hash21(vec2<f32>(cell, fr * 29.0 + 3.0));
-            let h3 = hash21(vec2<f32>(cell, fr * 7.0 + 11.0));
-            let fx = x - cell - 0.5 - (h1 - 0.5) * 0.5;
-            let lift = (h3 - 0.5) * 0.35;               // height variation
-            let y = (p.y - base) / scale + lift;
-            let head = length(vec2<f32>(fx * 1.1, (y + 0.8) * 0.95)) - 0.28;
-            let neck = length(vec2<f32>(fx, max(abs(y + 0.42) - 0.12, 0.0))) - 0.11;
-            // Shoulders: a capsule across, torso falling away below it.
-            let sx = max(abs(fx) - 0.3, 0.0);
-            let shoulders = length(vec2<f32>(sx, y + 0.12)) - 0.2;
-            let torso = max(abs(fx) - 0.42 - max(y, 0.0) * 0.05, -(y + 0.1));
-            var dd = smin(smin(head, neck, 0.08), min(shoulders, torso), 0.12);
-            if h2 > 0.5 {
-                let side = select(-1.0, 1.0, h1 > 0.5);
-                let sw = sin(u.beat * PI + h1 * 6.0) * 0.3 * (0.3 + u.intensity);
-                let sh = vec2<f32>(side * 0.4, -0.25);
-                let el = sh + vec2<f32>(side * 0.25 + sw * 0.4, -0.8);
-                let hand = el + vec2<f32>(sw, -0.75 - h3 * 0.3);
-                let q = vec2<f32>(fx, y);
-                let pa = q - sh;
-                let ba = el - sh;
-                let t1 = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
-                let pb = q - el;
-                let bb = hand - el;
-                let t2 = clamp(dot(pb, bb) / dot(bb, bb), 0.0, 1.0);
-                let arm = min(length(pa - ba * t1) - 0.12 + t1 * 0.03, length(pb - bb * t2) - 0.09 + t2 * 0.02);
-                let palm = length(q - hand) - 0.12;
-                dd = min(dd, min(arm, palm));
-            }
-            d = min(d, dd);
+            let h1 = hash21(vec2<f32>(cell, f32(row) * 13.0));
+            let h2 = hash21(vec2<f32>(cell, f32(row) * 29.0 + 3.0));
+            let h3 = hash21(vec2<f32>(cell, f32(row) * 7.0 + 11.0));
+            let bounce = -abs(sin((u.beat + h1 * 0.5) * PI)) * 0.12 * (0.2 + u.intensity);
+            let lx = x - cell - 0.5 - (h1 - 0.5) * 0.45;
+            let ly = (p.y - base) / scale + (h3 - 0.5) * 0.3 - bounce;
+            let r = person(vec2<f32>(lx, ly), h1, h2, h3);
+            d = min(d, r.x);
+            ph = max(ph, r.y);
+            d_up = min(d_up, person(vec2<f32>(lx, ly - e * 3.0), h1, h2, h3).x);
         }
-        let px = 1.5 / (u.res_y * scale);
-        let c = smoothstep(px, -px, d);
-        // Rim only along upper edges (heads, shoulders, raised arms).
-        let yy = (p.y - base) / scale;
-        let r = smoothstep(px * 5.0, 0.0, abs(d)) * (1.0 - cov) * smoothstep(-0.4, -0.8, yy);
-        rim = max(rim, r * (1.0 - fr * 0.35));
-        cov = max(cov, c);
+        // Front row slightly out of focus.
+        let soft = e * mix(0.6, 2.5, fr * fr);
+        let cov = smoothstep(soft, -soft, d);
+        // Rim: inside now, outside a few pixels up → a top-facing edge.
+        // Both conditions must hold outright — in the anti-aliased band both
+        // terms sit near 0.5 and would outline every edge.
+        let rim = smoothstep(0.0, -soft, d) * smoothstep(0.0, soft, d_up);
+        let haze = mix(0.35, 0.0, fr);                  // far rows sit in the haze
+        let body = mix(vec3<f32>(0.002, 0.002, 0.003), col_in * 0.35 + rim_c * 0.05, haze);
+        col = mix(col, body, cov);
+        col += rim_c * rim * mix(0.5, 0.25, fr);
+        col += vec3<f32>(0.7, 0.8, 1.0) * ph * cov * 0.8;
     }
-    return vec2<f32>(cov, rim);
+    return col;
 }
 
 @fragment
@@ -234,9 +274,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     col += wall_video(vec2<f32>(0.0, 8.5)) * 0.02 * exp(-dot(glow_p, glow_p) * 1.5);
 
     // --- Crowd -------------------------------------------------------------------
-    let cr = crowd(p, sway);
-    let rim_c = mix(palette(0.5), vec3<f32>(1.0, 0.6, 0.3), drop * 0.6) * (0.25 + 0.6 * u.intensity);
-    col = mix(col, vec3<f32>(0.002, 0.002, 0.003), cr.x) + rim_c * cr.y * 0.22;
+    let rim_c = mix(palette(0.5), vec3<f32>(1.0, 0.6, 0.3), drop * 0.6) * (0.3 + 0.7 * u.intensity);
+    col = crowd(p, sway, col, rim_c);
 
     col += (bluen(in.pos.xy) - 0.5) * 0.003;
     return vec4<f32>(col, 1.0);
