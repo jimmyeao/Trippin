@@ -13,12 +13,14 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         let h3 = hash21(vec2<f32>(fi * 5.3, 8.8));
 
         // Slow lissajous drift, each orb on its own path.
-        let cx = sin(u.time * (0.08 + h3 * 0.15) + h.x * TAU) * aspect() * 0.8;
-        let cy = cos(u.time * (0.06 + h.y * 0.12) + h.y * TAU) * 0.7;
+        // Energy: drift pace follows the energy clock (beats, ~2/s).
+        let cx = sin(u.clock4.x * 0.5 * (0.08 + h3 * 0.15) + h.x * TAU) * aspect() * 0.8;
+        let cy = cos(u.clock4.x * 0.5 * (0.06 + h.y * 0.12) + h.y * TAU) * 0.7;
         let d = length(p - vec2<f32>(cx, cy));
 
         // Big soft disc: gaussian core + faint rim like a defocused lens.
-        let r = 0.12 + h3 * 0.30;
+        // Shape: orbs swell with their band's presence and jump on kicks.
+        let r = (0.12 + h3 * 0.30) * (0.75 + 0.5 * u.pres4[i % 4]) + 0.04 * u.hits4.x;
         let core = exp(-d * d / (r * r) * 3.0);
         let rim = smoothstep(r, r * 0.85, d) * smoothstep(r * 0.6, r * 0.85, d) * 0.6;
 

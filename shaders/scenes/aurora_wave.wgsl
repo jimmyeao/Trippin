@@ -10,10 +10,13 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     for (var i = 0; i < 3; i++) {
         let fi = f32(i);
-        let phase = p.x * (1.5 + fi * 0.7) + u.flow * (0.3 + fi * 0.15) + fi * 2.1;
-        let centre = 0.55 + sin(phase) * 0.15 + fi * 0.08;
+        // Direction: curtains drift one way then the other; the ripple
+        // speed rides the mid energy clock.
+        let phase = p.x * (1.5 + fi * 0.7) + 3.0 * sin(u.clock4.x * 0.02 + fi) + u.clock4.z * (0.15 + fi * 0.08) + fi * 2.1;
+        // Shape: folds deepen with bass presence.
+        let centre = 0.55 + sin(phase) * (0.1 + 0.15 * u.pres4.x) + fi * 0.08;
         // Curtain: a soft sheet hanging from above, edge wobbles.
-        let edge_wob = sin(p.x * 6.0 + u.flow * 1.2 + fi * 5.0) * 0.05;
+        let edge_wob = sin(p.x * 6.0 + u.clock4.w * 1.2 + fi * 5.0) * (0.03 + 0.08 * u.pres4.w);
         let sheet = smoothstep(centre + edge_wob + 0.3, centre + edge_wob - 0.35, up);
         // Vertical strands inside the curtain shimmer on the highs.
         let strand = 0.5 + 0.5 * sin(p.x * 40.0 + fi * 9.0 + u.time * 0.7);

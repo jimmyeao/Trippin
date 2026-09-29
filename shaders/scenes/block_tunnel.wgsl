@@ -32,7 +32,8 @@ struct Block {
 
 // Distance to the nearest block among the 3x3 neighbouring cells.
 fn blocks(p: vec3<f32>) -> Block {
-    let q = p.xy - centre(p.z);
+    // Direction: the whole tunnel twists one way then the other.
+    let q = rot(0.5 * sin(u.clock4.z * 0.02)) * (p.xy - centre(p.z));
     let cell = vec2<f32>(floor((angle(q) / TAU + 0.5) * N), floor(p.z / L));
     var best: Block;
     best.d = 1e9;
@@ -43,7 +44,9 @@ fn blocks(p: vec3<f32>) -> Block {
             let radial = vec2<f32>(cos(a), sin(a));
             let tangent = vec2<f32>(-radial.y, radial.x);
             let h = hash21(vec2<f32>(((id.x % N) + N) % N, id.y));
-            let inner = R0 - DEPTH * h;
+            // Shape: blocks push in and retract with bass presence (never
+            // beyond their original depth, so the flight stays clear).
+            let inner = R0 - DEPTH * h * (0.55 + 0.45 * u.pres4.x);
             // Box from its inner face out past the wall.
             let half = vec3<f32>(PI * R0 / N * 0.97, (R0 + 0.3 - inner) * 0.5, L * 0.485);
             let mid_r = inner + half.y;
@@ -77,7 +80,7 @@ fn normal_at(p: vec3<f32>) -> vec3<f32> {
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
-    let z = u.flow * 1.6;
+    let z = u.clock4.x * 1.6;
     let ro = vec3<f32>(centre(z), z);
     let look_at = vec3<f32>(centre(z + 3.0), z + 3.0);
     let fw = normalize(look_at - ro);

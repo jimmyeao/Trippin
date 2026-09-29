@@ -10,8 +10,11 @@ fn sd_box(p: vec3<f32>, b: vec3<f32>) -> f32 {
 }
 
 // Height and glow of the tower in cell `id`; the street keeps x cells 0/-1 clear.
+// Shape: each tower rises and sinks with its own spectrum band (a street
+// of equaliser bars).
 fn tower_h(id: vec2<f32>) -> f32 {
-    return 0.5 + 3.0 * hash21(id * 3.17 + 11.0);
+    let band = hash21(id + 31.0);
+    return 0.5 + 3.0 * hash21(id * 3.17 + 11.0) * (0.55 + 0.7 * spec(band));
 }
 
 struct Hit {
@@ -63,13 +66,15 @@ fn windows(pos: vec3<f32>, h: Hit) -> vec3<f32> {
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
-    let z = u.flow * 4.0;
+    // Energy: the drive speeds up and slows with the mix.
+    let z = u.clock4.x * 4.0;
 
     // Street-centre camera; dips on the kick, sways lazily.
-    let ro = vec3<f32>(sin(u.time * 0.23) * 0.3, 1.05 - 0.10 * beat_pulse(8.0), z);
+    // Direction: weave from lane side to side, reversing each phrase.
+    let ro = vec3<f32>(sin(u.clock4.x * 0.05) * 0.45, 1.05 - 0.10 * beat_pulse(8.0), z);
     // centred() has +y pointing down the screen — negate so up is up.
     var rd = normalize(vec3<f32>(p.x * 0.8, -p.y * 0.7 + 0.12, 1.0));
-    rd = vec3<f32>(rot(sin(u.time * 0.09) * 0.04) * rd.xy, rd.z);
+    rd = vec3<f32>(rot(sin(u.clock4.x * 0.05) * 0.08) * rd.xy, rd.z);
 
     let t_ground = select(1e5, (-0.02 - ro.y) / rd.y, rd.y < 0.0);
     let t_max = min(t_ground, 90.0);

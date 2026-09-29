@@ -8,16 +8,20 @@ fn map(p: vec3<f32>) -> vec2<f32> {
     var c = p - id * 3.0;
     // Bob: each cell bobs on its own beat subdivision.
     c.y -= sin(u.beat * (0.5 + h) + h * TAU) * (0.3 + h * 0.5);
-    let r = 0.32 + h * 0.28 + u.kick * 0.08;
+    // Shape: orbs swell with their band's presence and jolt on kicks.
+    let r = (0.32 + h * 0.28) * (0.85 + 0.3 * spec(h)) + 0.06 * u.hits4.x;
     return vec2<f32>(length(c) - r, h);
 }
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
-    let t = u.flow * 0.5;
-    let ro = vec3<f32>(sin(t * 0.3) * 1.5, 3.0 + sin(t * 0.2) * 0.5, t * 4.0);
+    let t = u.clock4.x * 0.5;
+    let ro = vec3<f32>(1.5 + sin(t * 0.3) * 0.3, 1.5 + sin(t * 0.2) * 0.3, t * 4.0);
     var rd = normalize(vec3<f32>(p.x * 0.8, -p.y * 0.7 - 0.3, 1.0));
+    // Direction: yaw swings left and right over a phrase.
+    let yw = rot(0.35 * sin(u.clock4.x * 0.03)) * rd.xz;
+    rd = vec3<f32>(yw.x, rd.y, yw.y);
 
     var d_tot = 0.0;
     var hit = -1.0;
