@@ -265,6 +265,9 @@ pub struct DancerLayer {
     /// True once we've swapped to a gentle routine for the current calm
     /// spell; re-arms when the track picks up again.
     calm_swap: bool,
+    /// Current tempo — high-energy routines are held back on slow tracks
+    /// (see `energy_cap`).
+    pub bpm: f32,
 }
 
 impl DancerLayer {
@@ -282,6 +285,7 @@ impl DancerLayer {
             opacity: 0.0,
             rng: 0x9E37_79B9_7F4A_7C15,
             calm_swap: false,
+            bpm: 120.0,
         }
     }
 
@@ -339,12 +343,11 @@ impl DancerLayer {
                 .filter_map(|s| self.slots[s].current)
                 .collect();
             let mine = self.slots[slot].current;
-            if mine.is_some_and(|m| !taken.contains(&m) && !disabled.contains(&self.clips[m].name))
-            {
+            if mine.is_some_and(|m| !taken.contains(&m) && self.clip_allowed(m, disabled)) {
                 continue;
             }
             let free: Vec<usize> = (0..self.clips.len())
-                .filter(|i| !taken.contains(i) && !disabled.contains(&self.clips[*i].name))
+                .filter(|i| !taken.contains(i) && self.clip_allowed(*i, disabled))
                 .collect();
             // Too few ticked routines to go round: at least differ from the main dancer.
             let pool: Vec<usize> = if free.is_empty() {
@@ -364,11 +367,31 @@ impl DancerLayer {
     /// Load a routine whose energy suits the track: one of the three closest
     /// matches other than the current one (skipping `disabled` ones), chosen
     /// by `r` in 0..1.
+    /// Highest clip energy that suits the current tempo: fast, driving
+    /// routines look frantic on slow (60-100 BPM) tracks, so they're held
+    /// back there and phase in between 100 and 118 BPM.
+    pub fn energy_cap(&self) -> f32 {
+        let bpm = if self.bpm > 1.0 { self.bpm } else { 120.0 };
+        (0.45 + (bpm - 100.0) / 18.0 * 0.55).clamp(0.45, 1.0)
+    }
+
+    fn clip_allowed(&self, i: usize, disabled: &[String]) -> bool {
+        !disabled.contains(&self.clips[i].name) && self.clips[i].energy <= self.energy_cap() + 1e-3
+    }
+
     pub fn pick_for(&mut self, intensity: f32, r: f32, disabled: &[String]) {
         let current = self.current();
         let mut order: Vec<usize> = (0..self.clips.len())
-            .filter(|&i| Some(i) != current && !disabled.contains(&self.clips[i].name))
+            .filter(|&i| Some(i) != current && self.clip_allowed(i, disabled))
             .collect();
+        // Everything over the cap (or disabled): fall back to the gentlest.
+        if order.is_empty() {
+            order = (0..self.clips.len())
+                .filter(|&i| Some(i) != current && !disabled.contains(&self.clips[i].name))
+                .collect();
+            order.sort_by(|&a, &b| self.clips[a].energy.total_cmp(&self.clips[b].energy));
+            order.truncate(1);
+        }
         order.sort_by(|&a, &b| {
             let d = |i: usize| (self.clips[i].energy - intensity).abs();
             d(a).total_cmp(&d(b))
@@ -407,8 +430,9 @@ impl DancerLayer {
             Tristate::On => true,
             Tristate::Off => false,
         };
+        let cap = self.energy_cap();
         let current = self.current().and_then(|i| self.clips.get(i));
-        let current_ok = current.is_some_and(|c| !disabled.contains(&c.name));
+        let current_ok = current.is_some_and(|c| !disabled.contains(&c.name) && c.energy <= cap + 1e-3);
         let energy = current.map_or(0.5, |c| c.energy);
         // Calm sections always want a gentle routine: never let a stormer
         // ride out a breakdown.
@@ -504,6 +528,17 @@ impl DancerLayer {
             self.calm_swap = true;
             let r = self.rand();
             self.pick_for(intensity * 0.8, r, disabled);
+        }
+        // Tempo watchdog: a driving routine left over from a faster track (or
+        // the start-up clip) is swapped out once the tempo is too slow for it.
+        if self.slots[0].loader.is_none()
+            && self
+                .current()
+                .and_then(|i| self.clips.get(i))
+                .is_some_and(|c| c.energy > self.energy_cap() + 1e-3)
+        {
+            let r = self.rand();
+            self.pick_for(intensity.min(self.energy_cap()), r, disabled);
         }
         let mut slots = [SlotUniforms::default(); SLOTS];
         for (i, slot) in self.slots.iter_mut().enumerate() {

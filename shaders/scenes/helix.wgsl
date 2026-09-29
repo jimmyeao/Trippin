@@ -9,7 +9,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     // Horizontal breathe: expands on the beat then eases back. Pose, not an
     // integrator, so it can't stutter — it just follows beat_phase.
-    let breathe = 1.0 + exp(-u.beat_phase * 4.5) * (0.25 + u.bass * 0.5)
+    let breathe = 1.0 + beat_pulse(4.5) * (0.25 + u.bass * 0.5)
                 + u.kick * 0.15;
     p.x /= breathe;
 
@@ -26,7 +26,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
         // Two strands at phase 0 and pi — separation also widens on beats.
         let ph = fi * 0.55 + scroll * 2.0;
-        let sep = 0.28 * (1.0 + exp(-u.beat_phase * 5.0) * 0.35);
+        let sep = 0.28 * (1.0 + beat_pulse(5.0) * 0.35);
         let x1 = sin(ph) * sep;
         let x2 = sin(ph + PI) * sep;
 

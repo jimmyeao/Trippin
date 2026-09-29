@@ -50,7 +50,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let rd = cam_ray(p, ro, ta, sin(u.flow * 0.02) * 0.01, 1.3);
     let drive = 0.5 + 0.8 * u.intensity;
     let storm_dir = normalize(vec3<f32>(-0.6, 0.0, 1.0));
-    let flash = step(0.55, hash21(vec2<f32>(floor(u.beat), 7.7))) * exp(-u.beat_phase * 7.0) * smoothstep(0.2, 0.7, u.intensity + u.onset * 0.3);
+    let flash = step(0.55, hash21(vec2<f32>(floor(u.beat), 7.7))) * beat_pulse(7.0) * smoothstep(0.2, 0.7, u.intensity + u.onset * 0.3);
     let lamp_c = vec3<f32>(1.0, 0.55, 0.18);
     let lamp_i = (0.6 + 1.0 * u.bass) * drive;
 

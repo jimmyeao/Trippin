@@ -130,7 +130,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // bloom that lights the clouds and rims the hill. Beat-hashed so it fires
     // sparsely in quiet sections and often in driven ones — never a strobe.
     let striking = step(1.0 - 0.45 * u.intensity, hash21(vec2<f32>(strike_k, 31.0)));
-    let lflick = striking * exp(-u.beat_phase * 5.0)
+    let lflick = striking * beat_pulse(5.0)
                * (0.55 + 0.45 * sin(u.beat_phase * 80.0 + hash21(vec2<f32>(strike_k, 7.0)) * 20.0));
     let bolt_x = (hash21(vec2<f32>(strike_k, 5.0)) - 0.5) * 1.7 * asp;
     let band_i = floor((p.y + 1.1) * 9.0);

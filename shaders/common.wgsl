@@ -32,7 +32,7 @@ struct U {
     bloom: f32,       // `// @bloom <amt>` — 0 = off (older scenes unchanged)
     tonemap: f32,     // `// @tonemap agx` — 0 ACES, 1 AgX
     frame: f32,       // frame counter (wraps) — animates blue-noise dither
-    _pad: f32,
+    calm: f32,        // 0 = beats playing, 1 = breakdown (no drums); smoothed
 };
 
 @group(0) @binding(0) var<uniform> u: U;
@@ -119,8 +119,12 @@ fn wave(x: f32) -> f32 {
     return mix(a, b, fract(f));
 }
 
-// Sharp pulse at each beat, decaying through it.
-fn beat_pulse(sharpness: f32) -> f32 { return exp(-u.beat_phase * sharpness); }
+// Sharp pulse at each beat, decaying through it. In a breakdown (no drums)
+// the beat clock keeps ticking, but flashing to it looks wrong — the pulse
+// melts into a slow, steady level instead.
+fn beat_pulse(sharpness: f32) -> f32 {
+    return mix(exp(-u.beat_phase * sharpness), 0.25, u.calm);
+}
 
 fn rot(a: f32) -> mat2x2<f32> {
     let c = cos(a);

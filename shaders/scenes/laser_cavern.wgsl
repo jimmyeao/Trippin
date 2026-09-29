@@ -134,7 +134,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         // Black pool: mirror of the cave + lasers, rippled on the kick.
         let hp = ro + rd * t_pool;
         let r = length(hp.xz - emitter().xz * vec2<f32>(1.0, 0.6));
-        let ring = sin(r * 3.0 - u.beat_phase * 12.0) * exp(-u.beat_phase * 3.0) * u.kick * 0.03;
+        let ring = sin(r * 3.0 - u.beat_phase * 12.0) * beat_pulse(3.0) * u.kick * 0.03;
         let wn = tnoise(vec3<f32>(hp.xz * 0.4, u.time * 0.05)).b - 0.5;
         let n = normalize(vec3<f32>(wn * 0.02 + ring * hp.x / max(r, 0.1), 1.0, wn * 0.02 + ring * hp.z / max(r, 0.1)));
         let rr = reflect(rd, n);

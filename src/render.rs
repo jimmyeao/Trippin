@@ -72,7 +72,8 @@ pub struct Uniforms {
     pub tonemap: f32,
     /// Frame counter (wraps) — animates blue-noise dither.
     pub frame: f32,
-    pub _pad: f32,
+    /// Breakdown state 0 = beats, 1 = breakdown (no drums) — see audio.rs.
+    pub calm: f32,
 }
 
 #[derive(Default, Clone, Copy, PartialEq)]
@@ -1507,7 +1508,7 @@ impl Renderer {
             bloom: 0.0,
             tonemap: self.scenes[scene].tonemap,
             frame: 0.0,
-            _pad: 0.0,
+            calm: 0.0,
         };
         self.queue
             .write_buffer(&self.uniform_buf, 0, bytemuck::bytes_of(&u));

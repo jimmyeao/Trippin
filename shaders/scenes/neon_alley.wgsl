@@ -29,7 +29,7 @@ fn sign_level(k: f32) -> f32 {
     //  2 chase — lit on its own beat of the bar, so light runs down the
     //    alley, 3 hi-hat strobe, 4 faulty flicker.
     let role = i32(hash21(vec2<f32>(k, 3.3)) * 5.0);
-    let flash = exp(-u.beat_phase * 6.0);
+    let flash = beat_pulse(6.0);
     var l = base;
     if role == 1 {
         l = base * (0.35 + 1.6 * u.kick);

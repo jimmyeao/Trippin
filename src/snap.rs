@@ -31,11 +31,12 @@ fn arg<'a>(args: &'a [String], k: &str) -> Option<&'a str> {
 }
 
 /// A plausible house groove at `t` seconds, 126 BPM.
-fn groove(t: f32, w: u32, h: u32, frame: u32, bloom: f32, tonemap: f32) -> Uniforms {
+fn groove(t: f32, w: u32, h: u32, frame: u32, bloom: f32, tonemap: f32, calm: f32) -> Uniforms {
     let bpm = 126.0;
     let beat = t * bpm / 60.0;
     let ph = beat.fract();
-    let kick = (-ph * 7.0).exp();
+    // In a breakdown there are no drums: no kick, no onsets.
+    let kick = (-ph * 7.0).exp() * (1.0 - calm);
     let bar = (beat / 4.0).fract();
     let mut spectrum = [0.0f32; SPECTRUM_BINS];
     for (i, v) in spectrum.iter_mut().enumerate() {
@@ -56,7 +57,7 @@ fn groove(t: f32, w: u32, h: u32, frame: u32, bloom: f32, tonemap: f32) -> Unifo
         mid: 0.5,
         high: 0.35 + 0.2 * (t * 3.0).sin().abs(),
         energy: 0.6,
-        onset: if ph < 0.05 { 1.0 } else { 0.0 },
+        onset: if ph < 0.05 { 1.0 - calm } else { 0.0 },
         kick,
         beat,
         beat_phase: ph,
@@ -64,7 +65,7 @@ fn groove(t: f32, w: u32, h: u32, frame: u32, bloom: f32, tonemap: f32) -> Unifo
         bpm,
         build: 0.0,
         scene_time: t,
-        intensity: 0.7,
+        intensity: 0.7 - 0.45 * calm,
         hue: 0.0,
         seed: 17.0,
         flash: 0.0,
@@ -77,7 +78,7 @@ fn groove(t: f32, w: u32, h: u32, frame: u32, bloom: f32, tonemap: f32) -> Unifo
         bloom,
         tonemap,
         frame: (frame % 4096) as f32,
-        _pad: 0.0,
+        calm,
     }
 }
 
@@ -96,6 +97,8 @@ pub fn run(args: &[String]) -> Result<()> {
     let out_dir = PathBuf::from(arg(args, "--snap-out").unwrap_or("snaps"));
     std::fs::create_dir_all(&out_dir)?;
     let low = arg(args, "--gpu") == Some("low");
+    // `--snap-calm 1` previews breakdown mode (no drums).
+    let calm: f32 = arg(args, "--snap-calm").and_then(|s| s.parse().ok()).unwrap_or(0.0);
 
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -259,7 +262,7 @@ pub fn run(args: &[String]) -> Result<()> {
         let mut frame = 0u32;
         // One full frame: scene → bloom → present.
         let step = |t: f32, frame: u32, cur: &mut usize| {
-            let u = groove(t, w, h, frame, bloom_amt, tonemap);
+            let u = groove(t, w, h, frame, bloom_amt, tonemap, calm);
             queue.write_buffer(&ubuf, 0, bytemuck::bytes_of(&u));
             let next = 1 - *cur;
             let mut enc = device.create_command_encoder(&Default::default());

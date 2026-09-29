@@ -450,6 +450,9 @@ fn render_loop(
     let mut fps = 0.0f32;
     let mut flow = 0.0f64;
     let mut flow_bpm = 120.0f32;
+    // Camera-clock speed: eases to ~0.55x in breakdowns (floaty), back to 1x
+    // with the drums. Integrated into `flow`, so it never jumps.
+    let mut flow_speed = 1.0f32;
     let mut blackout = false;
     let mut master = 1.0f32;
     // The post effect showing now — the auto-pilot's pick when `fx_auto` is on.
@@ -977,7 +980,9 @@ fn render_loop(
         for (slot, clip) in dancer.poll_loaded() {
             r.set_dancer_clip(slot, &clip);
         }
-        if (ev.cut || ev.phrase) && s.mode != Mode::Manual && dancer.enabled {
+        dancer.bpm = f.bpm;
+        // Breakdowns and drops re-pick the dancer too (graceful <-> driving).
+        if (ev.cut || ev.phrase || ev.mode_change) && s.mode != Mode::Manual && dancer.enabled {
             let intensity = dir.intensity;
             dancer.on_cut(
                 intensity,
@@ -1004,7 +1009,9 @@ fn render_loop(
 
         // Tempo changes ease in; position only ever moves forward smoothly.
         flow_bpm += (f.bpm - flow_bpm) * (dt * 1.5).min(1.0);
-        flow = (flow + dt as f64 * flow_bpm as f64 / 60.0) % 4096.0;
+        let speed_target = 1.0 - 0.45 * f.calm;
+        flow_speed += (speed_target - flow_speed) * (dt * 0.8).min(1.0);
+        flow = (flow + dt as f64 * flow_bpm as f64 / 60.0 * flow_speed as f64) % 4096.0;
         let target = if blackout { 0.0 } else { 1.0 };
         master += (target - master) * (dt * 3.0).min(1.0);
 
@@ -1025,7 +1032,9 @@ fn render_loop(
             mid: f.mid,
             high: f.high,
             energy: f.energy,
-            onset: f.onset,
+            // Melodic onsets in a breakdown (piano, plucks) shouldn't fire the
+            // drum-style flashes scenes hang off `onset`.
+            onset: f.onset * (1.0 - 0.6 * f.calm),
             kick: f.kick,
             beat: (pos % 4096.0) as f32,
             beat_phase: pos.fract() as f32,
@@ -1047,7 +1056,7 @@ fn render_loop(
             bloom: 0.0,
             tonemap: 0.0,
             frame: 0.0,
-            _pad: 0.0,
+            calm: f.calm,
         };
         // Text overlays: fade in over 0.35 s, out over 0.5 s; a faded-out
         // slot drops off (its texture stays bound but the shader skips it).
@@ -1106,6 +1115,8 @@ fn render_loop(
                 fullscreen: false,
                 fx: if s.fx_auto { fx_current } else { s.fx },
                 output: r.output_status(),
+                groove: f.groove,
+                calm: f.calm,
             };
         }
 

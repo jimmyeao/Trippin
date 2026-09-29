@@ -299,7 +299,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
             let tc = dot(w.xz, rd.xz) / dot(rd.xz, rd.xz);
             let yc = ro.y + rd.y * tc - base.y;
             let dx = length((ro + rd * tc).xz - base.xz);
-            let env = exp(-u.beat_phase * 3.0) * drop;        // burst per beat
+            let env = beat_pulse(3.0) * drop;        // burst per beat
             let hgt = 7.0 * env;
             if yc > 0.0 && yc < hgt + 1.5 && tc > 0.0 && tc < t_hit {
                 let n = tnoise(vec3<f32>(dx * 0.3 + f32(j), yc * 0.12 - u.time * 1.4, u.time * 0.2)).r;

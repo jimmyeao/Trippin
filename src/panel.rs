@@ -59,6 +59,9 @@ pub struct Status {
     /// External output status line (NDI receiver count / error) — Some while
     /// output is enabled.
     pub output: Option<String>,
+    /// Groove 0..1 and breakdown state 0..1 (see audio.rs `Features`).
+    pub groove: f32,
+    pub calm: f32,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -211,6 +214,19 @@ fn build_ui(
         ui.label(format!("{:.1} BPM", st.bpm));
         ui.separator();
         ui.label(format!("beat {}/4", st.beat_in_bar + 1));
+        ui.separator();
+        // Beats vs breakdown — what the visuals are reacting as.
+        if st.calm > 0.5 {
+            ui.colored_label(egui::Color32::from_rgb(140, 170, 255), "breakdown");
+        } else {
+            ui.colored_label(egui::Color32::from_rgb(120, 230, 140), "beats");
+        }
+        ui.add(
+            egui::ProgressBar::new(st.groove)
+                .desired_width(50.0)
+                .desired_height(8.0),
+        )
+        .on_hover_text("Groove: how steadily kicks are landing. Below ~20% for a couple of seconds = breakdown mode.");
         if st.silent {
             ui.colored_label(egui::Color32::from_rgb(255, 160, 60), "no signal");
         }

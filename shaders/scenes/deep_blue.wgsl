@@ -122,7 +122,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         let rgt = normalize(cross(vec3<f32>(0.0, 1.0, 0.0), rd));
         let upv = cross(rd, rgt);
         var q = vec2<f32>(dot(off, rgt), dot(off, upv));
-        let pulse = 1.0 - 0.18 * exp(-u.beat_phase * 3.0);   // contracts on the beat
+        let pulse = 1.0 - 0.18 * beat_pulse(3.0);   // contracts on the beat
         q.x /= pulse;
         let R = 0.55;
         // Bell: an upper half-ellipse with a scalloped rim.

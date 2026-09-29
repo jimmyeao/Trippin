@@ -13,6 +13,8 @@ pub struct Events {
     pub cut: bool,
     /// A phrase ended without a cut (static mode).
     pub phrase: bool,
+    /// The track moved between beat mode and a breakdown (either way).
+    pub mode_change: bool,
 }
 
 pub struct Director {
@@ -22,6 +24,11 @@ pub struct Director {
     pub seed: f32,
     pub flash: f32,
     pub intensity: f32,
+    /// Breakdown state 0..1 (from the audio groove detector), as the
+    /// director last saw it — scales cut flashes and the camera clock.
+    pub calm: f32,
+    /// Hysteretic beats/breakdown flag for mode-change events.
+    in_breakdown: bool,
     bars_in_scene: u32,
     last_bar: i64,
     /// Downbeat slot the bar count is aligned to — a manual re-mark shifts
@@ -47,6 +54,8 @@ impl Director {
             seed: 0.0,
             flash: 0.0,
             intensity: 0.0,
+            calm: 1.0,
+            in_breakdown: true,
             bars_in_scene: 0,
             last_bar: i64::MIN,
             last_downbeat: u64::MAX,
@@ -69,7 +78,8 @@ impl Director {
         self.bars_in_scene = 0;
         self.hue = (self.hue + 0.2 + self.rand() * 0.5).fract();
         self.seed = self.rand() * 100.0;
-        self.flash = 1.0;
+        // A cut in a breakdown is a soft dissolve-ish lift, not a white-out.
+        self.flash = 1.0 - 0.7 * self.calm;
         self.pending_cut = true;
     }
 
@@ -116,14 +126,38 @@ impl Director {
         let mut ev = Events {
             cut: std::mem::take(&mut self.pending_cut),
             phrase: false,
+            mode_change: false,
         };
         self.flash = (self.flash - dt * 2.5).max(0.0);
+        self.calm = f.calm;
+        // Two modes. With drums, intensity follows loudness *and* how hard
+        // the groove is driving; in a breakdown it's capped low and follows
+        // the (pad/vocal) energy gently, so loud pads don't read as a peak.
+        let beat_t = (f.energy * 0.6 + f.groove * 0.35 + f.build.max(0.0) * 0.4).min(1.0);
+        let calm_t = (0.22 + f.energy * 0.35).min(0.5);
         let target = if f.silent {
             0.15
         } else {
-            (f.energy * 0.8 + f.build.max(0.0) * 0.4).min(1.0)
+            beat_t + (calm_t - beat_t) * f.calm
         };
         self.intensity += (target - self.intensity) * (dt * 2.0).min(1.0);
+
+        // Beats <-> breakdown transitions (hysteresis on the smoothed calm).
+        let enter = !self.in_breakdown && f.calm > 0.7;
+        let leave = self.in_breakdown && f.calm < 0.3;
+        let the_drop = leave && !f.silent && self.bars_in_scene >= 1;
+        if enter || leave {
+            self.in_breakdown = enter;
+            ev.mode_change = true;
+        }
+        // Drums slamming back in after a breakdown: that's the drop.
+        if the_drop && s.cut_on_drops && s.mode == Mode::Auto && !usable.is_empty() {
+            self.next_scene(usable, s.random_order);
+            self.flash = 1.0;
+            self.pending_cut = false;
+            ev.cut = true;
+            return ev;
+        }
 
         // The current scene was switched off in the playlist (or failed to compile).
         if !usable.is_empty() && !usable.contains(&self.scene) && s.mode != Mode::Manual {
@@ -147,12 +181,16 @@ impl Director {
             return ev;
         }
 
-        // A drop: energy on this downbeat is well above the recent breakdown.
+        // A drop: energy on this downbeat is well above the recent breakdown
+        // (loudness-based fallback; the groove detector handles most drops).
         let drop = s.cut_on_drops
+            && f.calm < 0.5
             && f.energy - self.recent_low > 0.35
             && f.energy > 0.55
             && self.bars_in_scene >= 2;
-        let phrase_end = self.bars_in_scene >= s.phrase_bars.max(1);
+        // Breakdowns breathe: phrases run twice as long before a cut.
+        let bars = if f.calm > 0.5 { s.phrase_bars.max(1) * 2 } else { s.phrase_bars.max(1) };
+        let phrase_end = self.bars_in_scene >= bars;
         if drop || phrase_end {
             if s.mode == Mode::Auto {
                 self.next_scene(usable, s.random_order);

@@ -248,6 +248,33 @@ an RTX 5070 Ti.
 When writing a scene, use `u.flow` for camera travel. `u.beat` gets phase
 corrections from the beat tracker, so motion driven by it stutters.
 
+## Beats vs breakdowns
+
+The audio analyser counts kick hits over the last 2.5 s against the beats
+expected at the current BPM. That's the `groove` (0–1, shown as a meter
+next to the BPM on the Show tab). When the groove stays low for about
+1.5 s, the show goes into **breakdown mode** (`calm` → 1). That covers
+pads, vocals, pure instrumental and no drums. When the kicks return,
+**beat mode** comes back within about half a second, and the drums
+slamming back in count as a drop.
+
+| | Beat mode | Breakdown mode |
+|---|---|---|
+| Intensity | loudness + groove + build | capped (~0.2–0.5), follows pad energy gently |
+| Beat flashes (`beat_pulse`) | full | melt into a steady glow |
+| Onsets (`u.onset`) | full | damped 60% (melodic notes don't fire flashes) |
+| Camera clock (`u.flow`) | tempo speed | eases to ~0.55× (floaty) |
+| Scene cuts | every phrase, and on drops | every 2 phrases, soft flash |
+| Dancer | driving routines allowed | re-picked to a graceful routine |
+
+Scenes can read `u.calm` directly for their own breakdown looks. Preview
+one with `--snap <scene> --snap-calm 1`.
+
+**Dancer tempo cap:** routines with high `energy` in `clip.json` are held
+back on slow tracks, where they look frantic. The cap is 0.45 up to
+100 BPM and rises to 1.0 by 118 BPM. A clip over the cap is swapped out
+even mid-phrase if the tempo drops.
+
 ## Palettes
 
 The **Show** tab's *Look* section picks a global colour palette —
