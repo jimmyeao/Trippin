@@ -566,14 +566,14 @@ impl Analyzer {
         let expected = WIN * self.f.bpm.clamp(60.0, 200.0) / 60.0;
         let raw_groove = (self.kick_times.len() as f32 / expected * 1.6).clamp(0.0, 1.0);
         self.f.groove += (raw_groove - self.f.groove) * (hop_s / 0.25).min(1.0);
-        // Hysteresis: enter a breakdown only after ~1.5 s of low groove (a
-        // fill or a dropped kick bar mustn't trigger it); leave it as soon as
-        // the groove is clearly back.
+        // Hysteresis: enter a breakdown only after two bars (8 beats) of low
+        // groove — techno drops the kick for a bar or two before a drop and
+        // that mustn't flip the whole show; leave as soon as it's back.
         if silent {
             self.calm_target = 1.0;
         } else if self.f.groove < 0.22 {
             self.quiet_for += hop_s;
-            if self.quiet_for > 1.5 {
+            if self.quiet_for > 8.0 * 60.0 / self.f.bpm.clamp(60.0, 200.0) {
                 self.calm_target = 1.0;
             }
         } else {
@@ -808,6 +808,47 @@ fn smooth(v: &mut f32, target: f32, attack: f32, release: f32) {
     *v += (target - *v) * k;
 }
 
+/// `trippin --groove-test track.mp3`: run the live analyser over a file
+/// (as fast as possible) and print tempo, groove, calm and kick counts every
+/// few seconds — for tuning the beats/breakdown detector on real music.
+pub fn groove_test(path: &std::path::Path) -> anyhow::Result<()> {
+    let song = crate::song::load(path)?;
+    let (_tx, rx) = mpsc::channel();
+    let shared: SharedFeatures = Arc::new(Mutex::new(Features::default()));
+    let mut a = Analyzer::new(song.sr as f32, shared, rx, None);
+    let mut next_print = 0.0f32;
+    let mut kicks = 0usize;
+    let mut last_kick_len = 0usize;
+    println!("{} — {:.1} BPM (file analysis)", song.name, song.bpm);
+    println!("   t    bpm  groove  calm  kicks/2s  energy");
+    for (i, &s) in song.mono.iter().enumerate() {
+        a.buf.push_back(s);
+        if a.buf.len() > FFT_SIZE {
+            a.buf.pop_front();
+        }
+        a.since_hop += 1;
+        if a.since_hop >= HOP && a.buf.len() == FFT_SIZE {
+            a.since_hop = 0;
+            a.frame();
+            if a.kick_times.len() > last_kick_len {
+                kicks += a.kick_times.len() - last_kick_len;
+            }
+            last_kick_len = a.kick_times.len();
+            let t = i as f32 / song.sr as f32;
+            if t >= next_print {
+                println!(
+                    "{:5.0}s {:6.1} {:6.2} {:5.2} {:6} {:8.2}{}",
+                    t, a.f.bpm, a.f.groove, a.f.calm, kicks, a.f.energy,
+                    if a.f.calm > 0.5 { "  BREAKDOWN" } else { "" }
+                );
+                kicks = 0;
+                next_print += 2.0;
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -861,7 +902,7 @@ mod tests {
         }
         assert!(at(12.0).2 < 0.1, "beats should read as beats");
         assert!(at(17.0).2 < 0.5, "one missing bar mustn't trip a breakdown");
-        assert!(at(26.0).2 > 0.9, "a drumless section is a breakdown");
+        assert!(at(29.0).2 > 0.9, "a drumless section is a breakdown");
         assert!(at(33.5).2 < 0.3, "the drop must be caught fast");
         assert!(at(44.0).2 < 0.05);
     }

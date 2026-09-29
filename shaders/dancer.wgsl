@@ -113,7 +113,12 @@ fn shade(hit: Hit, tint: f32) -> vec4<f32> {
     }
     if style == 2 {
         // Strobe: a white flash of the body on each beat, outline in between.
-        let flash = beat_pulse(10.0);
+        // It must always pulse — in a breakdown it slows to a softer flash
+        // every two beats instead of the hard per-beat hit (not beat_pulse(),
+        // which deliberately goes steady in breakdowns).
+        let hard = exp(-u.beat_phase * 10.0);
+        let soft = 0.2 + 0.8 * exp(-fract(u.beat * 0.5) * 4.0);
+        let flash = mix(hard, soft, u.calm);
         let col = vec3<f32>(2.0) * flash * m + e * palette(0.5 + tint);
         return vec4<f32>(col, m * flash);
     }

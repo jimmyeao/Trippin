@@ -285,6 +285,15 @@ fn show_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<UiCo
         Mode::Static => "Holds the current scene; the dancer still changes with the phrases.",
         Mode::Manual => "Nothing changes unless you change it.",
     });
+    row(ui, "Breakdowns", |ui| {
+        ui.selectable_value(&mut s.breakdown_mode, true, "Detect");
+        ui.selectable_value(&mut s.breakdown_mode, false, "Off");
+    });
+    ui.small(if s.breakdown_mode {
+        "When the drums drop out, visuals calm down (no beat flashes, slower camera, gentle dancer)."
+    } else {
+        "Always react as if the beat is playing."
+    });
     row(ui, "Scene", |ui| {
         if ui.button("◀ Prev").clicked() {
             cmd.push(UiCommand::Do(Action::PrevScene));

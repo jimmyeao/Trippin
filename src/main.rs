@@ -962,7 +962,10 @@ fn render_loop(
             r.reload_shaders(false);
         }
 
-        let f = audio.features.lock().map(|f| f.clone()).unwrap_or_default();
+        let mut f = audio.features.lock().map(|f| f.clone()).unwrap_or_default();
+        if !s.breakdown_mode {
+            f.calm = 0.0;
+        }
         // Positive latency shows the beat earlier (compensating capture delay).
         let pos = f.beat_position(now) + s.latency_ms as f64 / 1000.0 * f.bpm as f64 / 60.0;
         let ev = dir.update(&f, pos, dt, &usable, &s);
@@ -1951,6 +1954,9 @@ fn main() -> Result<()> {
     // `--snap <scenes|all>` renders scenes headless to PNG and times them.
     if args.iter().any(|a| a == "--snap") {
         return snap::run(&args);
+    }
+    if let Some(p) = arg_value(&args, "--groove-test") {
+        return audio::groove_test(std::path::Path::new(&p));
     }
     if args.iter().any(|a| a == "--check-shaders") {
         return check_shaders();
