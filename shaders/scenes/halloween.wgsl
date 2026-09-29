@@ -102,7 +102,7 @@ fn hill_h(x: f32, asp: f32) -> f32 {
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);            // y grows downward
-    let t = u.time;
+    let t = u.clock4.z * 0.5;
     let asp = aspect();
     let strike_k = floor(u.beat);
 

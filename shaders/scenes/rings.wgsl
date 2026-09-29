@@ -17,7 +17,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let line = smoothstep(0.12, 0.0, abs(cell - 0.5) - 0.36);
 
     // Each ring's brightness and warp come from the spectrum at this angle.
-    let v = spec(a * 0.5 + ring_i / n * 0.5);
+    // Mirrored angle for the spectrum lookup too (spec(a) jumped at the wrap).
+    let v = spec(abs(a - 0.5) + ring_i / n * 0.5);
     let warp = sin(a * TAU * (2.0 + ring_i)) * v * 0.02;
     let wr = length(p + vec2<f32>(warp));
 

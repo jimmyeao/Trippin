@@ -31,8 +31,9 @@ fn beam_pos(i: i32) -> vec3<f32> {
 // Beam direction: a choreography of poses over bar/phrase time.
 fn beam_dir(i: i32) -> vec3<f32> {
     let fi = f32(i);
-    let ph = u.flow * 0.125;                           // one cycle / 8 beats
-    let form = 0.5 + 0.5 * sin(u.flow * 0.03125 * PI); // slow formation morph
+    // Energy: the rig moves faster as the track drives.
+    let ph = u.clock4.x * 0.125;
+    let form = 0.5 + 0.5 * sin(u.clock4.x * 0.03125 * PI); // slow formation morph
     if i >= N_A + N_B {
         // Uplights: tall fans up into the roof haze, swaying.
         let k = f32(i - N_A - N_B) - 2.5;
@@ -44,7 +45,8 @@ fn beam_dir(i: i32) -> vec3<f32> {
     let k = select(fi, fi - f32(N_A), i >= N_A) - (n - 1.0) * 0.5;
     let rear = select(0.0, 1.0, i >= N_A);
     // Fan: spread symmetrically; sweep: all pan together; cross: mirrored.
-    let fan = k * 0.1 * (0.6 + 0.4 * sin(ph * TAU));
+    // Shape: the fan spreads wider as the mids build.
+    let fan = k * (0.06 + 0.08 * u.pres4.y) * (0.6 + 0.4 * sin(ph * TAU));
     let sweep = sin(ph * TAU * 0.5 + fi * 0.15 + rear) * 0.5;
     let cross = sin(ph * TAU + rear * PI) * 0.45 * sign(k);
     let pan = mix(fan + sweep * 0.4, cross, form);

@@ -40,7 +40,7 @@ fn snow_layer(uv: vec2<f32>, scale: f32, speed: f32, size: f32, t: f32) -> f32 {
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);            // y grows downward
-    let t = u.time;
+    let t = u.clock4.z * 0.5;
 
     // Night sky and stars.
     var col = mix(vec3<f32>(0.03, 0.05, 0.13), vec3<f32>(0.005, 0.01, 0.04), clamp(-p.y * 0.7 + 0.35, 0.0, 1.0));
@@ -102,7 +102,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // Star on top: gold, slowly turning, shimmering with the music.
     let sp = rot(sin(t * 0.5) * 0.2) * (p - vec2<f32>(0.0, top - 0.04));
     let star = sd_star5(vec2<f32>(sp.x, -sp.y), 0.075, 0.45);
-    let shimmer = 0.8 + 0.2 * sin(t * 3.0) + 0.4 * u.intensity + u.kick * 0.7;
+    let shimmer = 0.8 + 0.2 * sin(t * 3.0) + 0.4 * u.intensity + u.hits4.x * 0.7;
     col = mix(col, vec3<f32>(1.0, 0.8, 0.3) * shimmer, smoothstep(0.003, -0.003, star));
     col += vec3<f32>(1.0, 0.7, 0.2) * shimmer * 0.02 / (abs(star) + 0.02) * 0.35;
 

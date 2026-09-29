@@ -10,7 +10,9 @@ const RINGS: i32 = 3;
 
 // How open the flower is, 0 = bud, 1 = full bloom — smooth, never jumps.
 fn bloom_amt() -> f32 {
-    let cyc = 0.5 - 0.5 * cos(u.flow * TAU / 32.0);
+    // Energy: the unfold/fold cycle runs on the energy clock — it lingers
+    // in breakdowns and blooms quicker on drops.
+    let cyc = 0.5 - 0.5 * cos(u.clock4.x * TAU / 32.0);
     return clamp(cyc * (0.8 + 0.25 * u.intensity), 0.0, 1.0);
 }
 
@@ -24,7 +26,7 @@ fn open_angle(k: i32) -> f32 {
     let b = smoothstep(0.0, 1.0, clamp(bloom_amt() * 1.3 - (2.0 - fk) * 0.15, 0.0, 1.0));
     let closed = 0.02 + fk * 0.07;
     let open = 0.9 + fk * 0.35;
-    return mix(closed, open, b) + 0.06 * u.kick * (0.5 + fk * 0.3);
+    return mix(closed, open, b) + 0.06 * u.hits4.x * (0.5 + fk * 0.3);
 }
 
 struct Hit {
@@ -36,7 +38,8 @@ fn petal(p: vec3<f32>, k: i32) -> f32 {
     let fk = f32(k);
     let n = ring_n(k);
     let sector = TAU / n;
-    let spin = u.flow * 0.03 + fk * 0.35;
+    // Direction: the petal rings turn one way, then back.
+    let spin = 1.2 * sin(u.clock4.x * 0.02) + fk * 0.35;
     // Polar domain repetition around the stem axis (y).
     let a = angle(p.xz) + spin;
     let ai = round(a / sector);
@@ -65,7 +68,7 @@ fn petal(p: vec3<f32>, k: i32) -> f32 {
 fn map(p: vec3<f32>) -> Hit {
     var h: Hit;
     // Core (pistil).
-    h.d = length(p - vec3<f32>(0.0, 0.12, 0.0)) - (0.16 + 0.03 * u.bass);
+    h.d = length(p - vec3<f32>(0.0, 0.12, 0.0)) - (0.13 + 0.07 * u.pres4.x);
     h.part = 3.0;
     // Stem.
     let stem = max(length(p.xz) - 0.05, p.y);
@@ -104,7 +107,7 @@ fn env(d: vec3<f32>) -> vec3<f32> {
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
-    let drift = u.flow * 0.025 + u.seed;
+    let drift = u.clock4.x * 0.025 + u.seed;
     let elev = 0.75 + 0.2 * sin(u.flow * 0.02);
     let ro = vec3<f32>(sin(drift) * cos(elev), sin(elev), cos(drift) * cos(elev)) * 3.2;
     let rd = cam_ray(p, ro, vec3<f32>(0.0, 0.25, 0.0), 0.0, 1.6);

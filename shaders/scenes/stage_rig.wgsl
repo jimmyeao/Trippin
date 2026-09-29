@@ -17,10 +17,12 @@ fn beam_pos(i: i32) -> vec3<f32> {
 fn beam_dir(i: i32) -> vec3<f32> {
     let fi = f32(i);
     let side = fi - 5.5;
-    let ph = u.flow * 0.125;
-    let form = 0.5 + 0.5 * sin(u.flow * 0.03125 * PI + 1.0);
+    // Energy: the rig moves faster as the track drives.
+    let ph = u.clock4.x * 0.125;
+    let form = 0.5 + 0.5 * sin(u.clock4.x * 0.03125 * PI + 1.0);
     // Up-and-out fan over the crowd, sweeping; or a mirrored crossing.
-    let fan = side * 0.09 + sin(ph * TAU * 0.5) * 0.35;
+    // Shape: the fan opens wider with mid presence.
+    let fan = side * (0.05 + 0.08 * u.pres4.y) + sin(ph * TAU * 0.5) * 0.35;
     let cross = sin(ph * TAU + fi * 0.2) * 0.45 * sign(side);
     let pan = mix(fan, cross, form);
     let tilt = -0.35 + 0.3 * sin(ph * TAU * 0.5 + fi * 0.5);   // negative = up
@@ -52,10 +54,10 @@ fn box_t(ro: vec3<f32>, rd: vec3<f32>, c: vec3<f32>, h: vec3<f32>) -> f32 {
 
 // A: a tunnel that punches in on every kick, rings lit by their own band.
 fn prog_tunnel(n: vec2<f32>) -> vec3<f32> {
-    let punch = 1.0 - 0.22 * u.kick;
+    let punch = 1.0 - 0.22 * u.hits4.x;
     let r = length(n) * punch;
     let a = angle(n);
-    let z = 1.0 / max(r, 0.04) + u.flow * 0.5;
+    let z = 1.0 / max(r, 0.04) + u.clock4.x * 0.5;
     let band = fract(z * 0.1);
     let rings = smoothstep(0.35, 0.0, abs(fract(z * 0.5) - 0.5)) * (0.2 + 2.2 * spec(band) * spec(band));
     let spokes = smoothstep(0.85, 1.0, sin(a * 8.0 + z * 0.4 + u.bar_phase * TAU)) * (0.3 + u.high);
@@ -238,7 +240,8 @@ fn crowd(p: vec2<f32>, sway: f32, col_in: vec3<f32>, rim_c: vec3<f32>) -> vec3<f
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
-    let sway = sin(u.flow * 0.0625 * PI) * 0.08;
+    // Direction: the crowd (and camera) sway harder as the bass builds.
+    let sway = sin(u.clock4.x * 0.0625 * PI) * (0.05 + 0.08 * u.pres4.x);
     let ro = vec3<f32>(sway * 4.0, 2.2 + 0.05 * sin(u.beat * PI) * u.intensity, 0.0);
     let rd = cam_ray(p, ro, vec3<f32>(sway * 2.0, 7.5, STAGE_Z), 0.0, 1.6);
 
