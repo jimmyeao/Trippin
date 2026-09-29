@@ -9,8 +9,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     // Floor grid (computed everywhere; masked below the horizon).
     let depth = 0.5 / max(horizon - y, 0.002);
-    let gx = p.x * depth;
-    let gz = depth + u.flow * 2.0;
+    // Direction: the road drifts left and right; energy: drive speed.
+    let gx = p.x * depth + 3.0 * sin(u.clock4.x * 0.02);
+    let gz = depth + u.clock4.x * 2.0;
     let wx = fwidth(gx) * 1.5 + 0.01;
     let wz = fwidth(gz) * 1.5 + 0.01;
     let lines = max(
@@ -25,9 +26,10 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let sky_t = clamp((y - horizon) / 1.0, 0.0, 1.0);
     var sky = mix(palette(0.95) * 0.35, vec3<f32>(0.02, 0.0, 0.06), sqrt(sky_t));
     let sun_c = vec2<f32>(0.0, horizon + 0.35);
-    let sun_r = 0.32 + 0.05 * u.bass;
+    // Shape: the sun swells with bass presence.
+    let sun_r = 0.28 + 0.1 * u.pres4.x;
     let sd = length(vec2<f32>(p.x, y) - sun_c);
-    let stripes = step(0.5, fract((y - horizon) * 14.0 + u.time * 0.5)) + step(sun_c.y, y);
+    let stripes = step(0.5, fract((y - horizon) * 14.0 + u.clock4.w * 0.25)) + step(sun_c.y, y);
     let sun = smoothstep(sun_r, sun_r - 0.01, sd) * min(stripes, 1.0);
     sky = mix(sky, mix(palette(0.05), palette(0.25), (y - horizon) / 0.7) * 1.5, sun);
     sky += palette(0.1) * 0.08 / (sd * sd * 4.0 + 0.1) * (0.4 + u.bass);

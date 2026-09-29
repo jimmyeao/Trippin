@@ -8,9 +8,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let a = angle(p);
 
     let rays = 8.0 + floor(u.energy * 8.0) * 2.0;
-    let spin = u.flow * 0.35 + u.onset * 0.2;
+    // Direction: the rays spin one way, then back; energy sets pace.
+    let spin = 3.0 * sin(u.clock4.x * 0.03) + u.clock4.x * 0.1;
     let ray = abs(fract((a + spin) * rays / PI) - 0.5);
-    let width = 0.32 + u.bass * 0.14;
+    // Shape: rays fatten with bass presence.
+    let width = 0.22 + u.pres4.x * 0.25;
     let beam = smoothstep(width, width * 0.35, ray);
 
     // Rays fade out with radius; a hot core anchors the middle.

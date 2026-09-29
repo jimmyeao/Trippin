@@ -9,7 +9,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     // Spectrum folded into a height field with a slow drift.
     let v = spec(uv.x) * (0.9 + u.intensity * 0.3);
-    let drift = fbm(vec2<f32>(uv.x * 3.0 - u.flow * 0.1, u.seed)) * 0.06;
+    let drift = fbm(vec2<f32>(uv.x * 3.0 - 2.0 * sin(u.clock4.x * 0.02), u.seed)) * (0.03 + 0.08 * u.pres4.y);
     let h = 0.55 + v * 0.32 + drift;
 
     // Ribbon body and its glowing edge.
@@ -21,7 +21,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     col += palette(uv.x * 0.6 + 0.6) * edge;
 
     // Horizontal filaments inside the ribbon — a layered aurora look.
-    let fil = sin((yy - h) * 120.0 + u.flow * 2.0 + v * 20.0) * 0.5 + 0.5;
+    let fil = sin((yy - h) * 120.0 + u.clock4.z * 2.0 + v * 20.0) * 0.5 + 0.5;
     col += palette(uv.x + 0.4) * body * fil * v * 0.35;
 
     if mirror {

@@ -13,7 +13,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         let y = (fi / (lines - 1.0) - 0.5) * 1.6;
         // Each line samples the wave at a different zoom/offset.
         let w = wave(fract((p.x / aspect() + 1.0) * 0.5 + fi * 0.11)) * (0.10 + u.mid * 0.16);
-        let wob = sin(p.x * (3.0 + fi) + u.flow * (1.0 + fi * 0.2)) * 0.02 * (0.5 + u.bass);
+        // Direction + shape: the lines sway one way, then back, deeper as
+        // the bass builds.
+        let wob = sin(p.x * (3.0 + fi) + 6.0 * sin(u.clock4.x * 0.02) + u.clock4.x * (0.3 + fi * 0.06)) * (0.01 + 0.05 * u.pres4.x);
         let dy = p.y - (y + w + wob);
         let trace = exp(-abs(dy) * 90.0);
         let halo = exp(-abs(dy) * 10.0) * 0.1;

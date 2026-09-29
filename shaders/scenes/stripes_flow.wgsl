@@ -4,8 +4,11 @@
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     var p = centred(in.uv);
-    let wob = noise(p * 2.0 + u.flow * 0.2) * 0.6;
-    let d = p.x * 0.8 + p.y * 0.6 + wob + u.flow * 0.25;
+    // Direction: the stripes rotate and their flow reverses over a
+    // phrase; shape: they buckle harder with mid presence.
+    p = rot(0.6 * sin(u.clock4.x * 0.02)) * p;
+    let wob = noise(p * 2.0 + u.clock4.z * 0.2) * (0.3 + 0.7 * u.pres4.y);
+    let d = p.x * 0.8 + p.y * 0.6 + wob + 2.0 * sin(u.clock4.x * 0.03) + u.clock4.x * 0.1;
 
     let bands = 10.0;
     let b = fract(d * bands);

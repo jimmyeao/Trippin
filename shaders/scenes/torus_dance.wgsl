@@ -8,14 +8,16 @@ fn knot(q: vec3<f32>) -> f32 {
     let t = vec2<f32>(r - 1.0, q.z);
     let a = atan2(q.y, q.x);
     // Twist the tube cross-section along the knot.
-    let cross = rot(a * 1.5 + u.flow * 0.8) * t;
-    return length(cross) - (0.28 + u.bass * 0.12);
+    // Shape: the tube thickens with bass presence and jolts on kicks.
+    let cross = rot(a * 1.5 + u.clock4.z * 0.8) * t;
+    return length(cross) - (0.24 + u.pres4.x * 0.14 + u.hits4.x * 0.06);
 }
 
 fn map(p: vec3<f32>) -> f32 {
     let s = 0.85 + u.energy * 0.2;
     var q = p;
-    let qxz = rot(u.flow * 0.5) * q.xz;
+    // Direction: spins one way, then back.
+    let qxz = rot(4.0 * sin(u.clock4.x * 0.02) + u.clock4.x * 0.1) * q.xz;
     let qxy = rot(sin(u.time * 0.3) * 0.4) * vec2<f32>(qxz.x, q.y);
     q = vec3<f32>(qxy.x, qxy.y, qxz.y);
     return knot(q * s) / s;
