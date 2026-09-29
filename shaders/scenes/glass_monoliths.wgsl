@@ -43,15 +43,43 @@ fn normal(p: vec3<f32>) -> vec3<f32> {
     ));
 }
 
-// The world outside the glass: black stage, a wall of vertical light bars
-// (a spectrum display), a soft top light, and the black mirror floor.
+// The world outside the glass: a lit backdrop wall (gradient, panel seams
+// and a big soft glow disc that swells with the bass) with the spectrum
+// light bars in front of it, slatted strip lights on the side walls, a soft
+// top light, and the black mirror floor. Detail everywhere is what lets the
+// glass read — refraction of black is invisible.
 fn env(ro: vec3<f32>, rd: vec3<f32>) -> vec3<f32> {
     var c = vec3<f32>(0.004, 0.004, 0.006);
-    // Back wall at z = 7.
+    let drive = 0.6 + 0.7 * u.intensity;
+    // Side walls at x = ±9: vertical slat lights.
+    let tx = (sign(rd.x) * 9.0 - ro.x) / rd.x;
+    let tz = select(1e5, (7.0 - ro.z) / rd.z, rd.z > 0.0);
+    if abs(rd.x) > 1e-4 && tx > 0.0 && tx < tz {
+        let w = ro + rd * tx;
+        if w.y > -0.01 && w.y < 7.0 {
+            let slat = smoothstep(0.3, 0.15, abs(fract(w.z * 0.8) - 0.5));
+            let band = smoothstep(0.2, 0.6, w.y) * smoothstep(6.5, 5.0, w.y);
+            let tone = palette(0.55 + sign(rd.x) * 0.15);
+            c += mix(vec3<f32>(0.9, 0.92, 1.0), tone, 0.5) * slat * band * 0.22 * drive;
+            c += tone * 0.03 * band;
+        }
+        return c;
+    }
     if rd.z > 0.0 {
-        let t = (7.0 - ro.z) / rd.z;
-        let w = ro + rd * t;
+        let w = ro + rd * tz;
         if w.y > -0.01 {
+            // Backdrop: palette gradient rising from the floor.
+            let g = smoothstep(7.0, 0.0, w.y);
+            var wall = mix(palette(0.65), palette(0.9), smoothstep(-8.0, 8.0, w.x)) * (0.05 + 0.3 * g * g) * drive;
+            // Big soft glow disc behind the slabs, swelling with the bass.
+            let r = length(vec2<f32>(w.x, w.y - 2.6));
+            let disc = smoothstep(2.6 + 0.4 * u.bass, 2.3, r);
+            wall += palette(0.1) * (disc * (0.9 + 1.6 * u.bass) + exp(-r * 0.5) * 0.3) * drive;
+            // Panel seams: a thin grid that the glass visibly bends.
+            let sg = abs(fract(w.xy * vec2<f32>(0.8, 0.8)) - 0.5);
+            wall *= 0.55 + 0.45 * smoothstep(0.47, 0.44, max(sg.x, sg.y));
+            c += wall;
+            // Spectrum light bars in front of the backdrop.
             let bars = 24.0;
             let bx = (w.x + 8.0) / 16.0 * bars;
             let id = floor(bx);
@@ -61,8 +89,6 @@ fn env(ro: vec3<f32>, rd: vec3<f32>) -> vec3<f32> {
             let on = smoothstep(0.42, 0.3, abs(f - 0.5)) * smoothstep(hgt + 0.05, hgt - 0.05, w.y) * step(abs(w.x), 8.0);
             let bc = palette(id / bars * 0.8);
             c += bc * on * (1.2 + 1.5 * u.intensity) * (0.6 + 0.4 * smoothstep(0.0, hgt, w.y));
-            // Wall glow above the bars.
-            c += bc * 0.03 * exp(-abs(w.y - hgt) * 1.5) * step(abs(w.x), 8.5);
         }
     }
     // Soft top light.
@@ -73,7 +99,8 @@ fn env(ro: vec3<f32>, rd: vec3<f32>) -> vec3<f32> {
 // Stage without the glass: whichever of floor / wall the ray meets first;
 // the floor is a black mirror of the wall.
 fn world(ro: vec3<f32>, rd: vec3<f32>) -> vec3<f32> {
-    let tw = select(1e5, (7.0 - ro.z) / rd.z, rd.z > 0.0);
+    let tside = select(1e5, (sign(rd.x) * 9.0 - ro.x) / rd.x, abs(rd.x) > 1e-4);
+    let tw = min(select(1e5, (7.0 - ro.z) / rd.z, rd.z > 0.0), tside);
     let tf = select(1e5, -ro.y / rd.y, rd.y < 0.0);
     if tf < tw {
         let fp = ro + rd * tf;
