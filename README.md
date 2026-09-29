@@ -287,6 +287,13 @@ abstract scenes built on this vocabulary:
 - `kifs_cathedral`: a crystal fractal lattice with crevices lit on the
   kick.
 - `silk_flow`: iridescent liquid silk (2D, so not `@heavy`).
+- `cosmic_nest`: a Kali "Star Nest" volumetric fractal nebula.
+- `morph_sculpture`: a chrome and iridescent sculpture morphing through
+  four forms every 8 beats on the mid clock.
+- `echo_tunnel`: a psychedelic feedback tunnel whose dive speed follows
+  the energy.
+- `flow_field`: sparks streaking along a curl-noise flow, seeded per band,
+  with a burst ring on the kick.
 
 Scenes can read `u.calm` directly for their own breakdown looks. Preview
 one with `--snap <scene> --snap-calm 1`.
