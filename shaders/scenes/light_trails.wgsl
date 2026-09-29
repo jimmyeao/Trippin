@@ -17,10 +17,13 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         let h3 = hash21(vec2<f32>(fl * 7.9, 4.4));
 
         // Lane position/height, direction and speed.
-        let y = mix(-0.85, 0.85, h) + sin(u.time * 0.2 + fl) * 0.02;
+        // Shape: lanes weave into waves with mid presence.
+        let y = mix(-0.85, 0.85, h) + sin(p.x * 2.0 + u.clock4.z * 0.2 + fl) * 0.06 * u.pres4.y;
         let dir = select(1.0, -1.0, h2 > 0.5);
-        let speed = (0.25 + h3 * 1.1) * (0.4 + u.intensity * 1.4);
-        let head = fract(h2 * 7.0 + u.flow * speed * 0.18) * 4.4 - 2.2;
+        // Energy: speed rides the smooth energy clock (multiplying the
+        // tempo clock by intensity here made the streaks lurch).
+        let speed = 0.25 + h3 * 1.1;
+        let head = fract(h2 * 7.0 + u.clock4.x * speed * 0.3) * 4.4 - 2.2;
         let hx = head * dir * aspect();
 
         // Trail: bright head, exponential tail behind it.

@@ -8,7 +8,8 @@
 fn terrain_h(x: f32, z: f32) -> f32 {
     let broad = fbm(vec2<f32>(x * 0.09, z * 0.09));
     let ridged = 1.0 - abs(2.0 * noise(vec2<f32>(x * 0.22, z * 0.22)) - 1.0);
-    var h = broad * 5.5 + ridged * ridged * 2.2 + fbm(vec2<f32>(x * 0.5, z * 0.5)) * 0.6;
+    // Shape: ridges sharpen and rise as the bass builds.
+    var h = broad * 5.5 + ridged * ridged * (1.6 + 1.4 * u.pres4.x) + fbm(vec2<f32>(x * 0.5, z * 0.5)) * 0.6;
     // Valley floor: low and flat near the flight line, climbing with distance.
     let wall = smoothstep(0.8, 6.0, abs(x) + 1.2 * sin(z * 0.05));
     return h * wall + 0.35 * fbm(vec2<f32>(x * 0.4, z * 0.18)) - 0.2;
@@ -32,11 +33,12 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let sun = normalize(vec3<f32>(0.15, 0.14, 1.0));
 
     // Fly down the valley on the tempo clock, riding a little above the floor.
-    let cz = u.flow * 2.0;
+    let cz = u.clock4.x * 2.0;
     let cx = sin(cz * 0.06) * 0.8;
     let floor_h = terrain_h(cx, cz);
     let ro = vec3<f32>(cx, floor_h + 1.5 + sin(u.time * 0.1) * 0.15, cz);
-    let yaw = sin(u.time * 0.06) * 0.12 + cos(cz * 0.06) * 0.1;
+    // Direction: banking one way down the valley, then the other.
+    let yaw = sin(u.clock4.x * 0.025) * 0.25 + cos(cz * 0.06) * 0.1;
     let dxz = rot(yaw) * vec2<f32>(p.x, 1.7);
     let rd = normalize(vec3<f32>(dxz.x, -p.y - 0.1 + sin(u.time * 0.08) * 0.015, dxz.y));
 

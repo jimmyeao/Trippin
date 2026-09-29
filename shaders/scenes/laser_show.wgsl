@@ -36,14 +36,16 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // so they can light the smoke they pass through.
     var beams = vec3<f32>(0.0);
     let o = vec2<f32>(0.0, 0.62);
-    let spread = 1.35 * (0.75 + 0.45 * u.intensity);
+    // Shape: the fan opens wider with mid presence.
+    let spread = 1.35 * (0.6 + 0.4 * u.intensity + 0.4 * u.pres4.y);
     let chase = floor(u.beat * 2.0);                     // eighth-note chase
     for (var i = 0; i < 12; i++) {
         let fi = f32(i);
         // Eighth-note chase: only some beams fire at once, pattern rotates.
         let on = step(fract((fi - chase) * 0.25 + 0.5), 0.55);
         let base = -PI * 0.5 + (fi / 11.0 - 0.5) * spread;
-        let sweep = 0.3 * sin(u.flow * 0.35 + fi * 0.8) + 0.12 * sin(u.flow * 1.1 + fi * 2.1);
+        // Energy: sweeps quicken with the mix; wider with the bass.
+        let sweep = (0.2 + 0.2 * u.pres4.x) * sin(u.clock4.x * 0.35 + fi * 0.8) + 0.12 * sin(u.clock4.z * 1.1 + fi * 2.1);
         let ang = base + sweep;
         let hue = fi / 12.0 + u.hue * 0.15;
         let bc = palette(hue) * palette(hue);            // squared: saturated

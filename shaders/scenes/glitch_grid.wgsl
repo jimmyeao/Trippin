@@ -5,12 +5,14 @@
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     var uv = in.uv;
-    let p = centred(uv);
+    // Direction: the tile wall slides left and right over a phrase.
+    let p = centred(uv) + vec2<f32>(0.35 * sin(u.clock4.x * 0.02), 0.0);
 
     // Horizontal tears: whole rows shear on onsets.
     let row = floor(uv.y * 28.0);
     let tear_seed = vec2<f32>(row, floor(u.beat * 2.0));
-    let tear = step(0.75, hash21(tear_seed)) * (hash21(tear_seed + 7.0) - 0.5) * u.onset * 0.6;
+    // Shape: more rows tear, and further, on kicks and in busy sections.
+    let tear = step(0.75 - 0.2 * u.pres4.z, hash21(tear_seed)) * (hash21(tear_seed + 7.0) - 0.5) * (u.onset * 0.6 + u.hits4.x * 0.5);
     uv.x += tear;
 
     // Tile grid.

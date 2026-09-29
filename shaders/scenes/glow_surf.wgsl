@@ -13,7 +13,7 @@ fn shore(x: f32) -> f32 {
 
 // Wave phase at a point: 0..1 per wave, waves travel toward −z (the beach).
 fn wave_w(p: vec2<f32>) -> f32 {
-    return fract((p.y - shore(p.x)) * 0.075 + u.flow * 0.25 + sin(p.x * 0.04) * 0.15);
+    return fract((p.y - shore(p.x)) * 0.075 + u.clock4.x * 0.25 + sin(p.x * 0.04) * 0.15);
 }
 
 // Crest profile: a steep front (low w side toward the beach) and a long back.
@@ -29,7 +29,8 @@ fn height(p: vec2<f32>) -> f32 {
         return -dz * 0.06 - 0.02;
     }
     // Waves steepen as they near the shore, then collapse in the shallows.
-    let amp = smoothstep(40.0, 10.0, dz) * smoothstep(0.5, 5.0, dz) * 1.15 + 0.05;
+    // Shape: the swell grows with bass presence.
+    let amp = smoothstep(40.0, 10.0, dz) * smoothstep(0.5, 5.0, dz) * 1.15 * (0.6 + 0.8 * u.pres4.x) + 0.05;
     let n = tnoise(vec3<f32>(p * 0.08, u.time * 0.03)).b - 0.5;
     return crest(wave_w(p)) * amp + n * 0.18 - dz * 0.004;
 }
@@ -72,8 +73,10 @@ fn sky(rd: vec3<f32>, moon: vec3<f32>) -> vec3<f32> {
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
-    let ro = vec3<f32>(u.flow * 0.08 + sin(u.flow * 0.01) * 2.0, 1.2 + 0.1 * sin(u.flow * 0.013), shore(u.flow * 0.08) - 2.5);
-    let ta = ro + vec3<f32>(0.2 + sin(u.flow * 0.009) * 0.2, -0.08, 1.0);
+    // Direction: strolling the beach one way, then back.
+    let bx = 12.0 * sin(u.clock4.x * 0.01);
+    let ro = vec3<f32>(bx, 1.2 + 0.1 * sin(u.clock4.x * 0.013), shore(bx) - 2.5);
+    let ta = ro + vec3<f32>(0.2 + cos(u.clock4.x * 0.01) * 0.5, -0.08, 1.0);
     let rd = cam_ray(p, ro, ta, 0.0, 1.5);
     let moon = normalize(vec3<f32>(0.1, 0.16, 1.0));
     let blue = vec3<f32>(0.1, 0.55, 1.0);

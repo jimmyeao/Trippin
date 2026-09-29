@@ -5,15 +5,17 @@
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     var p = centred(in.uv);
-    p = rot(u.time * 0.05) * p;
+    // Direction: the rings turn one way, then back.
+    p = rot(1.2 * sin(u.clock4.x * 0.02)) * p;
 
-    let sep = 0.35 + u.bass * 0.4 + 0.05 * sin(u.time * 0.3);
+    // Shape: the two centres drift apart as the bass builds.
+    let sep = 0.25 + u.pres4.x * 0.5 + 0.05 * sin(u.clock4.z * 0.2);
     let d1 = length(p - vec2<f32>(sep, 0.0));
     let d2 = length(p + vec2<f32>(sep, 0.0));
 
     let freq = 60.0 + u.mid * 50.0;
-    let g1 = sin(d1 * freq - u.flow * 3.0);
-    let g2 = sin(d2 * freq + u.flow * 2.0);
+    let g1 = sin(d1 * freq - u.clock4.x * 3.0);
+    let g2 = sin(d2 * freq + u.clock4.z * 2.0);
     let m = g1 * g2 * 0.5 + 0.5;
 
     // Interference bands are sharp where the gratings differ most.

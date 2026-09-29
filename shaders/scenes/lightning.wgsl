@@ -40,6 +40,6 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     }
 
     // Sky charge glow between strikes.
-    col += palette(0.8 + u.hue) * fbm(p * 3.0 + u.time * 0.05) * 0.12 * (0.5 + u.energy);
+    col += palette(0.8 + u.hue) * fbm(p * 3.0 + u.clock4.w * 0.03) * 0.12 * (0.5 + u.energy);
     return vec4<f32>(col, 1.0);
 }

@@ -7,7 +7,8 @@ fn fan(d: vec2<f32>, count: f32, spread: f32, phase: f32) -> vec2<f32> {
     // Returns (beam intensity, per-beam hash index).
     let a = atan2(d.y, d.x); // up-screen is -PI/2
     let mid = -PI * 0.5;
-    let fan_span = spread * (0.7 + u.energy * 0.6);
+    // Shape: fans open wider with mid presence.
+    let fan_span = spread * (0.6 + u.pres4.y * 0.8);
     let centred_a = a - mid + phase;
     let half = fan_span * 0.5;
     if abs(centred_a) > half {
@@ -35,8 +36,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // Two rigs: one below the frame, one above — beams cross mid-screen.
     let o1 = vec2<f32>(-0.5 * aspect(), 1.3);
     let o2 = vec2<f32>(0.5 * aspect(), -1.3);
-    let swing1 = sin(u.flow * 0.35) * 0.25;
-    let swing2 = -sin(u.flow * 0.28 + 1.3) * 0.25;
+    // Energy: sweeps quicken with the mix and swing wider with the bass.
+    let swing1 = sin(u.clock4.x * 0.3) * (0.15 + 0.25 * u.pres4.x);
+    let swing2 = -sin(u.clock4.x * 0.24 + 1.3) * (0.15 + 0.25 * u.pres4.x);
 
     let f1 = fan(p - o1, 9.0, 0.9, swing1);
     let f2 = fan(vec2<f32>(-(p - o2).x, -(p - o2).y), 9.0, 0.9, swing2);

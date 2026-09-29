@@ -7,8 +7,10 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(uv);
 
     // Diffuse: sample a jittered neighbourhood and slightly shrink — smoke curl.
-    let j1 = noise(uv * 9.0 + u.time * 0.15) - 0.5;
-    let j2 = noise(uv * 9.0 - u.time * 0.15 + 40.0) - 0.5;
+    // Shape: the paper grain distorts more with mid presence; energy: it
+    // crawls faster.
+    let j1 = (noise(uv * 9.0 + u.clock4.z * 0.08) - 0.5) * (0.6 + 0.8 * u.pres4.y);
+    let j2 = (noise(uv * 9.0 - u.clock4.z * 0.08 + 40.0) - 0.5) * (0.6 + 0.8 * u.pres4.y);
     let duv = uv + vec2<f32>(j1, j2) * 0.004;
     var col = prev(uncentred(centred(duv) * 0.997)) * 0.965;
 
@@ -19,7 +21,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         if age > 3.0 { continue; }
         let pos_h = hash22(vec2<f32>(bi, u.seed + f32(i)));
         let pos = (pos_h - 0.5) * vec2<f32>(aspect(), 1.0) * 1.1;
-        let rad = age * (0.05 + u.energy * 0.10) + 0.01;
+        let rad = age * (0.05 + u.pres4.x * 0.12 + u.hits4.x * 0.04) + 0.01;
         let d = length(p - pos);
         let bloom = exp(-d * d / (rad * rad)) * exp(-age * 1.6);
         col += palette(hash21(vec2<f32>(bi, f32(i) * 9.0)) + u.hue) * bloom * (0.5 + u.onset);

@@ -23,6 +23,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let z = u.clock4.x * 3.0;
     let ro = vec3<f32>(sin(z * 0.06) * 0.7, -0.7 + sin(z * 0.05) * 0.3, z);
     var rd = normalize(vec3<f32>(p.x * 0.8, -p.y * 0.7, 1.0));
+    // Direction: a roll that swings one way, then the other.
+    rd = vec3<f32>(rot(0.5 * sin(u.clock4.x * 0.02)) * rd.xy, rd.z);
     rd = vec3<f32>(rot(sin(z * 0.04) * 0.15) * rd.xy, rd.z);
 
     var t = 0.0;

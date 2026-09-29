@@ -4,7 +4,8 @@
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-    let p = centred(in.uv) * 0.62;
+    // Direction: the figure tilts one way then the other.
+    let p = rot(0.6 * sin(u.clock4.x * 0.025)) * centred(in.uv) * 0.62;
 
     // Trails.
     var col = prev(in.uv * 0.996 + vec2<f32>(0.002, 0.0)) * 0.90;
@@ -12,7 +13,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // Oscillator frequencies ride the spectrum; phase beats with the track.
     let a = 2.0 + floor(spec(0.08) * 6.0 + 0.5);
     let b = 2.0 + floor(spec(0.85) * 6.0 + 0.5);
-    let ph = u.beat_phase * TAU;
+    // Shape: the phase (and so the figure) morphs with the energy clock.
+    let ph = u.clock4.z * 0.6;
 
     // Evaluate the curve parametrically and accumulate distance to each sample.
     var d = 10.0;

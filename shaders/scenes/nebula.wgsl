@@ -4,12 +4,14 @@
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
-    let q = p * 1.6 + vec2<f32>(u.flow * 0.05, u.flow * 0.03);
+    // Direction: the gas drifts one way, then back.
+    let q = p * 1.6 + vec2<f32>(3.0 * sin(u.clock4.x * 0.01), u.clock4.x * 0.03);
 
     // Domain warp for billowy structure.
-    let warp = vec2<f32>(fbm(q + vec2<f32>(0.0, u.time * 0.04)),
-                         fbm(q + vec2<f32>(5.2, 1.3) - u.time * 0.03));
-    let n = fbm(q + warp * (1.2 + u.energy * 0.8));
+    // Energy: billowing speed; shape: the gas folds harder with bass.
+    let warp = vec2<f32>(fbm(q + vec2<f32>(0.0, u.clock4.z * 0.02)),
+                         fbm(q + vec2<f32>(5.2, 1.3) - u.clock4.z * 0.015));
+    let n = fbm(q + warp * (0.9 + u.pres4.x * 1.4));
 
     let c1 = palette(u.hue);
     let c2 = palette(0.33 + u.hue);
