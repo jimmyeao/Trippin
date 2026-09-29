@@ -78,7 +78,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     var trap = 0.0;
     var steps = 0.0;
     let hue = u.clock4.w * 0.01 + u.hue;
-    for (var i = 0; i < 110; i++) {
+    for (var i = 0; i < 80; i++) {
         let pos = ro + rd * t;
         let h = kifs(pos);
         // Edge glow: accumulate near-misses, coloured by the orbit trap.
@@ -90,8 +90,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
             trap = h.y;
             break;
         }
-        t += max(h.x * 0.85, 0.002 * t);
-        if t > 18.0 {
+        t += max(h.x * 0.9, 0.004 * t);
+        if t > 13.0 {
             break;
         }
     }
