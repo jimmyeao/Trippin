@@ -23,12 +23,27 @@ fn sign_info(k: f32) -> vec3<f32> {
 
 fn sign_level(k: f32) -> f32 {
     let inf = sign_info(k);
-    var l = (0.5 + 1.1 * spec(inf.z * 0.8 + 0.05)) * (0.5 + 0.7 * u.intensity);
-    // Every 5th sign is a faulty one that stutters on the kick.
-    if fract(k / 5.0) < 0.1 {
-        l *= 1.0 - 0.7 * step(0.5, u.kick) * step(0.5, fract(u.time * 23.0));
+    let base = (0.7 + 1.0 * spec(inf.z * 0.8 + 0.05)) * (0.6 + 0.7 * u.intensity);
+    // Each sign has a rhythm role:
+    //  0 steady (breathes with its band), 1 punches on the kick,
+    //  2 chase — lit on its own beat of the bar, so light runs down the
+    //    alley, 3 hi-hat strobe, 4 faulty flicker.
+    let role = i32(hash21(vec2<f32>(k, 3.3)) * 5.0);
+    let flash = exp(-u.beat_phase * 6.0);
+    var l = base;
+    if role == 1 {
+        l = base * (0.35 + 1.6 * u.kick);
+    } else if role == 2 {
+        let my_beat = f32(((i32(k) % 4) + 4) % 4);
+        let on = select(0.0, 1.0, abs(floor(u.beat) % 4.0 - my_beat) < 0.5);
+        l = base * (0.3 + 2.0 * on * flash);
+    } else if role == 3 {
+        l = base * (0.4 + 1.4 * u.high * step(0.5, fract(u.beat * 4.0)));
+    } else if role == 4 {
+        l = base * (1.0 - 0.8 * step(0.4, u.kick) * step(0.5, fract(u.time * 23.0)));
     }
-    return l;
+    // Drops: the whole alley flares.
+    return l * (1.0 + 1.2 * u.flash);
 }
 
 // Neon tube shape of sign k in its local frame (blade sign perpendicular to
@@ -133,7 +148,7 @@ fn march(ro: vec3<f32>, rd: vec3<f32>, steps: i32, tmax: f32) -> Hit {
 
 // Light from the nearest signs (no shadows) plus a cool sky fill from above.
 fn light(p: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
-    var l = vec3<f32>(0.03, 0.035, 0.06) * (0.4 + 0.6 * max(n.y, 0.0)) + vec3<f32>(0.01, 0.01, 0.015);
+    var l = vec3<f32>(0.06, 0.065, 0.1) * (0.4 + 0.6 * max(n.y, 0.0)) + vec3<f32>(0.025, 0.022, 0.035);
     let k0 = round(p.z / SIGN_P);
     for (var j = -1; j <= 1; j++) {
         let k = k0 + f32(j);
@@ -142,7 +157,7 @@ fn light(p: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
         let v = c - p;
         let d2 = dot(v, v);
         let ndl = max(dot(n, v / sqrt(d2)), 0.0);
-        l += palette(inf.z * 0.9) * sign_level(k) * (0.2 + 0.8 * ndl) * 5.0 / (1.0 + d2 * 2.0);
+        l += palette(inf.z * 0.9) * sign_level(k) * (0.25 + 0.75 * ndl) * 9.0 / (1.0 + d2 * 1.4);
     }
     return l;
 }
@@ -205,7 +220,10 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     }
     // Damp air: depth haze tinted by the neon, plus the tubes' glow.
     let haze = 1.0 - exp(-dist * 0.06);
-    col = mix(col, vec3<f32>(0.03, 0.02, 0.045) * (0.5 + 0.8 * u.intensity), haze * 0.8);
+    // The haze picks up the nearest sign's colour, so the air pulses too.
+    let kn = round((ro.z + 4.0) / SIGN_P);
+    let haze_c = vec3<f32>(0.04, 0.03, 0.06) + palette(sign_info(kn).z * 0.9) * sign_level(kn) * 0.05;
+    col = mix(col, haze_c * (0.6 + 0.8 * u.intensity), haze * 0.8);
     col += h.glow;
 
     // Rain streaks in two parallax layers.
