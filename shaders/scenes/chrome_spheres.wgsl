@@ -115,9 +115,12 @@ fn shade(ro: vec3<f32>, rd: vec3<f32>, h: Hit, rad: f32) -> vec3<f32> {
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
     let z = u.clock4.x * 0.9;
-    // Fly along a gap between sphere rows (x,y on cell boundaries).
-    let ro = vec3<f32>(CELL * 0.5 * sin(z * 0.07) + CELL, CELL * 0.5 * cos(z * 0.05) + CELL, z);
-    let ta = ro + vec3<f32>(0.3 * sin(z * 0.11), 0.2 * cos(z * 0.09), 1.0);
+    // Fly down the centre of a gap between sphere rows: x, y sit on a cell
+    // corner (sphere centres are at odd multiples of CELL/2), so the nearest
+    // spheres are always sqrt(2)*CELL/2 away — they stream past, never at
+    // the viewer. Sway is kept small so the clearance holds (>0.5 units).
+    let ro = vec3<f32>(CELL + 0.12 * sin(z * 0.07), CELL + 0.12 * cos(z * 0.05), z);
+    let ta = ro + vec3<f32>(0.15 * sin(z * 0.11), 0.12 * cos(z * 0.09), 1.0);
     let rd = cam_ray(p, ro, ta, u.clock4.z * 0.02, 1.2);
     let rad = 0.62 + 0.06 * u.pres4.x;
 
