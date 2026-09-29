@@ -69,24 +69,28 @@ def main():
     lap = dt.sum()
     phi = t / lap
 
-    # theta(phi) - TAU*phi is periodic: fit it.
-    phi_u = np.linspace(0, 1, 4096, endpoint=False)
-    th_u = np.interp(phi_u, phi, th, period=1.0)
-    resid = th_u - TAU * phi_u
-    resid = (resid + math.pi) % TAU - math.pi
-    K = 24
+    # Fit the *inverse* map: lap fraction as a function of track position,
+    # phi(theta) = theta/TAU + low harmonics. Few smooth terms means the ride
+    # speed is smooth by construction (fitting theta(phi) directly rang
+    # around the chain-lift edges — 50+ speed wobbles per lap). The shader
+    # inverts it with a few Newton steps.
+    resid = phi - th / TAU
+    K = 8
     warp = []
     for k in range(1, K + 1):
-        a = 2 * np.mean(resid * np.cos(TAU * k * phi_u))
-        b = 2 * np.mean(resid * np.sin(TAU * k * phi_u))
+        a = 2 * np.mean(resid * np.cos(k * th))
+        b = 2 * np.mean(resid * np.sin(k * th))
         warp.append((k, a, b))
     a0 = np.mean(resid)
-    fit = a0 + sum(a * np.cos(TAU * k * phi_u) + b * np.sin(TAU * k * phi_u) for k, a, b in warp)
-    dfit = TAU + sum(TAU * k * (-a * np.sin(TAU * k * phi_u) + b * np.cos(TAU * k * phi_u)) for k, a, b in warp)
-    err = np.abs(((fit - resid) + math.pi) % TAU - math.pi).max()
+    dphi = 1 / TAU + sum(k * (-a * np.sin(k * th) + b * np.cos(k * th)) for k, a, b in warp)
+    fit = th / TAU + a0 + sum(a * np.cos(k * th) + b * np.sin(k * th) for k, a, b in warp)
+    err = np.abs(fit - phi).max()
+    spd = speed_th / dphi
+    ext = int((np.diff(np.sign(np.diff(spd))) != 0).sum())
     print(f"// lap length {np.sum(speed_th) * TAU / N:.0f} m, lap time {lap:.1f} s (physical), "
-          f"warp fit err {err:.4f} rad, min dtheta/dphi {dfit.min():.3f}", file=sys.stderr)
-    assert dfit.min() > 0.05, "warp not monotonic — raise K or smooth the lift"
+          f"phi fit err {err:.4f}, speed {spd.min() / spd.mean():.2f}..{spd.max() / spd.mean():.2f} x mean, "
+          f"{ext} speed extrema/lap", file=sys.stderr)
+    assert dphi.min() > 0.0, "fitted phi(theta) not monotonic"
 
     # Bank: roll into turns from the horizontal curvature and speed.
     ddx = np.gradient(dx, th)

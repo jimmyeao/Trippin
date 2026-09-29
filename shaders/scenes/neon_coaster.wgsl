@@ -34,33 +34,17 @@ const TZ: array<vec3<f32>, 3> = array<vec3<f32>, 3>(
     vec3<f32>(3.0, 25.00000, 0.00000)
 );
 const TY0: f32 = 95.00;
-const WARP: array<vec3<f32>, 24> = array<vec3<f32>, 24>(
-    vec3<f32>(1.0, 0.28866, 0.55966),
-    vec3<f32>(2.0, 0.11565, -0.06910),
-    vec3<f32>(3.0, -0.00750, -0.15188),
-    vec3<f32>(4.0, -0.02835, -0.06993),
-    vec3<f32>(5.0, -0.01355, -0.01964),
-    vec3<f32>(6.0, 0.01226, -0.00216),
-    vec3<f32>(7.0, 0.00185, 0.00004),
-    vec3<f32>(8.0, -0.01209, 0.00598),
-    vec3<f32>(9.0, -0.01381, 0.01999),
-    vec3<f32>(10.0, 0.00000, 0.02030),
-    vec3<f32>(11.0, 0.01333, 0.00638),
-    vec3<f32>(12.0, 0.01230, -0.01063),
-    vec3<f32>(13.0, 0.00172, -0.01613),
-    vec3<f32>(14.0, -0.00642, -0.00894),
-    vec3<f32>(15.0, -0.00597, 0.00097),
-    vec3<f32>(16.0, -0.00151, 0.00484),
-    vec3<f32>(17.0, 0.00051, 0.00350),
-    vec3<f32>(18.0, -0.00092, 0.00220),
-    vec3<f32>(19.0, -0.00128, 0.00288),
-    vec3<f32>(20.0, 0.00143, 0.00296),
-    vec3<f32>(21.0, 0.00432, -0.00018),
-    vec3<f32>(22.0, 0.00371, -0.00436),
-    vec3<f32>(23.0, -0.00030, -0.00543),
-    vec3<f32>(24.0, -0.00370, -0.00232)
+const WARP: array<vec3<f32>, 8> = array<vec3<f32>, 8>(
+    vec3<f32>(1.0, -0.07860, -0.06091),
+    vec3<f32>(2.0, 0.02667, 0.02272),
+    vec3<f32>(3.0, -0.00478, 0.00788),
+    vec3<f32>(4.0, -0.00161, 0.00986),
+    vec3<f32>(5.0, 0.00213, -0.00053),
+    vec3<f32>(6.0, 0.00019, 0.00074),
+    vec3<f32>(7.0, -0.00161, -0.00056),
+    vec3<f32>(8.0, 0.00084, -0.00086)
 );
-const WARP0: f32 = -0.35907;
+const WARP0: f32 = 0.05715;
 const BANK: array<vec3<f32>, 8> = array<vec3<f32>, 8>(
     vec3<f32>(1.0, -0.06884, -0.24405),
     vec3<f32>(2.0, -0.07326, -0.09030),
@@ -145,16 +129,26 @@ fn bank(h: Harm) -> f32 {
 }
 
 // Lap fraction -> track parameter (physical timing), and d(th)/d(phi).
+// The generator fits phi(th) = th/TAU + WARP0 + smooth harmonics; invert it
+// with clamped Newton steps (converges to float precision in 6).
 fn warp(phi: f32) -> vec2<f32> {
-    var th = TAU * phi + WARP0;
-    var dth = TAU;
-    for (var i = 0; i < 24; i++) {
-        let k = WARP[i].x;
-        let a = TAU * k * phi;
-        th += WARP[i].y * cos(a) + WARP[i].z * sin(a);
-        dth += TAU * k * (-WARP[i].y * sin(a) + WARP[i].z * cos(a));
+    var th = TAU * (phi - WARP0);
+    var dp = 1.0 / TAU;
+    for (var n = 0; n < 6; n++) {
+        var p = th / TAU + WARP0;
+        dp = 1.0 / TAU;
+        for (var i = 0; i < 8; i++) {
+            let k = WARP[i].x;
+            p += WARP[i].y * cos(k * th) + WARP[i].z * sin(k * th);
+            dp += k * (-WARP[i].y * sin(k * th) + WARP[i].z * cos(k * th));
+        }
+        // Wrap the error so phi near 0/1 converges the short way round.
+        let e = fract(p - phi + 0.5) - 0.5;
+        // Clamped step: plain Newton overshoots where the ride is slow
+        // (the chain lift) and never settles; clamped, 6 steps are exact.
+        th -= clamp(e / dp, -0.8, 0.8);
     }
-    return vec2<f32>(th, dth);
+    return vec2<f32>(th, 1.0 / dp);
 }
 
 // Banked frame at a track point: (right, up) with T the unit tangent.
