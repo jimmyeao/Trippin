@@ -271,6 +271,23 @@ slamming back in count as a drop.
 | Scene cuts | every phrase, and on drops | every 2 phrases, soft flash |
 | Dancer | driving routines allowed | re-picked to a graceful routine |
 
+**Synesthesia-style audio vocabulary**, for motion that feels alive:
+- `u.lvl4`, `u.hits4` and `u.pres4` give level, transient hits and slow
+  presence for the bass, mid, mid-high and high bands.
+- `u.clock4` holds energy clocks for the whole mix, bass, mid and high.
+  They advance at tempo × (0.3 + 2.4·level^1.6), measured at about 0.4×
+  in breakdowns and up to about 1.5× on drops. They're built from
+  smoothed levels, so they're safe for camera travel.
+- Helpers: `bpm_sin(n)`, `bpm_tri(n)`, `random_on_beat()` and
+  `toggle_on_beat()`.
+
+`fractal_flight`, `gyroid_drift`, `julia_portal`, `portal_zoom`,
+`lattice`, `fluid`, `kaleido` and `ring_runner` run on the clocks. New
+abstract scenes built on this vocabulary:
+- `kifs_cathedral`: a crystal fractal lattice with crevices lit on the
+  kick.
+- `silk_flow`: iridescent liquid silk (2D, so not `@heavy`).
+
 Scenes can read `u.calm` directly for their own breakdown looks. Preview
 one with `--snap <scene> --snap-calm 1`.
 
