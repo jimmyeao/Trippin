@@ -21,21 +21,24 @@ fn ring_local(p: vec3<f32>, k: i32) -> vec3<f32> {
     let fk = f32(k);
     let dir = select(1.0, -1.0, (k & 1) == 1);
     // Slow precession of the whole gyroscope about world y.
-    var q = vec3<f32>(rot(u.flow * 0.08) * p.xz, p.y).xzy;
+    // Direction: the precession swings back and forth.
+    var q = vec3<f32>(rot(2.0 * sin(u.clock4.x * 0.02)) * p.xz, p.y).xzy;
     // Each ring's gimbal axis sits at its own azimuth.
     q = vec3<f32>(rot(fk * 1.1) * q.xz, q.y).xzy;
     // Tumble about the local x axis.
-    let tumble = u.flow * (0.45 + 0.13 * fk) * dir + fk * 0.63;
+    // Energy: tumble rate follows the energy clock.
+    let tumble = u.clock4.z * (0.45 + 0.13 * fk) * dir + fk * 0.63;
     q = vec3<f32>(q.x, rot(tumble) * q.yz);
     return q;
 }
 
 fn ring_r(k: i32) -> f32 {
-    return 0.95 + f32(k) * 0.26;
+    // Shape: each ring expands with its band's presence.
+    return 0.95 + f32(k) * 0.26 + 0.12 * u.pres4[k % 4];
 }
 
 fn core_r() -> f32 {
-    return 0.42 + 0.07 * u.kick;
+    return 0.36 + 0.12 * u.pres4.x + 0.06 * u.hits4.x;
 }
 
 fn ring_col(k: i32) -> vec3<f32> {

@@ -24,7 +24,8 @@ fn ring_h(k: f32) -> f32 {
 
 fn spikes(n: vec3<f32>) -> f32 {
     let th = acos(clamp(n.y, -1.0, 1.0));
-    let ph = angle(n.xz);
+    // Direction: the spike crown turns one way, then back.
+    let ph = angle(n.xz) + 0.8 * sin(u.clock4.x * 0.02);
     let k0 = round(th / DTH);
     var bump = 0.0;
     for (var dk = -1; dk <= 1; dk++) {
@@ -56,7 +57,7 @@ fn map(p: vec3<f32>) -> f32 {
     let q = (p - C) * vec3<f32>(1.0, 1.3, 1.0);
     let r = length(q);
     let n = q / max(r, 1e-4);
-    let breathe = RAD * (1.0 + 0.04 * u.bass);
+    let breathe = RAD * (0.95 + 0.1 * u.pres4.x + 0.04 * u.hits4.x);
     // Spikes only where they'd stand up (upper ~3/4 of the blob).
     let blob = (r - breathe - spikes(n) * smoothstep(-0.55, -0.1, n.y)) * 0.55;
     // The puddle it's pooled in: a flat ellipsoid on the floor.
@@ -153,7 +154,7 @@ fn chrome(p: vec3<f32>, rd: vec3<f32>) -> vec3<f32> {
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
-    let ang = u.flow * 0.02 + u.seed;
+    let ang = 1.2 * sin(u.clock4.x * 0.015) + u.clock4.x * 0.01 + u.seed;
     let ro = vec3<f32>(sin(ang) * 4.3, 1.55 + 0.25 * sin(u.flow * 0.013), cos(ang) * 4.3);
     let rd = cam_ray(p, ro, vec3<f32>(0.0, 0.45, 0.0), 0.0, 2.1);
 

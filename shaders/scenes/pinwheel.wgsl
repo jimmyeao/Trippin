@@ -5,14 +5,17 @@
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     var p = centred(in.uv);
-    p *= 1.0 + u.kick * 0.06;
+    p *= 1.0 + u.hits4.x * 0.1;
     let r = length(p);
     let a = angle(p);
 
     let blades = 5.0;
-    let bend = sin(r * 9.0 - u.flow * 0.6) * 0.3 * (0.4 + u.mid);
-    let a1 = sin((a + bend + u.flow * 0.3) * blades);
-    let a2 = sin((a - bend - u.flow * 0.22) * blades);
+    // Shape: blades curl harder with mid presence.
+    let bend = sin(r * 9.0 - u.clock4.z * 0.6) * 0.3 * (0.2 + 1.2 * u.pres4.y);
+    // Direction: the two wheels swap which way they spin over a phrase.
+    let sw = 4.0 * sin(u.clock4.x * 0.03);
+    let a1 = sin((a + bend + sw + u.clock4.x * 0.1) * blades);
+    let a2 = sin((a - bend - sw * 0.7 - u.clock4.x * 0.08) * blades);
 
     var col = vec3<f32>(0.01, 0.008, 0.02);
     let b1 = smoothstep(0.1, 0.5, a1) * exp(-r * 1.1);

@@ -40,7 +40,8 @@ fn density(p: vec3<f32>, octaves: i32) -> f32 {
     let shape = smoothstep(0.0, 0.25, h) * smoothstep(1.0, 0.55, h);
     let n = fbm3(p * vec3<f32>(0.45, 0.75, 0.45) + vec3<f32>(u.time * 0.02, 0.0, 0.0), octaves);
     // Firm edges with gaps between the clouds; tops rounder than bases.
-    return clamp((n - 0.5 + 0.12 * (1.0 - h)) * 7.0 * shape, 0.0, 1.0);
+    // Shape: the cloud deck thickens and billows as the bass builds.
+    return clamp((n - 0.53 + 0.1 * u.pres4.x + 0.12 * (1.0 - h)) * 7.0 * shape, 0.0, 1.0);
 }
 
 fn sky(dir: vec3<f32>, sun: vec3<f32>) -> vec3<f32> {
@@ -55,9 +56,10 @@ fn sky(dir: vec3<f32>, sun: vec3<f32>) -> vec3<f32> {
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
     let sun = normalize(vec3<f32>(0.25, 0.1, 1.0));
-    let ro = vec3<f32>(sin(u.time * 0.05) * 2.0, 0.8, u.flow * 1.2);
+    let ro = vec3<f32>(sin(u.clock4.x * 0.02) * 2.5, 0.8, u.clock4.x * 1.2);
     // Yaw, not roll: banking tilted the cloud deck's horizon line.
-    let yaw = sin(u.time * 0.08) * 0.09;
+    // Direction: banking turns that swing each way.
+    let yaw = sin(u.clock4.x * 0.03) * 0.25;
     let dxz = rot(yaw) * vec2<f32>(p.x, 1.5);
     let rd = normalize(vec3<f32>(dxz.x, -p.y - 0.18 + sin(u.time * 0.06) * 0.015, dxz.y));
 

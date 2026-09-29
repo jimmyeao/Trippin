@@ -23,8 +23,10 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
             let h = hash22(vec2<f32>(f32(i) + fs * 100.0, beat_i));
             let h2 = hash22(vec2<f32>(f32(i) * 1.7 + fs * 31.0, beat_i + 7.0));
             // Projectile: up fast, gravity pulls it back down.
-            let v0 = 0.55 + h.x * 0.7;
-            let vx = (h.y - 0.5) * 0.9;
+            // Energy: volleys fire higher as the bass builds; direction:
+            // the fountains lean one way, then the other, over a phrase.
+            let v0 = (0.45 + h.x * 0.7) * (0.8 + 0.5 * u.pres4.x);
+            let vx = (h.y - 0.5) * 0.9 + 0.45 * sin(u.clock4.x * 0.03 + fs);
             let life = clamp(t / max(h2.x * 0.8 + 0.25, 0.06), 0.0, 1.0);
             let pos = base + vec2<f32>(
                 vx * life * 0.42 + sin(life * 20.0 + h2.y * 9.0) * 0.005,

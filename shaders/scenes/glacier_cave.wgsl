@@ -14,7 +14,8 @@ fn centre(z: f32) -> vec2<f32> {
 }
 
 fn radius(z: f32) -> f32 {
-    return 2.4 + sin(z * 0.19) * 0.4 + sin(z * 0.07) * 0.5;
+    // Shape: the ice tunnel swells open as the bass builds.
+    return 2.4 + sin(z * 0.19) * 0.4 + sin(z * 0.07) * 0.5 + 0.45 * u.pres4.x;
 }
 
 // Air-positive field: inside the tunnel is positive.
@@ -45,7 +46,8 @@ fn normal(p: vec3<f32>) -> vec3<f32> {
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
-    let z = u.flow * 0.5;
+    // Energy: flight speed follows the mix.
+    let z = u.clock4.x * 0.5;
     let c0 = centre(z);
     let ro = vec3<f32>(c0.x, c0.y - 0.35 + 0.08 * sin(u.flow * 0.05), z);
     let c1 = centre(z + 5.0);

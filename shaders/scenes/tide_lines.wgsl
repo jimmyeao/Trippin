@@ -13,10 +13,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         let depth = fi / lines;
         // Bands stack from bottom of frame (+p.y = down) upward.
         let base = 0.9 - depth * 1.4;
-        let amp = (0.03 + u.bass * 0.06) * (0.5 + spec(depth));
+        // Shape: the swell deepens with bass presence.
+        let amp = (0.02 + u.pres4.x * 0.08) * (0.5 + spec(depth));
         let yw = base - depth * 0.1
-               + sin(p.x * (4.0 + fi * 0.6) + u.flow * (0.4 + fi * 0.12) + fi) * amp
-               + sin(p.x * 9.0 - u.flow * (0.6 + fi * 0.09)) * amp * 0.5;
+               + sin(p.x * (4.0 + fi * 0.6) + 6.0 * sin(u.clock4.x * 0.02) + u.clock4.x * (0.2 + fi * 0.06) + fi) * amp
+               + sin(p.x * 9.0 - u.clock4.z * (0.6 + fi * 0.09)) * amp * 0.5;
         let dy = p.y - yw;
         let glow_line = exp(-dy * dy * 900.0);
         let soft = exp(-abs(dy) * 14.0) * 0.15;

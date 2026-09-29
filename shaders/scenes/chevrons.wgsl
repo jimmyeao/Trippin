@@ -3,11 +3,14 @@
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-    let p = centred(in.uv) * 0.6;
-    let chev = abs(p.x) + abs(p.y) * 0.7;    // diamond-ish distance
+    // Shape: kicks punch the pattern outward; the chevron profile morphs
+    // from flat to diamond with mid presence.
+    let p = centred(in.uv) * 0.6 * (1.0 - 0.08 * u.hits4.x);
+    let chev = abs(p.x) + abs(p.y) * (0.4 + 0.8 * u.pres4.y);
 
     let n = 10.0;
-    let scroll = u.flow * 0.35 + u.kick * 0.05;
+    // Direction: flows outward, then back in, over a phrase; energy sets pace.
+    let scroll = 3.0 * sin(u.clock4.x * 0.03) + u.clock4.x * 0.15;
     let cell = fract(chev * n - scroll);
     let band_i = floor(chev * n - scroll);
     let seg = abs(cell - 0.5);

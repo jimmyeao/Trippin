@@ -5,7 +5,8 @@
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-    let p = centred(in.uv);
+    // Direction: the wall of bars slides left, then right.
+    let p = centred(in.uv) + vec2<f32>(0.25 * sin(u.clock4.x * 0.02), 0.0);
     let up = -p.y * 0.5 + 0.5; // 0 at bottom edge, 1 at top
 
     let cols = 20.0;
@@ -16,7 +17,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // Column height = its spectrum band, plus a kick lift and onset spike.
     let band = spec(bar_t);
     let onset_cell = step(0.7, hash21(vec2<f32>(cx, floor(u.beat * 4.0))));
-    let h = 0.08 + band * (0.55 + u.energy * 0.35) + u.kick * 0.15
+    let h = 0.08 + band * (0.55 + u.energy * 0.35) + u.hits4.x * 0.15
           + u.onset * onset_cell * 0.25;
 
     let bar_w = smoothstep(0.0, 0.12, fx) * smoothstep(1.0, 0.88, fx);

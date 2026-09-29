@@ -3,7 +3,9 @@
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-    let p = centred(in.uv);
+    // Shape: kicks bulge the grid like a lens.
+    let p0 = centred(in.uv);
+    let p = p0 * (1.0 - 0.15 * u.hits4.x * exp(-dot(p0, p0) * 1.5));
     let n = 24.0; // dots across the short axis
     let cell = floor(p * n);
     let c = (cell + 0.5) / n;
@@ -11,7 +13,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     // Column spectrum drives the dot; rows fall off with height.
     let bin = spec((c.x / aspect() + 0.5) * 0.8 + 0.1);
-    let row_wave = sin(c.y * 8.0 - u.flow * 2.0 + cell.x * 0.4);
+    // Direction: the row wave runs up, then back down; energy sets pace.
+    let row_wave = sin(c.y * 8.0 - 6.0 * sin(u.clock4.x * 0.04) - u.clock4.x * 0.5 + cell.x * 0.4);
     let amp = bin * (0.55 + 0.45 * row_wave) * (0.7 + u.energy);
     let r = 0.16 + 0.30 * amp + u.kick * 0.08;
     let d = length(f);

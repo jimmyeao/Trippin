@@ -10,13 +10,14 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // Horizontal breathe: expands on the beat then eases back. Pose, not an
     // integrator, so it can't stutter — it just follows beat_phase.
     let breathe = 1.0 + beat_pulse(4.5) * (0.25 + u.bass * 0.5)
-                + u.kick * 0.15;
+                + u.hits4.x * 0.15;
     p.x /= breathe;
 
     var col = vec3<f32>(0.0);
 
     // Helix scrolls upward with the beat clock.
-    let scroll = u.flow * 0.35;
+    // Energy + direction: the helix streams along, then reverses.
+    let scroll = 3.0 * sin(u.clock4.x * 0.025) + u.clock4.x * 0.15;
     let rungs = 14.0;
     for (var i = 0; i < 14; i++) {
         let fi = f32(i);

@@ -14,7 +14,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     if (p.y > 0.005) {
         // Perspective depth: 1/y, clamped so the horizon isn't infinite.
         let z = clamp(0.18 / p.y, 0.0, 12.0);
-        let g = vec2<f32>(p.x * z * 5.0, z * 3.0 - u.flow * 3.0);
+        // Energy: rush speed follows the mix; direction: the grid slides
+        // sideways, then back (a banking run).
+        let g = vec2<f32>(p.x * z * 5.0 + 4.0 * sin(u.clock4.x * 0.02), z * 3.0 - u.clock4.x * 3.0);
         // Line thickness grows with depth so screen width stays visible.
         let th = 0.03 + z * 0.045;
         let lx = smoothstep(0.5 - th, 0.5, abs(fract(g.x) - 0.5));
@@ -22,7 +24,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         let band = spec(fract(p.x / aspect() * 0.5 + 0.5));
         let line_col = mix(palette(0.5 + u.hue), palette(0.85 + u.hue), band);
         // Bright near horizon (converge), taper at the very bottom.
-        let gain = (0.6 + band * 1.4 + u.kick * 0.6) * (0.5 + z * 0.12);
+        let gain = (0.6 + band * 1.4 + u.hits4.x * 0.6) * (0.5 + z * 0.12);
         col += line_col * (lx + ly) * gain;
         // Dark ground fill between lines.
         col = mix(col, vec3<f32>(0.008, 0.004, 0.03),

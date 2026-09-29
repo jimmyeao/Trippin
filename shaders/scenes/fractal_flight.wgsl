@@ -31,10 +31,11 @@ fn scene_dist(p: vec3<f32>) -> f32 {
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
-    let travel = u.flow * 1.2;
+    // Energy clock: glides in breakdowns, surges on drops (smooth).
+    let travel = u.clock4.x * 1.2;
     let ro = vec3<f32>(0.0, 0.0, travel);
     var rd = normalize(vec3<f32>(p * 0.8, 1.0));
-    let roll = rot(u.time * 0.1 + travel * 0.05);
+    let roll = rot(u.clock4.z * 0.05 + travel * 0.05);
     rd = vec3<f32>(roll * rd.xy, rd.z);
 
     var t = 0.0;

@@ -8,7 +8,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     // Water: deep gradient + slow drifting sheen.
     var col = vec3<f32>(0.008, 0.015, 0.03);
-    col += palette(0.55 + u.hue) * fbm(p * 2.0 + u.time * 0.05) * 0.06;
+    col += palette(0.55 + u.hue) * fbm(p * 2.0 + u.clock4.z * 0.03) * 0.06;
 
     // Ring sources: 8 slots, one fires per beat (hashed position).
     for (var i = 0; i < 8; i++) {

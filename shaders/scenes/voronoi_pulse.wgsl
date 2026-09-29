@@ -3,7 +3,9 @@
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-    let p = centred(in.uv) * vec2<f32>(1.0, 1.0) * 4.0;
+    // Shape: cells shrink/grow with mid presence; direction: the field
+    // drifts one way, then back.
+    let p = centred(in.uv) * (3.0 + 2.0 * u.pres4.y) + vec2<f32>(2.0 * sin(u.clock4.x * 0.02), u.clock4.x * 0.05);
 
     // Voronoi: nearest and second-nearest cell points.
     let ip = floor(p);
@@ -16,7 +18,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
             let g = vec2<f32>(f32(i), f32(j));
             let o = hash22(ip + g + u.seed);
             // Cell points wander slightly with the beat.
-            let wob = 0.12 * sin(u.beat_phase * TAU + hash21(ip + g) * TAU);
+            let wob = (0.08 + 0.12 * u.hits4.x) * sin(u.clock4.z * 0.5 + hash21(ip + g) * TAU);
             let r = g + o + wob - fp;
             let d = dot(r, r);
             if d < d1 {

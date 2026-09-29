@@ -18,7 +18,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let sun_p = p - vec2<f32>(0.0, 0.30);
     let sun_r = length(sun_p);
     let sun = smoothstep(0.32, 0.30, sun_r);
-    let stripes = smoothstep(0.0, 0.02, abs(fract(sun_p.y * 12.0 + u.time * 0.3) - 0.5) - 0.28);
+    let stripes = smoothstep(0.0, 0.02, abs(fract(sun_p.y * 12.0 + u.clock4.w * 0.15) - 0.5) - 0.28);
     let sun_col = mix(palette(0.9 + u.hue), palette(0.1 + u.hue), clamp(up * 2.0 + 0.5, 0.0, 1.0));
     col = mix(col, sun_col * (0.6 + beat_pulse(3.0) * 0.8), sun * stripes);
     col += palette(0.9 + u.hue) * exp(-sun_r * 4.0) * 0.4 * (0.5 + u.bass);
@@ -28,9 +28,12 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     for (var i = 0; i < 4; i++) {
         let fi = f32(i);
         let depth = fi / 4.0;
-        let amp = 0.02 + depth * 0.025 + u.bass * 0.03;
-        let wv = sin(p.x * (5.0 - fi) + u.flow * (0.6 + fi * 0.4) + fi * 2.0) * amp
-               + sin(p.x * 11.0 - u.flow * (0.9 + fi * 0.3)) * amp * 0.4;
+        // Shape: the swell rises with bass presence.
+        let amp = 0.015 + depth * 0.025 + u.pres4.x * 0.05;
+        // Direction: the waves roll one way, then back; energy sets pace.
+        let wt = 6.0 * sin(u.clock4.x * 0.02) + u.clock4.x * 0.2;
+        let wv = sin(p.x * (5.0 - fi) + wt * (0.6 + fi * 0.4) + fi * 2.0) * amp
+               + sin(p.x * 11.0 - wt * (0.9 + fi * 0.3)) * amp * 0.4;
         let level = -0.33 - depth * 0.45;
         let below = smoothstep(level + wv + 0.005, level + wv - 0.005, up);
         let layer_col = mix(palette(0.55 + u.hue) * 0.25, vec3<f32>(0.005, 0.002, 0.015), depth);

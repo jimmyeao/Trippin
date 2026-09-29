@@ -25,9 +25,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     for (var i = 0; i < 4; i++) {
         let fi = f32(i);
-        let head = fract(u.beat * (0.25 + fi * 0.06) + fi * 0.25);
+        // Direction: neighbouring chases run opposite ways; energy sets pace.
+        let head = fract(select(1.0, -1.0, (i & 1) == 1) * u.clock4.x * (0.25 + fi * 0.06) + fi * 0.25);
         let behind = fract(head - t);
-        let trail = smoothstep(0.30 - u.energy * 0.1, 0.0, behind);
+        // Shape: trails stretch with presence.
+        let trail = smoothstep(0.18 + 0.25 * u.pres4.y, 0.0, behind);
         let bulb = smoothstep(0.03, 0.0, behind);
         let dc = edge_d;
         col += palette(fi * 0.25 + u.hue) * (trail * 0.5 + bulb * 2.0)

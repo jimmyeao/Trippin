@@ -12,10 +12,15 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let rings = 6.0;
     for (var i = 0; i < 6; i++) {
         let fi = f32(i);
-        let rr = 0.15 + fi * 0.22;
+        // Shape: each ring swells with its band's presence and ripples on
+        // the kick.
+        let rr = 0.15 + fi * 0.22 + 0.05 * u.pres4[i % 4] + 0.025 * u.hits4.x * sin(a * TAU * 6.0 + fi * 1.7);
         let band = exp(-abs(r - rr) * 30.0);
         // Sweep head travels around the ring at its own rate.
-        let head = fract(a - fract(u.beat * (0.25 + fi * 0.125)) );
+        // Direction: neighbouring rings sweep opposite ways; speed rides
+        // the energy clock.
+        let dir = select(1.0, -1.0, (i & 1) == 1);
+        let head = fract(dir * (a - u.clock4.x * (0.25 + fi * 0.125)));
         let sweep = smoothstep(0.12, 0.0, head);
         let trail = smoothstep(0.45, 0.0, head) * 0.3;
         let amp = spec(fi / rings);

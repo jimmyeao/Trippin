@@ -25,7 +25,8 @@ fn block(c: vec2<f32>) -> vec4<f32> {
     let half = S * (0.3 + 0.12 * h.y);
     let downtown = exp(-length(ctr - vec2<f32>(0.0, 300.0)) / 260.0);
     let n = tnoise(vec3<f32>(c * 0.07, 0.3)).b;
-    var hgt = 8.0 + pow(h.x, 3.0) * 50.0 + pow(hash21(c + 5.5), 8.0) * 160.0 + downtown * 180.0 * n * n;
+    // Shape: the whole skyline rises and falls like an equaliser.
+    var hgt = (8.0 + pow(h.x, 3.0) * 50.0 + pow(hash21(c + 5.5), 8.0) * 160.0 + downtown * 180.0 * n * n) * (0.75 + 0.5 * spec(fract(h.y * 3.1)));
     // Empty lots — and a clearing round our own tower at the origin.
     if hash21(c + 9.1) < 0.08 || length(ctr - vec2<f32>(3.0, -20.0)) < 40.0 {
         hgt = 0.0;
@@ -99,7 +100,7 @@ fn facade(p: vec3<f32>, n: vec3<f32>, cell: vec2<f32>, hgt: f32) -> vec3<f32> {
     var lit = step(0.78, h);
     // Spectrum ripple: bands of windows light up in waves across the city.
     let band = fract(cell.x * 0.13 + cell.y * 0.07);
-    let wave = smoothstep(0.7, 1.0, sin(length(cell) * 0.4 - u.flow * 0.5) * 0.5 + 0.5);
+    let wave = smoothstep(0.7, 1.0, sin(length(cell) * 0.4 - u.clock4.z * 0.5) * 0.5 + 0.5);
     lit = max(lit, step(0.35, h) * wave * spec(band * 0.8) * 1.5 * u.intensity);
     let warm = mix(vec3<f32>(1.0, 0.72, 0.4), vec3<f32>(0.6, 0.8, 1.0), step(0.85, hash21(wc + 3.3)));
     var c = vec3<f32>(0.012, 0.012, 0.016) + warm * lit * pane * 0.9 * (0.4 + 0.6 * hash21(wc + 1.7));
@@ -124,9 +125,10 @@ fn facade(p: vec3<f32>, n: vec3<f32>, cell: vec2<f32>, hgt: f32) -> vec3<f32> {
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
-    let yaw = sin(u.flow * 0.012) * 0.45 + u.seed * 0.1;
+    // Direction: the view pans across the city and back.
+    let yaw = sin(u.clock4.x * 0.015) * 0.6 + u.seed * 0.1;
     let ro = vec3<f32>(3.0, 150.0, -20.0);
-    let fwd = vec3<f32>(sin(yaw), -0.2 + sin(u.flow * 0.009) * 0.05, cos(yaw));
+    let fwd = vec3<f32>(sin(yaw), -0.2 + sin(u.clock4.x * 0.009) * 0.05 - 0.08 * u.pres4.x, cos(yaw));
     let rd = cam_ray(p, ro, ro + fwd, 0.0, 1.45);
     let drive = 0.5 + 0.8 * u.intensity;
 

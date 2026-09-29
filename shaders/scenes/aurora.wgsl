@@ -14,13 +14,15 @@ fn curtain(pt: vec2<f32>, t: f32) -> f32 {
         let xp = clamp(pt.x * (0.030 + fk * 0.012) + 0.5, 0.0, 1.0);
         let s = spec(xp);
         // Wind still bends the ribbon, now on the beat clock.
-        let wind = (1.2 + s * 2.5) * sin(pt.x * 0.15 + u.flow * 0.35 + fk * 2.3)
-                 + 1.2 * fbm(vec2<f32>(pt.x * 0.10, fk * 5.0 + u.flow * 0.04));
+        // Shape: folds deepen with bass presence; energy: they ripple
+        // faster as the mids drive.
+        let wind = (1.2 + s * 2.5) * (0.7 + 0.6 * u.pres4.x) * sin(pt.x * 0.15 + u.clock4.z * 0.35 + fk * 2.3)
+                 + 1.2 * fbm(vec2<f32>(pt.x * 0.10, fk * 5.0 + u.clock4.z * 0.04));
         let edge = 7.0 + fk * 5.5 + s * 26.0 + wind;
         let d = pt.y - edge;
         let band = exp(-d * d * 0.30);
         // Vertical striations streaming upward, faster and brighter when loud.
-        let rays = noise(vec2<f32>(pt.x * 2.8 + fk * 7.0, pt.y * 0.22 - u.flow * (0.7 + s * 1.8)));
+        let rays = noise(vec2<f32>(pt.x * 2.8 + fk * 7.0, pt.y * 0.22 - u.clock4.w * (0.7 + s * 1.8)));
         v += band * (0.2 + 0.8 * rays) * (0.30 + s * 1.7);
     }
     return v * (0.6 + u.onset * 0.8 + u.kick * 0.5);

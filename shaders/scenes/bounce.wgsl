@@ -19,10 +19,12 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         let fi = f32(i);
         let band = (fi + 0.5) / 8.0;
         let v = spec(band);
-        let ox = 0.12 + fi * 0.105;
+        // Direction: the row sways side to side, each orb a little behind.
+        let ox = 0.12 + fi * 0.105 + 0.03 * sin(u.clock4.x * 0.1 - fi * 0.4);
         // Hop on the beat; height rides the band.
         let hop = abs(sin(u.beat_phase * PI + fi * 0.35));
-        let y = fy + 0.05 + v * (0.45 + u.energy * 0.2) + hop * 0.09 * (0.3 + v);
+        // Energy: kicks throw the orbs higher.
+        let y = fy + 0.05 + v * (0.45 + u.energy * 0.2) + hop * 0.09 * (0.3 + v + 1.5 * u.hits4.x);
         let d = length(vec2<f32>((x - ox) * aspect(), up - y));
         let r = 0.035 + v * 0.03;
         let orb = smoothstep(r, r * 0.5, d);

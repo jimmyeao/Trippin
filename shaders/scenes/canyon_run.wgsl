@@ -9,11 +9,13 @@ fn wav(z: f32) -> f32 {
 }
 
 fn half_w(z: f32) -> f32 {
-    return 1.7 + sin(z * 0.3) * 0.25;
+    // Shape: the walls close in a little as the bass builds.
+    return 1.7 + sin(z * 0.3) * 0.25 - 0.25 * u.pres4.x;
 }
 
 fn rim(p: vec3<f32>) -> f32 {
-    return 4.5 + (tnoise(vec3<f32>(p.z * 0.02, sign(p.x + wav(p.z)) * 0.3, 0.1)).b - 0.5) * 6.0;
+    // Shape: the rim rises with mid presence.
+    return 4.5 + 2.0 * u.pres4.y + (tnoise(vec3<f32>(p.z * 0.02, sign(p.x + wav(p.z)) * 0.3, 0.1)).b - 0.5) * 6.0;
 }
 
 // Air-positive field: the rock is |x'| > half and below the rim.
@@ -44,7 +46,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
     // Constant speed — modulating travel by bass made the flight lurch.
     // Bass dips the camera and stokes the wall lights instead.
-    let z = u.flow * 3.2;
+    // Energy: the sprint speed follows the mix.
+    let z = u.clock4.x * 3.2;
     let ro = vec3<f32>(-wav(z) + sin(u.time * 0.4) * 0.25, -0.1 + sin(u.time * 0.7) * 0.12 - u.kick * 0.12, z);
     // Look down the canyon, leaning into the curves, tilted up a touch.
     let ahead = vec3<f32>(-wav(z + 4.0), 0.35, z + 4.0);

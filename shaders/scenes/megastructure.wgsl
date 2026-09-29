@@ -25,7 +25,9 @@ fn wall(p: vec3<f32>, side: f32) -> f32 {
     let cz = floor(p.z / CELL.z);
     let h = hash21(vec2<f32>(cy * 13.0 + side * 7.0, cz * 3.0));
     let h2 = hash21(vec2<f32>(cy * 5.0 + side, cz * 11.0 + 1.0));
-    let proud = h * 3.0;                        // how far it juts out
+    // Shape: the blocks push out into the canyon as the bass builds
+    // (max 3.8, still clear of the flight path).
+    let proud = h * (2.2 + 1.6 * u.pres4.x);
     let c = vec3<f32>(-proud + 4.0, (cy + 0.5) * CELL.y, (cz + 0.5) * CELL.z);
     let b = vec3<f32>(4.0, CELL.y * (0.3 + 0.18 * h2), CELL.z * (0.32 + 0.16 * h));
     let d = sd_box(vec3<f32>(lx, p.y, p.z) - c, b);
@@ -87,9 +89,10 @@ fn windows(p: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
-    let z = u.flow * 1.1;
+    let z = u.clock4.x * 1.1;
     let ro = vec3<f32>(sin(u.flow * 0.013) * 2.5, sin(u.flow * 0.009) * 6.0, z);
-    let ta = ro + vec3<f32>(sin(u.flow * 0.011) * 0.25, -0.05 + sin(u.flow * 0.007) * 0.1, 1.0);
+    // Direction: the gaze swings from wall to wall.
+    let ta = ro + vec3<f32>(sin(u.clock4.x * 0.025) * 0.5, -0.05 + sin(u.clock4.x * 0.011) * 0.15, 1.0);
     let rd = cam_ray(p, ro, ta, sin(u.flow * 0.006) * 0.05, 1.45);
     let sun = normalize(vec3<f32>(0.25, 0.12, 1.0));
 

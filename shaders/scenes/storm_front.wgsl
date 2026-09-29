@@ -17,7 +17,7 @@ const TOP: f32 = 9.0;
 
 fn strike_pos(beat: f32) -> vec3<f32> {
     let h = hash22(vec2<f32>(beat, 3.7));
-    return vec3<f32>((h.x - 0.5) * 16.0, 3.0 + h.y * 2.5, u.flow * 0.6 + 14.0 + h.y * 10.0);
+    return vec3<f32>((h.x - 0.5) * 16.0, 3.0 + h.y * 2.5, u.clock4.x * 0.6 + 14.0 + h.y * 10.0);
 }
 
 // Lightning envelope for the current beat: fires on some beats when driving.
@@ -36,7 +36,7 @@ fn strike_amt() -> f32 {
 // decay envelopes of the beat phase — pose, never accumulated.
 fn sheet_pos(k: f32) -> vec3<f32> {
     let h = hash22(vec2<f32>(k, 5.3));
-    return vec3<f32>((h.x - 0.5) * 30.0, 4.5 + h.y * 3.0, u.flow * 0.6 + 18.0 + h.y * 22.0);
+    return vec3<f32>((h.x - 0.5) * 30.0, 4.5 + h.y * 3.0, u.clock4.x * 0.6 + 18.0 + h.y * 22.0);
 }
 
 fn density(p: vec3<f32>) -> f32 {
@@ -45,7 +45,7 @@ fn density(p: vec3<f32>) -> f32 {
         return 0.0;
     }
     // The storm wall sits ahead; coverage ramps up with distance.
-    let wall = smoothstep(6.0, 20.0, p.z - u.flow * 0.6);
+    let wall = smoothstep(6.0, 20.0, p.z - u.clock4.x * 0.6);
     let q = p * vec3<f32>(0.032, 0.05, 0.032) + vec3<f32>(0.0, 0.0, u.time * 0.003);
     let n = tnoise(q);
     // Height profile: flat dark base, billowing tower tops.
@@ -68,7 +68,7 @@ fn rain(p: vec3<f32>) -> f32 {
     if p.y > BASE || p.y < 0.0 {
         return 0.0;
     }
-    let wall = smoothstep(10.0, 22.0, p.z - u.flow * 0.6);
+    let wall = smoothstep(10.0, 22.0, p.z - u.clock4.x * 0.6);
     let n = tnoise(vec3<f32>(p.x * 0.05, 0.1, p.z * 0.05));
     let streak = tnoise(vec3<f32>(p.x * 0.6, p.y * 0.02 + u.time * 0.05, p.z * 0.6)).a;
     return smoothstep(0.52 - u.energy * 0.08, 0.7, n.b) * wall * (0.5 + streak) * 0.25 * (0.5 + 0.5 * u.intensity + 0.6 * u.energy);
@@ -85,8 +85,9 @@ fn sky(rd: vec3<f32>) -> vec3<f32> {
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
-    let ro = vec3<f32>(sin(u.flow * 0.01) * 1.5, 0.45 + 0.08 * sin(u.flow * 0.02), u.flow * 0.6);
-    let rd = cam_ray(p, ro, ro + vec3<f32>(sin(u.flow * 0.008) * 0.2, 0.2, 1.0), sin(u.flow * 0.006) * 0.03, 1.4);
+    // Direction: weaving wider across the sea.
+    let ro = vec3<f32>(sin(u.clock4.x * 0.02) * 3.0, 0.45 + 0.08 * sin(u.clock4.x * 0.02), u.clock4.x * 0.6);
+    let rd = cam_ray(p, ro, ro + vec3<f32>(sin(u.clock4.x * 0.008) * 0.2, 0.2, 1.0), sin(u.clock4.x * 0.006) * 0.03, 1.4);
 
     let sun = normalize(vec3<f32>(-0.2, 0.08, 1.0));
     let amb_top = vec3<f32>(0.045, 0.05, 0.07);

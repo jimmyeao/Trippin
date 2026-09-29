@@ -10,10 +10,12 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let c = (cell + 0.5) / n;
 
     // Rolling wave front + spectrum lift per column.
-    let wave_h = sin(c.x * aspect() * 4.0 - u.flow * 1.4) * 0.5 + 0.5;
+    // Shape: wavelength tightens with mid presence; direction: the wave
+    // rolls one way then back; energy sets its pace.
+    let wave_h = sin(c.x * aspect() * (3.0 + 3.0 * u.pres4.y) - 8.0 * sin(u.clock4.x * 0.02) - u.clock4.x * 0.7) * 0.5 + 0.5;
     let band = spec(c.x / aspect() + 0.25);
     let lift = wave_h * 0.6 + band * 0.6;
-    let r = 0.10 + lift * 0.38 + u.kick * 0.05;
+    let r = 0.10 + lift * 0.38 + u.hits4.x * 0.06;
     let dot = smoothstep(r, r - 0.06, length(f));
 
     // Colour sweeps across columns with the wavefront.

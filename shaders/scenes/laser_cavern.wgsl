@@ -107,8 +107,9 @@ fn map(p: vec3<f32>) -> f32 {
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
-    let ro = vec3<f32>(sin(u.flow * 0.012) * 3.0, 1.8 + 0.2 * sin(u.flow * 0.017), -9.0 + sin(u.flow * 0.008) * 1.5);
-    let ta = vec3<f32>(sin(u.flow * 0.009) * 1.5, 2.6, 8.0);
+    // Direction: the viewpoint swings around the pool, gaze following.
+    let ro = vec3<f32>(sin(u.clock4.x * 0.02) * 4.0, 1.8 + 0.3 * sin(u.clock4.x * 0.017), -9.0 + sin(u.clock4.x * 0.012) * 1.5);
+    let ta = vec3<f32>(-sin(u.clock4.x * 0.02) * 2.0, 2.6, 8.0);
     let rd = cam_ray(p, ro, ta, 0.0, 1.35);
     let drive = 0.5 + 0.8 * u.intensity;
 

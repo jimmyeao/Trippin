@@ -12,9 +12,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let persp = pow(depth, 0.75);
     let cols = 24.0;
     let rows = 14.0;
-    let cx = floor(uv.x * cols);
+    // Direction: the field slides sideways and back over a phrase.
+    let sx = uv.x + 0.2 * sin(u.clock4.x * 0.02);
+    let cx = floor(sx * cols);
     let cy = floor(persp * rows);
-    let f = vec2<f32>(fract(uv.x * cols), fract(persp * rows)) - 0.5;
+    let f = vec2<f32>(fract(sx * cols), fract(persp * rows)) - 0.5;
 
     let band = (cx + 0.5) / cols;
     let v = spec(band);
@@ -23,7 +25,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // Tiles light from the front (bottom of screen) up to the band height.
     let lit = step(1.0 - v * 1.15, row_level);
     // Kick bounce: tiles get rounder and hotter for a moment.
-    let shrink = 0.06 + beat_pulse(10.0) * 0.10;
+    // Shape: tiles swell as the bass builds and pop on kicks.
+    let shrink = 0.14 - 0.1 * u.pres4.x + beat_pulse(10.0) * 0.1;
     let tile = smoothstep(0.5 - shrink, 0.5 - shrink - 0.08, max(abs(f.x), abs(f.y)));
 
     var col = palette(band * 0.7 + row_level * 0.3) * tile * lit * (0.3 + v * 0.9);

@@ -25,7 +25,7 @@ struct Hit {
 fn map(p: vec3<f32>) -> Hit {
     let id = floor(p.xz / CELL);
     // Always a real column; the EQ adds height on top and the kick lifts all.
-    let hgt = 0.45 + 1.3 * pow(col_spec(id), 0.7) + 0.3 * u.kick;
+    let hgt = 0.45 + 1.3 * pow(col_spec(id), 0.7) + 0.3 * u.hits4.x;
     let c = (id + 0.5) * CELL;
     // Prism from the floor up to its EQ height; a narrow gap between columns.
     let local = p - vec3<f32>(c.x, hgt * 0.5, c.y);
@@ -40,12 +40,13 @@ fn map(p: vec3<f32>) -> Hit {
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
-    let z = u.flow * 1.4;
+    let z = u.clock4.x * 1.4;
     // High oblique view, drifting forward; tilts a touch with the kick.
     let ro = vec3<f32>(sin(z * 0.1) * 1.4, 1.9 - 0.12 * beat_pulse(8.0), z);
     // centred() has +y pointing down the screen — negate so up is up.
     var rd = normalize(vec3<f32>(p.x * 0.9, -p.y * 0.65 - 0.42, 1.0));
-    rd = vec3<f32>(rot(sin(u.time * 0.07) * 0.05) * rd.xy, rd.z);
+    // Direction: banking one way over the field, then the other.
+    rd = vec3<f32>(rot(sin(u.clock4.x * 0.025) * 0.2) * rd.xy, rd.z);
 
     var t = 0.0;
     var glow = vec3<f32>(0.0);
@@ -78,7 +79,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
             // The floor plane between columns.
             col = vec3<f32>(0.012, 0.012, 0.02) + glow * 0.25;
         } else {
-            let hgt = 0.45 + 1.3 * pow(e, 0.7) + 0.3 * u.kick;
+            let hgt = 0.45 + 1.3 * pow(e, 0.7) + 0.3 * u.hits4.x;
             if pos.y > hgt - 0.09 {
                 // Lit cap: bright face, hotter with the band's energy.
                 col = face * (0.6 + 1.5 * e) * (0.7 + 0.6 * u.intensity);

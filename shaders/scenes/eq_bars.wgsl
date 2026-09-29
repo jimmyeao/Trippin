@@ -11,7 +11,10 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     // Distance from the centre line; each bar grows both ways. Edge AA is
     // pixel-proportional (fwidth) so bars stay crisp at any resolution.
-    let d = abs(in.uv.y - 0.5) * 2.0;
+    // Shape + direction: the bar field bends into an arc that flips from
+    // smile to frown over a phrase, deeper with bass presence.
+    let bend = (fx - 0.5) * (fx - 0.5) * 4.0 - 0.33;
+    let d = abs(in.uv.y - 0.5 - bend * 0.12 * sin(u.clock4.x * 0.03) * (0.4 + u.pres4.x)) * 2.0;
     let h = 0.04 + v * (0.8 + 0.15 * u.intensity);
     let aay = fwidth(d) * 1.5;
     let bar = smoothstep(-aay, aay, h - d);

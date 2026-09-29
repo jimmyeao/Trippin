@@ -17,7 +17,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         let rr = age * 0.9 + 0.05;
         let w = 0.015 + age * 0.05;
         // Spectrum around the ring wobbles the radius.
-        let wob = spec(am) * 0.05;
+        // Shape: the rings buckle into petals with the spectrum, more so
+        // as the bass builds.
+        let wob = spec(am) * (0.04 + 0.1 * u.pres4.x) + sin(am * TAU * 3.0 + u.clock4.z * 0.3) * 0.02 * u.pres4.y;
         let ring = exp(-pow(abs(r - rr - wob) / w, 2.0));
         let fade = (1.0 - age) * (1.0 - age);
         // Chromatic dispersion: three offset rings of colour.
@@ -32,7 +34,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
          * (0.15 + u.bass * 0.5);
 
     // Subtle petal halo.
-    let halo = 0.5 + 0.5 * sin(am * TAU * 6.0 + u.flow);
+    // Direction: the petal halo turns one way then back.
+    let halo = 0.5 + 0.5 * sin(am * TAU * 6.0 + 6.0 * sin(u.clock4.x * 0.03));
     col += palette(am + u.hue) * halo * exp(-r * 3.0) * 0.15 * (0.5 + u.energy);
     return vec4<f32>(finite(col), 1.0);
 }

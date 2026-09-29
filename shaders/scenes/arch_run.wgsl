@@ -5,7 +5,8 @@
 fn arch2d(q: vec2<f32>) -> f32 {
     // Pointed-arch opening centred on x=0: two mirrored arcs meeting at a
     // point above. Negative inside the opening.
-    let w = 0.9;
+    // Shape: openings widen as the bass builds.
+    let w = 0.9 + 0.5 * u.pres4.x;
     let r = 1.6;
     let d1 = length(q - vec2<f32>(-w * 0.5, -0.2)) - r;
     let d2 = length(q - vec2<f32>(w * 0.5, -0.2)) - r;
@@ -26,9 +27,11 @@ fn map(p: vec3<f32>) -> f32 {
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
-    let z = u.flow * 2.8;
+    let z = u.clock4.x * 2.8;
     let ro = vec3<f32>(sin(z * 0.08) * 0.4, 0.2 + sin(u.time * 0.5) * 0.1, z);
     var rd = normalize(vec3<f32>(p.x * 0.7, -p.y * 0.6, 1.0));
+    // Direction: a slow roll that swings back and forth.
+    rd = vec3<f32>(rot(0.15 * sin(u.clock4.x * 0.03)) * rd.xy, rd.z);
 
     var t = 0.0;
     var pos = ro;

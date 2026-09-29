@@ -11,7 +11,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     let arms = 2.0 + floor(u.energy * 3.0);
     // Log spiral: angle + k*log(r) gives the classic hypnosis band.
-    let band = sin((a + u.flow * 0.5) * arms + log(r + 0.02) * 9.0);
+    // Direction: the spiral winds one way, then unwinds; shape: it coils
+    // tighter as the bass builds.
+    let band = sin((a + 4.0 * sin(u.clock4.x * 0.03) + u.clock4.x * 0.2) * arms + log(r + 0.02) * (6.0 + 6.0 * u.pres4.x));
     let b = smoothstep(-0.3, 0.3, band);
 
     var col = mix(vec3<f32>(0.01), palette(band * 0.1 + r * 0.2 + u.hue), b);

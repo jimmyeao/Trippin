@@ -55,9 +55,10 @@ fn canopy_gap(q: vec3<f32>) -> f32 {
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
-    let z = u.flow * 0.35;
+    let z = u.clock4.x * 0.35;
     let ro = vec3<f32>(sin(u.flow * 0.02) * 0.6, ground(vec2<f32>(0.0, z)) + 1.6 + 0.04 * sin(u.flow * PI), z);
-    let ta = ro + vec3<f32>(sin(u.flow * 0.013) * 0.4, -0.05 + sin(u.flow * 0.009) * 0.08, 1.0);
+    // Direction: the gaze wanders from side to side along the path.
+    let ta = ro + vec3<f32>(sin(u.clock4.x * 0.03) * 0.8, -0.05 + sin(u.clock4.x * 0.02) * 0.1, 1.0);
     let rd = cam_ray(p, ro, ta, 0.0, 1.3);
     let L = moon_dir();
     let moon_c = vec3<f32>(0.55, 0.65, 0.9);
@@ -113,7 +114,10 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
             let h = hash22(c.xz + c.y * 17.0);
             let exists = step(hash21(c.xz * 1.7 + c.y * 3.0), 0.7) * step(c.y * 3.0, ground(c.xz * 3.0) + 3.0);
             let fp = (c + vec3<f32>(h.x, 0.2 + 0.5 * h.y, fract(h.x * 7.3 + h.y))) * 3.0;
-            let fp2 = fp + vec3<f32>(sin(u.time * 0.7 + h.x * 9.0), sin(u.time * 0.5 + h.y * 7.0) * 0.4, cos(u.time * 0.6 + h.y * 5.0)) * 0.6;
+            // Shape + energy: the swarm loops wider and faster as the
+            // highs build.
+            let tw = u.clock4.w * 0.4;
+            let fp2 = fp + vec3<f32>(sin(tw * 0.7 + h.x * 9.0), sin(tw * 0.5 + h.y * 7.0) * 0.4, cos(tw * 0.6 + h.y * 5.0)) * (0.4 + 0.8 * u.pres4.z);
             let v = fp2 - ro;
             let tt = dot(v, rd);
             if tt > 0.2 && tt < t {

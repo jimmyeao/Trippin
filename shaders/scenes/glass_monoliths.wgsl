@@ -13,8 +13,11 @@ fn slab_xf(k: i32) -> vec4<f32> {
     // (x, z, yaw, unused)
     let fk = f32(k) - 2.0;
     let a = fk * 0.42;
-    let yaw = fk * 0.4 + sin(u.flow * 0.03 + f32(k) * 1.3) * 0.7 + u.flow * 0.01;
-    return vec4<f32>(sin(a) * 3.4, 3.4 - cos(a) * 3.4, yaw, 0.0);
+    // Direction: the slabs turn one way then back; energy speeds them.
+    let yaw = fk * 0.4 + sin(u.clock4.x * 0.03 + f32(k) * 1.3) * 0.9 + u.clock4.z * 0.01;
+    // Shape: the arc of slabs fans wider with bass presence.
+    let rr = 3.0 + 0.9 * u.pres4.x;
+    return vec4<f32>(sin(a) * rr, 3.4 - cos(a) * rr, yaw, 0.0);
 }
 
 fn rbox(p: vec3<f32>, b: vec3<f32>, r: f32) -> f32 {
@@ -166,7 +169,7 @@ fn glass(p: vec3<f32>, rd: vec3<f32>) -> vec3<f32> {
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
-    let ang = sin(u.flow * 0.012) * 0.35;
+    let ang = sin(u.clock4.x * 0.015) * 0.45;
     let ro = vec3<f32>(sin(ang) * 6.5, 1.35 + 0.2 * sin(u.flow * 0.017), -6.5 * cos(ang) + 1.5);
     let rd = cam_ray(p, ro, vec3<f32>(0.0, 1.2, 1.8), 0.0, 1.8);
 

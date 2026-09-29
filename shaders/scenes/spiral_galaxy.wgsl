@@ -8,9 +8,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let a = angle(p);
 
     let arms = 3.0;
-    let wind = u.flow * 0.12;
+    // Energy: the galaxy turns faster as the track drives.
+    let wind = u.clock4.x * 0.12;
     // Logarithmic spiral arms.
-    let arm = fract((a + r * 6.0 + wind * TAU) / TAU * arms);
+    // Shape: the arms wind tighter as the bass builds.
+    let arm = fract((a + r * (4.0 + 5.0 * u.pres4.x) + wind * TAU) / TAU * arms);
     let arm_dist = min(arm, 1.0 - arm);
     let arm_glow = exp(-arm_dist * arm_dist * 18.0 * (1.0 + r)) * exp(-r * 1.1);
 

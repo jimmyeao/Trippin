@@ -16,7 +16,10 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
         // Beam pivots: slow wander + a snap on each beat. Direction stays
         // continuous (it's a pose), so motion is smooth but clearly beat-led.
-        let swing = sin(u.flow * (0.5 + fi * 0.07) + fi * 1.9) * 0.55
+        // Energy: sweeps quicken with the mix; shape: the fan opens wider
+        // with bass presence and gathers/spreads with the mids.
+        let swing = sin(u.clock4.x * (0.3 + fi * 0.04) + fi * 1.9) * (0.35 + 0.35 * u.pres4.x)
+                  + (fi - 2.0) * 0.12 * (u.pres4.y * 2.0 - 0.6)
                   + sin(u.beat_phase * PI) * 0.15 * (fi - 2.0) * 0.3;
         let ang = -PI * 0.5 + swing; // pointing up-screen, ±swing
 
@@ -25,7 +28,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         let rel = p - mount;
         let along = rel.x * cos(ang) + rel.y * sin(ang);
         let perp = rel.y * cos(ang) - rel.x * sin(ang);
-        let width = 0.03 + max(along, 0.0) * 0.018;     // widen with distance
+        let width = (0.03 + max(along, 0.0) * 0.018) * (0.7 + 0.8 * u.lvl4.x);
         let band = spec(fi / 5.0);
         let front = smoothstep(0.0, 0.15, along);       // only above the mount
         let beam = smoothstep(0.04, 0.0, abs(perp) - width) * front;

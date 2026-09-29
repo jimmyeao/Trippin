@@ -31,8 +31,9 @@ const LEDS: array<vec4<f32>, 11> = array<vec4<f32>, 11>(
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
     // Stand near the middle of the room, turning slowly and looking around.
-    let yaw = u.flow * 0.02 + u.seed;
-    let pitch = sin(u.flow * 0.013) * 0.25;
+    // Direction: turns to look one way, then back; energy: pace.
+    let yaw = u.seed + 1.5 * sin(u.clock4.x * 0.02) + u.clock4.x * 0.01;
+    let pitch = sin(u.clock4.x * 0.013) * (0.15 + 0.3 * u.pres4.y);
     let ro = vec3<f32>(L * 0.5 + sin(u.flow * 0.01) * 0.3, 1.6, L * 0.5 + cos(u.flow * 0.012) * 0.3);
     let fwd = vec3<f32>(sin(yaw) * cos(pitch), sin(pitch), cos(yaw) * cos(pitch));
     let rd = cam_ray(p, ro, ro + fwd, 0.0, 1.1);

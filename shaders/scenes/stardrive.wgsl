@@ -3,7 +3,8 @@
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-    let p = centred(in.uv) * 0.6;
+    // Direction: the vanishing point drifts one way, then back.
+    let p = centred(in.uv) * 0.6 - vec2<f32>(0.18 * sin(u.clock4.x * 0.02), 0.08 * sin(u.clock4.x * 0.013));
     let r = length(p) + 1e-4;
     let a = angle(p);
 
@@ -12,9 +13,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // Three parallax layers of streaking stars.
     for (var L = 0; L < 3; L++) {
         let fl = f32(L);
-        let speed = (0.5 + fl * 0.5) * (0.5 + u.energy * 1.5);
+        let speed = 0.5 + fl * 0.5;
         // Radial coordinate folds into cells; stars move outward with flow.
-        let z = (1.0 / r) * (1.0 + fl * 0.3) - u.flow * speed * 0.5;
+        // Energy: warp speed rides the smooth energy clock (tempo x raw
+        // energy here made the starfield lurch).
+        let z = (1.0 / r) * (1.0 + fl * 0.3) - u.clock4.x * speed * 0.8;
         let cell_a = floor(a / TAU * 24.0 + fl * 7.0);
         let cell_r = floor(z * 3.0);
         let h = hash22(vec2<f32>(cell_a, cell_r) + fl * 13.0);

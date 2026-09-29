@@ -268,6 +268,10 @@ pub struct DancerLayer {
     /// Current tempo — high-energy routines are held back on slow tracks
     /// (see `energy_cap`).
     pub bpm: f32,
+    /// The routine was picked by hand (panel "show", the C key, or a
+    /// timeline clip cue): the calm/tempo watchdogs mustn't swap it away.
+    /// Lifts as soon as the auto-pilot itself picks a routine.
+    pinned: bool,
 }
 
 impl DancerLayer {
@@ -286,6 +290,7 @@ impl DancerLayer {
             rng: 0x9E37_79B9_7F4A_7C15,
             calm_swap: false,
             bpm: 120.0,
+            pinned: false,
         }
     }
 
@@ -311,6 +316,10 @@ impl DancerLayer {
             return;
         };
         self.slots[slot].current = Some(index);
+        if slot == 0 {
+            // Any programmatic pick releases a hand-picked routine.
+            self.pinned = false;
+        }
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
             let _ = tx.send(load_clip(&path));
@@ -323,10 +332,17 @@ impl DancerLayer {
         self.request_slot(0, index);
     }
 
+    /// Show routine `index` picked by hand: pin it so the calm/tempo
+    /// watchdogs don't immediately swap it for an auto-pilot choice.
+    pub fn pin(&mut self, index: usize) {
+        self.request(index);
+        self.pinned = true;
+    }
+
     pub fn next_clip(&mut self) {
         if !self.clips.is_empty() {
             let next = self.current().map_or(0, |c| (c + 1) % self.clips.len());
-            self.request(next);
+            self.pin(next);
         }
     }
 
@@ -480,6 +496,8 @@ impl DancerLayer {
     }
 
     /// Per-frame uniforms, or None when nothing should be drawn.
+    /// `auto_pick` is false in Manual mode: the watchdogs below stay out of
+    /// it and a routine only ever changes when the user asks for one.
     pub fn uniforms(
         &mut self,
         pos: f64,
@@ -490,6 +508,7 @@ impl DancerLayer {
         size: f32,
         trails: bool,
         disabled: &[String],
+        auto_pick: bool,
     ) -> Option<DancerUniforms> {
         let target = if self.enabled && self.showing {
             1.0
@@ -512,33 +531,38 @@ impl DancerLayer {
                 self.refresh_companions(disabled);
             }
         }
-        // Calm-section watchdog: on_cut only fires on phrase boundaries, so
-        // an energetic routine could otherwise ride out a whole breakdown.
-        // Swap once per calm spell, never while a load is in flight.
-        if intensity > 0.45 {
-            self.calm_swap = false;
-        } else if intensity < 0.35
-            && !self.calm_swap
-            && self.slots[0].loader.is_none()
-            && self
-                .current()
-                .and_then(|i| self.clips.get(i))
-                .is_some_and(|c| c.energy > 0.45)
-        {
-            self.calm_swap = true;
-            let r = self.rand();
-            self.pick_for(intensity * 0.8, r, disabled);
-        }
-        // Tempo watchdog: a driving routine left over from a faster track (or
-        // the start-up clip) is swapped out once the tempo is too slow for it.
-        if self.slots[0].loader.is_none()
-            && self
-                .current()
-                .and_then(|i| self.clips.get(i))
-                .is_some_and(|c| c.energy > self.energy_cap() + 1e-3)
-        {
-            let r = self.rand();
-            self.pick_for(intensity.min(self.energy_cap()), r, disabled);
+        // Auto-pilot watchdogs: skipped in Manual mode and while a routine
+        // is pinned by hand, so a clicked dancer can't be swapped out from
+        // under you.
+        if auto_pick && !self.pinned {
+            // Calm-section watchdog: on_cut only fires on phrase boundaries,
+            // so an energetic routine could otherwise ride out a whole
+            // breakdown. Swap once per calm spell, never mid-load.
+            if intensity > 0.45 {
+                self.calm_swap = false;
+            } else if intensity < 0.35
+                && !self.calm_swap
+                && self.slots[0].loader.is_none()
+                && self
+                    .current()
+                    .and_then(|i| self.clips.get(i))
+                    .is_some_and(|c| c.energy > 0.45)
+            {
+                self.calm_swap = true;
+                let r = self.rand();
+                self.pick_for(intensity * 0.8, r, disabled);
+            }
+            // Tempo watchdog: a driving routine left over from a faster track
+            // (or the start-up clip) is swapped once the tempo's too slow.
+            if self.slots[0].loader.is_none()
+                && self
+                    .current()
+                    .and_then(|i| self.clips.get(i))
+                    .is_some_and(|c| c.energy > self.energy_cap() + 1e-3)
+            {
+                let r = self.rand();
+                self.pick_for(intensity.min(self.energy_cap()), r, disabled);
+            }
         }
         let mut slots = [SlotUniforms::default(); SLOTS];
         for (i, slot) in self.slots.iter_mut().enumerate() {

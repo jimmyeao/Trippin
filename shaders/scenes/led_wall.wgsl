@@ -15,7 +15,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let row = cell.y / gy;
 
     // Two waves: a slow amplitude swell and a fast beat ripple travelling up.
-    let swell = v * (0.75 + 0.25 * u.intensity);
+    let swell = v * (0.6 + 0.3 * u.intensity + 0.3 * u.pres4.x);
     let ripple = fract(u.beat_phase) * 1.4 - 0.2;
     let wave = step(row, swell) * (0.35 + 0.65 * exp(-abs(row - swell) * 6.0));
     let ring = exp(-abs(row - ripple) * 14.0) * u.kick * step(row, swell + 0.15);
@@ -25,7 +25,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     var col = palette(band * 0.8 + row * 0.4) * dot_ * (wave + ring);
 
     // Beat-scrolling rainbow bands over the top at high energy.
-    col += palette(uv.x + uv.y * 0.5 + u.flow * 0.05) * dot_ * u.energy * 0.10;
+    col += palette(uv.x + uv.y * 0.5 + 3.0 * sin(u.clock4.x * 0.02)) * dot_ * u.energy * 0.10;
 
     // Background grid haze.
     col += palette(0.5) * 0.015 * dot_;

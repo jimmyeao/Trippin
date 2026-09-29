@@ -54,7 +54,9 @@ fn neon_d(p: vec3<f32>) -> vec2<f32> {
     let c = vec3<f32>(inf.x * (HALF_W - 0.45), inf.y, k * SIGN_P);
     let q = p - c;
     // Blade sign: tubes lie in the z-y plane (along the alley), thin in x.
-    let fr = abs(max(abs(q.z) - 0.34, abs(q.y) - 0.64));
+    // Shape: each sign's frame stretches with its own band.
+    let grow = 0.8 + 0.45 * spec(inf.z * 0.8 + 0.05);
+    let fr = abs(max(abs(q.z) - 0.34 * grow, abs(q.y) - 0.64 * grow));
     let frame = length(vec2<f32>(fr, q.x)) - 0.02;
     let ring = length(vec2<f32>(length(q.zy - vec2<f32>(0.0, 0.26)) - 0.17, q.x)) - 0.02;
     let bar = length(vec3<f32>(q.x, max(abs(q.y + 0.26) - 0.24, 0.0), q.z)) - 0.02;
@@ -187,9 +189,11 @@ fn surface(p: vec3<f32>, rd: vec3<f32>, mat: f32) -> vec3<f32> {
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
-    let z = u.flow * 0.45;
+    // Energy: walking pace follows the mix.
+    let z = u.clock4.x * 0.45;
     let ro = vec3<f32>(sin(u.flow * 0.05) * 0.25, 1.62 + 0.03 * sin(u.flow * PI), z);
-    let ta = vec3<f32>(sin(u.flow * 0.03) * 0.3, 1.9, z + 6.0);
+    // Direction: the gaze swings from one wall to the other.
+    let ta = vec3<f32>(sin(u.clock4.x * 0.03) * 0.55, 1.9, z + 6.0);
     let rd = cam_ray(p, ro, ta, 0.0, 1.35);
 
     let h = march(ro, rd, 96, 45.0);

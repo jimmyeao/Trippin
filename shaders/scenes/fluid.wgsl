@@ -11,7 +11,7 @@ fn emitter(p: vec2<f32>, centre: vec2<f32>, size: f32) -> f32 {
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let uv = in.uv;
     let p = centred(uv);
-    let t = u.time * 0.15 + u.seed * 0.1;
+    let t = u.clock4.z * 0.07 + u.seed * 0.1;
 
     let e = 0.02;
     let s = p * 1.2;
@@ -21,10 +21,10 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let curl = vec2<f32>(ny - n0, n0 - nx) / e;
 
     let radial = normalize(p + 1e-4) * (u.kick * 0.012 + 0.001);
-    let flow = curl * (0.0025 + 0.006 * u.intensity) + radial;
+    let flow = curl * (0.0025 + 0.007 * u.pres4.y) + radial;
     var c = prev(uncentred(p - flow)) * (0.965 + 0.02 * u.intensity);
 
-    let orbit = u.time * 0.4;
+    let orbit = u.clock4.x * 0.2;
     let c1 = vec2<f32>(sin(orbit), cos(orbit * 0.7)) * 0.6;
     let c2 = vec2<f32>(sin(orbit * 1.3 + 2.0), cos(orbit * 0.9 + 1.0)) * 0.8;
     let c3 = vec2<f32>(sin(orbit * 0.8 + 4.0), cos(orbit * 1.1 + 3.0)) * 0.7;

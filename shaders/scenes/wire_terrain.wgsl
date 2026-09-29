@@ -12,18 +12,22 @@ fn ground(p: vec3<f32>, lift: f32) -> f32 {
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
-    let z = u.flow * 5.0;
-    let lift = u.bass;
+    // Energy: flight speed follows the mix; shape: the ground rises with
+    // bass presence (smooth) and a kick.
+    let z = u.clock4.x * 5.0;
+    let lift = u.pres4.x + 0.4 * u.hits4.x;
 
     // Swoop: altitude and heading drift with the phrase, kick dips low.
     let ro = vec3<f32>(
         sin(z * 0.04) * 2.0,
-        1.3 + sin(u.time * 0.3) * 0.25 - u.kick * 0.25,
+        1.3 + sin(u.time * 0.3) * 0.25 - u.hits4.x * 0.25,
         z);
     var rd = normalize(vec3<f32>(
         p.x * 0.8 + cos(z * 0.04) * 0.22,
         -p.y * 0.8 - 0.22,
         1.0));
+    // Direction: banking one way, then the other.
+    rd = vec3<f32>(rot(0.3 * sin(u.clock4.x * 0.025)) * rd.xy, rd.z);
 
     var t = 0.0;
     var hit = false;

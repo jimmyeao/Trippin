@@ -16,12 +16,15 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         let band = ring / 3.0;                 // inner->bass, outer->highs
         let v = spec(band * 0.25 + 0.05);
 
-        let speed = (0.3 + ring * 0.15) * (0.5 + u.energy);
+        let speed = 0.3 + ring * 0.15;
         let dir = select(1.0, -1.0, i32(ring) % 2 == 1);
-        let ang = u.flow * speed * dir + hash21(vec2<f32>(fi, u.seed)) * TAU;
+        // Energy: orbit speed rides the smooth energy clock (multiplying
+        // the tempo clock by raw energy here made the orbits lurch).
+        let ang = u.clock4.x * speed * dir + hash21(vec2<f32>(fi, u.seed)) * TAU;
         // Inner ring starts far enough out that the orbs' halos never overlap
         // the centre — that overlap smeared into a permanent disc before.
-        let rad = 0.17 + ring * 0.15 + v * 0.16 + u.kick * 0.02;
+        // Shape: orbits widen with presence and jolt on kicks.
+        let rad = 0.14 + ring * (0.12 + 0.08 * u.pres4.x) + v * 0.16 + u.hits4.x * 0.04;
         let pos = vec2<f32>(cos(ang), sin(ang)) * rad;
 
         let d = length(p - pos);

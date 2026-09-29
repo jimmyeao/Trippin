@@ -11,10 +11,12 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         let fi = f32(i);
         let band = fi / 8.0;
         let v = spec(band * 0.6 + 0.05);
-        let ang = u.flow * (0.3 + fi * 0.07) * select(1.0, -1.0, i % 2 == 1) + fi * 1.7;
-        let orbit = 0.16 + 0.14 * sin(u.flow * 0.23 + fi * 2.1);
+        // Energy: orbit speed follows the energy clock; shape: orbits swing
+        // wider as the bass builds.
+        let ang = u.clock4.x * (0.3 + fi * 0.07) * select(1.0, -1.0, i % 2 == 1) + fi * 1.7;
+        let orbit = (0.1 + 0.14 * sin(u.clock4.z * 0.23 + fi * 2.1)) * (0.7 + 0.8 * u.pres4.x);
         let pos = vec2<f32>(cos(ang), sin(ang)) * orbit;
-        let r = 0.05 + v * 0.14 + u.kick * 0.008;
+        let r = 0.05 + v * 0.14 + u.hits4.x * 0.03;
         let d = length(p - pos);
         let w = r * r / max(d * d, 1e-5);
         f += w;
