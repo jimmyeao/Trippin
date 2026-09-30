@@ -2860,7 +2860,79 @@ fn clip_tex(
     }
 }
 
-/// Keys page (mockup 1a card): filter, key badges, rebind, conflict warn.
+/// One `action | key badge | rebind` row inside a keys-page Grid (must
+/// emit exactly three cells + `end_row`).
+fn key_row(
+    ui: &mut egui::Ui,
+    s: &mut Settings,
+    rebinding: &mut Option<Action>,
+    bound: &HashMap<String, u32>,
+    a: Action,
+) {
+    use crate::ui_theme::*;
+    let key = s.keys.get(&a).cloned().unwrap_or_default();
+    let conflict = !key.is_empty() && bound.get(key.as_str()).copied().unwrap_or(0) > 1;
+    // Column 1: action label, left-aligned — fixed generous width so
+    // full names show (truncate() alone let the grid squeeze the column).
+    ui.add_sized(
+        [220.0, 18.0],
+        egui::Label::new(egui::RichText::new(a.label()).size(12.0).color(TEXT)).truncate(),
+    );
+    // Column 2: key badge, fixed 90px.
+    ui.scope(|ui| {
+        let (r, _) = ui.allocate_exact_size(egui::vec2(90.0, 20.0), egui::Sense::hover());
+        let p = ui.painter();
+        p.rect_filled(r, 4.0, INSET);
+        p.rect_stroke(
+            r,
+            4.0,
+            egui::Stroke::new(1.0, if conflict { WARN } else { BORDER_HI }),
+            egui::StrokeKind::Inside,
+        );
+        let shown = key_short(&key);
+        p.text(
+            r.center(),
+            egui::Align2::CENTER_CENTER,
+            if shown.is_empty() { "—".to_string() } else { shown },
+            egui::FontId::monospace(11.0),
+            if conflict { WARN } else { MUTED },
+        );
+    });
+    // Column 3: rebind, fixed 70px.
+    ui.scope(|ui| {
+        if *rebinding == Some(a) {
+            ui.label(
+                egui::RichText::new("press a key…")
+                    .size(11.0)
+                    .color(WARN),
+            );
+            if ui.small_button("cancel").clicked() {
+                *rebinding = None;
+            }
+        } else {
+            let r = ui.add_sized(
+                [70.0, 24.0],
+                egui::Button::new(egui::RichText::new("rebind").size(12.0)),
+            );
+            if r.clicked() {
+                *rebinding = Some(a);
+            }
+        }
+    });
+    ui.end_row();
+    if conflict {
+        ui.label("");
+        ui.label(
+            egui::RichText::new("conflict — this key fires two actions")
+                .size(10.0)
+                .color(WARN),
+        );
+        ui.label("");
+        ui.end_row();
+    }
+}
+
+/// Keys page: filter, grouped action/key/rebind rows across columns.
 fn keys_tab(
     ui: &mut egui::Ui,
     s: &mut Settings,
@@ -2889,11 +2961,13 @@ fn keys_tab(
     );
     ui.add_space(4.0);
 
-    // A key bound to two actions fires both — flag it.
-    let mut bound: HashMap<&str, u32> = HashMap::new();
+    // A key bound to two actions fires both — flag it. Owned strings: a
+    // &str map would borrow s.keys for the rest of the function and block
+    // the &mut s the rebind buttons need.
+    let mut bound: HashMap<String, u32> = HashMap::new();
     for k in s.keys.values() {
         if !k.is_empty() {
-            *bound.entry(k.as_str()).or_default() += 1;
+            *bound.entry(k.clone()).or_default() += 1;
         }
     }
     let q = filter.to_lowercase();
@@ -2938,105 +3012,71 @@ fn keys_tab(
         ("recording", &[Action::SaveClip, Action::RecordSet]),
     ];
 
-    card().show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        egui::Grid::new("keys_grid")
-            .num_columns(3)
-            .spacing(egui::vec2(8.0, 6.0))
-            .show(ui, |ui| {
-                for (group, acts) in GROUPS {
-                    let acts: Vec<Action> = acts
-                        .iter()
-                        .copied()
-                        .filter(|a| {
-                            q.is_empty() || a.label().to_lowercase().contains(&q)
-                        })
-                        .collect();
-                    if acts.is_empty() {
-                        continue;
-                    }
-                    section_label(ui, group);
-                    ui.label("");
-                    ui.label("");
-                    ui.end_row();
-                    for a in acts {
-                        let key = s.keys.get(&a).cloned().unwrap_or_default();
-                        let conflict =
-                            !key.is_empty() && bound.get(key.as_str()).copied().unwrap_or(0) > 1;
-                        // Column 1: action label, left-aligned — fixed
-                        // generous width so full names show (truncate()
-                        // alone let the grid squeeze the column).
-                        ui.add_sized(
-                            [220.0, 18.0],
-                            egui::Label::new(
-                                egui::RichText::new(a.label()).size(12.0).color(TEXT),
-                            )
-                            .truncate(),
-                        );
-                        // Column 2: key badge, fixed 90px.
-                        ui.scope(|ui| {
-                            let (r, _) = ui.allocate_exact_size(
-                                egui::vec2(90.0, 20.0),
-                                egui::Sense::hover(),
-                            );
-                            let p = ui.painter();
-                            p.rect_filled(r, 4.0, INSET);
-                            p.rect_stroke(
-                                r,
-                                4.0,
-                                egui::Stroke::new(
-                                    1.0,
-                                    if conflict { WARN } else { BORDER_HI },
-                                ),
-                                egui::StrokeKind::Inside,
-                            );
-                            let shown = key_short(&key);
-                            p.text(
-                                r.center(),
-                                egui::Align2::CENTER_CENTER,
-                                if shown.is_empty() { "—".to_string() } else { shown },
-                                egui::FontId::monospace(11.0),
-                                if conflict { WARN } else { MUTED },
-                            );
-                        });
-                        // Column 3: rebind, fixed 70px.
-                        ui.scope(|ui| {
-                            if *rebinding == Some(a) {
-                                ui.label(
-                                    egui::RichText::new("press a key…")
-                                        .size(11.0)
-                                        .color(WARN),
-                                );
-                                if ui.small_button("cancel").clicked() {
-                                    *rebinding = None;
-                                }
-                            } else {
-                                let r = ui.add_sized(
-                                    [70.0, 24.0],
-                                    egui::Button::new(
-                                        egui::RichText::new("rebind").size(12.0),
-                                    ),
-                                );
-                                if r.clicked() {
-                                    *rebinding = Some(a);
-                                }
-                            }
-                        });
-                        ui.end_row();
-                        if conflict {
-                            ui.label("");
-                            ui.label(
-                                egui::RichText::new("conflict — this key fires two actions")
-                                    .size(10.0)
-                                    .color(WARN),
-                            );
-                            ui.label("");
-                            ui.end_row();
+    // Filter groups, then split them across columns — one card each — so
+    // the list uses the page width instead of scrolling as one tall
+    // column. Bounded child uis, not ui.columns (that bleeds under
+    // neighbours inside a ScrollArea — A1).
+    let groups: Vec<(&str, Vec<Action>)> = GROUPS
+        .iter()
+        .filter_map(|(g, acts)| {
+            let acts: Vec<Action> = acts
+                .iter()
+                .copied()
+                .filter(|a| q.is_empty() || a.label().to_lowercase().contains(&q))
+                .collect();
+            (!acts.is_empty()).then_some((*g, acts))
+        })
+        .collect();
+    let avail = ui.available_width();
+    // A row needs ~400px: label 220 + badge 90 + rebind 70 + grid spacing
+    // + card margin. Two columns fit a 900px window, three at ~1400px.
+    let ncol = ((avail / 410.0) as usize).clamp(1, 3).min(groups.len().max(1));
+    // Greedy balance by row count — a group is never split across columns.
+    let total: usize = groups.iter().map(|(_, a)| a.len() + 1).sum();
+    let target = total.div_ceil(ncol);
+    let mut buckets: Vec<Vec<(&str, Vec<Action>)>> = vec![Vec::new(); ncol];
+    let (mut bi, mut rows) = (0usize, 0usize);
+    for g in groups {
+        let n = g.1.len() + 1;
+        if rows > 0 && rows + n > target && bi + 1 < ncol {
+            bi += 1;
+            rows = 0;
+        }
+        rows += n;
+        buckets[bi].push(g);
+    }
+    let col_w = (avail - 16.0 * (ncol - 1) as f32) / ncol as f32;
+    let top = ui.cursor().min;
+    let mut max_h = 0.0_f32;
+    for (i, bucket) in buckets.iter().enumerate() {
+        let mut col = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(egui::Rect::from_min_size(
+                    egui::pos2(top.x + i as f32 * (col_w + 16.0), top.y),
+                    egui::vec2(col_w, 4000.0),
+                ))
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+        );
+        card().show(&mut col, |ui| {
+            ui.set_width(ui.available_width());
+            for (group, acts) in bucket {
+                section_label(ui, group);
+                egui::Grid::new(egui::Id::new("keys_grid").with(group))
+                    .num_columns(3)
+                    .spacing(egui::vec2(8.0, 6.0))
+                    .show(ui, |ui| {
+                        for &a in acts {
+                            key_row(ui, s, rebinding, &bound, a);
                         }
-                    }
-                }
-            });
-    });
+                    });
+                ui.add_space(6.0);
+            }
+        });
+        max_h = max_h.max(col.min_rect().height());
+    }
+    // The child uis painted without touching the parent's cursor — claim
+    // the columns' height so the footer starts below them.
+    ui.add_space(max_h);
     ui.add_space(8.0);
 
     // Footer: reset, right-aligned, danger text style (review F).
