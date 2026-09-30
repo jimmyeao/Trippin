@@ -1,6 +1,6 @@
 //! Trippin — live music-reactive visuals for DJ sets.
 //!
-//! Usage: trippin [--list-devices] [--device "<name part>"] [--mic] [--scene <name>]
+//! Usage: trippin [--list-devices] [--list-midi] [--device "<name part>"] [--mic] [--scene <name>]
 //!                [--dancer [style]] [--no-dancer] [--canon] [--no-panel]
 //!                [--gpu low] [--scale 0.75] [--fullscreen] [--vsync]
 //!                [--song <audio file>] [--analyze <audio file>]
@@ -32,6 +32,7 @@ mod director;
 mod editor;
 mod gfx;
 mod egui_win;
+mod midi;
 mod ndi;
 mod nowplaying;
 mod overlay;
@@ -57,7 +58,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::Key;
 use winit::window::{Fullscreen, Icon, Window, WindowId};
 
@@ -103,6 +104,16 @@ struct Shared {
     /// the editor each look up the keys they asked for, so the two windows
     /// can't eat each other's results.
     thumbs: Mutex<std::collections::HashMap<String, (u32, u32, Vec<u8>)>>,
+    /// MIDI connection state for the panel's status dot: (connected, label).
+    /// Written by the event thread where the connection lives.
+    midi_status: Mutex<(bool, String)>,
+}
+
+/// A pad press on the MIDI keyboard, posted to the event loop from midir's
+/// callback thread. The raw note (not the mapped action) travels so the
+/// Keys page can capture it for MIDI-learn.
+enum AppEvent {
+    MidiNote(u8),
 }
 
 /// Work the event thread hands to the render thread.
@@ -1434,6 +1445,15 @@ struct App {
     last_panel_toggle: Instant,
     /// Title-bar/taskbar icon, decoded once from the bundled PNG.
     icon: Option<Icon>,
+    /// Posts MIDI notes from midir's callback thread into `user_event`.
+    midi_proxy: EventLoopProxy<AppEvent>,
+    /// The open MIDI input, if any — its port name tells when `midi_in`
+    /// points somewhere new.
+    midi: Option<midi::Midi>,
+    /// Throttle for a failing/absent device retry, and for the port-list
+    /// scan that notices an unplugged device (WinMM has no disconnect event).
+    midi_retry: Instant,
+    midi_scan: Instant,
 }
 
 impl App {
@@ -1517,6 +1537,11 @@ impl App {
                     Some(p) => {
                         let show = p.window.is_visible() == Some(false);
                         p.window.set_visible(show);
+                        if !show {
+                            // A pending learn behind a hidden window would
+                            // eat the next pad press.
+                            p.midi_learn = None;
+                        }
                         if show {
                             p.window.request_redraw();
                         } else if let Some(w) = &self.window {
@@ -1574,11 +1599,48 @@ impl App {
         }
     }
 
+    /// A MIDI note-on from `midi_proxy`. While the Keys page is in learn mode
+    /// the note becomes the binding instead of firing.
+    fn midi_note(&mut self, event_loop: &ActiveEventLoop, note: u8) {
+        if self.shared.is_none() {
+            return;
+        }
+        if let Some(a) = self.panel.as_mut().and_then(|p| p.midi_learn.take()) {
+            {
+                let mut s = self.settings_mut();
+                // One note, one action — steal it from whatever had it.
+                s.midi_notes.retain(|_, n| *n != note);
+                s.midi_notes.insert(a, note);
+            }
+            self.mark_dirty();
+            if let Some(p) = &self.panel {
+                p.window.request_redraw();
+            }
+            return;
+        }
+        let action = self
+            .shared
+            .as_ref()
+            .and_then(|sh| lock(&sh.settings).midi_action_for(note));
+        if let Some(a) = action {
+            self.apply(a, event_loop);
+        }
+    }
+
     /// Dispatch a key through the binding map. Returns false when no action
     /// is bound, letting callers offer the key a fallback meaning (the
     /// editor's unbound-Space transport toggle).
     fn key(&mut self, event_loop: &ActiveEventLoop, key: &Key) -> bool {
         let Some(name) = key_name(key) else { return false };
+        // Esc also cancels a pending MIDI-learn — the cancel button isn't the
+        // only way out.
+        if name == "Escape" && self.panel.as_mut().is_some_and(|p| p.midi_learn.is_some()) {
+            if let Some(p) = &mut self.panel {
+                p.midi_learn = None;
+                p.window.request_redraw();
+            }
+            return true;
+        }
         // Rebinding: the next key press becomes the action's key (Esc cancels).
         if let Some(action) = self.panel.as_mut().and_then(|p| p.rebinding.take()) {
             if name != "Escape" {
@@ -1612,6 +1674,7 @@ impl App {
         if let Some(w) = &self.window {
             status.fullscreen = w.fullscreen().is_some();
         }
+        let midi_status = lock(&shared.midi_status).clone();
         // The UI runs under the settings lock; the GPU acquire/present must
         // not — a blocked surface acquire would freeze the render thread
         // through the lock.
@@ -1630,6 +1693,7 @@ impl App {
                 &shared.clip_names,
                 &shared.timeline,
                 &shared.thumbs,
+                &midi_status,
             )
         };
         if let Some(p) = self.panel.as_mut() {
@@ -1725,7 +1789,13 @@ fn toggle_fullscreen(w: &Window) {
     }
 }
 
-impl ApplicationHandler for App {
+impl ApplicationHandler<AppEvent> for App {
+    fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
+        match event {
+            AppEvent::MidiNote(note) => self.midi_note(event_loop, note),
+        }
+    }
+
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.shared.is_some() {
             return;
@@ -1790,6 +1860,7 @@ impl ApplicationHandler for App {
                 .map(|d| d.clip_names())
                 .unwrap_or_default(),
             thumbs: Mutex::new(std::collections::HashMap::new()),
+            midi_status: Mutex::new((false, "off".into())),
         });
         self.shared = Some(shared.clone());
         let (tx, rx) = mpsc::channel();
@@ -1916,8 +1987,9 @@ impl ApplicationHandler for App {
                 WindowEvent::CloseRequested => {
                     // Hide rather than destroy — reopening is then instant and
                     // can't fail partway through.
-                    if let Some(p) = &self.panel {
+                    if let Some(p) = &mut self.panel {
                         p.window.set_visible(false);
+                        p.midi_learn = None;
                     }
                     if let Some(w) = &self.window {
                         w.focus_window();
@@ -2036,6 +2108,43 @@ impl ApplicationHandler for App {
             {
                 self.last_editor_draw = Instant::now();
                 e.window.request_redraw();
+            }
+        }
+        // MIDI input: (re)connect when the chosen port changes. WinMM gives
+        // no unplug callback, so every few seconds the port list is scanned —
+        // a vanished port means a dead connection; drop it and the retry
+        // below picks the device back up the moment it's plugged in again.
+        if let Some(sh) = &self.shared {
+            let want = lock(&sh.settings).midi_in.clone();
+            if self.midi_scan.elapsed() > Duration::from_secs(3) {
+                self.midi_scan = Instant::now();
+                if self.midi.is_some() && !midi::ports().iter().any(|p| *p == want) {
+                    self.midi = None;
+                }
+            }
+            let have = self.midi.as_ref().map(|m| m.name.as_str()).unwrap_or("");
+            if want != have && (want.is_empty() || self.midi_retry.elapsed() > Duration::from_secs(3))
+            {
+                // Drop the old connection before opening a new one — a port
+                // can't be held twice.
+                self.midi = None;
+                self.midi_retry = Instant::now();
+                let status = if want.is_empty() {
+                    (false, "off".to_string())
+                } else {
+                    let proxy = self.midi_proxy.clone();
+                    match midi::connect(&want, move |note| {
+                        let _ = proxy.send_event(AppEvent::MidiNote(note));
+                    }) {
+                        Ok(m) => {
+                            let status = (true, m.name.clone());
+                            self.midi = Some(m);
+                            status
+                        }
+                        Err(e) => (false, format!("{want}: {e:#}")),
+                    }
+                };
+                *lock(&sh.midi_status) = status;
             }
         }
         // Settings changed on the render thread also need flushing to disk.
@@ -2167,6 +2276,17 @@ fn main() -> Result<()> {
     if args.iter().any(|a| a == "--list-devices") {
         return audio::list_devices();
     }
+    // `--list-midi`: print MIDI input port names (what the Keys page lists).
+    if args.iter().any(|a| a == "--list-midi") {
+        let ports = midi::ports();
+        if ports.is_empty() {
+            println!("No MIDI inputs found.");
+        }
+        for p in ports {
+            println!("{p}");
+        }
+        return Ok(());
+    }
     // `--snap <scenes|all>` renders scenes headless to PNG and times them.
     if args.iter().any(|a| a == "--snap") {
         return snap::run(&args);
@@ -2259,8 +2379,9 @@ fn main() -> Result<()> {
         dancer.request(first);
     }
 
-    let event_loop = EventLoop::new()?;
+    let event_loop = EventLoop::<AppEvent>::with_user_event().build()?;
     event_loop.set_control_flow(ControlFlow::Poll);
+    let midi_proxy = event_loop.create_proxy();
     let mut app = App {
         audio: Some(audio),
         window: None,
@@ -2288,6 +2409,14 @@ fn main() -> Result<()> {
         last_title: Instant::now(),
         last_panel_toggle: Instant::now() - Duration::from_secs(1),
         icon: load_icon(),
+        midi_proxy,
+        midi: None,
+        // Backdated so a configured device connects immediately at startup
+        // rather than after one retry interval.
+        midi_retry: Instant::now()
+            .checked_sub(Duration::from_secs(4))
+            .unwrap_or_else(Instant::now),
+        midi_scan: Instant::now(),
     };
     event_loop.run_app(&mut app)?;
     Ok(())

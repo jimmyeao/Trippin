@@ -297,6 +297,12 @@ pub enum Tristate {
 #[serde(default)]
 pub struct Settings {
     pub keys: BTreeMap<Action, String>,
+    /// MIDI input port to listen on ("" = off). Note-on presses fire the
+    /// action bound in `midi_notes`.
+    pub midi_in: String,
+    /// Action → MIDI note number, same shape as `keys`. Bound on the Keys
+    /// page by learning: click "midi", then hit the pad.
+    pub midi_notes: BTreeMap<Action, u8>,
     pub mode: Mode,
     pub random_order: bool,
     /// Bars per scene in auto mode.
@@ -408,6 +414,8 @@ impl Default for Settings {
                 .iter()
                 .map(|a| (*a, a.default_key().to_string()))
                 .collect(),
+            midi_in: String::new(),
+            midi_notes: BTreeMap::new(),
             mode: Mode::Auto,
             random_order: true,
             phrase_bars: 16,
@@ -562,6 +570,14 @@ impl Settings {
         self.keys
             .iter()
             .find(|(_, k)| k.as_str() == key)
+            .map(|(a, _)| *a)
+    }
+
+    /// The action bound to a MIDI note number (any channel).
+    pub fn midi_action_for(&self, note: u8) -> Option<Action> {
+        self.midi_notes
+            .iter()
+            .find(|(_, n)| **n == note)
             .map(|(a, _)| *a)
     }
 }

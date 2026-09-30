@@ -104,6 +104,7 @@ cargo run --release -- --snap x --snap-calm 1        # preview breakdown (no dru
 cargo run --release -- --nowplaying       # prints what each now-playing source sees
 cargo run --release -- --spout-grab <name> out.png   # receive one Spout frame (Windows)
 cargo run --release -- --ndi-monitor [name]
+cargo run --release -- --list-midi          # MIDI input ports (pad/key controllers)
 ```
 
 - If `trippin.exe` is running, it locks `target/release`. Build into another
@@ -142,6 +143,7 @@ cargo run --release -- --ndi-monitor [name]
 | `src/timeline.rs`, `src/song.rs`, `src/editor.rs`, `src/ai.rs` | The timeline show editor (F2), song playback, and the AI show builder. |
 | `src/panel.rs` | The egui control panel. Tabs: Show, Scenes, Dancer, Effects, Stream, Timeline, Keys. |
 | `src/config.rs` | `Settings` (serde, `#[serde(default)]`), actions and hotkeys, and `data_dir()`. |
+| `src/midi.rs` | MIDI input (midir): one port, note-ons become `Action`s. |
 | `src/snap.rs` | Headless snapshot and benchmark rendering. |
 | `tools/*.py` | Offline pipelines: mocap and stock video to dancer clips, and so on. |
 
@@ -226,6 +228,19 @@ cargo run --release -- --ndi-monitor [name]
   pass `/SUBSYSTEM:WINDOWS` via `RUSTFLAGS`.
 - Worker threads must always reply to their channel, even when they panic
   (use `catch_unwind`). A dropped reply wedged the editor.
+- **MIDI** (`midi.rs`): midir's callback thread posts `AppEvent::MidiNote`
+  through an `EventLoopProxy` — the event loop type is
+  `EventLoop<AppEvent>`, so `ApplicationHandler<AppEvent>::user_event`
+  dispatches. `App::midi_note` is the single entry point: it serves
+  MIDI-learn (Keys page `midi_learn`) or runs `apply` like a hotkey, so
+  pad presses record as timeline cues too. Only note-on with velocity > 0
+  counts (note-off / vel-0 is the pad release — acting on it doubles
+  toggles). Bindings are `Settings::midi_notes` (action → note, any
+  channel; one note = one action, learning steals it). WinMM has no
+  unplug event: `about_to_wait` rescans `midi::ports()` every 3 s and
+  drops a connection whose port vanished, so replugging recovers. midir's
+  macOS backend is CoreMIDI — the code isn't cfg-gated, but it hasn't been
+  compiled for macOS yet.
 - egui layout rules the UI relies on (learned the hard way, review A1):
   - `ui.horizontal` children see the parent's `max_rect`, not the shrunk
     `cursor` — a `right_to_left` or `available_width()` inside one can
