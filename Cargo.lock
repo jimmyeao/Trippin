@@ -3511,7 +3511,7 @@ dependencies = [
 
 [[package]]
 name = "trippin"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "ab_glyph",
  "aes",
