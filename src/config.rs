@@ -127,14 +127,8 @@ impl Action {
             Action::LatencyUp => "]",
             Action::CycleFx => "X",
             Action::ReloadShaders => "F5",
-            // No F-keys on Touch Bar Macs — F1 is a brightness key there.
-            Action::TogglePanel => {
-                if cfg!(target_os = "macos") {
-                    "P"
-                } else {
-                    "F1"
-                }
-            }
+            Action::TogglePanel => "F1",
+            // No F-keys on Touch Bar Macs — F2 is a brightness key there.
             Action::ToggleEditor => {
                 if cfg!(target_os = "macos") {
                     "E"
@@ -539,10 +533,11 @@ impl Settings {
                 .entry(a)
                 .or_insert_with(|| a.default_key().to_string());
         }
-        // macOS builds moved the panel off F1 (a brightness key on Touch Bar
-        // machines); a saved "F1" is the old default, not a deliberate pick.
+        // macOS builds briefly defaulted the panel to P (F1 is a brightness
+        // key on Touch Bar machines) — reverted; a saved "P" is that old
+        // default, not a deliberate pick.
         #[cfg(target_os = "macos")]
-        if s.keys.get(&Action::TogglePanel).is_some_and(|k| k == "F1") {
+        if s.keys.get(&Action::TogglePanel).is_some_and(|k| k == "P") {
             s.keys.insert(
                 Action::TogglePanel,
                 Action::TogglePanel.default_key().to_string(),

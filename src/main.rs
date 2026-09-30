@@ -1447,6 +1447,9 @@ struct App {
     icon: Option<Icon>,
     /// Posts MIDI notes from midir's callback thread into `user_event`.
     midi_proxy: EventLoopProxy<AppEvent>,
+    /// Pointer over the visuals is hidden while fullscreen — synced to the
+    /// window's real fullscreen state in `about_to_wait`.
+    cursor_hidden: bool,
     /// The open MIDI input, if any — its port name tells when `midi_in`
     /// points somewhere new.
     midi: Option<midi::Midi>,
@@ -2153,6 +2156,18 @@ impl ApplicationHandler<AppEvent> for App {
                 self.dirty_since = Some(Instant::now());
             }
         }
+        // Fullscreen visuals get no pointer; the panel/editor keep theirs
+        // (cursor visibility is per hovered window).
+        let fs = self
+            .window
+            .as_ref()
+            .is_some_and(|w| w.fullscreen().is_some());
+        if fs != self.cursor_hidden {
+            self.cursor_hidden = fs;
+            if let Some(w) = &self.window {
+                w.set_cursor_visible(!fs);
+            }
+        }
         if let Some(t) = self.dirty_since {
             if t.elapsed() > Duration::from_secs(1) {
                 self.dirty_since = None;
@@ -2409,6 +2424,7 @@ fn main() -> Result<()> {
         last_title: Instant::now(),
         last_panel_toggle: Instant::now() - Duration::from_secs(1),
         icon: load_icon(),
+        cursor_hidden: false,
         midi_proxy,
         midi: None,
         // Backdated so a configured device connects immediately at startup
