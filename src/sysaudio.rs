@@ -179,6 +179,7 @@ unsafe fn push_audio(iv: &SinkIvars, buf: &CMSampleBuffer) {
         for v in mono.iter_mut() {
             *v /= channels as f32;
         }
+        crate::rec::audio_in(asbd.mSampleRate as u32, 1, || mono.clone());
         // Drop audio rather than block the capture queue if analysis stalls.
         let _ = iv.tx.try_send(mono);
     }

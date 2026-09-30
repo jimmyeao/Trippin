@@ -52,6 +52,8 @@ pub struct Conf {
     /// Transparent background: frames are un-premultiplied before sending
     /// (NDI and Spout receivers expect straight alpha).
     pub transparent: bool,
+    /// Keep the tap running for the clip recorder even with no sink on.
+    pub record: bool,
     /// Frame height; width is the 16:9 match (720→1280, 1080→1920, 2160→3840).
     pub height: u32,
     /// Frame cadence cap.
@@ -208,6 +210,7 @@ impl Output {
                         Ok(i) => {
                             let buf = &staging[i];
                             if let Ok(mapped) = buf.slice(..).get_mapped_range() {
+                                crate::rec::frame_in(width, height, row_bytes, &mapped);
                                 let range: &[u8] = match &unpremul {
                                     Some(lut) => {
                                         scratch.clear();
@@ -276,7 +279,7 @@ impl Output {
                 Err(_) => errs.push("Spout: sender didn't start".into()),
             }
         }
-        if !ndi_on && spout_name.is_none() {
+        if !ndi_on && spout_name.is_none() && !conf.record {
             drop(tx);
             let _ = worker.join();
             return Err(anyhow::anyhow!(errs.join(" · ")));
@@ -418,6 +421,9 @@ impl Output {
             parts.push(format!("Spout \"{n}\" — live"));
         }
         parts.extend(self.errs.iter().cloned());
+        if parts.is_empty() {
+            parts.push("Recording tap on".into());
+        }
         parts.join("\n")
     }
 }

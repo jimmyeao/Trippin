@@ -33,10 +33,12 @@ pub enum Action {
     TimelinePlay,
     TimelineRecord,
     ShowNowPlaying,
+    SaveClip,
+    RecordSet,
 }
 
 impl Action {
-    pub const ALL: [Action; 23] = [
+    pub const ALL: [Action; 25] = [
         Action::NextScene,
         Action::PrevScene,
         Action::ModeAuto,
@@ -60,6 +62,8 @@ impl Action {
         Action::TimelinePlay,
         Action::TimelineRecord,
         Action::ShowNowPlaying,
+        Action::SaveClip,
+        Action::RecordSet,
     ];
 
     pub fn label(self) -> &'static str {
@@ -87,6 +91,8 @@ impl Action {
             Action::TimelinePlay => "Timeline play / pause",
             Action::TimelineRecord => "Timeline record on / off",
             Action::ShowNowPlaying => "Show the now-playing card again",
+            Action::SaveClip => "Save a clip (the last N seconds)",
+            Action::RecordSet => "Record the whole set: start / stop",
         }
     }
 
@@ -128,6 +134,8 @@ impl Action {
             Action::TimelinePlay => "T",
             Action::TimelineRecord => "G",
             Action::ShowNowPlaying => "N",
+            Action::SaveClip => "K",
+            Action::RecordSet => "J",
         }
     }
 }
@@ -331,6 +339,14 @@ pub struct Settings {
     /// Transparent background: scenes off, the dancer + overlays go out with
     /// alpha (NDI/Spout) to layer over a camera in OBS.
     pub out_transparent: bool,
+    /// Clip recorder: keep the last `rec_keep_s` seconds ready to save.
+    pub rec_buffer: bool,
+    pub rec_keep_s: u32,
+    pub rec_layout: crate::rec::Layout,
+    /// Clip folder ("" = Videos/Trippin).
+    pub rec_dir: String,
+    /// ffmpeg binary ("" = find it).
+    pub ffmpeg_path: String,
     /// Now playing: where tracks come from (Auto = whichever changed last).
     pub np_source: crate::nowplaying::NpSource,
     /// Hold a new track back until it has stayed this long (seconds) — skips
@@ -398,6 +414,11 @@ impl Default for Settings {
             ndi_fps: 60,
             spout_enabled: false,
             out_transparent: false,
+            rec_buffer: false,
+            rec_keep_s: 60,
+            rec_layout: crate::rec::Layout::Wide,
+            rec_dir: String::new(),
+            ffmpeg_path: String::new(),
             np_source: Default::default(),
             np_delay_s: 0.0,
             np_file: String::new(),

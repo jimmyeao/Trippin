@@ -35,6 +35,7 @@ mod egui_win;
 mod ndi;
 mod nowplaying;
 mod overlay;
+mod rec;
 #[cfg(windows)]
 mod spout;
 mod output;
@@ -93,6 +94,9 @@ struct Shared {
     np: nowplaying::SharedNowPlaying,
     np_cfg: Arc<Mutex<nowplaying::NpConfig>>,
     np_replay: AtomicBool,
+    /// Clip recorder requests from hotkeys/panel, handled on the render thread.
+    rec_clip: AtomicBool,
+    rec_set: AtomicBool,
     /// Finished scene thumbnails for the editor: (name, w, h, RGBA8).
     /// Produced on the render thread, drained by `draw_editor`.
     thumbs: Mutex<Vec<(String, u32, u32, Vec<u8>)>>,
@@ -489,6 +493,10 @@ fn render_loop(
     // Live text overlays — one per text lane; `TextOff` starts the fade-out.
     let mut text_slots: [Option<text::TextState>; text::TEXT_SLOTS] = [None, None];
     let mut overlays = overlay::Overlays::default();
+    // Clip recorder (replay buffer / whole-set), and whether a set is rolling.
+    let mut recorder: Option<rec::Recorder> = None;
+    let mut rec_err: Option<String> = None;
+    let mut set_on = false;
     // Live rig as it was before a timeline borrowed it — restored on show end.
     let mut pre_show: Option<ShowBaseline> = None;
     // Global seconds up to which cues were already dispatched — one-shot.
@@ -784,11 +792,82 @@ fn render_loop(
         r.set_palette(&s.palette);
         // NDI output — a conf change rebuilds it; otherwise a cheap no-op.
         r.transparent = s.out_transparent;
-        r.set_output((s.ndi_enabled || s.spout_enabled).then(|| output::Conf {
+        // Clip recorder: runs while the buffer is armed or a set is rolling.
+        {
+            let want_set = shared.rec_set.load(Ordering::Relaxed);
+            let want = s.rec_buffer || want_set || set_on;
+            let conf = if want {
+                match rec::find_ffmpeg(&s.ffmpeg_path) {
+                    Some(ff) => {
+                        let (w, h) = output::Conf {
+                            name: String::new(),
+                            ndi: false,
+                            spout: false,
+                            transparent: false,
+                            record: true,
+                            height: s.ndi_height,
+                            fps: s.ndi_fps,
+                        }
+                        .size();
+                        rec_err = None;
+                        Some(rec::RecConf {
+                            ffmpeg: ff,
+                            width: w,
+                            height: h,
+                            fps: s.ndi_fps,
+                            keep_s: s.rec_keep_s.clamp(10, 600),
+                            out_dir: if s.rec_dir.trim().is_empty() {
+                                rec::default_out_dir()
+                            } else {
+                                s.rec_dir.trim().into()
+                            },
+                        })
+                    }
+                    None => {
+                        rec_err = Some(
+                            "ffmpeg not found — install it (winget install ffmpeg / brew install ffmpeg) or pick ffmpeg in Stream → Recording".into(),
+                        );
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+            if recorder.as_ref().map(|r| &r.conf) != conf.as_ref() {
+                if let (Some(old), true) = (recorder.as_ref(), set_on) {
+                    old.set_stop(s.rec_layout);
+                    set_on = false;
+                }
+                // Drop first: the old one clears the global taps on drop, which
+                // must happen before the new one installs its own.
+                drop(recorder.take());
+                recorder = conf.map(rec::Recorder::start);
+            }
+            if let Some(rc) = &recorder {
+                if want_set != set_on {
+                    if want_set {
+                        rc.set_start();
+                    } else {
+                        rc.set_stop(s.rec_layout);
+                    }
+                    set_on = want_set;
+                }
+                if shared.rec_clip.swap(false, Ordering::Relaxed) {
+                    rc.save_clip(s.rec_keep_s, s.rec_layout);
+                }
+            } else {
+                shared.rec_clip.store(false, Ordering::Relaxed);
+                if !want {
+                    set_on = false;
+                }
+            }
+        }
+        r.set_output((s.ndi_enabled || s.spout_enabled || recorder.is_some()).then(|| output::Conf {
             name: s.ndi_name.clone(),
             ndi: s.ndi_enabled,
             spout: s.spout_enabled,
             transparent: s.out_transparent,
+            record: recorder.is_some(),
             height: s.ndi_height,
             fps: s.ndi_fps,
         }));
@@ -1193,6 +1272,8 @@ fn render_loop(
                 calm: f.calm,
                 np_track,
                 np_status,
+                rec: recorder.as_ref().map(|r| lock(&r.status).clone()),
+                rec_err: rec_err.clone(),
             };
         }
 
@@ -1261,6 +1342,10 @@ fn apply_render(
         }
         Action::ReloadShaders => r.reload_shaders(true),
         Action::ShowNowPlaying => shared.np_replay.store(true, Ordering::Relaxed),
+        Action::SaveClip => shared.rec_clip.store(true, Ordering::Relaxed),
+        Action::RecordSet => {
+            shared.rec_set.fetch_xor(true, Ordering::Relaxed);
+        }
         // Handled on the event thread (windows / timeline transport).
         Action::Fullscreen
         | Action::LeaveFullscreen
@@ -1648,6 +1733,8 @@ impl ApplicationHandler for App {
             np,
             np_cfg,
             np_replay: AtomicBool::new(false),
+            rec_clip: AtomicBool::new(false),
+            rec_set: AtomicBool::new(false),
             settings: Mutex::new(self.settings.clone()),
             status: Mutex::new(Status::default()),
             timeline: timeline::TimelineState::new(),

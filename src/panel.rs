@@ -65,6 +65,9 @@ pub struct Status {
     /// Now playing: the track on screen, and one status line per source.
     pub np_track: Option<String>,
     pub np_status: Vec<(String, String)>,
+    /// Clip recorder state (None = not running) / why it can't run.
+    pub rec: Option<crate::rec::Status>,
+    pub rec_err: Option<String>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -441,6 +444,67 @@ fn stream_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<Ui
     row(ui, "Card size", |ui| {
         ui.add(egui::Slider::new(&mut s.np_size, 0.5..=2.0));
     });
+
+    ui.separator();
+    ui.label(egui::RichText::new("Recording").strong());
+    row(ui, "Replay", |ui| {
+        ui.checkbox(&mut s.rec_buffer, "Keep the last");
+        ui.add(egui::DragValue::new(&mut s.rec_keep_s).range(10..=600).suffix(" s"));
+    });
+    row(ui, "Format", |ui| {
+        for l in crate::rec::Layout::ALL {
+            ui.selectable_value(&mut s.rec_layout, l, l.label());
+        }
+    });
+    row(ui, "", |ui| {
+        let can = st.rec.is_some();
+        if ui.add_enabled(can, egui::Button::new("💾 Save clip")).on_hover_text("Hotkey K").clicked() {
+            cmd.push(UiCommand::Do(Action::SaveClip));
+        }
+        let rolling = st.rec.as_ref().and_then(|r| r.set_since);
+        let label = match rolling {
+            Some(t) => {
+                let e = t.elapsed().as_secs();
+                format!("⏹ Stop set ({}:{:02}:{:02})", e / 3600, e / 60 % 60, e % 60)
+            }
+            None => "⏺ Record set".into(),
+        };
+        if ui.button(label).on_hover_text("Hotkey J — records until you stop it").clicked() {
+            cmd.push(UiCommand::Do(Action::RecordSet));
+        }
+    });
+    if let Some(e) = &st.rec_err {
+        ui.colored_label(egui::Color32::from_rgb(255, 160, 60), e);
+    }
+    if let Some(r) = &st.rec {
+        let mut line = format!("{} · {} s buffered", r.encoder, r.buffered_s);
+        if r.saving {
+            line.push_str(" · saving…");
+        }
+        ui.small(line);
+        if let Some(e) = &r.err {
+            ui.colored_label(egui::Color32::from_rgb(255, 120, 120), e);
+        } else if let Some(p) = &r.last {
+            ui.small(format!("Saved {p}"));
+        }
+    }
+    row(ui, "Folder", |ui| {
+        ui.add(egui::TextEdit::singleline(&mut s.rec_dir).desired_width(150.0).hint_text("Videos/Trippin"));
+        if ui.button("…").clicked() {
+            if let Some(p) = rfd::FileDialog::new().pick_folder() {
+                s.rec_dir = p.display().to_string();
+            }
+        }
+    });
+    row(ui, "ffmpeg", |ui| {
+        ui.add(egui::TextEdit::singleline(&mut s.ffmpeg_path).desired_width(150.0).hint_text("auto"));
+        if ui.button("…").clicked() {
+            if let Some(p) = rfd::FileDialog::new().pick_file() {
+                s.ffmpeg_path = p.display().to_string();
+            }
+        }
+    });
+    ui.small("Clips include the overlays and the audio. Size/fps follow the video output settings below.");
 
     ui.separator();
     ui.label(egui::RichText::new("Branding").strong());

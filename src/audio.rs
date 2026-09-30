@@ -327,9 +327,17 @@ where
     T: SizedSample,
     f32: FromSample<T>,
 {
+    let rate = config.sample_rate;
     let stream = dev.build_input_stream::<T, _, _>(
         config.clone(),
         move |data: &[T], _| {
+            // Clip recorder: first two channels, interleaved.
+            let out_ch = channels.min(2);
+            crate::rec::audio_in(rate, out_ch as u16, || {
+                data.chunks(channels)
+                    .flat_map(|f| f[..out_ch].iter().map(|&s| s.to_sample::<f32>()))
+                    .collect()
+            });
             let mono: Vec<f32> = data
                 .chunks(channels)
                 .map(|frame| {
