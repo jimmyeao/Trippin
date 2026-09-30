@@ -25,9 +25,7 @@ fn wall(p: vec3<f32>, side: f32) -> f32 {
     let cz = floor(p.z / CELL.z);
     let h = hash21(vec2<f32>(cy * 13.0 + side * 7.0, cz * 3.0));
     let h2 = hash21(vec2<f32>(cy * 5.0 + side, cz * 11.0 + 1.0));
-    // Shape: the blocks push out into the canyon as the bass builds
-    // (max 3.8, still clear of the flight path).
-    let proud = h * (2.2 + 1.6 * u.pres4.x);
+    let proud = h * 3.0;                        // how far it juts out
     let c = vec3<f32>(-proud + 4.0, (cy + 0.5) * CELL.y, (cz + 0.5) * CELL.z);
     let b = vec3<f32>(4.0, CELL.y * (0.3 + 0.18 * h2), CELL.z * (0.32 + 0.16 * h));
     let d = sd_box(vec3<f32>(lx, p.y, p.z) - c, b);

@@ -33,6 +33,11 @@ mod editor;
 mod gfx;
 mod egui_win;
 mod ndi;
+mod nowplaying;
+mod overlay;
+mod rec;
+#[cfg(windows)]
+mod spout;
 mod output;
 mod palettes;
 mod panel;
@@ -84,6 +89,14 @@ struct Shared {
     /// The GPU tier can run `@heavy` scenes (panel greys them otherwise).
     heavy_ok: bool,
     clip_names: Vec<String>,
+    /// Now playing: detector output, its live config, and a "show the card
+    /// again" request from the hotkey.
+    np: nowplaying::SharedNowPlaying,
+    np_cfg: Arc<Mutex<nowplaying::NpConfig>>,
+    np_replay: AtomicBool,
+    /// Clip recorder requests from hotkeys/panel, handled on the render thread.
+    rec_clip: AtomicBool,
+    rec_set: AtomicBool,
     /// Finished scene thumbnails for the editor: (name, w, h, RGBA8).
     /// Produced on the render thread, drained by `draw_editor`.
     thumbs: Mutex<Vec<(String, u32, u32, Vec<u8>)>>,
@@ -479,6 +492,11 @@ fn render_loop(
     let mut matcher = Matcher::new();
     // Live text overlays — one per text lane; `TextOff` starts the fade-out.
     let mut text_slots: [Option<text::TextState>; text::TEXT_SLOTS] = [None, None];
+    let mut overlays = overlay::Overlays::default();
+    // Clip recorder (replay buffer / whole-set), and whether a set is rolling.
+    let mut recorder: Option<rec::Recorder> = None;
+    let mut rec_err: Option<String> = None;
+    let mut set_on = false;
     // Live rig as it was before a timeline borrowed it — restored on show end.
     let mut pre_show: Option<ShowBaseline> = None;
     // Global seconds up to which cues were already dispatched — one-shot.
@@ -760,11 +778,96 @@ fn render_loop(
         }
         let s = lock(&shared.settings).clone();
         let usable = usable_scenes(&r, &s);
+        {
+            let mut c = lock(&shared.np_cfg);
+            if c.source != s.np_source || c.delay_s != s.np_delay_s || c.file != s.np_file {
+                *c = nowplaying::NpConfig {
+                    source: s.np_source,
+                    delay_s: s.np_delay_s,
+                    file: s.np_file.clone(),
+                };
+            }
+        }
         // Global palette — a no-op while the name is unchanged.
         r.set_palette(&s.palette);
         // NDI output — a conf change rebuilds it; otherwise a cheap no-op.
-        r.set_output(s.ndi_enabled.then(|| output::Conf {
+        r.transparent = s.out_transparent;
+        // Clip recorder: runs while the buffer is armed or a set is rolling.
+        {
+            let want_set = shared.rec_set.load(Ordering::Relaxed);
+            let want = s.rec_buffer || want_set || set_on;
+            let conf = if want {
+                match rec::find_ffmpeg(&s.ffmpeg_path) {
+                    Some(ff) => {
+                        let (w, h) = output::Conf {
+                            name: String::new(),
+                            ndi: false,
+                            spout: false,
+                            transparent: false,
+                            record: true,
+                            height: s.ndi_height,
+                            fps: s.ndi_fps,
+                        }
+                        .size();
+                        rec_err = None;
+                        Some(rec::RecConf {
+                            ffmpeg: ff,
+                            width: w,
+                            height: h,
+                            fps: s.ndi_fps,
+                            keep_s: s.rec_keep_s.clamp(10, 600),
+                            out_dir: if s.rec_dir.trim().is_empty() {
+                                rec::default_out_dir()
+                            } else {
+                                s.rec_dir.trim().into()
+                            },
+                        })
+                    }
+                    None => {
+                        rec_err = Some(
+                            "ffmpeg not found — install it (winget install ffmpeg / brew install ffmpeg) or pick ffmpeg in Stream → Recording".into(),
+                        );
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+            if recorder.as_ref().map(|r| &r.conf) != conf.as_ref() {
+                if let (Some(old), true) = (recorder.as_ref(), set_on) {
+                    old.set_stop(s.rec_layout);
+                    set_on = false;
+                }
+                // Drop first: the old one clears the global taps on drop, which
+                // must happen before the new one installs its own.
+                drop(recorder.take());
+                recorder = conf.map(rec::Recorder::start);
+            }
+            if let Some(rc) = &recorder {
+                if want_set != set_on {
+                    if want_set {
+                        rc.set_start();
+                    } else {
+                        rc.set_stop(s.rec_layout);
+                    }
+                    set_on = want_set;
+                }
+                if shared.rec_clip.swap(false, Ordering::Relaxed) {
+                    rc.save_clip(s.rec_keep_s, s.rec_layout);
+                }
+            } else {
+                shared.rec_clip.store(false, Ordering::Relaxed);
+                if !want {
+                    set_on = false;
+                }
+            }
+        }
+        r.set_output((s.ndi_enabled || s.spout_enabled || recorder.is_some()).then(|| output::Conf {
             name: s.ndi_name.clone(),
+            ndi: s.ndi_enabled,
+            spout: s.spout_enabled,
+            transparent: s.out_transparent,
+            record: recorder.is_some(),
             height: s.ndi_height,
             fps: s.ndi_fps,
         }));
@@ -1092,6 +1195,7 @@ fn render_loop(
             hits4: f.hits4,
             pres4: f.pres4,
             clock4: clock4.map(|c| c as f32),
+            misc4: [0.0; 4],
         };
         // Text overlays: fade in over 0.35 s, out over 0.5 s; a faded-out
         // slot drops off (its texture stays bound but the shader skips it).
@@ -1130,12 +1234,26 @@ fn render_loop(
             any_text = true;
         }
         let text_arg = any_text.then_some(&text_u);
-        if let Err(e) = r.render(dir.scene, &u, dancer_u.as_ref(), text_arg) {
+        // Stream overlays: now-playing card, branding, ticker.
+        if shared.np_replay.swap(false, Ordering::Relaxed) {
+            overlays.replay_card(now_t);
+        }
+        let ov_u = {
+            let np = lock(&shared.np);
+            overlays.update(&s, &np, now_t, w as f32 / h.max(1) as f32, &mut |i, img| {
+                r.set_overlay_image(i, img)
+            })
+        };
+        if let Err(e) = r.render(dir.scene, &u, dancer_u.as_ref(), text_arg, ov_u.as_ref()) {
             eprintln!("render error: {e}");
         }
 
         if now - last_status > Duration::from_millis(50) {
             last_status = now;
+            let (np_track, np_status) = {
+                let np = lock(&shared.np);
+                (np.track.as_ref().map(|t| t.line()), np.status.clone())
+            };
             *lock(&shared.status) = Status {
                 bpm: f.bpm,
                 confidence: f.tempo_confidence,
@@ -1152,6 +1270,10 @@ fn render_loop(
                 output: r.output_status(),
                 groove: f.groove,
                 calm: f.calm,
+                np_track,
+                np_status,
+                rec: recorder.as_ref().map(|r| lock(&r.status).clone()),
+                rec_err: rec_err.clone(),
             };
         }
 
@@ -1219,6 +1341,11 @@ fn apply_render(
             s.fx = s.fx.next();
         }
         Action::ReloadShaders => r.reload_shaders(true),
+        Action::ShowNowPlaying => shared.np_replay.store(true, Ordering::Relaxed),
+        Action::SaveClip => shared.rec_clip.store(true, Ordering::Relaxed),
+        Action::RecordSet => {
+            shared.rec_set.fetch_xor(true, Ordering::Relaxed);
+        }
         // Handled on the event thread (windows / timeline transport).
         Action::Fullscreen
         | Action::LeaveFullscreen
@@ -1596,7 +1723,18 @@ impl ApplicationHandler for App {
         }
 
         self.gpu = Some(r.gpu());
+        let np_cfg = Arc::new(Mutex::new(nowplaying::NpConfig {
+            source: self.settings.np_source,
+            delay_s: self.settings.np_delay_s,
+            file: self.settings.np_file.clone(),
+        }));
+        let np = nowplaying::start(np_cfg.clone(), config::data_dir().join("nowplaying.txt"));
         let shared = Arc::new(Shared {
+            np,
+            np_cfg,
+            np_replay: AtomicBool::new(false),
+            rec_clip: AtomicBool::new(false),
+            rec_set: AtomicBool::new(false),
             settings: Mutex::new(self.settings.clone()),
             status: Mutex::new(Status::default()),
             timeline: timeline::TimelineState::new(),
@@ -1905,6 +2043,7 @@ fn check_shaders() -> Result<()> {
     paths.push(dir.join("present.wgsl"));
     paths.push(dir.join("dancer.wgsl"));
     paths.push(dir.join("text.wgsl"));
+    paths.push(dir.join("overlay.wgsl"));
     let mut bad = 0;
     for p in &paths {
         let body = std::fs::read_to_string(p)?;
@@ -1986,6 +2125,22 @@ fn main() -> Result<()> {
     // `--snap <scenes|all>` renders scenes headless to PNG and times them.
     if args.iter().any(|a| a == "--snap") {
         return snap::run(&args);
+    }
+    // `--nowplaying`: watch what each track source (Spotify, Serato, …) sees.
+    #[cfg(windows)]
+    if let Some(name) = arg_value(&args, "--spout-grab") {
+        let (w, h, px) = spout::grab(name)?;
+        let out = args.last().filter(|a| a.ends_with(".png")).cloned().unwrap_or("spout.png".into());
+        image::save_buffer(&out, &px, w, h, image::ColorType::Rgba8)?;
+        println!("{w}x{h} → {out}");
+        return Ok(());
+    }
+    #[cfg(windows)]
+    if args.iter().any(|a| a == "--spout-test") {
+        return spout::test();
+    }
+    if args.iter().any(|a| a == "--nowplaying") {
+        return nowplaying::monitor();
     }
     if let Some(p) = arg_value(&args, "--groove-test") {
         return audio::groove_test(std::path::Path::new(&p));

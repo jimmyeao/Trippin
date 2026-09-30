@@ -81,9 +81,15 @@ fn lasers(ro: vec3<f32>, rd: vec3<f32>, tmax: f32) -> vec3<f32> {
         let rr = 0.012 + sc * 0.0015;
         let vis = step(0.0, tc) * step(tc, tmax);
         let lat = exp(-dist * dist / (rr * rr)) / (1.7725 * rr * max(sqrt(den), 0.1));
-        let haze = 0.4 + 1.2 * tnoise((o + bd * sc) * 0.1 + vec3<f32>(u.time * 0.01, 0.0, 0.0)).r;
+        // Fog-machine smoke: contrasty billows (bright where the beam passes
+        // a cloud, nearly invisible in the gaps), drifting on the mid clock.
+        let sq = (o + bd * sc) * 0.12 + vec3<f32>(u.clock4.z * 0.01, u.clock4.z * 0.004, 0.0);
+        let sm = smoothstep(0.42, 0.62, tnoise(sq).b * 0.7 + tnoise(sq * 2.3 + 0.5).b * 0.3);
+        let haze = 0.08 + 2.2 * sm;
         let lvl = (0.35 + 1.3 * spec(f32(i) / f32(N) * 0.8)) * (0.4 + 0.8 * u.intensity);
         c += beam_col(i) * lat * haze * lvl * vis * 0.012;
+        // Smoke around the beam lit in its colour (broad scatter).
+        c += beam_col(i) * exp(-dist / (0.4 + sc * 0.05)) * sm * lvl * vis * 0.025;
     }
     return c;
 }

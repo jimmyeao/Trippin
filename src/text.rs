@@ -252,7 +252,7 @@ fn find_font() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-fn font() -> Option<&'static FontVec> {
+pub fn font() -> Option<&'static FontVec> {
     static FONT: OnceLock<Option<FontVec>> = OnceLock::new();
     FONT.get_or_init(|| {
         let path = find_font()?;

@@ -451,6 +451,7 @@ impl ShowPlayer {
                                 let chunk: Vec<f32> = (0..n)
                                     .map(|i| sample_at(&regions, sent_t + i as f64 / analysis_sr))
                                     .collect();
+                                crate::rec::audio_in(analysis_sr as u32, 1, || chunk.clone());
                                 let _ = tx.try_send(chunk); // drop rather than stall the analyser
                             }
                             sent_t = pos_t;

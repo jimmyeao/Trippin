@@ -327,9 +327,17 @@ where
     T: SizedSample,
     f32: FromSample<T>,
 {
+    let rate = config.sample_rate;
     let stream = dev.build_input_stream::<T, _, _>(
         config.clone(),
         move |data: &[T], _| {
+            // Clip recorder: first two channels, interleaved.
+            let out_ch = channels.min(2);
+            crate::rec::audio_in(rate, out_ch as u16, || {
+                data.chunks(channels)
+                    .flat_map(|f| f[..out_ch].iter().map(|&s| s.to_sample::<f32>()))
+                    .collect()
+            });
             let mono: Vec<f32> = data
                 .chunks(channels)
                 .map(|frame| {
@@ -672,14 +680,32 @@ impl Analyzer {
             smooth(dst, (src * g).min(1.0), 0.6, 0.12);
         }
 
-        // Time-domain trace: 64 samples decimated from the newest 1024
-        // (~21 ms at 48 kHz), lightly auto-levelled so quiet tracks still
-        // show a wiggle.
+        // Time-domain trace like a real oscilloscope: trigger on a rising
+        // zero crossing of the low-passed signal (so periodic content holds
+        // still instead of scribbling at a random phase every frame), take
+        // 1024 samples (~21 ms) from there, and box-average them down to 64
+        // points (no aliasing). Lightly auto-levelled so quiet tracks still
+        // show a wiggle, and eased frame to frame.
         let n = self.buf.len();
         let wgain = (0.5 / (rms * 3.0 + 0.02)).clamp(0.6, 5.0);
+        let search = n - 1024;
+        let mut start = search;
+        let mut lp = 0.0f32;
+        let mut prev_lp = 0.0f32;
+        for i in 0..search {
+            lp += (self.buf[i] - lp) * 0.08;
+            if i > 32 && prev_lp <= 0.0 && lp > 0.0 {
+                start = i;
+                // Keep the latest crossing that still leaves a full window.
+            }
+            prev_lp = lp;
+        }
+        let start = start.min(n - 1024);
         for (i, w) in self.f.waveform.iter_mut().enumerate() {
-            let s = self.buf[n - 1024 + i * 16 + 8];
-            *w = (s * wgain).clamp(-1.0, 1.0);
+            let b = start + i * 16;
+            let avg = (b..b + 16).map(|j| self.buf[j]).sum::<f32>() / 16.0;
+            let target = (avg * wgain * 1.3).clamp(-1.0, 1.0);
+            *w += (target - *w) * 0.6;
         }
 
         self.track_beats(silent);
@@ -998,6 +1024,39 @@ mod tests {
         assert!(at(29.0).2 > 0.9, "a drumless section is a breakdown");
         assert!(at(33.5).2 < 0.3, "the drop must be caught fast");
         assert!(at(44.0).2 < 0.05);
+    }
+
+    /// A steady tone must draw the same trace every frame (triggered scope),
+    /// not a randomly phased slice.
+    #[test]
+    fn waveform_is_triggered() {
+        let sr = 48000.0f32;
+        let (_tx, rx) = mpsc::channel();
+        let shared: SharedFeatures = Arc::new(Mutex::new(Features::default()));
+        let mut a = Analyzer::new(sr, shared, rx, None);
+        let mut snaps = Vec::new();
+        for k in 0..(sr as usize) {
+            let t = k as f32 / sr;
+            a.buf.push_back((t * 110.0 * TAU_F).sin() * 0.4 + (t * 330.0 * TAU_F).sin() * 0.1);
+            if a.buf.len() > FFT_SIZE {
+                a.buf.pop_front();
+            }
+            a.since_hop += 1;
+            if a.since_hop >= HOP && a.buf.len() == FFT_SIZE {
+                a.since_hop = 0;
+                a.frame();
+                if k > 24000 {
+                    snaps.push(a.f.waveform);
+                }
+            }
+        }
+        // Compare consecutive frames: max point difference must be small.
+        let worst = snaps
+            .windows(2)
+            .map(|w| w[0].iter().zip(w[1].iter()).map(|(x, y)| (x - y).abs()).fold(0.0f32, f32::max))
+            .fold(0.0f32, f32::max);
+        println!("worst frame-to-frame deviation {worst:.3}");
+        assert!(worst < 0.25, "trace jitters between frames: {worst}");
     }
 
     const TAU_F: f32 = std::f32::consts::TAU;

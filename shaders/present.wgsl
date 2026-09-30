@@ -77,13 +77,19 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         textureSampleLevel(prev_tex, samp, uv - dir * ca, 0.0).b
     );
     col = finite(col);
+    let clear_bg = u.misc4.x > 0.5;
+    // Transparent mode: the target holds the dancer premultiplied over
+    // alpha 0 — carry its coverage through.
+    let cover = textureSampleLevel(prev_tex, samp, uv, 0.0).a;
     if u.bloom > 0.0 {
         // The chain sums 6 levels; normalise, then blend (energy-conserving).
         let b = finite(textureSampleLevel(bloom_tex, samp, uv, 0.0).rgb) / 6.0;
         col = mix(col, b, clamp(u.bloom, 0.0, 1.0) * 0.12);
     }
     let expo = 0.75 + 0.35 * u.intensity;
-    if u.tonemap > 0.5 {
+    // AgX lifts black off zero — a grey veil over the camera in transparent
+    // mode — so that mode always takes ACES (black stays black).
+    if u.tonemap > 0.5 && !clear_bg {
         col = agx(col * expo * 1.25);
     } else {
         col = aces(col * expo);
@@ -91,13 +97,22 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // Vignette and grain use screen-space uv so edges darken the same under FX.
     let scr = in.uv - 0.5;
     col *= 1.0 - 0.9 * dot(scr, scr) * 1.6;
-    col += u.flash * u.flash * 0.35;
+    if !clear_bg {
+        col += u.flash * u.flash * 0.35;
+    }
     col *= u.master;
     // Grain fades out in the blacks — flat noise there shimmers as a dirty
     // texture, speckles a blacked-out screen, and costs encoders bits on
     // pure noise. Real film grain vanishes in deep shadow anyway.
     let lum = max(col.r, max(col.g, col.b));
     col += (hash21(in.uv * vec2<f32>(u.res_x, u.res_y) + floor(fract(u.time * 7.0) * 997.0)) - 0.5) * 0.012 * smoothstep(0.0, 0.08, lum);
+    if clear_bg {
+        // Premultiplied out: anything lit (glow, bloom) earns alpha too, so
+        // additive light reads over a camera feed instead of going grey.
+        col = max(col, vec3<f32>(0.0));
+        let a = clamp(max(cover * u.master, max(col.r, max(col.g, col.b))), 0.0, 1.0);
+        return vec4<f32>(col, a);
+    }
     // The surface is usually sRGB, so let the hardware do the encode.
     return vec4<f32>(max(col, vec3<f32>(0.0)), 1.0);
 }
