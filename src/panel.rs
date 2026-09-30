@@ -542,14 +542,12 @@ fn topbar(ui: &mut egui::Ui, tab: &mut Tab, s: &mut Settings, st: &Status) {
         let show_fps = room > need + 72.0;
         let mut pill_room = room - need - if show_fps { 72.0 } else { 0.0 };
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            // Rightmost first: pills, then pips, BPM, fps, then the Perform
-            // Library/Pads toggle (a small segmented, not extra tabs — B7).
-            if st.calm > 0.5 && pill_room > 96.0 {
-                pill(ui, "breakdown", BREAKDOWN, BREAKDOWN_BG);
-                pill_room -= 96.0;
-            }
-            if st.silent && pill_room > 88.0 {
-                pill(ui, "no signal", WARN, WARN_BG);
+            // Rightmost first: the Library/Pads toggle is pinned to the
+            // right edge so variable-width readouts (BPM digits, pills
+            // appearing) can't push the buttons out from under the cursor.
+            if *tab == Tab::Perform {
+                segmented(ui, &mut s.perform_pads, &[(false, "Library"), (true, "Pads")]);
+                ui.add_space(6.0);
             }
             // The Pads view has the big BPM readout — one readout per
             // screen, so the header's BPM + pips hide while Pads is up (B3).
@@ -566,7 +564,7 @@ fn topbar(ui: &mut egui::Ui, tab: &mut Tab, s: &mut Settings, st: &Status) {
                     );
                 }
                 ui.label(
-                    egui::RichText::new(format!("{:.1}", st.bpm))
+                    egui::RichText::new(format!("{:>5}", format!("{:.1}", st.bpm)))
                         .monospace()
                         .size(16.0)
                         .strong(),
@@ -575,14 +573,19 @@ fn topbar(ui: &mut egui::Ui, tab: &mut Tab, s: &mut Settings, st: &Status) {
             }
             if show_fps {
                 ui.label(
-                    egui::RichText::new(format!("{:.0} fps", st.fps))
+                    egui::RichText::new(format!("{:>3.0} fps", st.fps))
                         .color(MUTED)
                         .size(11.0),
                 );
             }
-            if *tab == Tab::Perform {
-                ui.add_space(6.0);
-                segmented(ui, &mut s.perform_pads, &[(false, "Library"), (true, "Pads")]);
+            // Pills come last (cluster's left edge) — appearing/disappearing
+            // extends into empty space instead of moving the readouts.
+            if st.calm > 0.5 && pill_room > 96.0 {
+                pill(ui, "breakdown", BREAKDOWN, BREAKDOWN_BG);
+                pill_room -= 96.0;
+            }
+            if st.silent && pill_room > 88.0 {
+                pill(ui, "no signal", WARN, WARN_BG);
             }
         });
     });
