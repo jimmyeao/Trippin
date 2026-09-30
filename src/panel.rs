@@ -1,10 +1,11 @@
 //! Control panel: a second window (egui) for modes, scene playlist, dancer
 //! options, sync and hotkey bindings. It shares the renderer's GPU device.
 //!
-//! Layout (Docs/mockups.html): a live-status header, a tab strip — Perform,
-//! Dancer & FX, Stream, Timeline, Keys — then one page at a time. Perform is
-//! the default: a thumbnail scene library on the left and a live inspector
-//! on the right (mockup 1b).
+//! Layout (Docs/mockups.html): a live-status header across the top, a left
+//! sidebar nav — Show, Perform, Dancer & FX, Stream, Timeline, Keys — with
+//! Blackout/Fullscreen pinned to its foot, then one page at a time. Show is
+//! the default (the 1a console); Perform is a thumbnail scene library on
+//! the left and a live inspector on the right (mockup 1b).
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -304,13 +305,18 @@ fn build_ui(
         .inner_margin(egui::Margin::symmetric(12, 10))
         .show(ui, |ui| header(ui, st, scenes));
 
-    // --- Tabs -------------------------------------------------------------
-    ui.horizontal(|ui| {
-        for t in Tab::ALL {
-            ui.selectable_value(tab, t, t.label());
-        }
-    });
-    ui.separator();
+    // --- Sidebar nav (mockup 1a) ------------------------------------------
+    egui::Panel::left("nav")
+        .resizable(false)
+        .exact_size(148.0)
+        .frame(
+            egui::Frame::NONE
+                .fill(crate::ui_theme::PANEL)
+                .inner_margin(egui::Margin::symmetric(10, 8)),
+        )
+        .show(ui, |ui| {
+            sidebar(ui, tab, s, st, scenes.len(), clips.len(), cmd);
+        });
 
     match *tab {
         Tab::Perform => perform_tab(
@@ -332,7 +338,7 @@ fn build_ui(
                 .horizontal_scroll_offset(0.0)
                 .show(ui, |ui| match *tab {
                     Tab::Show => {
-                        show_tab(ui, s, st, scenes, scene_heavy, thumbs, want_thumbs, cmd)
+                        show_tab(ui, s, st, scenes, scene_heavy, heavy_ok, thumbs, want_thumbs, cmd)
                     }
                     Tab::DancerFx => {
                         dancer_fx_tab(ui, s, st, clips, clip_thumbs, cmd)
@@ -564,8 +570,108 @@ fn palette_swatch(ui: &mut egui::Ui, s: &mut Settings, name: &str, w: f32, h: f3
     resp.on_hover_text(name);
 }
 
-/// Mockup 1a: the console. Now/up-next previews over Director, Palette and
-/// Sync cards, with Blackout + Fullscreen at the foot.
+/// One sidebar nav row: label left, optional count right, dark pill when
+/// selected (mockup 1a). Returns true when clicked.
+fn nav_item(ui: &mut egui::Ui, label: &str, count: Option<usize>, sel: bool) -> bool {
+    use crate::ui_theme::*;
+    let w = ui.available_width();
+    let (rect, resp) =
+        ui.allocate_exact_size(egui::vec2(w, 28.0), egui::Sense::click());
+    let bg = if sel {
+        RAISED
+    } else if resp.hovered() {
+        HOVER.gamma_multiply(0.5)
+    } else {
+        egui::Color32::TRANSPARENT
+    };
+    ui.painter().rect_filled(rect, 6.0, bg);
+    ui.painter().text(
+        egui::pos2(rect.min.x + 10.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        label,
+        egui::FontId::proportional(13.0),
+        if sel { TEXT } else { MUTED },
+    );
+    if let Some(n) = count {
+        ui.painter().text(
+            egui::pos2(rect.max.x - 8.0, rect.center().y),
+            egui::Align2::RIGHT_CENTER,
+            n.to_string(),
+            egui::FontId::monospace(11.0),
+            FAINT,
+        );
+    }
+    resp.clicked()
+}
+
+/// Left nav rail (mockup 1a): one row per screen with counts where they
+/// make sense; Blackout + Fullscreen pinned to the foot.
+fn sidebar(
+    ui: &mut egui::Ui,
+    tab: &mut Tab,
+    s: &Settings,
+    st: &Status,
+    n_scenes: usize,
+    n_clips: usize,
+    cmd: &mut Vec<UiCommand>,
+) {
+    use crate::ui_theme::*;
+    ui.spacing_mut().item_spacing.y = 3.0;
+    for t in Tab::ALL {
+        let count = match t {
+            Tab::Perform => Some(n_scenes),
+            Tab::DancerFx => Some(n_clips),
+            Tab::Keys => Some(s.keys.len()),
+            _ => None,
+        };
+        if nav_item(ui, t.label(), count, *tab == t) {
+            *tab = t;
+        }
+    }
+
+    // Blackout + Fullscreen pinned to the foot of the rail.
+    ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+        ui.add_space(2.0);
+        let w = ui.available_width();
+        let bw = (w - 30.0).max(60.0);
+        ui.horizontal(|ui| {
+            let fs = if st.fullscreen {
+                "Leave fullscreen"
+            } else {
+                "Fullscreen"
+            };
+            if ui
+                .add_sized([bw, 30.0], egui::Button::new(fs))
+                .clicked()
+            {
+                cmd.push(UiCommand::Do(Action::Fullscreen));
+            }
+            key_badge(ui, &key_short(s.keys.get(&Action::Fullscreen).map_or("", String::as_str)));
+        });
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            let bo = if st.blackout { "Blackout: ON" } else { "Blackout" };
+            if ui
+                .add_sized(
+                    [bw, 30.0],
+                    egui::Button::new(egui::RichText::new(bo).color(if st.blackout {
+                        TEXT
+                    } else {
+                        DANGER
+                    }))
+                    .fill(if st.blackout { DANGER } else { DANGER_BG }),
+                )
+                .clicked()
+            {
+                cmd.push(UiCommand::Do(Action::Blackout));
+            }
+            key_badge(ui, &key_short(s.keys.get(&Action::Blackout).map_or("", String::as_str)));
+        });
+    });
+}
+
+/// Mockup 1a: the console. Now/up-next previews over Director, Scene sets,
+/// Palette and Sync cards.
 #[allow(clippy::too_many_arguments)]
 fn show_tab(
     ui: &mut egui::Ui,
@@ -573,6 +679,7 @@ fn show_tab(
     st: &Status,
     scenes: &[String],
     heavy: &[bool],
+    heavy_ok: bool,
     thumbs: &mut HashMap<String, egui::TextureHandle>,
     want: &mut HashMap<String, Instant>,
     cmd: &mut Vec<UiCommand>,
@@ -695,6 +802,59 @@ fn show_tab(
             ui.checkbox(&mut s.random_order, "Random order");
         });
 
+        ui.add_space(6.0);
+        card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(egui::RichText::new("Scene sets").size(14.0).strong());
+            ui.add_space(4.0);
+            ui.label(egui::RichText::new("Seasonal").size(11.0).color(MUTED));
+            segmented_wide(
+                ui,
+                &mut s.seasonal,
+                &[
+                    (Seasonal::Auto, "Auto"),
+                    (Seasonal::Always, "Always"),
+                    (Seasonal::Off, "Off"),
+                ],
+            );
+            let in_now: Vec<&str> = scenes
+                .iter()
+                .map(String::as_str)
+                .filter(|n| in_season(n, today()) == Some(true))
+                .collect();
+            ui.small(if in_now.is_empty() {
+                "Nothing seasonal today.".to_string()
+            } else {
+                format!("In season: {}", in_now.join(", "))
+            });
+            ui.add_space(6.0);
+            ui.label(egui::RichText::new("3D scenes").size(11.0).color(MUTED));
+            segmented_wide(
+                ui,
+                &mut s.heavy_scenes,
+                &[
+                    (Tristate::Auto, "Auto"),
+                    (Tristate::On, "On"),
+                    (Tristate::Off, "Off"),
+                ],
+            );
+            ui.small(match s.heavy_scenes {
+                Tristate::Auto if heavy_ok => {
+                    "Raymarched scenes are in rotation — this GPU can handle them."
+                }
+                Tristate::Auto => {
+                    "Raymarched scenes are off — this GPU can't keep up. Force them with On."
+                }
+                Tristate::On => {
+                    "Raymarched scenes forced on — may drop frames on a weak GPU."
+                }
+                Tristate::Off => "Raymarched scenes are off.",
+            });
+            ui.add_space(6.0);
+            ui.label(egui::RichText::new("2D scenes").size(11.0).color(MUTED));
+            segmented_wide(ui, &mut s.flat_scenes, &[(true, "On"), (false, "Off")]);
+        });
+
         let ui = &mut cols[1];
         card().show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -744,32 +904,6 @@ fn show_tab(
             }
         });
     });
-
-    ui.add_space(10.0);
-    ui.horizontal(|ui| {
-        let bw = ((ui.available_width() - ui.spacing().item_spacing.x - 56.0) / 2.0).max(40.0);
-        let bo = if st.blackout { "Blackout: ON" } else { "Blackout" };
-        if ui
-            .add_sized(
-                [bw, 28.0],
-                egui::Button::new(egui::RichText::new(bo).color(if st.blackout {
-                    TEXT
-                } else {
-                    DANGER
-                }))
-                .fill(if st.blackout { DANGER } else { DANGER_BG }),
-            )
-            .clicked()
-        {
-            cmd.push(UiCommand::Do(Action::Blackout));
-        }
-        key_badge(ui, &key_short(s.keys.get(&Action::Blackout).map_or("", String::as_str)));
-        let fs = if st.fullscreen { "Leave fullscreen" } else { "Fullscreen" };
-        if ui.add_sized([bw, 28.0], egui::Button::new(fs)).clicked() {
-            cmd.push(UiCommand::Do(Action::Fullscreen));
-        }
-        key_badge(ui, &key_short(s.keys.get(&Action::Fullscreen).map_or("", String::as_str)));
-    });
 }
 
 // ---------------------------------------------------------------------------
@@ -805,8 +939,10 @@ fn perform_tab(
         return;
     }
 
-    // Right inspector — fixed width; blackout/fullscreen pinned at its foot.
+    // Right inspector — fixed width; not resizable (the default-resizable
+    // panel draws a grab pill on the border).
     egui::Panel::right("inspector")
+        .resizable(false)
         .exact_size(292.0)
         .frame(
             egui::Frame::NONE
@@ -815,7 +951,7 @@ fn perform_tab(
                 .stroke(egui::Stroke::new(1.0, BORDER)),
         )
         .show(ui, |ui| {
-            inspector(ui, s, st, scenes, heavy_ok, thumbs, want, cmd);
+            inspector(ui, s, st, scenes, thumbs, want, cmd);
         });
 
     let date = today();
@@ -918,16 +1054,15 @@ fn perform_tab(
     });
     ui.add_space(2.0);
 
-    // Thumbnail grid — reflows with the column width. The scrollbar takes
-    // real layout space (non-floating) and `max_width` leaves a gap before
-    // the inspector so the handle can't sit on its border. x-offset is
-    // pinned: a stray horizontal offset has no scrollbar to undo it.
-    ui.spacing_mut().scroll.floating = false;
+    // Thumbnail grid — reflows with the column width. The scrollbar is
+    // hidden (mockups show none; wheel/drag still scroll) so no handle can
+    // float in the gutter beside the inspector. x-offset is pinned: a
+    // stray horizontal offset has no scrollbar to undo it.
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .max_width(ui.available_width() - 16.0)
         .horizontal_scroll_offset(0.0)
-        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
+        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing = egui::vec2(10.0, 10.0);
             let avail = ui.available_width() - 4.0;
@@ -1118,25 +1253,22 @@ fn scene_tile(
     });
 }
 
-/// Mockup 1b right column: live preview, transport, look controls, and the
-/// advanced knobs folded under collapsing headers.
+/// Mockup 1b right column: live preview, transport, and the look controls.
+/// Director / scene-sets settings live on the Show page instead.
 #[allow(clippy::too_many_arguments)]
 fn inspector(
     ui: &mut egui::Ui,
     s: &mut Settings,
     st: &Status,
     scenes: &[String],
-    heavy_ok: bool,
     thumbs: &mut HashMap<String, egui::TextureHandle>,
     want: &mut HashMap<String, Instant>,
     cmd: &mut Vec<UiCommand>,
 ) {
     use crate::ui_theme::*;
-    let scroll_h = (ui.available_height() - 44.0).max(80.0);
     ui.spacing_mut().scroll.floating = false;
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
-        .max_height(scroll_h)
         .horizontal_scroll_offset(0.0)
         .show(ui, |ui| {
             // Live preview with the accent frame + a "live output" caption
@@ -1273,24 +1405,23 @@ fn inspector(
             ui.add_space(8.0);
             section_label(ui, "controls");
             card().show(ui, |ui| {
-                ctl_row(ui, "Mode", |ui| {
-                    segmented(
-                        ui,
-                        &mut s.mode,
-                        &[
-                            (Mode::Auto, "Auto"),
-                            (Mode::Static, "Static"),
-                            (Mode::Manual, "Manual"),
-                        ],
-                    );
-                });
-                ctl_row(ui, "Bars", |ui| {
-                    segmented(
-                        ui,
-                        &mut s.phrase_bars,
-                        &[(4u32, "4"), (8, "8"), (16, "16"), (32, "32")],
-                    );
-                });
+                ui.spacing_mut().item_spacing.y = 8.0;
+                ui.label(egui::RichText::new("Mode").size(12.0).color(MUTED));
+                segmented_wide(
+                    ui,
+                    &mut s.mode,
+                    &[
+                        (Mode::Auto, "Auto"),
+                        (Mode::Static, "Static"),
+                        (Mode::Manual, "Manual"),
+                    ],
+                );
+                ui.label(egui::RichText::new("Bars").size(12.0).color(MUTED));
+                segmented_wide(
+                    ui,
+                    &mut s.phrase_bars,
+                    &[(4u32, "4"), (8, "8"), (16, "16"), (32, "32")],
+                );
                 ctl_row(ui, "Dancer", |ui| {
                     let look = s.dancer_style.map(|i| STYLES[i]).unwrap_or("auto");
                     ui.label(
@@ -1299,16 +1430,21 @@ fn inspector(
                             st.clip.as_deref().unwrap_or("off")
                         ))
                         .monospace()
-                        .size(11.0),
+                        .size(12.0),
                     );
-                    if ui.small_button("next").clicked() {
+                    if ui.button("next").clicked() {
                         cmd.push(UiCommand::Do(Action::NextClip));
                     }
                 });
                 ctl_row(ui, "Look", |ui| {
                     egui::ComboBox::from_id_salt("look")
-                        .width(120.0)
-                        .selected_text(s.dancer_style.map(|i| STYLES[i]).unwrap_or("auto"))
+                        .width(ui.available_width().max(80.0))
+                        .selected_text(
+                            egui::RichText::new(
+                                s.dancer_style.map(|i| STYLES[i]).unwrap_or("auto"),
+                            )
+                            .size(12.0),
+                        )
                         .show_ui(ui, |ui| {
                             ui.selectable_value(&mut s.dancer_style, None, "auto");
                             for (i, name) in STYLES.iter().enumerate() {
@@ -1318,8 +1454,8 @@ fn inspector(
                 });
                 ctl_row(ui, "Effect", |ui| {
                     egui::ComboBox::from_id_salt("fx")
-                        .width(88.0)
-                        .selected_text(s.fx.label())
+                        .width((ui.available_width() - 30.0).max(60.0))
+                        .selected_text(egui::RichText::new(s.fx.label()).size(12.0))
                         .show_ui(ui, |ui| {
                             for f in Fx::ALL {
                                 if ui
@@ -1335,8 +1471,8 @@ fn inspector(
                 });
                 ctl_row(ui, "Palette", |ui| {
                     egui::ComboBox::from_id_salt("pal")
-                        .width(110.0)
-                        .selected_text(s.palette.as_str())
+                        .width(ui.available_width().max(80.0))
+                        .selected_text(egui::RichText::new(s.palette.as_str()).size(12.0))
                         .show_ui(ui, |ui| {
                             for name in crate::palettes::names() {
                                 ui.selectable_value(&mut s.palette, name.to_string(), name);
@@ -1345,132 +1481,7 @@ fn inspector(
                 });
                 palette_strip(ui, &s.palette);
             });
-
-            ui.add_space(8.0);
-            egui::CollapsingHeader::new(
-                egui::RichText::new("director & sync").size(11.0).color(MUTED),
-            )
-            .default_open(false)
-            .show(ui, |ui| {
-                ctl_row(ui, "Breakdowns", |ui| {
-                    segmented(
-                        ui,
-                        &mut s.breakdown_mode,
-                        &[(true, "Detect"), (false, "Off")],
-                    );
-                });
-                ui.small(if s.breakdown_mode {
-                    "When the drums drop out, visuals calm down."
-                } else {
-                    "Always react as if the beat is playing."
-                });
-                ui.checkbox(&mut s.cut_on_drops, "Cut early when a drop lands");
-                ui.checkbox(&mut s.random_order, "Random scene order");
-                ctl_row(ui, "Latency", |ui| {
-                    ui.add(
-                        egui::Slider::new(&mut s.latency_ms, -100.0..=200.0)
-                            .step_by(5.0)
-                            .suffix(" ms"),
-                    );
-                });
-                ui.small(
-                    "Raise it if the visuals land after the beat, lower it if they land before.",
-                );
-                if ui
-                    .button("Mark this beat as the downbeat (the \"one\")")
-                    .clicked()
-                {
-                    cmd.push(UiCommand::Do(Action::MarkDownbeat));
-                }
-            });
-            egui::CollapsingHeader::new(
-                egui::RichText::new("scene sets").size(11.0).color(MUTED),
-            )
-            .default_open(false)
-            .show(ui, |ui| {
-                ctl_row(ui, "Seasonal", |ui| {
-                    segmented(
-                        ui,
-                        &mut s.seasonal,
-                        &[
-                            (Seasonal::Auto, "Auto"),
-                            (Seasonal::Always, "Always"),
-                            (Seasonal::Off, "Off"),
-                        ],
-                    );
-                });
-                ctl_row(ui, "3D scenes", |ui| {
-                    segmented(
-                        ui,
-                        &mut s.heavy_scenes,
-                        &[
-                            (Tristate::Auto, "Auto"),
-                            (Tristate::On, "On"),
-                            (Tristate::Off, "Off"),
-                        ],
-                    );
-                });
-                ui.small(match s.heavy_scenes {
-                    Tristate::Auto if heavy_ok => {
-                        "Raymarched scenes are in rotation — this GPU can handle them."
-                    }
-                    Tristate::Auto => {
-                        "Raymarched scenes are off — this GPU can't keep up. Force them with On."
-                    }
-                    Tristate::On => {
-                        "Raymarched scenes forced on — may drop frames on a weak GPU."
-                    }
-                    Tristate::Off => "Raymarched scenes are off.",
-                });
-                ctl_row(ui, "2D scenes", |ui| {
-                    segmented(ui, &mut s.flat_scenes, &[(true, "On"), (false, "Off")]);
-                });
-                let in_now: Vec<&str> = scenes
-                    .iter()
-                    .map(String::as_str)
-                    .filter(|n| in_season(n, today()) == Some(true))
-                    .collect();
-                ui.small(if in_now.is_empty() {
-                    "Nothing seasonal today.".to_string()
-                } else {
-                    format!("In season: {}", in_now.join(", "))
-                });
-            });
         });
-
-    ui.add_space(4.0);
-    ui.horizontal(|ui| {
-        let bw = ((ui.available_width() - ui.spacing().item_spacing.x - 56.0) / 2.0).max(40.0);
-        let bo = if st.blackout {
-            "Blackout: ON"
-        } else {
-            "Blackout"
-        };
-        if ui
-            .add_sized(
-                [bw, 28.0],
-                egui::Button::new(egui::RichText::new(bo).color(if st.blackout {
-                    TEXT
-                } else {
-                    DANGER
-                }))
-                .fill(if st.blackout { DANGER } else { DANGER_BG }),
-            )
-            .clicked()
-        {
-            cmd.push(UiCommand::Do(Action::Blackout));
-        }
-        key_badge(ui, &key_short(s.keys.get(&Action::Blackout).map_or("", String::as_str)));
-        let fs = if st.fullscreen {
-            "Leave fullscreen"
-        } else {
-            "Fullscreen"
-        };
-        if ui.add_sized([bw, 28.0], egui::Button::new(fs)).clicked() {
-            cmd.push(UiCommand::Do(Action::Fullscreen));
-        }
-        key_badge(ui, &key_short(s.keys.get(&Action::Fullscreen).map_or("", String::as_str)));
-    });
 }
 
 // ---------------------------------------------------------------------------
@@ -1735,10 +1746,10 @@ fn palette_column(ui: &mut egui::Ui, s: &mut Settings) {
 fn ctl_row(ui: &mut egui::Ui, label: &str, body: impl FnOnce(&mut egui::Ui)) {
     ui.horizontal(|ui| {
         ui.add_sized(
-            [56.0, 20.0],
+            [60.0, 26.0],
             egui::Label::new(
                 egui::RichText::new(label)
-                    .size(11.0)
+                    .size(12.0)
                     .color(crate::ui_theme::MUTED),
             ),
         );
@@ -1863,11 +1874,77 @@ fn status_dot(ui: &mut egui::Ui, ok: bool, text: &str) {
 fn stream_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<UiCommand>) {
     use crate::nowplaying::NpSource;
     use crate::ui_theme::*;
-    // Two columns like the Dancer & FX page — input-ish cards on the left,
-    // on-screen dressing on the right, output full width at the bottom.
+    // Top row: Now Playing left stretched to meet Branding + Ticker on the
+    // right. Bottom row: Recording | Video Output side by side.
     ui.columns(2, |cols| {
+        // Right column first — its height is what the Now Playing card
+        // stretches to, so the column bottoms line up.
+        let ui = &mut cols[1];
+        card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            section_label(ui, "branding");
+            status_dot(ui, s.brand_on, if s.brand_on { "showing" } else { "off" });
+        ui.checkbox(&mut s.brand_on, "Show logo / name");
+        row(ui, "DJ name", |ui| {
+            ui.add(egui::TextEdit::singleline(&mut s.brand_name).desired_width(180.0));
+        });
+        row(ui, "Handles", |ui| {
+            ui.add(egui::TextEdit::singleline(&mut s.brand_handles).desired_width(180.0).hint_text("@you · twitch.tv/you"));
+        });
+        row(ui, "Logo", |ui| {
+            ui.add(egui::TextEdit::singleline(&mut s.brand_logo).desired_width(150.0).hint_text("PNG, optional"));
+            if ui.button("…").clicked() {
+                if let Some(p) = rfd::FileDialog::new().add_filter("PNG", &["png"]).pick_file() {
+                    s.brand_logo = p.display().to_string();
+                }
+            }
+        });
+        row(ui, "Corner", |ui| {
+            for (i, l) in ["↖", "↗", "↙", "↘"].iter().enumerate() {
+                ui.selectable_value(&mut s.brand_corner, i as u8, *l);
+            }
+        });
+        row(ui, "Size", |ui| {
+            ui.add(egui::Slider::new(&mut s.brand_size, 0.5..=2.0));
+        });
+        row(ui, "Opacity", |ui| {
+            ui.add(egui::Slider::new(&mut s.brand_opacity, 0.1..=1.0));
+        });
+        row(ui, "Accent", |ui| {
+            let mut c = crate::overlay::parse_hex(&s.brand_color, [0.25, 0.85, 1.0]);
+            if ui.color_edit_button_rgb(&mut c).changed() {
+                s.brand_color = format!(
+                    "#{:02x}{:02x}{:02x}",
+                    (c[0] * 255.0) as u8,
+                    (c[1] * 255.0) as u8,
+                    (c[2] * 255.0) as u8
+                );
+            }
+        });
+
+        });
+        ui.add_space(6.0);
+        card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            section_label(ui, "ticker");
+            status_dot(ui, s.ticker_on, if s.ticker_on { "scrolling" } else { "off" });
+        ui.checkbox(&mut s.ticker_on, "Scroll a message along the bottom");
+        ui.add(
+            egui::TextEdit::multiline(&mut s.ticker_text)
+                .desired_rows(2)
+                .desired_width(280.0)
+                .hint_text("Requests in chat · follow for the next set"),
+        );
+        row(ui, "Speed", |ui| {
+            ui.add(egui::Slider::new(&mut s.ticker_speed, 0.3..=3.0));
+        });
+
+        });
+        let right_h = ui.min_rect().height();
         let ui = &mut cols[0];
         card().show(ui, |ui| {
+            // Stretch to the right column's height so the bottoms align.
+            ui.set_min_height((right_h - 30.0).max(60.0));
             ui.set_width(ui.available_width());
             section_label(ui, "now playing");
             status_dot(
@@ -1925,7 +2002,10 @@ fn stream_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<Ui
         });
 
         });
-        ui.add_space(6.0);
+    });
+    ui.add_space(6.0);
+    ui.columns(2, |cols| {
+        let ui = &mut cols[0];
         card().show(ui, |ui| {
             ui.set_width(ui.available_width());
             section_label(ui, "recording");
@@ -1995,73 +2075,11 @@ fn stream_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<Ui
                 }
             }
         });
-        ui.small("Clips include the overlays and the audio. Size/fps follow the video output settings below.");
+        ui.small("Clips include the overlays and the audio. Size/fps follow the video output settings.");
 
         });
         let ui = &mut cols[1];
         card().show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            section_label(ui, "branding");
-            status_dot(ui, s.brand_on, if s.brand_on { "showing" } else { "off" });
-        ui.checkbox(&mut s.brand_on, "Show logo / name");
-        row(ui, "DJ name", |ui| {
-            ui.add(egui::TextEdit::singleline(&mut s.brand_name).desired_width(180.0));
-        });
-        row(ui, "Handles", |ui| {
-            ui.add(egui::TextEdit::singleline(&mut s.brand_handles).desired_width(180.0).hint_text("@you · twitch.tv/you"));
-        });
-        row(ui, "Logo", |ui| {
-            ui.add(egui::TextEdit::singleline(&mut s.brand_logo).desired_width(150.0).hint_text("PNG, optional"));
-            if ui.button("…").clicked() {
-                if let Some(p) = rfd::FileDialog::new().add_filter("PNG", &["png"]).pick_file() {
-                    s.brand_logo = p.display().to_string();
-                }
-            }
-        });
-        row(ui, "Corner", |ui| {
-            for (i, l) in ["↖", "↗", "↙", "↘"].iter().enumerate() {
-                ui.selectable_value(&mut s.brand_corner, i as u8, *l);
-            }
-        });
-        row(ui, "Size", |ui| {
-            ui.add(egui::Slider::new(&mut s.brand_size, 0.5..=2.0));
-        });
-        row(ui, "Opacity", |ui| {
-            ui.add(egui::Slider::new(&mut s.brand_opacity, 0.1..=1.0));
-        });
-        row(ui, "Accent", |ui| {
-            let mut c = crate::overlay::parse_hex(&s.brand_color, [0.25, 0.85, 1.0]);
-            if ui.color_edit_button_rgb(&mut c).changed() {
-                s.brand_color = format!(
-                    "#{:02x}{:02x}{:02x}",
-                    (c[0] * 255.0) as u8,
-                    (c[1] * 255.0) as u8,
-                    (c[2] * 255.0) as u8
-                );
-            }
-        });
-
-        });
-        ui.add_space(6.0);
-        card().show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            section_label(ui, "ticker");
-            status_dot(ui, s.ticker_on, if s.ticker_on { "scrolling" } else { "off" });
-        ui.checkbox(&mut s.ticker_on, "Scroll a message along the bottom");
-        ui.add(
-            egui::TextEdit::multiline(&mut s.ticker_text)
-                .desired_rows(2)
-                .desired_width(280.0)
-                .hint_text("Requests in chat · follow for the next set"),
-        );
-        row(ui, "Speed", |ui| {
-            ui.add(egui::Slider::new(&mut s.ticker_speed, 0.3..=3.0));
-        });
-
-        });
-    });
-    ui.add_space(6.0);
-    card().show(ui, |ui| {
         ui.set_width(ui.available_width());
         section_label(ui, "video output");
         status_dot(
@@ -2102,6 +2120,7 @@ fn stream_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<Ui
              Spout for OBS on this PC, NDI across the network.",
         );
     }
+        });
     });
 }
 
