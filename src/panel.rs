@@ -1962,23 +1962,21 @@ pub(crate) fn fmt_time(t: f64) -> String {
 }
 
 pub(crate) fn cue_color(k: &CueKind) -> egui::Color32 {
-    use egui::Color32;
+    use crate::ui_theme as t;
+    // Colour = the lane the block lives on, so the strip reads at a glance.
     match k {
-        CueKind::Scene(_) | CueKind::NextScene | CueKind::PrevScene => {
-            Color32::from_rgb(160, 95, 250)
-        }
-        CueKind::Fx(_) | CueKind::FxAuto(_) => Color32::from_rgb(70, 200, 220),
+        CueKind::Scene(_) | CueKind::NextScene | CueKind::PrevScene => t::LANE_SCENE,
+        CueKind::Fx(_) | CueKind::FxAuto(_) => t::LANE_FX,
         CueKind::Dancer(_)
         | CueKind::Clip(_)
         | CueKind::NextClip
         | CueKind::NextLook
         | CueKind::Look(_)
-        | CueKind::Trails(_) => Color32::from_rgb(90, 210, 130),
-        CueKind::Canon(_) => Color32::from_rgb(150, 220, 90),
-        CueKind::Blackout(_) => Color32::from_rgb(240, 90, 90),
-        CueKind::Mode(_) => Color32::from_rgb(240, 175, 70),
-        CueKind::Palette(_) => Color32::from_rgb(235, 60, 160),
-        CueKind::Text(_) | CueKind::TextOff(_) => Color32::from_rgb(240, 140, 200),
+        | CueKind::Trails(_)
+        | CueKind::Canon(_) => t::LANE_DANCER,
+        CueKind::Blackout(_) => t::DANGER,
+        CueKind::Mode(_) | CueKind::Palette(_) => t::LANE_SHOW,
+        CueKind::Text(_) | CueKind::TextOff(_) => t::LANE_TEXT,
     }
 }
 
@@ -2096,6 +2094,7 @@ pub(crate) fn cue_param_ui(
 
 #[allow(clippy::too_many_arguments)]
 fn timeline_tab(ui: &mut egui::Ui, tl_shared: &crate::timeline::Shared, cmd: &mut Vec<UiCommand>) {
+    use crate::ui_theme as t;
     let mut guard = tl_shared.lock().unwrap_or_else(|e| e.into_inner());
     let crate::timeline::TimelineState {
         doc: doc_opt,
@@ -2111,109 +2110,182 @@ fn timeline_tab(ui: &mut egui::Ui, tl_shared: &crate::timeline::Shared, cmd: &mu
         ..
     } = &mut *guard;
 
-    ui.horizontal(|ui| {
-        if ui.button("Open timeline editor").clicked() {
-            cmd.push(UiCommand::OpenEditor);
-        }
-        if let Some(doc) = doc_opt.as_mut() {
-            ui.label(egui::RichText::new(&doc.name).strong());
-            ui.small(format!(
-                "{} song{} · {} · {} cues{}",
-                doc.clips.len(),
-                if doc.clips.len() == 1 { "" } else { "s" },
-                fmt_time(doc.end_s()),
-                doc.cues.len(),
-                if *dirty { " · unsaved" } else { "" }
-            ));
-        }
-    });
-
-    // --- Transport ----------------------------------------------------------
-    ui.horizontal(|ui| {
-        let play_label = if *mode == PlayMode::Playing {
-            "⏸ Pause"
-        } else {
-            "▶ Play"
-        };
-        if ui
-            .add_enabled(doc_opt.is_some() && !*busy, egui::Button::new(play_label))
-            .clicked()
-        {
-            cmd.push(UiCommand::Song(SongCtl::Toggle));
-        }
-        if ui
-            .add_enabled(*mode != PlayMode::Stopped, egui::Button::new("⏹"))
-            .clicked()
-        {
-            cmd.push(UiCommand::Song(SongCtl::Stop));
-        }
-        ui.label(format!("{} {}", fmt_time(*pos_s), mode_str(*mode)));
-        if *recording {
-            ui.colored_label(egui::Color32::from_rgb(255, 80, 80), "● REC");
-        }
-        if *autosync {
-            ui.label(if *live_locked {
-                "live: LOCKED"
-            } else {
-                "live: listening…"
+    // --- Timeline card: doc summary + transport -------------------------------
+    t::card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal(|ui| {
+            t::section_label(ui, "timeline");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("open editor").clicked() {
+                    cmd.push(UiCommand::OpenEditor);
+                }
             });
-            ui.small(format!("{:.2}", *live_score));
-        }
-    });
+        });
+        ui.add_space(6.0);
 
-    // --- Songs on the timeline ----------------------------------------------
+        if let Some(doc) = doc_opt.as_mut() {
+            ui.label(
+                egui::RichText::new(&doc.name)
+                    .monospace()
+                    .size(15.0)
+                    .color(t::TEXT),
+            );
+            ui.label(
+                egui::RichText::new(format!(
+                    "{} song{} · {} · {} cues{}",
+                    doc.clips.len(),
+                    if doc.clips.len() == 1 { "" } else { "s" },
+                    fmt_time(doc.end_s()),
+                    doc.cues.len(),
+                    if *dirty { " · unsaved" } else { "" }
+                ))
+                .size(11.0)
+                .color(t::MUTED),
+            );
+        }
+
+        // Transport — same round-button language as the editor's bar.
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            let playing = *mode == PlayMode::Playing;
+            if ui
+                .add_enabled(
+                    doc_opt.is_some() && !*busy,
+                    egui::Button::new(egui::RichText::new(if playing { "⏸" } else { "▶" }).size(13.0))
+                        .min_size(egui::vec2(30.0, 26.0))
+                        .corner_radius(egui::CornerRadius::same(13)),
+                )
+                .clicked()
+            {
+                cmd.push(UiCommand::Song(SongCtl::Toggle));
+            }
+            if ui
+                .add_enabled(
+                    *mode != PlayMode::Stopped,
+                    egui::Button::new(egui::RichText::new("⏹").size(11.0))
+                        .min_size(egui::vec2(30.0, 26.0))
+                        .corner_radius(egui::CornerRadius::same(13)),
+                )
+                .clicked()
+            {
+                cmd.push(UiCommand::Song(SongCtl::Stop));
+            }
+            ui.label(
+                egui::RichText::new(format!("{} {}", fmt_time(*pos_s), mode_str(*mode)))
+                    .monospace()
+                    .size(13.0)
+                    .color(t::TEXT),
+            );
+            if *recording {
+                ui.label(egui::RichText::new("● REC").size(11.0).color(t::DANGER));
+            }
+            if *autosync {
+                ui.label(
+                    egui::RichText::new(if *live_locked {
+                        "live: LOCKED"
+                    } else {
+                        "live: listening…"
+                    })
+                    .size(11.0)
+                    .color(if *live_locked { t::GOOD } else { t::MUTED }),
+                );
+                ui.label(
+                    egui::RichText::new(format!("{:.2}", *live_score))
+                        .monospace()
+                        .size(10.0)
+                        .color(t::FAINT),
+                );
+            }
+        });
+    });
+    ui.add_space(8.0);
+
+    // --- Songs card ------------------------------------------------------------
     if let Some(doc) = doc_opt.as_mut() {
         if !doc.clips.is_empty() {
-            ui.add_space(4.0);
-            ui.label("Songs:");
-        }
-        for c in &doc.clips {
-            ui.horizontal(|ui| {
-                ui.small(format!("@{}", fmt_time(c.offset_s)));
-                ui.label(&c.name);
-                ui.small(format!("{} · {:.1} BPM", fmt_time(c.duration_s), c.bpm));
+            t::card().show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                t::section_label(ui, "songs");
+                for c in &doc.clips {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(format!("@{}", fmt_time(c.offset_s)))
+                                .monospace()
+                                .size(11.0)
+                                .color(t::FAINT),
+                        );
+                        ui.label(
+                            egui::RichText::new(&c.name)
+                                .monospace()
+                                .size(12.0)
+                                .color(t::TEXT),
+                        );
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "{} · {:.1} BPM",
+                                fmt_time(c.duration_s),
+                                c.bpm
+                            ))
+                            .size(10.5)
+                            .color(t::MUTED),
+                        );
+                    });
+                }
             });
+            ui.add_space(8.0);
         }
     }
 
-    // --- Save / open ---------------------------------------------------------
-    ui.add_space(6.0);
-    ui.horizontal(|ui| {
-        if let Some(doc) = doc_opt.as_mut() {
-            ui.label("name");
-            ui.add(egui::TextEdit::singleline(&mut doc.name).desired_width(110.0));
-            if ui.button("Save").clicked() {
-                cmd.push(UiCommand::SaveTimeline);
+    // --- Library card: name + save + open saved --------------------------------
+    t::card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        t::section_label(ui, "file");
+        ui.horizontal(|ui| {
+            if let Some(doc) = doc_opt.as_mut() {
+                ui.add(
+                    egui::TextEdit::singleline(&mut doc.name)
+                        .desired_width(140.0)
+                        .hint_text("timeline name"),
+                );
+                if ui.button("Save").clicked() {
+                    cmd.push(UiCommand::SaveTimeline);
+                }
             }
-        }
-        let saved = Timeline::list(&crate::config::timelines_dir());
-        if !saved.is_empty() {
-            egui::ComboBox::from_id_salt("tl_open")
-                .selected_text("open saved…")
-                .show_ui(ui, |ui| {
-                    for p in saved {
-                        let stem = p
-                            .file_stem()
-                            .unwrap_or_default()
-                            .to_string_lossy()
-                            .to_string();
-                        if ui.selectable_label(false, &stem).clicked() {
-                            cmd.push(UiCommand::LoadTimeline(p.clone()));
+            let saved = Timeline::list(&crate::config::timelines_dir());
+            if !saved.is_empty() {
+                egui::ComboBox::from_id_salt("tl_open")
+                    .selected_text("open saved…")
+                    .show_ui(ui, |ui| {
+                        for p in saved {
+                            let stem = p
+                                .file_stem()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .to_string();
+                            if ui.selectable_label(false, &stem).clicked() {
+                                cmd.push(UiCommand::LoadTimeline(p.clone()));
+                            }
                         }
-                    }
-                });
+                    });
+            }
+        });
+        ui.label(
+            egui::RichText::new(
+                "add tracks and lay out cues in the editor — or drop an audio file / timeline .json on any window",
+            )
+            .size(10.5)
+            .color(t::FAINT),
+        );
+        if *busy {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(egui::RichText::new("decoding — a few seconds").size(11.0).color(t::MUTED));
+            });
+        }
+        if !message.is_empty() {
+            ui.label(egui::RichText::new(message.as_str()).size(11.0).color(t::MUTED));
         }
     });
-    ui.small("Add tracks and lay out cues in the editor — or drop an audio file / timeline .json on any window.");
-    if *busy {
-        ui.horizontal(|ui| {
-            ui.spinner();
-            ui.label("decoding — a few seconds");
-        });
-    }
-    if !message.is_empty() {
-        ui.small(message.as_str());
-    }
 }
 
 fn mode_str(m: PlayMode) -> &'static str {

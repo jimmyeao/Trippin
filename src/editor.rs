@@ -19,6 +19,7 @@ use crate::egui_win::{EguiWin, Frame};
 use crate::panel::{UiCommand, cue_color, cue_param_ui, fmt_time};
 use crate::render::Gpu;
 use crate::timeline::{Cue, CueKind, PlayMode, SongCtl, Timeline, TimelineState};
+use crate::ui_theme as t;
 
 pub struct Editor {
     /// Clone of `win.window` for event matching.
@@ -56,6 +57,19 @@ pub struct Editor {
     ai_replace: bool,
     /// Shared state with the AI worker thread (analysis + API call).
     ai_job: Arc<Mutex<AiJob>>,
+    /// Which section the left library is showing.
+    lib_tab: LibTab,
+    /// Search filter inside the library.
+    lib_filter: String,
+}
+
+/// Left-library sections, matching the timeline lanes they feed.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LibTab {
+    Scenes,
+    Dancer,
+    Fx,
+    Cues,
 }
 
 /// AI show-builder state shared with its worker thread.
@@ -112,6 +126,8 @@ impl Editor {
             },
             ai_open: false,
             ai_replace: true,
+            lib_tab: LibTab::Scenes,
+            lib_filter: String::new(),
             ai_job: Arc::new(Mutex::new(AiJob {
                 busy: false,
                 status: String::new(),
@@ -214,6 +230,7 @@ impl Editor {
         let (pps, scroll) = (&mut self.px_per_s, &mut self.scroll_s);
         let (zoom_fit, scrub, sb_grab) = (&mut self.zoom_fit, &mut self.scrub, &mut self.sb_grab);
         let (thumbs, want_thumbs) = (&mut self.thumbs, &mut self.want_thumbs);
+        let (lib_tab, lib_filter) = (&mut self.lib_tab, &mut self.lib_filter);
         let text_draft = &mut self.text_draft;
         let (ai_open, ai_replace, ai_job) = (&mut self.ai_open, &mut self.ai_replace, &self.ai_job);
         let file_pick = &self.file_pick;
@@ -232,9 +249,160 @@ impl Editor {
                 .text_styles
                 .insert(egui::TextStyle::Small, egui::FontId::proportional(12.0));
 
-            // --- Toolbar ----------------------------------------------------
+            // --- Transport bar (mockup 1d): playback controls + a big mono
+            // timecode, snap/follow pills, then file ops and zoom ----------
             egui::Panel::top("ed_tool").show(ui, |ui| {
                 ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    let playing = *mode == PlayMode::Playing;
+                    let play_lbl = if playing { "⏸" } else { "▶" };
+                    if ui
+                        .add_enabled(
+                            doc_opt.is_some() && !*busy,
+                            egui::Button::new(egui::RichText::new(play_lbl).size(15.0))
+                                .min_size(egui::vec2(34.0, 30.0))
+                                .corner_radius(egui::CornerRadius::same(15)),
+                        )
+                        .on_hover_text(if playing { "pause" } else { "play" })
+                        .clicked()
+                    {
+                        cmd.push(UiCommand::Song(SongCtl::Toggle));
+                    }
+                    if ui
+                        .add_enabled(
+                            *mode != PlayMode::Stopped,
+                            egui::Button::new(egui::RichText::new("⏹").size(13.0))
+                                .min_size(egui::vec2(34.0, 30.0))
+                                .corner_radius(egui::CornerRadius::same(15)),
+                        )
+                        .on_hover_text("stop")
+                        .clicked()
+                    {
+                        cmd.push(UiCommand::Song(SongCtl::Stop));
+                    }
+                    let rec_btn = egui::Button::new(
+                        egui::RichText::new("●").size(13.0).color(if *recording {
+                            t::DANGER
+                        } else {
+                            t::MUTED
+                        }),
+                    )
+                    .min_size(egui::vec2(34.0, 30.0))
+                    .corner_radius(egui::CornerRadius::same(15))
+                    .fill(if *recording { t::DANGER_BG } else { t::RAISED });
+                    if ui
+                        .add(rec_btn)
+                        .on_hover_text("record: playhead writes cues as you trigger them live")
+                        .clicked()
+                    {
+                        *recording = !*recording;
+                    }
+
+                    ui.add_space(8.0);
+                    // Big timecode + bar·beat under it.
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 0.0;
+                        ui.label(
+                            egui::RichText::new(fmt_time(*pos_s))
+                                .monospace()
+                                .size(21.0)
+                                .color(t::TEXT),
+                        );
+                        let loc = doc_opt
+                            .as_ref()
+                            .and_then(|d| d.clip_at(*pos_s))
+                            .map(|(_, c)| {
+                                let beat = c.beat_at(*pos_s - c.offset_s);
+                                format!(
+                                    "bar {} · beat {}",
+                                    beat as u32 / 4 + 1,
+                                    beat as u32 % 4 + 1
+                                )
+                            })
+                            .unwrap_or_else(|| "no track loaded".into());
+                        ui.label(egui::RichText::new(loc).size(10.0).color(t::FAINT));
+                    });
+
+                    ui.add_space(10.0);
+                    // Pill-shaped toggles: accent fill when on, raised when off.
+                    let snap_btn = egui::Button::new(
+                        egui::RichText::new("snap ¼")
+                            .size(11.0)
+                            .color(if *snap { t::ACCENT } else { t::MUTED }),
+                    )
+                    .fill(if *snap { t::ACCENT_SEL } else { t::RAISED })
+                    .corner_radius(egui::CornerRadius::same(10));
+                    if ui.add(snap_btn).clicked() {
+                        *snap = !*snap;
+                    }
+                    let follow_btn = egui::Button::new(
+                        egui::RichText::new("follow live")
+                            .size(11.0)
+                            .color(if *autosync { t::ACCENT } else { t::MUTED }),
+                    )
+                    .fill(if *autosync { t::ACCENT_SEL } else { t::RAISED })
+                    .corner_radius(egui::CornerRadius::same(10));
+                    if ui
+                        .add(follow_btn)
+                        .on_hover_text("chase the live director's position")
+                        .clicked()
+                    {
+                        *autosync = !*autosync;
+                    }
+                    if *autosync {
+                        ui.label(
+                            egui::RichText::new(if *live_locked { "locked" } else { "listening" })
+                                .size(11.0)
+                                .color(if *live_locked { t::GOOD } else { t::FAINT }),
+                        );
+                    }
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        if *busy {
+                            ui.spinner();
+                        }
+                        if !message.is_empty() {
+                            let failed = message.starts_with("load failed")
+                                || message.starts_with("save failed")
+                                || message.starts_with("open failed");
+                            ui.label(
+                                egui::RichText::new(message.as_str())
+                                    .size(11.0)
+                                    .color(if failed { t::DANGER } else { t::MUTED }),
+                            );
+                        }
+                        if ui
+                            .small_button("fit")
+                            .on_hover_text("zoom to fit the whole timeline")
+                            .clicked()
+                        {
+                            *zoom_fit = true;
+                        }
+                        if ui.small_button("+").clicked() {
+                            *pps = (*pps * 1.4).clamp(4.0, 600.0);
+                        }
+                        let mut z = *pps;
+                        if ui
+                            .add_sized(
+                                egui::vec2(80.0, 16.0),
+                                egui::Slider::new(&mut z, 4.0..=600.0)
+                                    .logarithmic(true)
+                                    .show_value(false),
+                            )
+                            .changed()
+                        {
+                            *pps = z;
+                        }
+                        if ui.small_button("−").clicked() {
+                            *pps = (*pps / 1.4).clamp(4.0, 600.0);
+                        }
+                    });
+                });
+
+                // Row 2: file ops + doc name (kept slim — the canvas is the star).
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
                     if ui
                         .button("Open…")
                         .on_hover_text("audio or a saved timeline .json")
@@ -272,11 +440,10 @@ impl Editor {
                             *slot.lock().unwrap_or_else(|e| e.into_inner()) = p;
                         });
                     }
-                    ui.separator();
                     if let Some(doc) = doc_opt.as_mut() {
-                        ui.label("name");
+                        ui.label(egui::RichText::new("name").size(11.0).color(t::MUTED));
                         if ui
-                            .add(egui::TextEdit::singleline(&mut doc.name).desired_width(110.0))
+                            .add(egui::TextEdit::singleline(&mut doc.name).desired_width(130.0))
                             .changed()
                         {
                             *dirty = true;
@@ -295,84 +462,6 @@ impl Editor {
                         {
                             *ai_open = !*ai_open;
                         }
-                        ui.separator();
-                    }
-                    let play = if *mode == PlayMode::Playing {
-                        "⏸ Pause"
-                    } else {
-                        "▶ Play"
-                    };
-                    if ui
-                        .add_enabled(doc_opt.is_some() && !*busy, egui::Button::new(play))
-                        .clicked()
-                    {
-                        cmd.push(UiCommand::Song(SongCtl::Toggle));
-                    }
-                    if ui
-                        .add_enabled(*mode != PlayMode::Stopped, egui::Button::new("⏹"))
-                        .clicked()
-                    {
-                        cmd.push(UiCommand::Song(SongCtl::Stop));
-                    }
-                    ui.label(fmt_time(*pos_s));
-                    ui.separator();
-                    let rec = ui.selectable_label(*recording, "● REC");
-                    if rec.clicked() {
-                        *recording = !*recording;
-                    }
-                    ui.checkbox(snap, "snap ¼");
-                    ui.checkbox(autosync, "follow live");
-                    if *autosync {
-                        ui.colored_label(
-                            if *live_locked {
-                                egui::Color32::from_rgb(90, 220, 120)
-                            } else {
-                                egui::Color32::GRAY
-                            },
-                            if *live_locked { "locked" } else { "listening" },
-                        );
-                    }
-                    ui.separator();
-                    // Zoom: buttons + slider + fit (Ctrl+scroll zooms too).
-                    if ui.small_button("−").clicked() {
-                        *pps = (*pps / 1.4).clamp(4.0, 600.0);
-                    }
-                    let mut z = *pps;
-                    if ui
-                        .add_sized(
-                            egui::vec2(70.0, 18.0),
-                            egui::Slider::new(&mut z, 4.0..=600.0)
-                                .logarithmic(true)
-                                .show_value(false),
-                        )
-                        .changed()
-                    {
-                        *pps = z;
-                    }
-                    if ui.small_button("+").clicked() {
-                        *pps = (*pps * 1.4).clamp(4.0, 600.0);
-                    }
-                    if ui
-                        .small_button("fit")
-                        .on_hover_text("zoom to fit the whole timeline")
-                        .clicked()
-                    {
-                        *zoom_fit = true;
-                    }
-                    if *busy {
-                        ui.spinner();
-                        ui.small("decoding…");
-                    }
-                    if !message.is_empty() {
-                        let failed = message.starts_with("load failed")
-                            || message.starts_with("save failed")
-                            || message.starts_with("open failed");
-                        let col = if failed {
-                            egui::Color32::from_rgb(255, 110, 110)
-                        } else {
-                            ui.visuals().weak_text_color()
-                        };
-                        ui.small(egui::RichText::new(message.as_str()).color(col));
                     }
                 });
             });
@@ -544,29 +633,167 @@ impl Editor {
                 }
             }
 
-            // --- Media row (full width, very bottom): effects, actions,
-            // palettes and the text composer as a horizontal strip ---------
-            egui::Panel::bottom("ed_media")
+            // --- Inspector (right, mockup 1d): selected cue / clip ----------
+            egui::Panel::right("ed_insp")
                 .resizable(true)
-                .default_size(96.0)
-                .size_range(70.0..=240.0)
+                .default_size(252.0)
+                .size_range(200.0..=400.0)
                 .show(ui, |ui| {
-                    egui::ScrollArea::horizontal()
-                        .id_salt("ed_media_scroll")
-                        .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                // Text composer: edit the draft, drag the card
-                                // onto a text lane (the drop row picks lane 1/2).
-                                ui.vertical(|ui| {
-                                    ui.label(egui::RichText::new("Text").strong());
+                    inspector(
+                        ui, doc_opt, scenes, routines, thumbs, *sel_cue, *sel_clip, *cursor_s,
+                        *snap, dirty, &mut cmd,
+                    );
+                });
+
+            // --- Library (left): tabbed palette per lane ---------------------
+            egui::Panel::left("ed_lib")
+                .resizable(true)
+                .default_size(236.0)
+                .size_range(190.0..=380.0)
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    t::segmented(
+                        ui,
+                        lib_tab,
+                        &[
+                            (LibTab::Scenes, "scenes"),
+                            (LibTab::Dancer, "dancer"),
+                            (LibTab::Fx, "fx"),
+                            (LibTab::Cues, "cues"),
+                        ],
+                    );
+                    ui.add_space(4.0);
+                    ui.add(
+                        egui::TextEdit::singleline(lib_filter)
+                            .desired_width(f32::INFINITY)
+                            .hint_text("filter…"),
+                    );
+                    ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new("drag onto the timeline · click = preview")
+                            .size(10.0)
+                            .color(t::FAINT),
+                    );
+                    ui.separator();
+                    let filt = lib_filter.to_lowercase();
+                    let show = |name: &str| filt.is_empty() || name.to_lowercase().contains(&filt);
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| match *lib_tab {
+                            LibTab::Scenes => {
+                                for name in scenes.iter().filter(|n| show(n)) {
+                                    let key = format!("scene:{name}");
+                                    let tex = lib_thumb(
+                                        ui, &key, thumbs, want_thumbs, None, &mut cmd,
+                                    );
+                                    let kind = CueKind::Scene(name.clone());
+                                    if lib_item(ui, name, &kind, tex) {
+                                        cmd.push(UiCommand::FireCue(kind));
+                                    }
+                                }
+                            }
+                            LibTab::Dancer => {
+                                t::section_label(ui, "state");
+                                for (lbl, kind) in [
+                                    ("dancer on", CueKind::Dancer(true)),
+                                    ("dancer off", CueKind::Dancer(false)),
+                                    ("next look", CueKind::NextLook),
+                                    ("auto look", CueKind::Look(None)),
+                                    ("canon", CueKind::Canon(crate::config::Tristate::On)),
+                                    ("canon auto", CueKind::Canon(crate::config::Tristate::Auto)),
+                                    ("canon off", CueKind::Canon(crate::config::Tristate::Off)),
+                                    ("trails on", CueKind::Trails(true)),
+                                    ("trails off", CueKind::Trails(false)),
+                                ]
+                                .into_iter()
+                                .filter(|(l, _)| show(l))
+                                {
+                                    if lib_item(ui, lbl, &kind, None) {
+                                        cmd.push(UiCommand::FireCue(kind));
+                                    }
+                                }
+                                if filt.is_empty() {
+                                    t::section_label(ui, "looks");
+                                    for (i, n) in STYLES.iter().enumerate() {
+                                        let kind = CueKind::Look(Some(i));
+                                        if lib_item(ui, n, &kind, None) {
+                                            cmd.push(UiCommand::FireCue(kind));
+                                        }
+                                    }
+                                    t::section_label(ui, "routines");
+                                }
+                                for name in routines.iter().filter(|n| show(n)) {
+                                    let key = format!("clip:{name}");
+                                    let tex = lib_thumb(
+                                        ui,
+                                        &key,
+                                        thumbs,
+                                        want_thumbs,
+                                        Some(name.as_str()),
+                                        &mut cmd,
+                                    );
+                                    let kind = CueKind::Clip(name.clone());
+                                    if lib_item(ui, name, &kind, tex) {
+                                        cmd.push(UiCommand::FireCue(kind));
+                                    }
+                                }
+                            }
+                            LibTab::Fx => {
+                                let mut kinds: Vec<CueKind> =
+                                    Fx::ALL.iter().map(|f| CueKind::Fx(*f)).collect();
+                                kinds.push(CueKind::FxAuto(true));
+                                kinds.push(CueKind::FxAuto(false));
+                                for kind in kinds {
+                                    let lbl = match &kind {
+                                        CueKind::Fx(f) => f.label(),
+                                        CueKind::FxAuto(true) => "auto FX",
+                                        _ => "auto FX off",
+                                    };
+                                    if !show(lbl) {
+                                        continue;
+                                    }
+                                    if lib_item(ui, lbl, &kind, None) {
+                                        cmd.push(UiCommand::FireCue(kind));
+                                    }
+                                }
+                            }
+                            LibTab::Cues => {
+                                t::section_label(ui, "actions");
+                                for (lbl, kind) in [
+                                    ("next scene", CueKind::NextScene),
+                                    ("prev scene", CueKind::PrevScene),
+                                    ("auto mode", CueKind::Mode(crate::config::Mode::Auto)),
+                                    ("static mode", CueKind::Mode(crate::config::Mode::Static)),
+                                    ("manual mode", CueKind::Mode(crate::config::Mode::Manual)),
+                                    ("blackout", CueKind::Blackout(true)),
+                                ]
+                                .into_iter()
+                                .filter(|(l, _)| show(l))
+                                {
+                                    if lib_item(ui, lbl, &kind, None) {
+                                        cmd.push(UiCommand::FireCue(kind));
+                                    }
+                                }
+                                t::section_label(ui, "palettes");
+                                for name in crate::palettes::names()
+                                    .into_iter()
+                                    .filter(|n| show(n))
+                                {
+                                    let kind = CueKind::Palette(name.to_string());
+                                    if lib_item(ui, name, &kind, None) {
+                                        cmd.push(UiCommand::FireCue(kind));
+                                    }
+                                }
+                                if filt.is_empty() {
+                                    t::section_label(ui, "text");
                                     ui.add(
                                         egui::TextEdit::singleline(&mut text_draft.text)
-                                            .desired_width(220.0)
+                                            .desired_width(f32::INFINITY)
                                             .hint_text("say something…"),
                                     );
-                                    ui.horizontal(|ui| {
+                                    ui.horizontal_wrapped(|ui| {
                                         egui::ComboBox::from_id_salt("text_style")
-                                            .width(76.0)
+                                            .width(70.0)
                                             .selected_text(text_draft.style.label())
                                             .show_ui(ui, |ui| {
                                                 for v in crate::text::TextStyle::ALL {
@@ -578,10 +805,14 @@ impl Editor {
                                                 }
                                             });
                                         for v in crate::text::TextPos::ALL {
-                                            ui.selectable_value(&mut text_draft.pos, v, v.label());
+                                            ui.selectable_value(
+                                                &mut text_draft.pos,
+                                                v,
+                                                v.label(),
+                                            );
                                         }
                                         egui::ComboBox::from_id_salt("text_anim")
-                                            .width(80.0)
+                                            .width(74.0)
                                             .selected_text(text_draft.anim.label())
                                             .show_ui(ui, |ui| {
                                                 for v in crate::text::TextAnim::ALL {
@@ -595,146 +826,26 @@ impl Editor {
                                     });
                                     if !text_draft.text.trim().is_empty() {
                                         let kind = CueKind::Text(text_draft.clone());
-                                        if palette_item(
+                                        if lib_item(
                                             ui,
                                             &format!("“{}”", text_draft.text),
                                             &kind,
+                                            None,
                                         ) {
                                             cmd.push(UiCommand::FireCue(kind));
                                         }
                                     } else {
-                                        ui.small("type, then drag onto a text lane");
+                                        ui.label(
+                                            egui::RichText::new(
+                                                "type, then drag onto a text lane",
+                                            )
+                                            .size(10.0)
+                                            .color(t::FAINT),
+                                        );
                                     }
-                                });
-                                ui.separator();
-
-                                ui.vertical(|ui| {
-                                    ui.label(egui::RichText::new("Effects").strong());
-                                    let mut kinds: Vec<CueKind> =
-                                        Fx::ALL.iter().map(|f| CueKind::Fx(*f)).collect();
-                                    kinds.push(CueKind::FxAuto(true));
-                                    kinds.push(CueKind::FxAuto(false));
-                                    egui::Grid::new("fx_grid").num_columns(4).show(ui, |ui| {
-                                        for (i, kind) in kinds.iter().enumerate() {
-                                            let lbl = match kind {
-                                                CueKind::Fx(f) => f.label(),
-                                                CueKind::FxAuto(true) => "auto FX",
-                                                _ => "auto FX off",
-                                            };
-                                            if palette_item(ui, lbl, kind) {
-                                                cmd.push(UiCommand::FireCue(kind.clone()));
-                                            }
-                                            if i % 4 == 3 {
-                                                ui.end_row();
-                                            }
-                                        }
-                                    });
-                                });
-                                ui.separator();
-
-                                ui.vertical(|ui| {
-                                    ui.label(egui::RichText::new("Actions").strong());
-                                    for (lbl, kind) in [
-                                        ("next scene", CueKind::NextScene),
-                                        ("prev scene", CueKind::PrevScene),
-                                        ("auto mode", CueKind::Mode(crate::config::Mode::Auto)),
-                                        ("static mode", CueKind::Mode(crate::config::Mode::Static)),
-                                        ("manual mode", CueKind::Mode(crate::config::Mode::Manual)),
-                                        ("blackout", CueKind::Blackout(true)),
-                                    ] {
-                                        if palette_item(ui, lbl, &kind) {
-                                            cmd.push(UiCommand::FireCue(kind));
-                                        }
-                                    }
-                                });
-                                ui.separator();
-
-                                ui.vertical(|ui| {
-                                    ui.label(egui::RichText::new("Palettes").strong());
-                                    egui::Grid::new("pal_grid").num_columns(6).show(ui, |ui| {
-                                        for (i, name) in crate::palettes::names().enumerate() {
-                                            let kind = CueKind::Palette(name.to_string());
-                                            if palette_item(ui, name, &kind) {
-                                                cmd.push(UiCommand::FireCue(kind));
-                                            }
-                                            if i % 6 == 5 {
-                                                ui.end_row();
-                                            }
-                                        }
-                                    });
-                                });
-                            });
+                                }
+                            }
                         });
-                });
-
-            // --- Inspector (above the media row) ------------------------------
-            egui::Panel::bottom("ed_insp").show(ui, |ui| {
-                inspector(
-                    ui, doc_opt, scenes, routines, *sel_cue, *sel_clip, *cursor_s, *snap, dirty,
-                    &mut cmd,
-                );
-            });
-
-            // --- Palette: scenes left, dancer right ----------------------------
-            egui::Panel::left("ed_scenes")
-                .resizable(true)
-                .default_size(180.0)
-                .size_range(140.0..=320.0)
-                .show(ui, |ui| {
-                    egui::ScrollArea::vertical().show(ui, |ui| {
-                        ui.heading("Scenes");
-                        ui.small("drag onto timeline · click = preview");
-                        ui.separator();
-                        for name in scenes {
-                            let kind = CueKind::Scene(name.clone());
-                            if palette_item(ui, name, &kind) {
-                                cmd.push(UiCommand::FireCue(kind));
-                            }
-                        }
-                    });
-                });
-
-            egui::Panel::right("ed_dancer")
-                .resizable(true)
-                .default_size(160.0)
-                .size_range(120.0..=300.0)
-                .show(ui, |ui| {
-                    egui::ScrollArea::vertical().show(ui, |ui| {
-                        ui.heading("Dancer");
-                        ui.small("drag onto the dancer lane");
-                        ui.separator();
-                        for (lbl, kind) in [
-                            ("dancer on", CueKind::Dancer(true)),
-                            ("dancer off", CueKind::Dancer(false)),
-                            ("next look", CueKind::NextLook),
-                            ("auto look", CueKind::Look(None)),
-                            ("canon", CueKind::Canon(crate::config::Tristate::On)),
-                            ("canon auto", CueKind::Canon(crate::config::Tristate::Auto)),
-                            ("canon off", CueKind::Canon(crate::config::Tristate::Off)),
-                            ("trails on", CueKind::Trails(true)),
-                            ("trails off", CueKind::Trails(false)),
-                        ] {
-                            if palette_item(ui, lbl, &kind) {
-                                cmd.push(UiCommand::FireCue(kind));
-                            }
-                        }
-                        ui.separator();
-                        ui.label(egui::RichText::new("Looks").strong());
-                        for (i, n) in STYLES.iter().enumerate() {
-                            let kind = CueKind::Look(Some(i));
-                            if palette_item(ui, n, &kind) {
-                                cmd.push(UiCommand::FireCue(kind));
-                            }
-                        }
-                        ui.separator();
-                        ui.label(egui::RichText::new("Routines").strong());
-                        for name in routines {
-                            let kind = CueKind::Clip(name.clone());
-                            if palette_item(ui, name, &kind) {
-                                cmd.push(UiCommand::FireCue(kind));
-                            }
-                        }
-                    });
                 });
 
             // --- Timeline canvas ----------------------------------------------
@@ -767,20 +878,77 @@ impl Editor {
     }
 }
 
-/// A palette entry: drag onto the cue lane (drag ghost + payload via
-/// `dnd_drag_source`), click = preview. The drag source only senses drags,
-/// so the click is detected manually: press started inside, released inside,
-/// and the drag never engaged.
-fn palette_item(ui: &mut egui::Ui, label: &str, kind: &CueKind) -> bool {
-    // Salt with the kind label: a scene named "ocean" mustn't share a
-    // drag-source id with the "ocean" palette entry.
-    let id = egui::Id::new(("pal", kind.label(), label));
+/// Fetch a library-row thumbnail: hit the texture map, else kick off the
+/// request once per key (scenes render on the render thread; routines load
+/// a mid-frame PNG from disk). Only requests while the row is on screen.
+fn lib_thumb<'a>(
+    ui: &egui::Ui,
+    key: &str,
+    thumbs: &'a mut HashMap<String, egui::TextureHandle>,
+    want_thumbs: &mut HashSet<String>,
+    clip_name: Option<&str>,
+    cmd: &mut Vec<UiCommand>,
+) -> Option<&'a egui::TextureHandle> {
+    if thumbs.contains_key(key) {
+        return thumbs.get(key);
+    }
+    let row = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(200.0, 28.0));
+    if !ui.clip_rect().intersects(row) || !want_thumbs.insert(key.to_string()) {
+        return None;
+    }
+    match clip_name {
+        Some(name) => match load_clip_thumb(ui.ctx(), name) {
+            Some(tex) => {
+                thumbs.insert(key.to_string(), tex);
+            }
+            None => eprintln!("Editor: no clip thumbnail for {name}"),
+        },
+        None => cmd.push(UiCommand::Thumb(key.to_string())),
+    }
+    thumbs.get(key)
+}
+
+/// A library row: lane-coloured edge, optional thumbnail, mono name. Drag =
+/// cue payload (same press/release-vs-drag discipline as `palette_item`),
+/// click = preview on the visuals window.
+fn lib_item(
+    ui: &mut egui::Ui,
+    label: &str,
+    kind: &CueKind,
+    thumb: Option<&egui::TextureHandle>,
+) -> bool {
+    let col = cue_color(kind);
+    let w = ui.available_width();
+    let id = egui::Id::new(("lib", kind.label(), label));
     let resp = ui
         .dnd_drag_source(id, kind.clone(), |ui| {
-            ui.colored_label(cue_color(kind), label);
+            egui::Frame::default()
+                .fill(t::RAISED)
+                .corner_radius(egui::CornerRadius::same(4))
+                .inner_margin(egui::Margin::same(0))
+                .show(ui, |ui| {
+                    ui.set_width((w - 2.0).max(40.0));
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        let (r, _) = ui.allocate_exact_size(
+                            egui::vec2(3.0, 26.0),
+                            egui::Sense::hover(),
+                        );
+                        ui.painter().rect_filled(r, 0.0, col);
+                        if let Some(tex) = thumb {
+                            ui.add(egui::Image::new(tex).max_size(egui::vec2(44.0, 22.0)));
+                        }
+                        ui.label(
+                            egui::RichText::new(label)
+                                .monospace()
+                                .size(11.5)
+                                .color(t::TEXT),
+                        );
+                    });
+                });
         })
         .response
-        .on_hover_text("click to preview — drag onto the cue lane");
+        .on_hover_text("click to preview — drag onto the timeline");
     let ctx = ui.ctx();
     let (released, origin) =
         ctx.input(|i| (i.pointer.primary_released(), i.pointer.press_origin()));
@@ -799,10 +967,18 @@ const RULER_H: f32 = 26.0;
 const CLIP_H: f32 = 68.0;
 const TRACK_H: f32 = 30.0;
 /// Resolve-style track header column at the left of the strip.
-const GUTTER: f32 = 78.0;
+const GUTTER: f32 = 96.0;
 const SCROLL_H: f32 = 12.0;
 /// Cue lanes, in `CueKind::track()` order.
 const TRACK_NAMES: [&str; 6] = ["scenes", "dancer", "fx", "show", "text 1", "text 2"];
+const LANE_COLORS: [egui::Color32; 6] = [
+    t::LANE_SCENE,
+    t::LANE_DANCER,
+    t::LANE_FX,
+    t::LANE_SHOW,
+    t::LANE_TEXT,
+    t::LANE_TEXT,
+];
 const CUE_H: f32 = TRACK_H * TRACK_NAMES.len() as f32;
 /// Trim zone: this many px *inside* a block's edge plus `EDGE_OUT` px of
 /// overshoot past it, so grabbing an edge doesn't take pixel aim.
@@ -932,11 +1108,11 @@ fn canvas(
     let scroll_v = *scroll;
     let x_at = |t: f64| lane_x + ((t - scroll_v) * pps_v) as f32;
     let t_at = |x: f32| (scroll_v + (x - lane_x) as f64 / pps_v).max(0.0);
-    let white = Color32::from_gray(210);
-    let faint = Color32::from_gray(80);
+    let white = t::TEXT;
+    let faint = t::FAINT;
 
     // --- Ruler ---------------------------------------------------------------
-    painter.rect_filled(ruler, 0.0, Color32::from_gray(28));
+    painter.rect_filled(ruler, 0.0, t::PANEL);
     let steps = [0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0];
     let step = steps
         .iter()
@@ -947,7 +1123,7 @@ fn canvas(
     while x_at(t) < rect.right() {
         let x = x_at(t);
         if x >= lane_x {
-            painter.vline(x, ruler.y_range(), Stroke::new(1.0, Color32::from_gray(60)));
+            painter.vline(x, ruler.y_range(), Stroke::new(1.0, t::BORDER_HI));
             painter.text(
                 pos2(x + 3.0, ruler.top() + 3.0),
                 Align2::LEFT_TOP,
@@ -959,37 +1135,51 @@ fn canvas(
         t += step;
     }
 
-    painter.rect_filled(clip_lane, 0.0, Color32::from_gray(22));
-    painter.rect_filled(cue_lane, 0.0, Color32::from_gray(16));
+    painter.rect_filled(clip_lane, 0.0, t::CARD);
+    painter.rect_filled(cue_lane, 0.0, t::BG);
 
     // Track header gutter + lane separators.
-    painter.rect_filled(gutter, 0.0, Color32::from_gray(26));
+    painter.rect_filled(gutter, 0.0, t::PANEL);
     painter.vline(
         lane_x,
         egui::Rangef::new(rect.top(), bar.top()),
-        Stroke::new(1.0, Color32::from_gray(70)),
+        Stroke::new(1.0, t::BORDER_HI),
+    );
+    painter.rect_filled(
+        Rect::from_center_size(
+            pos2(gutter.left() + 10.0, clip_lane.center().y),
+            vec2(7.0, 7.0),
+        ),
+        2.0,
+        t::ACCENT,
     );
     painter.text(
-        pos2(gutter.left() + 6.0, clip_lane.center().y),
+        pos2(gutter.left() + 20.0, clip_lane.center().y),
         Align2::LEFT_CENTER,
         "audio",
         FontId::proportional(12.0),
-        faint,
+        t::MUTED,
     );
     for (i, name) in TRACK_NAMES.iter().enumerate() {
         let ty = cue_lane.top() + i as f32 * TRACK_H;
+        // Lane-coloured chip + name, like the mockup's track headers.
+        painter.rect_filled(
+            Rect::from_center_size(pos2(gutter.left() + 10.0, ty + TRACK_H * 0.5), vec2(7.0, 7.0)),
+            2.0,
+            LANE_COLORS[i],
+        );
         painter.text(
-            pos2(gutter.left() + 6.0, ty + TRACK_H * 0.5),
+            pos2(gutter.left() + 20.0, ty + TRACK_H * 0.5),
             Align2::LEFT_CENTER,
             *name,
             FontId::proportional(12.0),
-            faint,
+            t::MUTED,
         );
         if i > 0 {
             painter.hline(
                 egui::Rangef::new(lane_x, rect.right()),
                 ty,
-                Stroke::new(1.0, Color32::from_gray(44)),
+                Stroke::new(1.0, t::BORDER),
             );
         }
     }
@@ -1019,18 +1209,18 @@ fn canvas(
         let fill = if *sel_clip == Some(i) {
             Color32::from_rgb(46, 74, 96)
         } else {
-            Color32::from_rgb(36, 52, 68)
+            Color32::from_rgb(30, 44, 58)
         };
-        painter.rect_filled(r, 3.0, fill);
+        painter.rect_filled(r, 4.0, fill);
         painter.rect_stroke(
             r,
-            3.0,
+            4.0,
             Stroke::new(
                 1.0,
                 if hovered_clip {
                     white
                 } else {
-                    Color32::from_gray(110)
+                    t::BORDER_HI
                 },
             ),
             egui::StrokeKind::Inside,
@@ -1052,7 +1242,7 @@ fn canvas(
                     painter.vline(
                         x,
                         egui::Rangef::new(mid - hh, mid + hh),
-                        Stroke::new(1.0, Color32::from_rgb(110, 170, 210)),
+                        Stroke::new(1.0, t::ACCENT.gamma_multiply(0.8)),
                     );
                 }
             }
@@ -1101,11 +1291,7 @@ fn canvas(
                     egui::Rangef::new(grid_top, grid_bot),
                     Stroke::new(
                         1.0,
-                        if bar {
-                            Color32::from_gray(85)
-                        } else {
-                            Color32::from_gray(48)
-                        },
+                        if bar { t::BORDER_HI } else { t::BORDER },
                     ),
                 );
                 if bar {
@@ -1237,7 +1423,7 @@ fn canvas(
         painter.rect_stroke(
             Rect::from_min_max(pos2(lane_x, clip_lane.top()), cue_lane.max),
             0.0,
-            Stroke::new(1.5, Color32::WHITE),
+            Stroke::new(1.5, t::ACCENT),
             egui::StrokeKind::Inside,
         );
     }
@@ -1567,13 +1753,14 @@ fn canvas(
     painter.vline(
         cur_x,
         egui::Rangef::new(rect.top(), bar.top()),
-        Stroke::new(1.0, Color32::from_gray(120)),
+        Stroke::new(1.0, t::MUTED),
     );
+    // Red playhead (mockup); it glows a touch hotter while recording cues.
     let ph_x = x_at(pos_s);
     let ph_col = if recording {
-        Color32::from_rgb(255, 80, 80)
+        Color32::from_rgb(255, 70, 60)
     } else {
-        Color32::from_rgb(255, 210, 90)
+        t::DANGER
     };
     painter.vline(
         ph_x,
@@ -1598,7 +1785,7 @@ fn canvas(
     // Proportional thumb over the whole doc. Drag it, click the track to
     // page, or grab the track beside the thumb to centre it on the cursor.
     let sb = ui.interact(bar, egui::Id::new("hscroll"), Sense::click_and_drag());
-    painter.rect_filled(bar, 4.0, Color32::from_gray(24));
+    painter.rect_filled(bar, 4.0, t::INSET);
     if max_scroll > 0.0 {
         let visible_s = total_s - max_scroll;
         let tw = (bar.width() * (visible_s / total_s) as f32).clamp(20.0, bar.width());
@@ -1638,9 +1825,9 @@ fn canvas(
             thumb,
             4.0,
             if sb.hovered() || sb.dragged() {
-                Color32::from_gray(130)
+                t::HOVER
             } else {
-                Color32::from_gray(95)
+                t::RAISED
             },
         );
         if sb.hovered() && !sb.dragged() {
@@ -1659,6 +1846,7 @@ fn inspector(
     doc_opt: &mut Option<Timeline>,
     scenes: &[String],
     routines: &[String],
+    thumbs: &HashMap<String, egui::TextureHandle>,
     sel_cue: Option<usize>,
     sel_clip: Option<usize>,
     cursor_s: f64,
@@ -1666,74 +1854,194 @@ fn inspector(
     dirty: &mut bool,
     cmd: &mut Vec<UiCommand>,
 ) {
+    ui.set_width(ui.available_width());
+    t::section_label(ui, "inspector");
     let Some(doc) = doc_opt.as_mut() else {
+        ui.label(
+            egui::RichText::new("open a song to start building")
+                .size(11.0)
+                .color(t::MUTED),
+        );
         return;
     };
-    ui.horizontal(|ui| {
-        if let Some(i) = sel_cue {
+    ui.add_space(4.0);
+
+    if let Some(i) = sel_cue {
+        t::card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
             let when = doc.cues.get(i).and_then(|c| doc.cue_time(c)).unwrap_or(0.0);
             if let Some(cue) = doc.cues.get_mut(i) {
-                ui.label(format!("cue {} @ {} ({})", i + 1, fmt_time(when), cue.kind.label()));
-                ui.label("@");
-                let mut beat = cue.beat;
-                if ui
-                    .add(egui::DragValue::new(&mut beat).speed(0.1).suffix(" bt"))
-                    .changed()
-                {
-                    cue.beat = beat;
-                    *dirty = true;
+                // Title row: lane-coloured square + mono name + kind + time.
+                ui.horizontal(|ui| {
+                    let (r, _) = ui.allocate_exact_size(
+                        egui::vec2(8.0, 8.0),
+                        egui::Sense::hover(),
+                    );
+                    ui.painter().rect_filled(r, 2.0, cue_color(&cue.kind));
+                    ui.label(
+                        egui::RichText::new(cue.kind.text())
+                            .monospace()
+                            .size(13.0)
+                            .color(t::TEXT),
+                    );
+                });
+                ui.label(
+                    egui::RichText::new(format!("{} · @ {}", cue.kind.label(), fmt_time(when)))
+                        .size(10.5)
+                        .color(t::MUTED),
+                );
+
+                // Preview: the same thumbnail the lane block draws.
+                let key = match &cue.kind {
+                    CueKind::Scene(n) => Some(format!("scene:{n}")),
+                    CueKind::Clip(n) => Some(format!("clip:{n}")),
+                    CueKind::Text(s) => Some(format!("text:{}:{}", s.style.index(), s.text)),
+                    _ => None,
+                };
+                if let Some(tex) = key.as_deref().and_then(|k| thumbs.get(k)) {
+                    ui.add_space(4.0);
+                    ui.add(
+                        egui::Image::new(tex)
+                            .max_size(egui::vec2(ui.available_width(), 110.0)),
+                    );
+                    ui.add_space(4.0);
                 }
-                ui.label("len");
-                let mut beats = cue.beats;
-                if ui
-                    .add(egui::DragValue::new(&mut beats).speed(0.1).range(0.25..=512.0).suffix(" bt"))
-                    .changed()
-                {
-                    cue.beats = beats;
-                    *dirty = true;
-                }
+
+                egui::Grid::new(("insp_grid", i))
+                    .num_columns(2)
+                    .spacing(egui::vec2(8.0, 6.0))
+                    .show(ui, |ui| {
+                        ui.label(egui::RichText::new("start").size(11.0).color(t::MUTED));
+                        let mut beat = cue.beat;
+                        if ui
+                            .add(egui::DragValue::new(&mut beat).speed(0.1).suffix(" bt"))
+                            .changed()
+                        {
+                            cue.beat = beat;
+                            *dirty = true;
+                        }
+                        ui.end_row();
+                        ui.label(egui::RichText::new("length").size(11.0).color(t::MUTED));
+                        let mut beats = cue.beats;
+                        if ui
+                            .add(
+                                egui::DragValue::new(&mut beats)
+                                    .speed(0.1)
+                                    .range(0.25..=512.0)
+                                    .suffix(" bt"),
+                            )
+                            .changed()
+                        {
+                            cue.beats = beats;
+                            *dirty = true;
+                        }
+                        ui.end_row();
+                    });
+                // Bar-length presets — one tap for the common spans.
+                ui.horizontal(|ui| {
+                    for bars in [1.0_f64, 2.0, 4.0, 8.0] {
+                        if ui
+                            .small_button(format!("{}b", bars as u32))
+                            .on_hover_text(format!("{bars} bars"))
+                            .clicked()
+                        {
+                            cue.beats = bars * 4.0;
+                            *dirty = true;
+                        }
+                    }
+                });
+
                 let mut kind = cue.kind.clone();
                 if cue_param_ui(ui, &mut kind, scenes, routines, egui::Id::new(("insp", i))) {
                     cue.kind = kind;
                     *dirty = true;
                 }
-                if ui.button("preview").clicked() {
+                ui.add_space(4.0);
+                let (prev_click, del_click) = ui
+                    .horizontal(|ui| {
+                        (
+                            ui.button("preview").clicked(),
+                            ui.button(egui::RichText::new("delete").color(t::DANGER))
+                                .clicked(),
+                        )
+                    })
+                    .inner;
+                if prev_click {
                     cmd.push(UiCommand::FireCue(cue.kind.clone()));
                 }
-                if ui.button("delete").clicked() {
+                if del_click {
                     doc.cues.remove(i);
                     *dirty = true;
                 }
             }
-        } else if let Some(i) = sel_clip {
+        });
+    } else if let Some(i) = sel_clip {
+        t::card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
             if let Some(c) = doc.clips.get_mut(i) {
-                ui.label(format!("clip: {}", c.name));
-                ui.label("offset");
-                let mut off = c.offset_s;
-                if ui.add(egui::DragValue::new(&mut off).speed(0.1).suffix(" s")).changed() {
-                    c.offset_s = off.max(0.0);
-                    *dirty = true;
-                }
-                ui.small(format!("{:.1} BPM · {}", c.bpm, fmt_time(c.duration_s)));
-                if ui.button("remove from timeline").clicked() {
+                ui.label(
+                    egui::RichText::new(c.name.clone())
+                        .monospace()
+                        .size(13.0)
+                        .color(t::TEXT),
+                );
+                ui.label(
+                    egui::RichText::new(format!("{:.1} BPM · {}", c.bpm, fmt_time(c.duration_s)))
+                        .size(10.5)
+                        .color(t::MUTED),
+                );
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("offset").size(11.0).color(t::MUTED));
+                    let mut off = c.offset_s;
+                    if ui
+                        .add(egui::DragValue::new(&mut off).speed(0.1).suffix(" s"))
+                        .changed()
+                    {
+                        c.offset_s = off.max(0.0);
+                        *dirty = true;
+                    }
+                });
+                if ui
+                    .button(egui::RichText::new("remove from timeline").color(t::DANGER))
+                    .clicked()
+                {
                     doc.remove_clip(i);
                     *dirty = true;
                 }
             }
-        } else {
-            ui.small("click a block to edit · drag its edges to resize · right-click deletes · drag from the palette to add · Ctrl+scroll zooms");
-            if doc.clip_at(cursor_s).is_some() && ui.button("+ marker at cursor").clicked() {
+        });
+    } else {
+        t::card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            for line in [
+                "click a block to edit it",
+                "drag edges to resize · drag body to move",
+                "right-click a block to delete",
+                "drag from the library to add",
+                "Ctrl+scroll zooms · wheel pans",
+            ] {
+                ui.label(egui::RichText::new(line).size(11.0).color(t::MUTED));
+            }
+        });
+        if doc.clip_at(cursor_s).is_some() {
+            ui.add_space(6.0);
+            if ui.button("+ marker at cursor").clicked() {
                 let (ci, c) = doc.clip_at(cursor_s).unwrap();
                 let mut beat = c.beat_at(cursor_s - c.offset_s);
                 if snap {
                     beat = (beat * 4.0).round() / 4.0;
                 }
-                doc.cues.push(Cue { clip: ci, beat: beat.max(0.0), beats: 4.0, kind: CueKind::NextScene });
+                doc.cues.push(Cue {
+                    clip: ci,
+                    beat: beat.max(0.0),
+                    beats: 4.0,
+                    kind: CueKind::NextScene,
+                });
                 doc.sort_cues();
                 *dirty = true;
             }
         }
-    });
+    }
 }
 
 /// Load a mid-sequence frame from `dancers/<name>/frames/` as an egui texture.
