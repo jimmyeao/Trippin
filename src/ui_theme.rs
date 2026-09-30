@@ -165,6 +165,108 @@ pub fn segmented<T: PartialEq + Copy>(
     changed
 }
 
+/// Painted transport icon — play triangle / pause bars / stop square.
+/// No font glyphs: the bundled fonts lack the transport symbols.
+#[derive(Clone, Copy)]
+pub enum TrIcon {
+    Play,
+    Pause,
+    Stop,
+}
+
+/// Round painted transport button. Returns true on click.
+pub fn tr_btn(ui: &mut Ui, icon: TrIcon, enabled: bool) -> bool {
+    let (r, resp) = ui.allocate_exact_size(
+        egui::vec2(28.0, 28.0),
+        if enabled {
+            egui::Sense::click()
+        } else {
+            egui::Sense::hover()
+        },
+    );
+    let p = ui.painter();
+    p.circle_filled(
+        r.center(),
+        13.0,
+        if enabled && resp.hovered() {
+            HOVER
+        } else {
+            RAISED
+        },
+    );
+    let c = if enabled { TEXT } else { FAINT };
+    let (cx, cy) = (r.center().x, r.center().y);
+    match icon {
+        TrIcon::Play => {
+            p.add(egui::Shape::convex_polygon(
+                vec![
+                    egui::pos2(cx - 3.0, cy - 5.5),
+                    egui::pos2(cx - 3.0, cy + 5.5),
+                    egui::pos2(cx + 5.5, cy),
+                ],
+                c,
+                egui::Stroke::NONE,
+            ));
+        }
+        TrIcon::Pause => {
+            for dx in [-4.5f32, 1.5f32] {
+                p.rect_filled(
+                    egui::Rect::from_min_size(
+                        egui::pos2(cx + dx, cy - 5.0),
+                        egui::vec2(3.0, 10.0),
+                    ),
+                    1.0,
+                    c,
+                );
+            }
+        }
+        TrIcon::Stop => {
+            p.rect_filled(
+                egui::Rect::from_center_size(r.center(), egui::vec2(9.0, 9.0)),
+                1.5,
+                c,
+            );
+        }
+    }
+    enabled && resp.clicked()
+}
+
+/// Record button: a red dot (#F06A62). Armed → DANGER_BG with a pulsing
+/// dot (caller still owns the `recording` flag this toggles).
+pub fn rec_btn(ui: &mut Ui, armed: bool) -> bool {
+    if armed {
+        // The pulse needs repainting while armed.
+        ui.ctx().request_repaint();
+    }
+    let (r, resp) = ui.allocate_exact_size(egui::vec2(28.0, 28.0), egui::Sense::click());
+    let p = ui.painter();
+    p.circle_filled(
+        r.center(),
+        13.0,
+        if armed {
+            DANGER_BG
+        } else if resp.hovered() {
+            HOVER
+        } else {
+            RAISED
+        },
+    );
+    if armed {
+        p.circle_stroke(r.center(), 13.0, egui::Stroke::new(1.0, DANGER));
+    }
+    let pulse = if armed {
+        (ui.input(|i| i.time) * 4.0).sin() as f32 * 0.5 + 0.5
+    } else {
+        0.0
+    };
+    p.circle_filled(
+        r.center(),
+        4.5 + pulse * 1.8,
+        Color32::from_rgb(0xF0, 0x6A, 0x62).gamma_multiply(if armed { 1.0 } else { 0.75 }),
+    );
+    resp.clicked()
+}
+
 /// Segmented control stretched to the full width — equal-width options,
 /// as in mockup 1a's Mode/Scene-length pickers.
 pub fn segmented_wide<T: PartialEq + Copy>(

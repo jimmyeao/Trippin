@@ -226,6 +226,26 @@ cargo run --release -- --ndi-monitor [name]
   pass `/SUBSYSTEM:WINDOWS` via `RUSTFLAGS`.
 - Worker threads must always reply to their channel, even when they panic
   (use `catch_unwind`). A dropped reply wedged the editor.
+- egui layout rules the UI relies on (learned the hard way, review A1):
+  - `ui.horizontal` children see the parent's `max_rect`, not the shrunk
+    `cursor` — a `right_to_left` or `available_width()` inside one can
+    overflow and re-widen `cursor.max.x`, pushing later rows under a
+    `Panel::right`. Capture the needed width at parent scope first, or
+    paint inside a bounded `allocate_exact_size` rect.
+  - `ui.columns` inside a `ScrollArea` lets card content bleed under the
+    neighbour column; use `ui.new_child(UiBuilder::max_rect(...))` columns
+    and `ui.add_space(col_height)` to claim the row (see `stream_tab` /
+    `dancer_fx_tab`).
+  - In `egui::Grid`, every `ui.add` is a new cell — multi-widget form rows
+    must be wrapped in one `scope_builder` horizontal cell (see `grow`),
+    or the extra widgets become columns and stretch the grid.
+  - Cards only bound their own frame, not content: an over-long label or
+    path widens `min_rect` and the card escapes its column. Elide text
+    (`ellipsize` / `elide_left` / `elide_mid`) rather than trusting clip.
+  - No font glyphs for icons — the bundled fonts lack them (tofu). Paint
+    checkboxes/ticks (`paint_check`), transport buttons (`t::tr_btn`), and
+    the record dot (`t::rec_btn`) instead. `key_short` maps key names to
+    words (`Space`, `Right`) for the same reason.
 
 ## 8. Streaming features: how they work
 

@@ -249,222 +249,251 @@ impl Editor {
                 .text_styles
                 .insert(egui::TextStyle::Small, egui::FontId::proportional(12.0));
 
-            // --- Transport bar (mockup 1d): playback controls + a big mono
-            // timecode, snap/follow pills, then file ops and zoom ----------
-            egui::Panel::top("ed_tool").show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 6.0;
-                    let playing = *mode == PlayMode::Playing;
-                    let play_lbl = if playing { "⏸" } else { "▶" };
-                    if ui
-                        .add_enabled(
-                            doc_opt.is_some() && !*busy,
-                            egui::Button::new(egui::RichText::new(play_lbl).size(15.0))
-                                .min_size(egui::vec2(34.0, 30.0))
-                                .corner_radius(egui::CornerRadius::same(15)),
-                        )
-                        .on_hover_text(if playing { "pause" } else { "play" })
-                        .clicked()
-                    {
-                        cmd.push(UiCommand::Song(SongCtl::Toggle));
-                    }
-                    if ui
-                        .add_enabled(
-                            *mode != PlayMode::Stopped,
-                            egui::Button::new(egui::RichText::new("⏹").size(13.0))
-                                .min_size(egui::vec2(34.0, 30.0))
-                                .corner_radius(egui::CornerRadius::same(15)),
-                        )
-                        .on_hover_text("stop")
-                        .clicked()
-                    {
-                        cmd.push(UiCommand::Song(SongCtl::Stop));
-                    }
-                    let rec_btn = egui::Button::new(
-                        egui::RichText::new("●").size(13.0).color(if *recording {
-                            t::DANGER
-                        } else {
-                            t::MUTED
-                        }),
-                    )
-                    .min_size(egui::vec2(34.0, 30.0))
-                    .corner_radius(egui::CornerRadius::same(15))
-                    .fill(if *recording { t::DANGER_BG } else { t::RAISED });
-                    if ui
-                        .add(rec_btn)
-                        .on_hover_text("record: playhead writes cues as you trigger them live")
-                        .clicked()
-                    {
-                        *recording = !*recording;
-                    }
+            // --- One 40px toolbar row (review G2): File menu, painted
+            // transport + record, timecode │ snap/follow │ marker │ flex │
+            // name, Save, AI show │ zoom.
+            egui::Panel::top("ed_tool")
+                .frame(
+                    egui::Frame::NONE
+                        .fill(t::PANEL)
+                        .inner_margin(egui::Margin::symmetric(10, 6))
+                        .stroke(egui::Stroke::new(1.0, t::BORDER)),
+                )
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.set_min_height(28.0);
+                        ui.spacing_mut().item_spacing.x = 6.0;
 
-                    ui.add_space(8.0);
-                    // Big timecode + bar·beat under it.
-                    ui.vertical(|ui| {
-                        ui.spacing_mut().item_spacing.y = 0.0;
-                        ui.label(
-                            egui::RichText::new(fmt_time(*pos_s))
-                                .monospace()
-                                .size(21.0)
-                                .color(t::TEXT),
+                        // File menu: Open… / Add song… (off the big row).
+                        ui.menu_button(
+                            egui::RichText::new("File").size(12.0).color(t::MUTED),
+                            |ui| {
+                                if ui
+                                    .button("Open…")
+                                    .on_hover_text("audio or a saved timeline .json")
+                                    .clicked()
+                                {
+                                    let slot = file_pick.clone();
+                                    std::thread::spawn(move || {
+                                        let p = rfd::FileDialog::new()
+                                            .add_filter(
+                                                "audio / timeline",
+                                                &[
+                                                    "mp3", "flac", "wav", "m4a", "aac", "ogg",
+                                                    "opus", "aiff", "json",
+                                                ],
+                                            )
+                                            .pick_file();
+                                        *slot.lock().unwrap_or_else(|e| e.into_inner()) = p;
+                                    });
+                                    ui.close();
+                                }
+                                if ui
+                                    .add_enabled(!*busy, egui::Button::new("Add song…"))
+                                    .on_hover_text("append another song to this timeline")
+                                    .clicked()
+                                {
+                                    let slot = file_pick.clone();
+                                    std::thread::spawn(move || {
+                                        let p = rfd::FileDialog::new()
+                                            .add_filter(
+                                                "audio",
+                                                &[
+                                                    "mp3", "flac", "wav", "m4a", "aac", "ogg",
+                                                    "opus", "aiff",
+                                                ],
+                                            )
+                                            .pick_file();
+                                        *slot.lock().unwrap_or_else(|e| e.into_inner()) = p;
+                                    });
+                                    ui.close();
+                                }
+                            },
                         );
-                        let loc = doc_opt
-                            .as_ref()
-                            .and_then(|d| d.clip_at(*pos_s))
-                            .map(|(_, c)| {
-                                let beat = c.beat_at(*pos_s - c.offset_s);
-                                format!(
-                                    "bar {} · beat {}",
-                                    beat as u32 / 4 + 1,
-                                    beat as u32 % 4 + 1
-                                )
-                            })
-                            .unwrap_or_else(|| "no track loaded".into());
-                        ui.label(egui::RichText::new(loc).size(10.0).color(t::FAINT));
-                    });
+                        ui.separator();
 
-                    ui.add_space(10.0);
-                    // Pill-shaped toggles: accent fill when on, raised when off.
-                    let snap_btn = egui::Button::new(
-                        egui::RichText::new("snap ¼")
-                            .size(11.0)
-                            .color(if *snap { t::ACCENT } else { t::MUTED }),
-                    )
-                    .fill(if *snap { t::ACCENT_SEL } else { t::RAISED })
-                    .corner_radius(egui::CornerRadius::same(10));
-                    if ui.add(snap_btn).clicked() {
-                        *snap = !*snap;
-                    }
-                    let follow_btn = egui::Button::new(
-                        egui::RichText::new("follow live")
-                            .size(11.0)
-                            .color(if *autosync { t::ACCENT } else { t::MUTED }),
-                    )
-                    .fill(if *autosync { t::ACCENT_SEL } else { t::RAISED })
-                    .corner_radius(egui::CornerRadius::same(10));
-                    if ui
-                        .add(follow_btn)
-                        .on_hover_text("chase the live director's position")
-                        .clicked()
-                    {
-                        *autosync = !*autosync;
-                    }
-                    if *autosync {
-                        ui.label(
-                            egui::RichText::new(if *live_locked { "locked" } else { "listening" })
+                        let playing = *mode == PlayMode::Playing;
+                        if t::tr_btn(
+                            ui,
+                            if playing { t::TrIcon::Pause } else { t::TrIcon::Play },
+                            doc_opt.is_some() && !*busy,
+                        ) {
+                            cmd.push(UiCommand::Song(SongCtl::Toggle));
+                        }
+                        if t::tr_btn(ui, t::TrIcon::Stop, *mode != PlayMode::Stopped) {
+                            cmd.push(UiCommand::Song(SongCtl::Stop));
+                        }
+                        if t::rec_btn(ui, *recording) {
+                            *recording = !*recording;
+                        }
+
+                        ui.add_space(4.0);
+                        // Timecode + bar·beat under it.
+                        ui.vertical(|ui| {
+                            ui.spacing_mut().item_spacing.y = 0.0;
+                            ui.label(
+                                egui::RichText::new(fmt_time(*pos_s))
+                                    .monospace()
+                                    .size(17.0)
+                                    .color(t::TEXT),
+                            );
+                            let loc = doc_opt
+                                .as_ref()
+                                .and_then(|d| d.clip_at(*pos_s))
+                                .map(|(_, c)| {
+                                    let beat = c.beat_at(*pos_s - c.offset_s);
+                                    format!(
+                                        "bar {} · beat {}",
+                                        beat as u32 / 4 + 1,
+                                        beat as u32 % 4 + 1
+                                    )
+                                })
+                                .unwrap_or_else(|| "no track loaded".into());
+                            ui.label(egui::RichText::new(loc).size(9.5).color(t::FAINT));
+                        });
+
+                        ui.separator();
+                        // Pill-shaped toggles: accent fill when on.
+                        let snap_btn = egui::Button::new(
+                            egui::RichText::new("snap ¼")
+                                .size(11.0)
+                                .color(if *snap { t::ACCENT } else { t::MUTED }),
+                        )
+                        .fill(if *snap { t::ACCENT_SEL } else { t::RAISED })
+                        .corner_radius(egui::CornerRadius::same(10));
+                        if ui.add(snap_btn).clicked() {
+                            *snap = !*snap;
+                        }
+                        let follow_btn = egui::Button::new(
+                            egui::RichText::new("follow live")
+                                .size(11.0)
+                                .color(if *autosync { t::ACCENT } else { t::MUTED }),
+                        )
+                        .fill(if *autosync { t::ACCENT_SEL } else { t::RAISED })
+                        .corner_radius(egui::CornerRadius::same(10));
+                        if ui
+                            .add(follow_btn)
+                            .on_hover_text("chase the live director's position")
+                            .clicked()
+                        {
+                            *autosync = !*autosync;
+                        }
+                        if *autosync {
+                            ui.label(
+                                egui::RichText::new(if *live_locked {
+                                    "locked"
+                                } else {
+                                    "listening"
+                                })
                                 .size(11.0)
                                 .color(if *live_locked { t::GOOD } else { t::FAINT }),
-                        );
-                    }
-
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.spacing_mut().item_spacing.x = 6.0;
-                        if *busy {
-                            ui.spinner();
-                        }
-                        if !message.is_empty() {
-                            let failed = message.starts_with("load failed")
-                                || message.starts_with("save failed")
-                                || message.starts_with("open failed");
-                            ui.label(
-                                egui::RichText::new(message.as_str())
-                                    .size(11.0)
-                                    .color(if failed { t::DANGER } else { t::MUTED }),
                             );
                         }
-                        if ui
-                            .small_button("fit")
-                            .on_hover_text("zoom to fit the whole timeline")
-                            .clicked()
-                        {
-                            *zoom_fit = true;
+                        // Marker at the playhead — was buried in the
+                        // inspector's empty state (review G4).
+                        if let Some(doc) = doc_opt.as_mut() {
+                            if doc.clip_at(*cursor_s).is_some()
+                                && ui
+                                    .small_button("+ marker")
+                                    .on_hover_text("drop a cue at the playhead")
+                                    .clicked()
+                            {
+                                let (ci, c) = doc.clip_at(*cursor_s).unwrap();
+                                let mut beat = c.beat_at(*cursor_s - c.offset_s);
+                                if *snap {
+                                    beat = (beat * 4.0).round() / 4.0;
+                                }
+                                doc.cues.push(Cue {
+                                    clip: ci,
+                                    beat: beat.max(0.0),
+                                    beats: 4.0,
+                                    kind: CueKind::NextScene,
+                                });
+                                doc.sort_cues();
+                                *dirty = true;
+                            }
                         }
-                        if ui.small_button("+").clicked() {
-                            *pps = (*pps * 1.4).clamp(4.0, 600.0);
-                        }
-                        let mut z = *pps;
-                        if ui
-                            .add_sized(
-                                egui::vec2(80.0, 16.0),
-                                egui::Slider::new(&mut z, 4.0..=600.0)
-                                    .logarithmic(true)
-                                    .show_value(false),
-                            )
-                            .changed()
-                        {
-                            *pps = z;
-                        }
-                        if ui.small_button("−").clicked() {
-                            *pps = (*pps / 1.4).clamp(4.0, 600.0);
-                        }
+
+                        // Right edge: zoom · AI show · Save · name · status.
+                        ui.with_layout(
+                            egui::Layout::right_to_left(egui::Align::Center),
+                            |ui| {
+                                ui.spacing_mut().item_spacing.x = 6.0;
+                                if ui
+                                    .small_button("fit")
+                                    .on_hover_text("zoom to fit the whole timeline")
+                                    .clicked()
+                                {
+                                    *zoom_fit = true;
+                                }
+                                if ui.small_button("+").clicked() {
+                                    *pps = (*pps * 1.4).clamp(4.0, 600.0);
+                                }
+                                let mut z = *pps;
+                                if ui
+                                    .add_sized(
+                                        egui::vec2(80.0, 16.0),
+                                        egui::Slider::new(&mut z, 4.0..=600.0)
+                                            .logarithmic(true)
+                                            .show_value(false),
+                                    )
+                                    .changed()
+                                {
+                                    *pps = z;
+                                }
+                                if ui.small_button("-").clicked() {
+                                    *pps = (*pps / 1.4).clamp(4.0, 600.0);
+                                }
+                                if let Some(doc) = doc_opt.as_mut() {
+                                    if ui
+                                        .button("AI show…")
+                                        .on_hover_text(
+                                            "analyse the tracks and have an LLM write the cue list",
+                                        )
+                                        .clicked()
+                                    {
+                                        *ai_open = !*ai_open;
+                                    }
+                                    if ui
+                                        .button("Save")
+                                        .on_hover_text("timelines/<name>.json")
+                                        .clicked()
+                                    {
+                                        cmd.push(UiCommand::SaveTimeline);
+                                    }
+                                    if ui
+                                        .add(
+                                            egui::TextEdit::singleline(&mut doc.name)
+                                                .desired_width(110.0),
+                                        )
+                                        .changed()
+                                    {
+                                        *dirty = true;
+                                    }
+                                }
+                                if *busy {
+                                    ui.spinner();
+                                }
+                                if !message.is_empty() {
+                                    let failed = message.starts_with("load failed")
+                                        || message.starts_with("save failed")
+                                        || message.starts_with("open failed");
+                                    let col = if failed { t::DANGER } else { t::MUTED };
+                                    // Cap it — a long file name otherwise
+                                    // collides with the marker button.
+                                    let g = ui.painter().layout(
+                                        message.clone(),
+                                        egui::FontId::proportional(11.0),
+                                        col,
+                                        170.0,
+                                    );
+                                    ui.add(egui::Label::new(g).truncate())
+                                        .on_hover_text(message.as_str());
+                                }
+                            },
+                        );
                     });
                 });
-
-                // Row 2: file ops + doc name (kept slim — the canvas is the star).
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 6.0;
-                    if ui
-                        .button("Open…")
-                        .on_hover_text("audio or a saved timeline .json")
-                        .clicked()
-                    {
-                        let slot = file_pick.clone();
-                        std::thread::spawn(move || {
-                            let p = rfd::FileDialog::new()
-                                .add_filter(
-                                    "audio / timeline",
-                                    &[
-                                        "mp3", "flac", "wav", "m4a", "aac", "ogg", "opus", "aiff",
-                                        "json",
-                                    ],
-                                )
-                                .pick_file();
-                            eprintln!("Open dialog -> {p:?}");
-                            *slot.lock().unwrap_or_else(|e| e.into_inner()) = p;
-                        });
-                    }
-                    if ui
-                        .add_enabled(!*busy, egui::Button::new("Add song…"))
-                        .on_hover_text("append another song to this timeline")
-                        .clicked()
-                    {
-                        let slot = file_pick.clone();
-                        std::thread::spawn(move || {
-                            let p = rfd::FileDialog::new()
-                                .add_filter(
-                                    "audio",
-                                    &["mp3", "flac", "wav", "m4a", "aac", "ogg", "opus", "aiff"],
-                                )
-                                .pick_file();
-                            eprintln!("Add-song dialog -> {p:?}");
-                            *slot.lock().unwrap_or_else(|e| e.into_inner()) = p;
-                        });
-                    }
-                    if let Some(doc) = doc_opt.as_mut() {
-                        ui.label(egui::RichText::new("name").size(11.0).color(t::MUTED));
-                        if ui
-                            .add(egui::TextEdit::singleline(&mut doc.name).desired_width(130.0))
-                            .changed()
-                        {
-                            *dirty = true;
-                        }
-                        if ui
-                            .button("Save")
-                            .on_hover_text("timelines/<name>.json")
-                            .clicked()
-                        {
-                            cmd.push(UiCommand::SaveTimeline);
-                        }
-                        if ui
-                            .button("✦ AI show…")
-                            .on_hover_text("analyse the tracks and have an LLM write the cue list")
-                            .clicked()
-                        {
-                            *ai_open = !*ai_open;
-                        }
-                    }
-                });
-            });
 
             // --- AI show builder ------------------------------------------
             // Poll the worker: apply finished cues into the doc.
@@ -494,7 +523,7 @@ impl Editor {
             if *ai_open {
                 let mut open = true;
                 let mut s_dirty = false;
-                egui::Window::new("✦ AI show builder")
+                egui::Window::new("AI show builder")
                     .open(&mut open)
                     .collapsible(false)
                     .default_width(430.0)
@@ -968,7 +997,7 @@ const RULER_H: f32 = 26.0;
 const CLIP_H: f32 = 68.0;
 const TRACK_H: f32 = 30.0;
 /// Resolve-style track header column at the left of the strip.
-const GUTTER: f32 = 96.0;
+const GUTTER: f32 = 110.0;
 const SCROLL_H: f32 = 12.0;
 /// Cue lanes, in `CueKind::track()` order.
 const TRACK_NAMES: [&str; 6] = ["scenes", "dancer", "fx", "show", "text 1", "text 2"];
@@ -1146,32 +1175,30 @@ fn canvas(
         egui::Rangef::new(rect.top(), bar.top()),
         Stroke::new(1.0, t::BORDER_HI),
     );
+    // Lane headers hug the lane edge (review G5): dot, then the name
+    // right-aligned so there is no dead space inside the gutter.
     painter.rect_filled(
-        Rect::from_center_size(
-            pos2(gutter.left() + 10.0, clip_lane.center().y),
-            vec2(7.0, 7.0),
-        ),
+        Rect::from_center_size(pos2(lane_x - 12.0, clip_lane.center().y), vec2(7.0, 7.0)),
         2.0,
         t::ACCENT,
     );
     painter.text(
-        pos2(gutter.left() + 20.0, clip_lane.center().y),
-        Align2::LEFT_CENTER,
+        pos2(lane_x - 20.0, clip_lane.center().y),
+        Align2::RIGHT_CENTER,
         "audio",
         FontId::proportional(12.0),
         t::MUTED,
     );
     for (i, name) in TRACK_NAMES.iter().enumerate() {
         let ty = cue_lane.top() + i as f32 * TRACK_H;
-        // Lane-coloured chip + name, like the mockup's track headers.
         painter.rect_filled(
-            Rect::from_center_size(pos2(gutter.left() + 10.0, ty + TRACK_H * 0.5), vec2(7.0, 7.0)),
+            Rect::from_center_size(pos2(lane_x - 12.0, ty + TRACK_H * 0.5), vec2(7.0, 7.0)),
             2.0,
             LANE_COLORS[i],
         );
         painter.text(
-            pos2(gutter.left() + 20.0, ty + TRACK_H * 0.5),
-            Align2::LEFT_CENTER,
+            pos2(lane_x - 20.0, ty + TRACK_H * 0.5),
+            Align2::RIGHT_CENTER,
             *name,
             FontId::proportional(12.0),
             t::MUTED,
@@ -1296,11 +1323,13 @@ fn canvas(
                     ),
                 );
                 if bar {
+                    // Bar numbers live on the ruler's bottom edge — in the
+                    // clip lane they collided with the song title (G3).
                     painter.text(
-                        pos2(x + 3.0, clip_lane.top() + 4.0),
+                        pos2(x + 3.0, ruler.bottom() - 13.0),
                         Align2::LEFT_TOP,
                         format!("{}", b / 4 + 1),
-                        FontId::proportional(11.0),
+                        FontId::proportional(10.0),
                         faint,
                     );
                 }
@@ -1850,8 +1879,8 @@ fn inspector(
     thumbs: &HashMap<String, egui::TextureHandle>,
     sel_cue: Option<usize>,
     sel_clip: Option<usize>,
-    cursor_s: f64,
-    snap: bool,
+    _cursor_s: f64,
+    _snap: bool,
     dirty: &mut bool,
     cmd: &mut Vec<UiCommand>,
 ) {
@@ -2012,35 +2041,16 @@ fn inspector(
             }
         });
     } else {
-        t::card().show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            for line in [
-                "click a block to edit it",
-                "drag edges to resize · drag body to move",
-                "right-click a block to delete",
-                "drag from the library to add",
-                "Ctrl+scroll zooms · wheel pans",
-            ] {
-                ui.label(egui::RichText::new(line).size(11.0).color(t::MUTED));
-            }
-        });
-        if doc.clip_at(cursor_s).is_some() {
-            ui.add_space(6.0);
-            if ui.button("+ marker at cursor").clicked() {
-                let (ci, c) = doc.clip_at(cursor_s).unwrap();
-                let mut beat = c.beat_at(cursor_s - c.offset_s);
-                if snap {
-                    beat = (beat * 4.0).round() / 4.0;
-                }
-                doc.cues.push(Cue {
-                    clip: ci,
-                    beat: beat.max(0.0),
-                    beats: 4.0,
-                    kind: CueKind::NextScene,
-                });
-                doc.sort_cues();
-                *dirty = true;
-            }
+        // Empty state: hints only — no card box, muted 11px (review G4).
+        ui.add_space(4.0);
+        for line in [
+            "click a block to edit it",
+            "drag edges to resize · drag body to move",
+            "right-click a block to delete",
+            "drag from the library to add",
+            "Ctrl+scroll zooms · wheel pans",
+        ] {
+            ui.label(egui::RichText::new(line).size(11.0).color(t::MUTED));
         }
     }
 }
@@ -2053,7 +2063,14 @@ pub(crate) fn load_clip_thumb(ctx: &egui::Context, name: &str) -> Option<egui::T
         return None;
     }
     let path = dir.join(format!("{:04}.png", n / 2));
-    let img = image::open(path).ok()?.to_rgba8();
+    let mut img = image::open(path).ok()?.to_rgba8();
+    // Clip frames are white-on-black renders — turn luminance into alpha so
+    // the thumbnail is a white silhouette on the card's INSET background,
+    // not a black box.
+    for px in img.pixels_mut() {
+        let a = px[0].max(px[1]).max(px[2]).min(px[3]);
+        *px = image::Rgba([255, 255, 255, a]);
+    }
     let (w, h) = img.dimensions();
     let tex = ctx.load_texture(
         format!("clipthumb:{name}"),
