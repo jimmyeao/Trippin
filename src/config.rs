@@ -35,10 +35,14 @@ pub enum Action {
     ShowNowPlaying,
     SaveClip,
     RecordSet,
+    MarkPhrase,
+    ToggleLogo,
+    ToggleName,
+    ToggleTicker,
 }
 
 impl Action {
-    pub const ALL: [Action; 25] = [
+    pub const ALL: [Action; 29] = [
         Action::NextScene,
         Action::PrevScene,
         Action::ModeAuto,
@@ -64,6 +68,10 @@ impl Action {
         Action::ShowNowPlaying,
         Action::SaveClip,
         Action::RecordSet,
+        Action::MarkPhrase,
+        Action::ToggleLogo,
+        Action::ToggleName,
+        Action::ToggleTicker,
     ];
 
     pub fn label(self) -> &'static str {
@@ -93,6 +101,10 @@ impl Action {
             Action::ShowNowPlaying => "Show the now-playing card again",
             Action::SaveClip => "Save a clip (the last N seconds)",
             Action::RecordSet => "Record the whole set: start / stop",
+            Action::MarkPhrase => "Mark phrase start (this beat = bar 1)",
+            Action::ToggleLogo => "Logo on / off",
+            Action::ToggleName => "DJ name on / off",
+            Action::ToggleTicker => "Scrolling ticker on / off",
         }
     }
 
@@ -136,6 +148,10 @@ impl Action {
             Action::ShowNowPlaying => "N",
             Action::SaveClip => "K",
             Action::RecordSet => "J",
+            Action::MarkPhrase => "O",
+            Action::ToggleLogo => "L",
+            Action::ToggleName => "Y",
+            Action::ToggleTicker => "W",
         }
     }
 }
@@ -374,6 +390,11 @@ pub struct Settings {
     pub brand_opacity: f32,
     /// Accent colour for the card, handles and ticker ("#rrggbb").
     pub brand_color: String,
+    /// Per-piece kills inside the branding block — the perform pads and
+    /// hotkeys flip these so the logo or the name can drop out mid-set
+    /// without touching the layout.
+    pub brand_logo_on: bool,
+    pub brand_name_on: bool,
     /// Scrolling ticker along the bottom.
     pub ticker_on: bool,
     pub ticker_text: String,
@@ -439,6 +460,8 @@ impl Default for Settings {
             brand_size: 1.0,
             brand_opacity: 0.9,
             brand_color: "#40d9ff".into(),
+            brand_logo_on: true,
+            brand_name_on: true,
             ticker_on: false,
             ticker_text: String::new(),
             ticker_speed: 1.0,

@@ -1707,7 +1707,15 @@ fn pads_view(
         Tristate::Off => "off",
     };
     let holding = s.mode == Mode::Static;
-    let pads: [(Action, &str, String, PadKind, bool); 8] = [
+    // Lit states for the overlay pads mirror what the render thread
+    // actually shows (master switch + piece flag + content present).
+    let logo_live =
+        s.brand_on && s.brand_logo_on && !s.brand_logo.trim().is_empty();
+    let name_live = s.brand_on
+        && s.brand_name_on
+        && !(s.brand_name.trim().is_empty() && s.brand_handles.trim().is_empty());
+    let ticker_live = s.ticker_on && !s.ticker_text.trim().is_empty();
+    let pads: [(Action, &str, String, PadKind, bool); 12] = [
         (
             Action::NextScene,
             "next scene",
@@ -1748,9 +1756,9 @@ fn pads_view(
             st.blackout,
         ),
         (
-            Action::MarkDownbeat,
-            "mark the one",
-            "tap on the 1".to_string(),
+            Action::MarkPhrase,
+            "mark section",
+            format!("this beat = bar 1 of {}", s.phrase_bars),
             PadKind::Warn,
             false,
         ),
@@ -1774,6 +1782,52 @@ fn pads_view(
             canon_now.to_string(),
             PadKind::Dancer,
             false,
+        ),
+        (
+            Action::ToggleDancer,
+            "dancer",
+            if s.dancer_enabled { "on" } else { "off" }.to_string(),
+            PadKind::Dancer,
+            s.dancer_enabled,
+        ),
+        (
+            Action::ToggleLogo,
+            "logo",
+            if s.brand_logo.trim().is_empty() {
+                "no image set".to_string()
+            } else if logo_live {
+                "on".to_string()
+            } else {
+                "off".to_string()
+            },
+            PadKind::Neutral,
+            logo_live,
+        ),
+        (
+            Action::ToggleName,
+            "dj name",
+            if s.brand_name.trim().is_empty() && s.brand_handles.trim().is_empty() {
+                "no name set".to_string()
+            } else if name_live {
+                "on".to_string()
+            } else {
+                "off".to_string()
+            },
+            PadKind::Neutral,
+            name_live,
+        ),
+        (
+            Action::ToggleTicker,
+            "scroll text",
+            if s.ticker_text.trim().is_empty() {
+                "no text set".to_string()
+            } else if ticker_live {
+                "on".to_string()
+            } else {
+                "off".to_string()
+            },
+            PadKind::Neutral,
+            ticker_live,
         ),
     ];
     let pad_w = ((ui.available_width() - 3.0 * 10.0) / 4.0).max(100.0);
@@ -2202,8 +2256,17 @@ fn stream_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<Ui
         card().show(ui, |ui| {
             ui.set_width(ui.available_width());
             section_label(ui, "branding");
-            status_dot(ui, s.brand_on, if s.brand_on { "showing" } else { "off" });
-        ui.checkbox(&mut s.brand_on, "Show logo / name");
+            let brand_live = s.brand_on
+                && ((s.brand_logo_on && !s.brand_logo.trim().is_empty())
+                    || (s.brand_name_on
+                        && !(s.brand_name.trim().is_empty()
+                            && s.brand_handles.trim().is_empty())));
+            status_dot(ui, brand_live, if brand_live { "showing" } else { "off" });
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut s.brand_on, "Show");
+            ui.checkbox(&mut s.brand_logo_on, "logo");
+            ui.checkbox(&mut s.brand_name_on, "name");
+        });
         egui::Grid::new("brand_grid")
             .num_columns(2)
             .min_col_width(96.0)
@@ -2987,7 +3050,12 @@ fn keys_tab(
         ),
         (
             "sync",
-            &[Action::MarkDownbeat, Action::LatencyDown, Action::LatencyUp],
+            &[
+                Action::MarkPhrase,
+                Action::MarkDownbeat,
+                Action::LatencyDown,
+                Action::LatencyUp,
+            ],
         ),
         (
             "output",
@@ -2999,6 +3067,9 @@ fn keys_tab(
                 Action::TogglePanel,
                 Action::ShowNowPlaying,
                 Action::ReloadShaders,
+                Action::ToggleLogo,
+                Action::ToggleName,
+                Action::ToggleTicker,
             ],
         ),
         (

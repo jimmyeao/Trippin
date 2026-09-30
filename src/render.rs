@@ -573,6 +573,7 @@ impl Renderer {
                     },
                     count: None,
                 },
+                text_tex_entry(4),
             ],
         });
         let ov_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -1198,6 +1199,10 @@ impl Renderer {
                 wgpu::BindGroupEntry {
                     binding: 3,
                     resource: self.ov_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(view(3)),
                 },
             ],
         }));

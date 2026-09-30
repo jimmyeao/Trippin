@@ -12,10 +12,13 @@ use crate::config::Settings;
 use crate::nowplaying::NowPlayingState;
 
 /// GPU layers — must match `O` in `shaders/overlay.wgsl`.
-pub const OV_LAYERS: usize = 3;
+pub const OV_LAYERS: usize = 4;
 pub const L_CARD: usize = 0;
-pub const L_BRAND: usize = 1;
+/// Logo image only — its own layer so it can fade without touching the name.
+pub const L_LOGO: usize = 1;
 pub const L_TICKER: usize = 2;
+/// DJ name + handles only — same corner, own fade.
+pub const L_NAME: usize = 3;
 
 /// One layer — must match `OL` in `shaders/overlay.wgsl`.
 #[repr(C)]
@@ -285,7 +288,9 @@ pub fn render_ticker(text: &str, accent: [f32; 3]) -> Option<Image> {
     Some(img)
 }
 
-/// Render-thread state: what's uploaded, and the card's show/hide envelope.
+/// Render-thread state: what's uploaded, plus the show/hide envelopes —
+/// each overlay piece eases its own visibility so pads/hotkeys fade
+/// rather than pop.
 #[derive(Default)]
 pub struct Overlays {
     card_serial: u64,
@@ -293,10 +298,26 @@ pub struct Overlays {
     card_aspect: f32,
     card_born: f32,
     card_on: bool,
-    brand_key: String,
-    brand_aspect: f32,
+    logo_key: String,
+    /// Uploaded pixel size [w, h] — zero width = nothing uploaded.
+    logo_size: [f32; 2],
+    name_key: String,
+    name_size: [f32; 2],
     ticker_key: String,
     ticker_aspect: f32,
+    logo_vis: f32,
+    name_vis: f32,
+    ticker_vis: f32,
+    last_t: f32,
+}
+
+/// Ease `vis` toward `target` — in over ~0.45 s, out over ~0.3 s.
+fn ease_vis(vis: &mut f32, target: f32, dt: f32) {
+    let rate = if target > *vis { 2.2 } else { 3.2 };
+    *vis = (*vis + rate * dt * (target - *vis).signum()).clamp(0.0, 1.0);
+    if (target - *vis).abs() < 0.02 {
+        *vis = target;
+    }
 }
 
 impl Overlays {
@@ -314,13 +335,17 @@ impl Overlays {
         let mut u = OvUniforms::default();
         let mut any = false;
         let m = 0.05f32; // screen margin (centred units)
+        let dt = (now_t - self.last_t).clamp(0.0, 0.1);
+        self.last_t = now_t;
 
         // --- Ticker (bottom band) --------------------------------------
-        let ticker_on = s.ticker_on && !s.ticker_text.trim().is_empty();
+        // Slides off the bottom edge while fading, instead of blinking.
+        let want_ticker = s.ticker_on && !s.ticker_text.trim().is_empty();
+        ease_vis(&mut self.ticker_vis, want_ticker as u8 as f32, dt);
         let ticker_half_h = 0.034f32;
-        if ticker_on {
+        if self.ticker_vis > 0.001 {
             let key = format!("{}|{}", s.ticker_text, s.brand_color);
-            if key != self.ticker_key {
+            if want_ticker && key != self.ticker_key {
                 self.ticker_key = key;
                 if let Some(img) = render_ticker(&s.ticker_text, accent) {
                     self.ticker_aspect = img.w as f32 / img.h as f32;
@@ -330,54 +355,110 @@ impl Overlays {
             if self.ticker_aspect > 0.0 {
                 let img_w = 2.0 * ticker_half_h * self.ticker_aspect;
                 let scroll = now_t * 0.18 * s.ticker_speed.max(0.1) / img_w;
+                let cy = 1.0 - ticker_half_h + (1.0 - self.ticker_vis) * 2.0 * ticker_half_h;
                 u.layers[L_TICKER] = OvLayerU {
-                    quad: [0.0, 1.0 - ticker_half_h, screen_asp, ticker_half_h],
-                    uvx: [2.0 * screen_asp / img_w, scroll, 1.0, 1.0],
+                    quad: [0.0, cy, screen_asp, ticker_half_h],
+                    uvx: [2.0 * screen_asp / img_w, scroll, self.ticker_vis, 1.0],
                 };
                 any = true;
             }
         }
-        let floor_y = if ticker_on { 1.0 - 2.0 * ticker_half_h } else { 1.0 };
+        let floor_y = 1.0 - 2.0 * ticker_half_h * self.ticker_vis;
 
         // --- Branding (a corner) ---------------------------------------
+        // Logo and name/handles are separate layers — each eases its own
+        // visibility AND its share of the block's width, so the surviving
+        // piece slides sideways instead of the whole block blinking.
         let logo_path = s.brand_logo.trim();
-        let brand_on = s.brand_on && (!s.brand_name.trim().is_empty() || !s.brand_handles.trim().is_empty() || !logo_path.is_empty());
+        let want_logo = s.brand_on && s.brand_logo_on && !logo_path.is_empty();
+        let want_name = s.brand_on
+            && s.brand_name_on
+            && (!s.brand_name.trim().is_empty() || !s.brand_handles.trim().is_empty());
+        ease_vis(&mut self.logo_vis, want_logo as u8 as f32, dt);
+        ease_vis(&mut self.name_vis, want_name as u8 as f32, dt);
         let corner = s.brand_corner.min(3);
-        if brand_on {
-            let key = format!("{}|{}|{}|{}", s.brand_name, s.brand_handles, logo_path, s.brand_color);
-            if key != self.brand_key {
-                self.brand_key = key;
-                let logo = if logo_path.is_empty() {
-                    None
-                } else {
-                    match image::open(logo_path) {
-                        Ok(i) => Some(i.to_rgba8()),
-                        Err(e) => {
-                            eprintln!("overlay: logo {logo_path}: {e}");
-                            None
-                        }
+        if self.logo_vis > 0.001 || want_logo {
+            let key = format!("{}|{}", logo_path, s.brand_color);
+            if want_logo && key != self.logo_key {
+                self.logo_key = key;
+                let logo = match image::open(logo_path) {
+                    Ok(i) => Some(i.to_rgba8()),
+                    Err(e) => {
+                        eprintln!("overlay: logo {logo_path}: {e}");
+                        None
                     }
                 };
-                match render_brand(logo.as_ref(), s.brand_name.trim(), s.brand_handles.trim(), accent) {
+                match render_brand(logo.as_ref(), "", "", accent) {
                     Some(img) => {
-                        self.brand_aspect = img.w as f32 / img.h as f32;
-                        upload(L_BRAND, &img);
+                        self.logo_size = [img.w as f32, img.h as f32];
+                        upload(L_LOGO, &img);
                     }
-                    None => self.brand_aspect = 0.0,
+                    None => self.logo_size = [0.0, 0.0],
                 }
             }
-            if self.brand_aspect > 0.0 {
-                let hh = 0.085 * s.brand_size.clamp(0.4, 2.5);
-                let hw = (hh * self.brand_aspect).min(screen_asp * 0.6);
-                let hh = hw / self.brand_aspect;
-                let x = if corner % 2 == 0 { -screen_asp + m + hw } else { screen_asp - m - hw };
-                let y = if corner < 2 { -1.0 + m + hh } else { floor_y - m - hh };
-                u.layers[L_BRAND] = OvLayerU {
-                    quad: [x, y, hw, hh],
-                    uvx: [1.0, 0.0, s.brand_opacity.clamp(0.0, 1.0), 0.0],
+        }
+        if self.name_vis > 0.001 || want_name {
+            let key = format!("{}|{}|{}", s.brand_name, s.brand_handles, s.brand_color);
+            if want_name && key != self.name_key {
+                self.name_key = key;
+                match render_brand(
+                    None,
+                    s.brand_name.trim(),
+                    s.brand_handles.trim(),
+                    accent,
+                ) {
+                    Some(img) => {
+                        self.name_size = [img.w as f32, img.h as f32];
+                        upload(L_NAME, &img);
+                    }
+                    None => self.name_size = [0.0, 0.0],
+                }
+            }
+        }
+        // Layout in block pixels scaled to centred units; a piece's width
+        // contribution is eased by its visibility, so the neighbour slides.
+        let block_hh = 0.085 * s.brand_size.clamp(0.4, 2.5);
+        let px2c = 2.0 * block_hh / 194.0; // centred units per block pixel
+        let lw = self.logo_size[0] * px2c * self.logo_vis;
+        let nw = self.name_size[0] * px2c * self.name_vis;
+        let gap = 30.0 * px2c * self.logo_vis.min(self.name_vis);
+        let total = lw + gap + nw;
+        let mut brand_vis = 0.0f32;
+        if total > 0.001 {
+            // Full block capped at 60% of screen width, as before.
+            let fit = (screen_asp * 1.2 / total).min(1.0);
+            let x0 = if corner % 2 == 0 {
+                -screen_asp + m
+            } else {
+                screen_asp - m - total * fit
+            };
+            let y = if corner < 2 { -1.0 + m + block_hh * fit } else { floor_y - m - block_hh * fit };
+            let op = s.brand_opacity.clamp(0.0, 1.0);
+            if self.logo_vis > 0.001 && self.logo_size[0] > 0.0 {
+                u.layers[L_LOGO] = OvLayerU {
+                    quad: [
+                        x0 + lw * fit / 2.0,
+                        y,
+                        lw * fit / 2.0,
+                        self.logo_size[1] * px2c * fit / 2.0,
+                    ],
+                    uvx: [1.0, 0.0, self.logo_vis * op, 0.0],
                 };
                 any = true;
             }
+            if self.name_vis > 0.001 && self.name_size[0] > 0.0 {
+                u.layers[L_NAME] = OvLayerU {
+                    quad: [
+                        x0 + (lw + gap) * fit + nw * fit / 2.0,
+                        y,
+                        nw * fit / 2.0,
+                        self.name_size[1] * px2c * fit / 2.0,
+                    ],
+                    uvx: [1.0, 0.0, self.name_vis * op, 0.0],
+                };
+                any = true;
+            }
+            brand_vis = self.logo_vis.max(self.name_vis);
         }
 
         // --- Now playing card (bottom-left; bottom-right if the brand
@@ -414,7 +495,7 @@ impl Overlays {
                 let hh = 0.1 * s.np_size.clamp(0.4, 2.5);
                 let hw = (hh * self.card_aspect).min(screen_asp * 0.9);
                 let hh = hw / self.card_aspect;
-                let right = brand_on && corner == 2;
+                let right = brand_vis > 0.01 && corner == 2;
                 let travel = 2.0 * hw + m * 2.0;
                 let off = travel * (1.0 - ein + eout);
                 let x = if right { screen_asp - m - hw + off } else { -screen_asp + m + hw - off };

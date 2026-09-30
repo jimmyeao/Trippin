@@ -1352,6 +1352,23 @@ fn apply_render(
         Action::MarkDownbeat => {
             let _ = audio.commands.send(Command::MarkDownbeat);
         }
+        // A segment starts here: re-anchor the bar grid AND restart the
+        // phrase clock so the next auto cut lands `phrase_bars` from now.
+        Action::MarkPhrase => {
+            let _ = audio.commands.send(Command::MarkDownbeat);
+            dir.mark_phrase();
+        }
+        Action::ToggleLogo => {
+            s.brand_logo_on = !s.brand_logo_on;
+            // Showing a piece also enables the block, so the pad always has
+            // a visible effect; hiding leaves the master as it was.
+            s.brand_on |= s.brand_logo_on;
+        }
+        Action::ToggleName => {
+            s.brand_name_on = !s.brand_name_on;
+            s.brand_on |= s.brand_name_on;
+        }
+        Action::ToggleTicker => s.ticker_on = !s.ticker_on,
         Action::LatencyDown => s.latency_ms -= 5.0,
         Action::LatencyUp => s.latency_ms += 5.0,
         // Cycling the effect by hand turns auto off: the key always shows what it does.

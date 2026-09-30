@@ -9,13 +9,14 @@ struct OL {
 };
 
 struct O {
-    l: array<OL, 3>,
+    l: array<OL, 4>,
 };
 
 @group(1) @binding(0) var ov0: texture_2d<f32>;
 @group(1) @binding(1) var ov1: texture_2d<f32>;
 @group(1) @binding(2) var ov2: texture_2d<f32>;
 @group(1) @binding(3) var<uniform> o: O;
+@group(1) @binding(4) var ov3: texture_2d<f32>;
 
 fn tap(i: i32, uv: vec2<f32>, wrap: bool) -> vec4<f32> {
     var c: vec4<f32>;
@@ -23,6 +24,8 @@ fn tap(i: i32, uv: vec2<f32>, wrap: bool) -> vec4<f32> {
         c = textureSampleLevel(ov0, samp, uv, 0.0);
     } else if i == 1 {
         c = textureSampleLevel(ov1, samp, uv, 0.0);
+    } else if i == 3 {
+        c = textureSampleLevel(ov3, samp, uv, 0.0);
     } else if wrap {
         c = textureSampleLevel(ov2, rsamp, uv, 0.0);
     } else {
@@ -61,7 +64,8 @@ fn layer(i: i32, p: vec2<f32>) -> vec4<f32> {
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
-    var out = layer(2, p);
+    var out = layer(3, p);
+    out = over(layer(2, p), out);
     out = over(layer(1, p), out);
     out = over(layer(0, p), out);
     return out;
