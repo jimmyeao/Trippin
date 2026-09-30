@@ -51,6 +51,11 @@ pub struct Status {
     pub fps: f32,
     pub device: String,
     pub scene: usize,
+    /// Predicted next scene in ordered mode (None = random or unknown).
+    pub next_scene: Option<usize>,
+    /// "bar N of M" toward the next auto cut (0/0 outside Auto).
+    pub bar_in_scene: u32,
+    pub bars_total: u32,
     pub clip: Option<String>,
     pub blackout: bool,
     pub fullscreen: bool,
@@ -215,43 +220,12 @@ fn build_ui(
     let before = serde_json::to_string(s).unwrap_or_default();
 
     // --- Status header ---------------------------------------------------
-    ui.horizontal(|ui| {
-        ui.heading("Trippin");
-        ui.separator();
-        ui.label(format!("{:.0} fps", st.fps));
-        ui.separator();
-        ui.label(format!("{:.1} BPM", st.bpm));
-        ui.separator();
-        ui.label(format!("beat {}/4", st.beat_in_bar + 1));
-        ui.separator();
-        // Beats vs breakdown — what the visuals are reacting as.
-        if st.calm > 0.5 {
-            ui.colored_label(egui::Color32::from_rgb(140, 170, 255), "breakdown");
-        } else {
-            ui.colored_label(egui::Color32::from_rgb(120, 230, 140), "beats");
-        }
-        ui.add(
-            egui::ProgressBar::new(st.groove)
-                .desired_width(50.0)
-                .desired_height(8.0),
-        )
-        .on_hover_text("Groove: how steadily kicks are landing. Below ~20% for a couple of seconds = breakdown mode.");
-        if st.silent {
-            ui.colored_label(egui::Color32::from_rgb(255, 160, 60), "no signal");
-        }
-    });
-    ui.horizontal(|ui| {
-        ui.monospace(scenes.get(st.scene).map(String::as_str).unwrap_or("?"));
-        ui.separator();
-        ui.small(format!(
-            "dancer {}  ·  {:.0}% conf  ·  {}",
-            st.clip.as_deref().unwrap_or("off"),
-            st.confidence * 100.0,
-            st.device
-        ));
-    });
-    ui.add_space(2.0);
-    ui.separator();
+    // The beat pips animate, so repaint every frame while we're up.
+    ui.ctx().request_repaint();
+    egui::Frame::NONE
+        .fill(crate::ui_theme::PANEL)
+        .inner_margin(egui::Margin::symmetric(12, 10))
+        .show(ui, |ui| header(ui, st, scenes));
 
     // --- Tabs -------------------------------------------------------------
     ui.horizontal(|ui| {
@@ -274,6 +248,111 @@ fn build_ui(
         });
 
     serde_json::to_string(s).unwrap_or_default() != before
+}
+
+/// The live-status strip: current + next scene, BPM, beat pips, bar
+/// progress and state pills (Docs/mockups.html §2).
+fn header(ui: &mut egui::Ui, st: &Status, scenes: &[String]) {
+    use crate::ui_theme::*;
+    ui.horizontal(|ui| {
+        // Left: what's on screen.
+        ui.vertical(|ui| {
+            section_label(ui, "on screen");
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(
+                        scenes.get(st.scene).map(String::as_str).unwrap_or("—"),
+                    )
+                    .monospace()
+                    .size(18.0)
+                    .strong(),
+                );
+                if let Some(nx) = st.next_scene {
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "next → {}",
+                            scenes.get(nx).map(String::as_str).unwrap_or("?")
+                        ))
+                        .size(11.0)
+                        .color(MUTED)
+                        .monospace(),
+                    );
+                }
+            });
+        });
+        // Right: fps · BPM · pips · pills.
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(egui::RichText::new(format!("{:.0} fps", st.fps)).color(MUTED).size(11.0));
+            if st.calm > 0.5 {
+                pill(ui, "breakdown", BREAKDOWN, BREAKDOWN_BG);
+            }
+            if st.silent {
+                pill(ui, "no signal", WARN, WARN_BG);
+            }
+            // Four beat pips: the live one is accent.
+            let (r, _) = ui.allocate_exact_size(egui::vec2(42.0, 10.0), egui::Sense::hover());
+            for i in 0..4u64 {
+                let c = egui::pos2(r.min.x + 5.0 + i as f32 * 11.0, r.center().y);
+                ui.painter().circle_filled(
+                    c,
+                    4.0,
+                    if i == st.beat_in_bar % 4 { ACCENT } else { BORDER },
+                );
+            }
+            ui.label(
+                egui::RichText::new(format!("{:.1}", st.bpm))
+                    .monospace()
+                    .size(16.0)
+                    .strong(),
+            );
+            ui.label(egui::RichText::new("BPM").size(10.0).color(FAINT));
+        });
+    });
+    // Second line: bar progress to the next cut + dancer + device.
+    ui.horizontal(|ui| {
+        if st.bars_total > 0 {
+            let frac = st.bar_in_scene as f32 / st.bars_total as f32;
+            ui.add(
+                egui::ProgressBar::new(frac)
+                    .desired_width(90.0)
+                    .desired_height(4.0)
+                    .fill(ACCENT)
+                    .corner_radius(2.0)
+                    .show_percentage(),
+            );
+            ui.label(
+                egui::RichText::new(format!(
+                    "bar {} of {} · cut in {}",
+                    st.bar_in_scene,
+                    st.bars_total,
+                    st.bars_total - st.bar_in_scene
+                ))
+                .size(11.0)
+                .color(MUTED),
+            );
+        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(egui::RichText::new(&st.device).size(10.0).color(FAINT));
+            ui.add(
+                egui::ProgressBar::new(st.groove)
+                    .desired_width(40.0)
+                    .desired_height(4.0)
+                    .fill(BREAKDOWN)
+                    .corner_radius(2.0),
+            )
+            .on_hover_text("Groove: how steadily kicks land. Sustained low = breakdown.");
+            ui.label(
+                egui::RichText::new(format!(
+                    "dancer {} · {:.0}% conf",
+                    st.clip.as_deref().unwrap_or("off"),
+                    st.confidence * 100.0
+                ))
+                .size(11.0)
+                .color(MUTED)
+                .monospace(),
+            );
+        });
+    });
 }
 
 /// A labelled row of content with the label kept a fixed width.

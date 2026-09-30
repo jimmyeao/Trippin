@@ -65,6 +65,17 @@ impl Director {
         }
     }
 
+    /// (current bar in the scene, bars the scene will run) — for the
+    /// panel's "bar 2 of 4" readout. Breakdowns double the phrase length.
+    pub fn bars_progress(&self, phrase_bars: u32) -> (u32, u32) {
+        let total = if self.calm > 0.5 {
+            phrase_bars.max(1) * 2
+        } else {
+            phrase_bars.max(1)
+        };
+        ((self.bars_in_scene + 1).min(total), total)
+    }
+
     pub fn rand(&mut self) -> f32 {
         self.rng ^= self.rng << 13;
         self.rng ^= self.rng >> 7;
