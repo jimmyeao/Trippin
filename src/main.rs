@@ -33,6 +33,7 @@ mod editor;
 mod gfx;
 mod egui_win;
 mod ndi;
+mod nowplaying;
 mod output;
 mod palettes;
 mod panel;
@@ -1986,6 +1987,10 @@ fn main() -> Result<()> {
     // `--snap <scenes|all>` renders scenes headless to PNG and times them.
     if args.iter().any(|a| a == "--snap") {
         return snap::run(&args);
+    }
+    // `--nowplaying`: watch what each track source (Spotify, Serato, …) sees.
+    if args.iter().any(|a| a == "--nowplaying") {
+        return nowplaying::monitor();
     }
     if let Some(p) = arg_value(&args, "--groove-test") {
         return audio::groove_test(std::path::Path::new(&p));
