@@ -62,6 +62,9 @@ pub struct Status {
     /// Groove 0..1 and breakdown state 0..1 (see audio.rs `Features`).
     pub groove: f32,
     pub calm: f32,
+    /// Now playing: the track on screen, and one status line per source.
+    pub np_track: Option<String>,
+    pub np_status: Vec<(String, String)>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -70,16 +73,18 @@ enum Tab {
     Scenes,
     Dancer,
     Effects,
+    Stream,
     Timeline,
     Keys,
 }
 
 impl Tab {
-    const ALL: [Tab; 6] = [
+    const ALL: [Tab; 7] = [
         Tab::Show,
         Tab::Scenes,
         Tab::Dancer,
         Tab::Effects,
+        Tab::Stream,
         Tab::Timeline,
         Tab::Keys,
     ];
@@ -90,6 +95,7 @@ impl Tab {
             Tab::Scenes => "Scenes",
             Tab::Dancer => "Dancer",
             Tab::Effects => "Effects",
+            Tab::Stream => "Stream",
             Tab::Timeline => "Timeline",
             Tab::Keys => "Keys",
         }
@@ -259,6 +265,7 @@ fn build_ui(
             Tab::Scenes => scenes_tab(ui, s, st, scenes, scene_heavy, heavy_ok, scene_filter, cmd),
             Tab::Dancer => dancer_tab(ui, s, st, clips, cmd),
             Tab::Effects => effects_tab(ui, s, st),
+            Tab::Stream => stream_tab(ui, s, st, cmd),
             Tab::Timeline => timeline_tab(ui, tl_shared, cmd),
             Tab::Keys => keys_tab(ui, s, rebinding),
         });
@@ -377,6 +384,117 @@ fn show_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<UiCo
     {
         cmd.push(UiCommand::Do(Action::MarkDownbeat));
     }
+}
+
+fn stream_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<UiCommand>) {
+    use crate::nowplaying::NpSource;
+    ui.label(egui::RichText::new("Now playing").strong());
+    row(ui, "Source", |ui| {
+        egui::ComboBox::from_id_salt("np_src")
+            .width(130.0)
+            .selected_text(s.np_source.label())
+            .show_ui(ui, |ui| {
+                for src in NpSource::ALL {
+                    ui.selectable_value(&mut s.np_source, src, src.label());
+                }
+            });
+    });
+    ui.small(
+        "Auto follows whichever source changed last: Spotify / Apple Music / any media \
+         player, Serato, VirtualDJ, rekordbox, Mixxx, or a text file.",
+    );
+    if s.np_source == NpSource::File || s.np_source == NpSource::Auto {
+        row(ui, "Text file", |ui| {
+            ui.add(egui::TextEdit::singleline(&mut s.np_file).desired_width(150.0).hint_text("optional"));
+            if ui.button("…").clicked() {
+                if let Some(p) = rfd::FileDialog::new().add_filter("text", &["txt"]).pick_file() {
+                    s.np_file = p.display().to_string();
+                }
+            }
+        });
+    }
+    row(ui, "Delay", |ui| {
+        ui.add(egui::Slider::new(&mut s.np_delay_s, 0.0..=60.0).step_by(1.0).suffix(" s"));
+    });
+    ui.small("A new track must stay loaded this long before it's shown — skips headphone cue-ups.");
+    match &st.np_track {
+        Some(t) => ui.label(format!("♪ {t}")),
+        None => ui.weak("No track yet"),
+    };
+    for (name, line) in &st.np_status {
+        ui.small(format!("{name}: {line}"));
+    }
+    ui.small(format!(
+        "OBS: add a Text source reading {}",
+        crate::config::data_dir().join("nowplaying.txt").display()
+    ));
+    row(ui, "Card", |ui| {
+        ui.checkbox(&mut s.np_card, "Show on screen");
+        if ui.button("Show again").clicked() {
+            cmd.push(UiCommand::Do(Action::ShowNowPlaying));
+        }
+    });
+    row(ui, "Card time", |ui| {
+        ui.add(egui::Slider::new(&mut s.np_hold_s, 0.0..=60.0).step_by(1.0).suffix(" s"));
+        ui.small("0 = always");
+    });
+    row(ui, "Card size", |ui| {
+        ui.add(egui::Slider::new(&mut s.np_size, 0.5..=2.0));
+    });
+
+    ui.separator();
+    ui.label(egui::RichText::new("Branding").strong());
+    ui.checkbox(&mut s.brand_on, "Show logo / name");
+    row(ui, "DJ name", |ui| {
+        ui.add(egui::TextEdit::singleline(&mut s.brand_name).desired_width(180.0));
+    });
+    row(ui, "Handles", |ui| {
+        ui.add(egui::TextEdit::singleline(&mut s.brand_handles).desired_width(180.0).hint_text("@you · twitch.tv/you"));
+    });
+    row(ui, "Logo", |ui| {
+        ui.add(egui::TextEdit::singleline(&mut s.brand_logo).desired_width(150.0).hint_text("PNG, optional"));
+        if ui.button("…").clicked() {
+            if let Some(p) = rfd::FileDialog::new().add_filter("PNG", &["png"]).pick_file() {
+                s.brand_logo = p.display().to_string();
+            }
+        }
+    });
+    row(ui, "Corner", |ui| {
+        for (i, l) in ["↖", "↗", "↙", "↘"].iter().enumerate() {
+            ui.selectable_value(&mut s.brand_corner, i as u8, *l);
+        }
+    });
+    row(ui, "Size", |ui| {
+        ui.add(egui::Slider::new(&mut s.brand_size, 0.5..=2.0));
+    });
+    row(ui, "Opacity", |ui| {
+        ui.add(egui::Slider::new(&mut s.brand_opacity, 0.1..=1.0));
+    });
+    row(ui, "Accent", |ui| {
+        let mut c = crate::overlay::parse_hex(&s.brand_color, [0.25, 0.85, 1.0]);
+        if ui.color_edit_button_rgb(&mut c).changed() {
+            s.brand_color = format!(
+                "#{:02x}{:02x}{:02x}",
+                (c[0] * 255.0) as u8,
+                (c[1] * 255.0) as u8,
+                (c[2] * 255.0) as u8
+            );
+        }
+    });
+
+    ui.separator();
+    ui.label(egui::RichText::new("Ticker").strong());
+    ui.checkbox(&mut s.ticker_on, "Scroll a message along the bottom");
+    ui.add(
+        egui::TextEdit::multiline(&mut s.ticker_text)
+            .desired_rows(2)
+            .desired_width(280.0)
+            .hint_text("Requests in chat · follow for the next set"),
+    );
+    row(ui, "Speed", |ui| {
+        ui.add(egui::Slider::new(&mut s.ticker_speed, 0.3..=3.0));
+    });
+
     ui.separator();
     ui.label(egui::RichText::new("Network output").strong());
     row(ui, "NDI", |ui| {

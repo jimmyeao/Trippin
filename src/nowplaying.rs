@@ -264,6 +264,7 @@ impl Source for FileWatch {
         if m != self.seen {
             self.seen = m;
             let s = std::fs::read_to_string(p).map_err(|e| e.to_string())?;
+            let s = s.trim_start_matches('\u{feff}');
             self.last = s.lines().rev().find(|l| !l.trim().is_empty()).map(|l| {
                 let (a, t) = l.trim().split_once(" - ").unwrap_or(("", l.trim()));
                 Track { artist: a.trim().into(), title: t.trim().into(), source: "File".into() }

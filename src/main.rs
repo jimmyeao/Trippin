@@ -34,6 +34,7 @@ mod gfx;
 mod egui_win;
 mod ndi;
 mod nowplaying;
+mod overlay;
 mod output;
 mod palettes;
 mod panel;
@@ -85,6 +86,11 @@ struct Shared {
     /// The GPU tier can run `@heavy` scenes (panel greys them otherwise).
     heavy_ok: bool,
     clip_names: Vec<String>,
+    /// Now playing: detector output, its live config, and a "show the card
+    /// again" request from the hotkey.
+    np: nowplaying::SharedNowPlaying,
+    np_cfg: Arc<Mutex<nowplaying::NpConfig>>,
+    np_replay: AtomicBool,
     /// Finished scene thumbnails for the editor: (name, w, h, RGBA8).
     /// Produced on the render thread, drained by `draw_editor`.
     thumbs: Mutex<Vec<(String, u32, u32, Vec<u8>)>>,
@@ -480,6 +486,7 @@ fn render_loop(
     let mut matcher = Matcher::new();
     // Live text overlays — one per text lane; `TextOff` starts the fade-out.
     let mut text_slots: [Option<text::TextState>; text::TEXT_SLOTS] = [None, None];
+    let mut overlays = overlay::Overlays::default();
     // Live rig as it was before a timeline borrowed it — restored on show end.
     let mut pre_show: Option<ShowBaseline> = None;
     // Global seconds up to which cues were already dispatched — one-shot.
@@ -761,6 +768,16 @@ fn render_loop(
         }
         let s = lock(&shared.settings).clone();
         let usable = usable_scenes(&r, &s);
+        {
+            let mut c = lock(&shared.np_cfg);
+            if c.source != s.np_source || c.delay_s != s.np_delay_s || c.file != s.np_file {
+                *c = nowplaying::NpConfig {
+                    source: s.np_source,
+                    delay_s: s.np_delay_s,
+                    file: s.np_file.clone(),
+                };
+            }
+        }
         // Global palette — a no-op while the name is unchanged.
         r.set_palette(&s.palette);
         // NDI output — a conf change rebuilds it; otherwise a cheap no-op.
@@ -1131,12 +1148,26 @@ fn render_loop(
             any_text = true;
         }
         let text_arg = any_text.then_some(&text_u);
-        if let Err(e) = r.render(dir.scene, &u, dancer_u.as_ref(), text_arg) {
+        // Stream overlays: now-playing card, branding, ticker.
+        if shared.np_replay.swap(false, Ordering::Relaxed) {
+            overlays.replay_card(now_t);
+        }
+        let ov_u = {
+            let np = lock(&shared.np);
+            overlays.update(&s, &np, now_t, w as f32 / h.max(1) as f32, &mut |i, img| {
+                r.set_overlay_image(i, img)
+            })
+        };
+        if let Err(e) = r.render(dir.scene, &u, dancer_u.as_ref(), text_arg, ov_u.as_ref()) {
             eprintln!("render error: {e}");
         }
 
         if now - last_status > Duration::from_millis(50) {
             last_status = now;
+            let (np_track, np_status) = {
+                let np = lock(&shared.np);
+                (np.track.as_ref().map(|t| t.line()), np.status.clone())
+            };
             *lock(&shared.status) = Status {
                 bpm: f.bpm,
                 confidence: f.tempo_confidence,
@@ -1153,6 +1184,8 @@ fn render_loop(
                 output: r.output_status(),
                 groove: f.groove,
                 calm: f.calm,
+                np_track,
+                np_status,
             };
         }
 
@@ -1220,6 +1253,7 @@ fn apply_render(
             s.fx = s.fx.next();
         }
         Action::ReloadShaders => r.reload_shaders(true),
+        Action::ShowNowPlaying => shared.np_replay.store(true, Ordering::Relaxed),
         // Handled on the event thread (windows / timeline transport).
         Action::Fullscreen
         | Action::LeaveFullscreen
@@ -1597,7 +1631,16 @@ impl ApplicationHandler for App {
         }
 
         self.gpu = Some(r.gpu());
+        let np_cfg = Arc::new(Mutex::new(nowplaying::NpConfig {
+            source: self.settings.np_source,
+            delay_s: self.settings.np_delay_s,
+            file: self.settings.np_file.clone(),
+        }));
+        let np = nowplaying::start(np_cfg.clone(), config::data_dir().join("nowplaying.txt"));
         let shared = Arc::new(Shared {
+            np,
+            np_cfg,
+            np_replay: AtomicBool::new(false),
             settings: Mutex::new(self.settings.clone()),
             status: Mutex::new(Status::default()),
             timeline: timeline::TimelineState::new(),

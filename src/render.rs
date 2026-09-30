@@ -22,6 +22,7 @@ use crate::dancer::{Clip, DancerUniforms, SLOTS};
 use crate::gfx;
 use crate::output::{self, OUT_FORMAT};
 use crate::palettes;
+use crate::overlay::{OV_LAYERS, OvUniforms};
 use crate::text::{TEXT_SLOTS, TextBitmap, TextUniforms};
 
 pub const SCENE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
@@ -91,6 +92,8 @@ enum Kind {
     Dancer,
     /// Text overlay — drawn over the surface in the present pass.
     Text,
+    /// Stream overlays (now playing, branding, ticker) — same pass.
+    Overlay,
 }
 
 #[derive(Default)]
@@ -276,6 +279,15 @@ pub struct Renderer {
     text_buf: wgpu::Buffer,
     text_masks: [Option<(wgpu::Texture, wgpu::TextureView)>; TEXT_SLOTS],
     text_bg: Option<wgpu::BindGroup>,
+    /// Stream overlays — one RGBA image per layer (see overlay.rs).
+    overlay: Scene,
+    ov_layout: wgpu::BindGroupLayout,
+    ov_pipeline_layout: wgpu::PipelineLayout,
+    ov_buf: wgpu::Buffer,
+    ov_tex: [Option<(wgpu::Texture, wgpu::TextureView)>; OV_LAYERS],
+    /// 1×1 transparent stand-in for layers never uploaded.
+    ov_blank: wgpu::TextureView,
+    ov_bg: Option<wgpu::BindGroup>,
     /// A size seen but not yet applied — settled before the surface is
     /// reconfigured, so resize bursts can't churn the swapchain.
     pending_size: Option<(u32, u32, Instant)>,
@@ -311,6 +323,7 @@ pub struct Renderer {
     /// present/text recompiled for the output texture format.
     out_present: Option<wgpu::RenderPipeline>,
     out_text: Option<wgpu::RenderPipeline>,
+    out_overlay: Option<wgpu::RenderPipeline>,
 }
 
 pub fn find_shader_dir() -> Result<PathBuf> {
@@ -539,6 +552,37 @@ impl Renderer {
             mapped_at_creation: false,
         });
 
+        let ov_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("overlay"),
+            entries: &[
+                text_tex_entry(0),
+                text_tex_entry(1),
+                text_tex_entry(2),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let ov_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("overlay"),
+            bind_group_layouts: &[Some(&layout), Some(&ov_layout)],
+            immediate_size: 0,
+        });
+        let ov_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("overlay uniforms"),
+            size: std::mem::size_of::<OvUniforms>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let ov_blank = rgba_texture(&device, &queue, 1, 1, &[0, 0, 0, 0]).1;
+
         // Palette LUT: a 256×1 gradient the user can swap globally.
         let pal_tex = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("palette"),
@@ -599,6 +643,7 @@ impl Renderer {
         let present_path = shader_dir.join("present.wgsl");
         let dancer_path = shader_dir.join("dancer.wgsl");
         let text_path = shader_dir.join("text.wgsl");
+        let overlay_path = shader_dir.join("overlay.wgsl");
         let mut r = Self {
             window,
             instance,
@@ -646,6 +691,18 @@ impl Renderer {
             text_buf,
             text_masks: Default::default(),
             text_bg: None,
+            overlay: Scene {
+                kind: Kind::Overlay,
+                name: "overlay".into(),
+                path: overlay_path,
+                ..Default::default()
+            },
+            ov_layout,
+            ov_pipeline_layout,
+            ov_buf,
+            ov_tex: Default::default(),
+            ov_blank,
+            ov_bg: None,
             pending_size: None,
             last_configure: Instant::now(),
             surface_ok: true,
@@ -665,6 +722,7 @@ impl Renderer {
             out_err: None,
             out_present: None,
             out_text: None,
+            out_overlay: None,
         };
         r.reload_shaders(true);
         if r.present.pipeline.is_none() {
@@ -923,9 +981,10 @@ impl Renderer {
         let mut present = std::mem::take(&mut self.present);
         let mut dancer = std::mem::take(&mut self.dancer);
         let mut text = std::mem::take(&mut self.text);
+        let mut overlay = std::mem::take(&mut self.overlay);
         for s in scenes
             .iter_mut()
-            .chain([&mut present, &mut dancer, &mut text])
+            .chain([&mut present, &mut dancer, &mut text, &mut overlay])
         {
             let m = mtime(&s.path);
             if !common_changed && m == s.mtime {
@@ -951,12 +1010,17 @@ impl Renderer {
                             &self.text_pipeline_layout,
                             Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                         ),
+                        Kind::Overlay => (
+                            &self.ov_pipeline_layout,
+                            Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                        ),
                         _ => continue,
                     };
                     match self.compile_into(&common, &s.path, layout, OUT_FORMAT, blend) {
                         Ok(p) => match s.kind {
                             Kind::Present => self.out_present = Some(p),
                             Kind::Text => self.out_text = Some(p),
+                            Kind::Overlay => self.out_overlay = Some(p),
                             _ => {}
                         },
                         Err(e) => eprintln!("shader {} (output) failed:\n{e}", s.name),
@@ -970,6 +1034,7 @@ impl Renderer {
         self.present = present;
         self.dancer = dancer;
         self.text = text;
+        self.overlay = overlay;
     }
 
     fn compile(&self, common: &str, path: &Path, kind: Kind) -> Result<wgpu::RenderPipeline> {
@@ -985,6 +1050,11 @@ impl Renderer {
             Kind::Text => (
                 self.config.format,
                 &self.text_pipeline_layout,
+                Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+            ),
+            Kind::Overlay => (
+                self.config.format,
+                &self.ov_pipeline_layout,
                 Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
             ),
         };
@@ -1092,6 +1162,41 @@ impl Renderer {
         }));
     }
 
+    /// Upload a stream-overlay image into `layer` (see overlay.rs).
+    pub fn set_overlay_image(&mut self, layer: usize, img: &crate::overlay::Image) {
+        if layer >= OV_LAYERS {
+            return;
+        }
+        self.ov_tex[layer] = Some(rgba_texture(&self.device, &self.queue, img.w, img.h, &img.px));
+        let view = |i: usize| {
+            self.ov_tex[i]
+                .as_ref()
+                .map_or(&self.ov_blank, |(_, v)| v)
+        };
+        self.ov_bg = Some(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("overlay"),
+            layout: &self.ov_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(view(0)),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(view(1)),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(view(2)),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: self.ov_buf.as_entire_binding(),
+                },
+            ],
+        }));
+    }
+
     /// Upload a rasterised text mask into `slot` (0/1 — the two text lanes).
     pub fn set_text_bitmap(&mut self, slot: usize, bmp: &TextBitmap) {
         if slot >= TEXT_SLOTS {
@@ -1180,6 +1285,7 @@ impl Renderer {
         u: &Uniforms,
         dancer: Option<&DancerUniforms>,
         text: Option<&TextUniforms>,
+        overlay: Option<&OvUniforms>,
     ) -> Result<()> {
         let (want_bloom, tonemap) = self
             .scenes
@@ -1206,6 +1312,10 @@ impl Renderer {
         if let Some(t) = text {
             self.queue
                 .write_buffer(&self.text_buf, 0, bytemuck::bytes_of(t));
+        }
+        if let Some(o) = overlay {
+            self.queue
+                .write_buffer(&self.ov_buf, 0, bytemuck::bytes_of(o));
         }
 
         // A failed configure is reported via the device's error callback —
@@ -1314,6 +1424,14 @@ impl Renderer {
             pass.set_pipeline(self.present.pipeline.as_ref().unwrap());
             pass.set_bind_group(0, &self.bind_groups[self.current], &[]);
             pass.draw(0..3, 0..1);
+            if let (Some(_), Some(op), Some(obg)) =
+                (overlay, self.overlay.pipeline.as_ref(), self.ov_bg.as_ref())
+            {
+                pass.set_pipeline(op);
+                pass.set_bind_group(0, &self.bind_groups[self.current], &[]);
+                pass.set_bind_group(1, obg, &[]);
+                pass.draw(0..3, 0..1);
+            }
             // Text rides on top of the finished frame — post FX can't distort it.
             if let (Some(_), Some(text), Some(text_bg)) =
                 (text, self.text.pipeline.as_ref(), self.text_bg.as_ref())
@@ -1356,6 +1474,14 @@ impl Renderer {
                 pass.set_pipeline(pipe);
                 pass.set_bind_group(0, &o.bind_groups[self.current], &[]);
                 pass.draw(0..3, 0..1);
+                if let (Some(_), Some(op), Some(obg)) =
+                    (overlay, self.out_overlay.as_ref(), self.ov_bg.as_ref())
+                {
+                    pass.set_pipeline(op);
+                    pass.set_bind_group(0, &o.bind_groups[self.current], &[]);
+                    pass.set_bind_group(1, obg, &[]);
+                    pass.draw(0..3, 0..1);
+                }
                 if let (Some(_), Some(tp), Some(tbg)) =
                     (text, self.out_text.as_ref(), self.text_bg.as_ref())
                 {
@@ -1659,6 +1785,48 @@ impl Renderer {
         }
         Some(px)
     }
+}
+
+/// An sRGB RGBA8 texture filled with `px` (straight alpha).
+fn rgba_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    w: u32,
+    h: u32,
+    px: &[u8],
+) -> (wgpu::Texture, wgpu::TextureView) {
+    let size = wgpu::Extent3d {
+        width: w,
+        height: h,
+        depth_or_array_layers: 1,
+    };
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("overlay"),
+        size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        px,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(w * 4),
+            rows_per_image: Some(h),
+        },
+        size,
+    );
+    let view = texture.create_view(&Default::default());
+    (texture, view)
 }
 
 /// Compile `common + path` into a fullscreen-triangle pipeline for `format`.

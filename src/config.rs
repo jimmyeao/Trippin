@@ -32,10 +32,11 @@ pub enum Action {
     LeaveFullscreen,
     TimelinePlay,
     TimelineRecord,
+    ShowNowPlaying,
 }
 
 impl Action {
-    pub const ALL: [Action; 22] = [
+    pub const ALL: [Action; 23] = [
         Action::NextScene,
         Action::PrevScene,
         Action::ModeAuto,
@@ -58,6 +59,7 @@ impl Action {
         Action::LeaveFullscreen,
         Action::TimelinePlay,
         Action::TimelineRecord,
+        Action::ShowNowPlaying,
     ];
 
     pub fn label(self) -> &'static str {
@@ -84,6 +86,7 @@ impl Action {
             Action::LeaveFullscreen => "Leave fullscreen",
             Action::TimelinePlay => "Timeline play / pause",
             Action::TimelineRecord => "Timeline record on / off",
+            Action::ShowNowPlaying => "Show the now-playing card again",
         }
     }
 
@@ -124,6 +127,7 @@ impl Action {
             Action::LeaveFullscreen => "Escape",
             Action::TimelinePlay => "T",
             Action::TimelineRecord => "G",
+            Action::ShowNowPlaying => "N",
         }
     }
 }
@@ -321,6 +325,33 @@ pub struct Settings {
     pub ndi_height: u32,
     /// Output cadence cap.
     pub ndi_fps: u32,
+    /// Now playing: where tracks come from (Auto = whichever changed last).
+    pub np_source: crate::nowplaying::NpSource,
+    /// Hold a new track back until it has stayed this long (seconds) — skips
+    /// cue-previews and tracks only auditioned in the headphones.
+    pub np_delay_s: f32,
+    /// Text-file source: any file another tool keeps up to date.
+    pub np_file: String,
+    /// Show the on-screen "now playing" card when the track changes.
+    pub np_card: bool,
+    /// Seconds the card stays up (0 = stays until the next track).
+    pub np_hold_s: f32,
+    pub np_size: f32,
+    /// Branding block: logo PNG + DJ name + social handles in a corner.
+    pub brand_on: bool,
+    pub brand_name: String,
+    pub brand_handles: String,
+    pub brand_logo: String,
+    /// 0 top-left · 1 top-right · 2 bottom-left · 3 bottom-right.
+    pub brand_corner: u8,
+    pub brand_size: f32,
+    pub brand_opacity: f32,
+    /// Accent colour for the card, handles and ticker ("#rrggbb").
+    pub brand_color: String,
+    /// Scrolling ticker along the bottom.
+    pub ticker_on: bool,
+    pub ticker_text: String,
+    pub ticker_speed: f32,
 }
 
 impl Default for Settings {
@@ -359,6 +390,23 @@ impl Default for Settings {
             ndi_name: "Trippin".into(),
             ndi_height: 1080,
             ndi_fps: 60,
+            np_source: Default::default(),
+            np_delay_s: 0.0,
+            np_file: String::new(),
+            np_card: true,
+            np_hold_s: 12.0,
+            np_size: 1.0,
+            brand_on: false,
+            brand_name: String::new(),
+            brand_handles: String::new(),
+            brand_logo: String::new(),
+            brand_corner: 0,
+            brand_size: 1.0,
+            brand_opacity: 0.9,
+            brand_color: "#40d9ff".into(),
+            ticker_on: false,
+            ticker_text: String::new(),
+            ticker_speed: 1.0,
         }
     }
 }
@@ -391,6 +439,14 @@ fn path() -> PathBuf {
     }
 }
 
+/// The folder `trippin.json` lives in — `nowplaying.txt` goes here too.
+pub fn data_dir() -> PathBuf {
+    match path().parent() {
+        Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
+        _ => PathBuf::from("."),
+    }
+}
+
 /// Where timeline `.json` docs live — a `timelines/` dir next to
 /// `trippin.json`.
 pub fn timelines_dir() -> PathBuf {
@@ -405,7 +461,8 @@ impl Settings {
         let mut s: Settings = std::fs::read_to_string(path())
             .ok()
             .and_then(|t| {
-                serde_json::from_str(&t)
+                // Notepad (and PowerShell 5) save UTF-8 with a BOM.
+                serde_json::from_str(t.trim_start_matches('\u{feff}'))
                     .map_err(|e| eprintln!("trippin.json ignored: {e}"))
                     .ok()
             })
