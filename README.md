@@ -101,8 +101,9 @@ into tabs — **Show** (modes, scene stepping, length, blackout, fullscreen,
 latency/downbeat), **Scenes** (the playlist: tick to include, search filter,
 "show" to jump to one now), **Dancer** (on/off, look, canon, size, which
 routines), **Effects** (the post effect + strength — picks apply live to the
-output, so the panel doubles as a preview) and **Keys** (rebindable hotkeys:
-click Rebind, then press a key). Everything is saved to `trippin.json`, and
+output, so the panel doubles as a preview), **Stream** (OBS output, now
+playing, branding, ticker, clips — see below) and **Keys** (rebindable
+hotkeys: click Rebind, then press a key). Everything is saved to `trippin.json`, and
 the visuals keep animating while the panel is being moved — rendering runs
 on its own thread.
 
@@ -127,6 +128,9 @@ Default keys (all rebindable in the panel):
 | F5 | reload shaders |
 | T | timeline play / pause |
 | G | timeline record on / off |
+| N | show the now-playing card again |
+| K | save a clip (the replay buffer) |
+| J | record the whole set: start / stop |
 | F1 (P on macOS) | show / hide the control panel |
 | Esc | leave fullscreen (it never quits; close the window to quit) |
 
@@ -333,25 +337,83 @@ sits over the plain frame). **Auto** picks a fresh effect on every scene cut
 It's applied in `present.wgsl` from `u.fx`, so it needs no scene support and
 combines with everything (a mirrored dancer in canon is five dancers).
 
-## Output to other screens (NDI)
+## Streaming: OBS, overlays, now playing, clips
 
-The **Show** tab's *Network output* section sends the finished frame — scene,
-dancer, post FX, text, blackout — as an **NDI** source on the LAN. Enable it,
-pick a source name, and it shows up in:
+Everything for streamers lives on the **Stream** tab.
 
-- **OBS** (add an *NDI Source*, pick the Trippin sender — then stream, record,
-  projector fullscreen, or VirtualCam it);
-- Resolume, vMix, MadMapper, NDI Studio Monitor, or another machine running
-  OBS — NDI crosses the network, so a second laptop can do the displaying.
+### Video output: Spout and NDI
 
-It needs the free **NDI runtime**: `winget install NDI.NDIRuntime` (Windows)
-or NDI Tools on macOS — Trippin loads it dynamically, so the app still works
-fine without it (the panel just shows the error). Resolution (720p/1080p/4K)
-and a 30/60 fps cap are independent of the window size; the render loop never
-blocks on the network — frames drop rather than stall.
+The finished frame goes out as a video source: scene, dancer, post FX,
+overlays, text and blackout.
 
-`trippin --ndi-monitor [name]` lists sources and counts frames from the first
-match — a quick "is it on the wire?" check with no other tools needed.
+- **Spout** (Windows, same PC). This is GPU texture sharing, so there's no
+  network and no runtime to install. In OBS, add *Spout2 Capture*, which
+  comes from the free Spout2 OBS plugin. It also works with Resolume,
+  TouchDesigner and anything else that reads Spout. It's implemented
+  natively (a D3D11 shared texture plus the Spout sender registry), so no
+  SpoutLibrary.dll is needed.
+- **NDI** (network). In OBS, add an *NDI Source*. It also works with vMix,
+  Resolume, NDI Studio Monitor, or a second machine. It needs the free NDI
+  runtime: `winget install NDI.NDIRuntime`, or NDI Tools on macOS. Trippin
+  loads it dynamically, so without it the app still works and the panel
+  shows the error.
+
+The output resolution (720p, 1080p or 4K) and the 30 or 60 fps cap are
+independent of the window size. The render loop never blocks on an output:
+if a sink falls behind, frames are dropped.
+
+**Transparent background.** Scenes turn off, and only the dancer, its glow,
+the overlays and the text go out, with straight alpha over Spout and NDI.
+Use it to layer Trippin over your camera in OBS.
+
+`trippin --ndi-monitor [name]` and `trippin --spout-grab <name> out.png`
+check that frames are really arriving, without any other tools.
+
+### Now playing
+
+A card slides in when the track changes. The track is also written to
+`nowplaying.txt`, next to `trippin.json`, for an OBS Text source. *Auto*
+follows whichever source changed most recently. The sources are:
+
+- **Spotify, Apple Music, a browser, or any media player**, via the OS media
+  session. On macOS, Spotify and Music are read through AppleScript. This
+  covers anyone just playing a Spotify playlist.
+- **Serato**: the newest `_Serato_/History/Sessions` file.
+- **VirtualDJ**: `History/tracklist.txt`.
+- **rekordbox**: `master.db` play history. The database is SQLCipher, and
+  Trippin decrypts it to read it.
+- **Mixxx**: the library's set log.
+- **A text file** kept up to date by any other tool.
+
+The **delay** holds a new track back until it has stayed loaded for that long,
+which skips tracks you only cued in your headphones. **N** shows the card
+again. `trippin --nowplaying` prints what each source sees.
+
+### Branding and ticker
+
+- **Branding**: an always-on logo PNG, DJ name and social handles, in any
+  corner, with a size, an opacity and an accent colour.
+- **Ticker**: a message scrolling along the bottom.
+
+The branding, the ticker and the now-playing card are drawn by the renderer,
+so Spout and NDI carry them, and so do recorded clips.
+
+### Clips and set recording
+
+Clips need **ffmpeg**. Install it with `winget install ffmpeg` or
+`brew install ffmpeg`, or point the panel at an ffmpeg binary.
+
+- **Replay buffer**: it keeps the last N seconds (60 by default), and **K**
+  saves them.
+- **Set recording**: **J** starts it and **J** again saves the whole set.
+- **Formats**:
+  - 16:9, as rendered;
+  - 9:16 crop, which fills a phone screen;
+  - 9:16 fit, which puts the whole frame over a blurred zoom of itself and
+    keeps the overlays.
+- **Encoding**: hardware H.264 when it's available (NVENC, VideoToolbox,
+  QuickSync or AMF), with stereo audio of what Trippin hears.
+- **Where clips go**: `Videos/Trippin` (`Movies/Trippin` on macOS).
 
 ## Timeline
 
@@ -476,6 +538,11 @@ shaders/present.wgsl     post: chromatic aberration, bloom, ACES / AgX tonemap, 
 shaders/bloom.wgsl       13-tap Karis downsample / tent upsample chain (embedded, not hot-reloaded)
 src/gfx.rs               baked 64³ noise volume + blue noise, bloom chain
 src/snap.rs              --snap headless render + bench
+src/nowplaying.rs        track detection: OS media session, Serato, VirtualDJ, rekordbox, Mixxx, text file
+src/overlay.rs           now-playing card, branding, ticker (CPU-drawn, composited by shaders/overlay.wgsl)
+src/output.rs            output tap: present re-run at output size, async readback, sinks
+src/spout.rs             native Spout2 sender (Windows)
+src/rec.rs               ffmpeg replay buffer / set recording, clip assembly
 shaders/scenes/*.wgsl    one file per scene; new files are picked up live
 ```
 
@@ -513,6 +580,6 @@ The 2026 helpers are:
    blending. Frames go over shared memory.
 3. ~~Silhouette dancer layer~~ (done). Next: a live webcam silhouette of the DJ.
 4. Control panel (egui): scene playlist, prompt presets, sensitivity, output select.
-5. Outputs: Spout / NDI to Resolume, and recording to MP4 for social clips.
+5. ~~Outputs: Spout / NDI, MP4 clips~~ (done). Next: Syphon on macOS.
 6. Deck awareness: Ableton Link, and track metadata / beatgrids from Rekordbox and
    Serato (reusing BeatDis readers) so phrase changes line up with the actual track.
