@@ -48,6 +48,7 @@ mod song;
 mod sysaudio;
 mod text;
 mod timeline;
+mod ui_theme;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
@@ -1262,6 +1263,26 @@ fn render_loop(
                 fps,
                 device: audio.device_name.clone(),
                 scene: dir.scene,
+                // Ordered mode can name the next scene; random is a surprise.
+                next_scene: if s.mode == Mode::Auto && !s.random_order && !usable.is_empty() {
+                    usable
+                        .iter()
+                        .position(|&x| x == dir.scene)
+                        .map(|i| usable[(i + 1) % usable.len()])
+                        .or(Some(usable[0]))
+                } else {
+                    None
+                },
+                bar_in_scene: if s.mode == Mode::Auto {
+                    dir.bars_progress(s.phrase_bars).0
+                } else {
+                    0
+                },
+                bars_total: if s.mode == Mode::Auto {
+                    dir.bars_progress(s.phrase_bars).1
+                } else {
+                    0
+                },
                 clip: dancer.loaded_name(),
                 blackout,
                 // Filled in by the event thread — it owns the window state.

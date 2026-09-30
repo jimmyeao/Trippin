@@ -92,7 +92,7 @@ impl EguiWin {
         }
 
         let ctx = egui::Context::default();
-        ctx.set_visuals(egui::Visuals::dark());
+        crate::ui_theme::apply(&ctx);
         let state = egui_winit::State::new(
             ctx.clone(),
             egui::ViewportId::ROOT,
