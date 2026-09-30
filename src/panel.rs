@@ -1,11 +1,11 @@
 //! Control panel: a second window (egui) for modes, scene playlist, dancer
 //! options, sync and hotkey bindings. It shares the renderer's GPU device.
 //!
-//! Layout (Docs/mockups.html): a live-status header across the top, a left
-//! sidebar nav — Show, Perform, Dancer & FX, Stream, Timeline, Keys — with
-//! Blackout/Fullscreen pinned to its foot, then one page at a time. Show is
-//! the default (the 1a console); Perform is a thumbnail scene library on
-//! the left and a live inspector on the right (mockup 1b).
+//! Layout (Docs/mockups.html): a top bar holding the page tabs and live
+//! status (1b arrangement — the 1a console is styling reference only), then
+//! one page at a time. Perform is the default: a thumbnail scene library
+//! with a live inspector on the right (1b), or the Pads perform view (1c).
+//! Dancer & FX, Stream, Timeline and Keys are the settings pages.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -28,6 +28,8 @@ pub type PanelFrame = crate::egui_win::Frame;
 pub enum UiCommand {
     Do(Action),
     GoToScene(usize),
+    /// Queue a scene to play at the next cut (right-click / shift-click).
+    QueueNext(usize),
     ShowClip(usize),
     /// Decode an audio file and append it as a clip region on the timeline.
     AddSong(PathBuf),
@@ -81,8 +83,6 @@ pub struct Status {
 
 #[derive(Clone, Copy, PartialEq)]
 enum Tab {
-    /// The console: now/next previews, director, palette, sync (mockup 1a).
-    Show,
     /// Scene library + inspector — the old Show and Scenes tabs merged
     /// (mockup 1b).
     Perform,
@@ -100,11 +100,12 @@ enum LibChip {
     Flat,
     Heavy,
     Seasonal,
+    /// Starred scenes only (Settings.favourite_scenes).
+    Fav,
 }
 
 impl Tab {
-    const ALL: [Tab; 6] = [
-        Tab::Show,
+    const ALL: [Tab; 5] = [
         Tab::Perform,
         Tab::DancerFx,
         Tab::Stream,
@@ -114,7 +115,6 @@ impl Tab {
 
     fn label(self) -> &'static str {
         match self {
-            Tab::Show => "Show",
             Tab::Perform => "Perform",
             Tab::DancerFx => "Dancer & FX",
             Tab::Stream => "Stream",
@@ -171,7 +171,7 @@ impl Panel {
             window,
             win,
             rebinding: None,
-            tab: Tab::Show,
+            tab: Tab::Perform,
             scene_filter: String::new(),
             chip: LibChip::All,
             thumbs: HashMap::new(),
@@ -297,49 +297,58 @@ fn build_ui(
 ) -> bool {
     let before = serde_json::to_string(s).unwrap_or_default();
 
-    // --- Status header ---------------------------------------------------
+    // --- Top bar: tabs on the left, live status on the right (1b) --------
     // The beat pips animate, so repaint every frame while we're up.
     ui.ctx().request_repaint();
-    egui::Frame::NONE
-        .fill(crate::ui_theme::PANEL)
-        .inner_margin(egui::Margin::symmetric(12, 10))
-        .show(ui, |ui| header(ui, st, scenes));
-
-    // --- Sidebar nav (mockup 1a) ------------------------------------------
-    egui::Panel::left("nav")
-        .resizable(false)
-        .exact_size(148.0)
+    egui::Panel::top("topbar")
         .frame(
             egui::Frame::NONE
                 .fill(crate::ui_theme::PANEL)
-                .inner_margin(egui::Margin::symmetric(10, 8)),
+                .inner_margin(egui::Margin::symmetric(10, 6))
+                .stroke(egui::Stroke::new(1.0, crate::ui_theme::BORDER)),
         )
-        .show(ui, |ui| {
-            sidebar(ui, tab, s, st, scenes.len(), clips.len(), cmd);
-        });
+        .show(ui, |ui| topbar(ui, tab, s, st));
 
     match *tab {
-        Tab::Perform => perform_tab(
-            ui,
-            s,
-            st,
-            scenes,
-            scene_heavy,
-            heavy_ok,
-            scene_filter,
-            chip,
-            thumbs,
-            want_thumbs,
-            cmd,
-        ),
+        Tab::Perform => {
+            if s.perform_pads {
+                pads_view(ui, s, st, scenes, thumbs, want_thumbs, cmd);
+            } else {
+                // Inspector declared before the central grid (top → right →
+                // central) so egui shrinks the library correctly — no width
+                // fudges needed downstream.
+                egui::Panel::right("inspector")
+                    .resizable(false)
+                    .exact_size(292.0)
+                    .frame(
+                        egui::Frame::NONE
+                            .fill(crate::ui_theme::PANEL)
+                            .inner_margin(egui::Margin::symmetric(12, 10))
+                            .stroke(egui::Stroke::new(1.0, crate::ui_theme::BORDER)),
+                    )
+                    .show(ui, |ui| {
+                        inspector(ui, s, st, scenes, tab, thumbs, want_thumbs, cmd);
+                    });
+                perform_tab(
+                    ui,
+                    s,
+                    st,
+                    scenes,
+                    scene_heavy,
+                    heavy_ok,
+                    scene_filter,
+                    chip,
+                    thumbs,
+                    want_thumbs,
+                    cmd,
+                );
+            }
+        }
         _ => {
             egui::ScrollArea::vertical()
                 .auto_shrink([false, true])
                 .horizontal_scroll_offset(0.0)
                 .show(ui, |ui| match *tab {
-                    Tab::Show => {
-                        show_tab(ui, s, st, scenes, scene_heavy, heavy_ok, thumbs, want_thumbs, cmd)
-                    }
                     Tab::DancerFx => {
                         dancer_fx_tab(ui, s, st, clips, clip_thumbs, cmd)
                     }
@@ -354,47 +363,49 @@ fn build_ui(
     serde_json::to_string(s).unwrap_or_default() != before
 }
 
-/// The live-status strip: current + next scene, BPM, beat pips, bar
-/// progress and state pills (Docs/mockups.html §2).
-fn header(ui: &mut egui::Ui, st: &Status, scenes: &[String]) {
+/// The top bar (mockup 1b): page tabs on the left — with the Perform
+/// Library/Pads toggle beside them when Perform is active — and live
+/// status on the right: fps · BPM · beat pips · pills.
+fn topbar(ui: &mut egui::Ui, tab: &mut Tab, s: &mut Settings, st: &Status) {
     use crate::ui_theme::*;
     ui.horizontal(|ui| {
-        // Left: what's on screen.
-        ui.vertical(|ui| {
-            section_label(ui, "on screen");
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(
-                        scenes.get(st.scene).map(String::as_str).unwrap_or("—"),
-                    )
-                    .monospace()
-                    .size(18.0)
-                    .strong(),
-                );
-                if let Some(nx) = st.next_scene {
-                    ui.label(
-                        egui::RichText::new(format!(
-                            "next → {}",
-                            scenes.get(nx).map(String::as_str).unwrap_or("?")
-                        ))
-                        .size(11.0)
-                        .color(MUTED)
-                        .monospace(),
-                    );
-                }
-            });
-        });
-        // Right: fps · BPM · pips · pills.
+        for t in Tab::ALL {
+            let sel = *tab == t;
+            let b = egui::Button::new(
+                egui::RichText::new(t.label())
+                    .size(12.5)
+                    .color(if sel { TEXT } else { MUTED }),
+            )
+            .fill(if sel { ACCENT_SEL } else { egui::Color32::TRANSPARENT })
+            .stroke(if sel {
+                egui::Stroke::new(1.0, ACCENT)
+            } else {
+                egui::Stroke::NONE
+            })
+            .corner_radius(egui::CornerRadius::same(5));
+            if ui.add(b).clicked() {
+                *tab = t;
+            }
+        }
+        if *tab == Tab::Perform {
+            ui.add_space(10.0);
+            segmented(ui, &mut s.perform_pads, &[(false, "Library"), (true, "Pads")]);
+        }
+        // Remaining width decides how much status fits beside the tabs —
+        // the right-to-left cluster otherwise overdraws the toggle.
+        let room = ui.available_width();
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(egui::RichText::new(format!("{:.0} fps", st.fps)).color(MUTED).size(11.0));
-            if st.calm > 0.5 {
+            // Rightmost first: pills, then pips, BPM, fps. Pills drop first
+            // when cramped (their state still shows in the inspector).
+            if room > 240.0 && st.calm > 0.5 {
                 pill(ui, "breakdown", BREAKDOWN, BREAKDOWN_BG);
             }
-            if st.silent {
+            if room > 240.0 && st.silent {
                 pill(ui, "no signal", WARN, WARN_BG);
             }
             // Four beat pips: the live one is accent.
-            let (r, _) = ui.allocate_exact_size(egui::vec2(42.0, 10.0), egui::Sense::hover());
+            let (r, _) =
+                ui.allocate_exact_size(egui::vec2(42.0, 10.0), egui::Sense::hover());
             for i in 0..4u64 {
                 let c = egui::pos2(r.min.x + 5.0 + i as f32 * 11.0, r.center().y);
                 ui.painter().circle_filled(
@@ -410,46 +421,13 @@ fn header(ui: &mut egui::Ui, st: &Status, scenes: &[String]) {
                     .strong(),
             );
             ui.label(egui::RichText::new("BPM").size(10.0).color(FAINT));
-        });
-    });
-    // Second line: bar progress to the next cut + dancer + device.
-    ui.horizontal(|ui| {
-        if st.bars_total > 0 {
-            let frac = st.bar_in_scene as f32 / st.bars_total as f32;
-            ui.add(
-                egui::ProgressBar::new(frac)
-                    .desired_width(90.0)
-                    .desired_height(4.0)
-                    .fill(ACCENT)
-                    .corner_radius(2.0)
-                    .show_percentage(),
-            );
-            ui.label(
-                egui::RichText::new(bar_progress_line(st))
-                    .size(11.0)
-                    .color(MUTED),
-            );
-        }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(egui::RichText::new(&st.device).size(10.0).color(FAINT));
-            ui.add(
-                egui::ProgressBar::new(st.groove)
-                    .desired_width(40.0)
-                    .desired_height(4.0)
-                    .fill(BREAKDOWN)
-                    .corner_radius(2.0),
-            )
-            .on_hover_text("Groove: how steadily kicks land. Sustained low = breakdown.");
-            ui.label(
-                egui::RichText::new(format!(
-                    "dancer {} · {:.0}% conf",
-                    st.clip.as_deref().unwrap_or("off"),
-                    st.confidence * 100.0
-                ))
-                .size(11.0)
-                .color(MUTED)
-                .monospace(),
-            );
+            if room > 170.0 {
+                ui.label(
+                    egui::RichText::new(format!("{:.0} fps", st.fps))
+                        .color(MUTED)
+                        .size(11.0),
+                );
+            }
         });
     });
 }
@@ -472,73 +450,6 @@ fn row(ui: &mut egui::Ui, label: &str, body: impl FnOnce(&mut egui::Ui)) {
     });
 }
 
-// ---------------------------------------------------------------------------
-// Show tab (mockup 1a): now/next previews, director, palette, sync.
-// ---------------------------------------------------------------------------
-
-/// A framed scene preview: thumbnail with a caption bar baked into its
-/// lower-left corner, like the NOW / UP NEXT cards in mockup 1a.
-#[allow(clippy::too_many_arguments)]
-fn preview_card(
-    ui: &mut egui::Ui,
-    name: &str,
-    caption: &str,
-    accent_edge: bool,
-    w: f32,
-    thumbs: &mut HashMap<String, egui::TextureHandle>,
-    want: &mut HashMap<String, Instant>,
-    cmd: &mut Vec<UiCommand>,
-) {
-    use crate::ui_theme::*;
-    let h = w * 9.0 / 16.0;
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::hover());
-    let p = ui.painter();
-    let key = format!("scene:{name}");
-    if let Some(tex) = thumb_tex(ui, thumbs, want, &key, cmd) {
-        p.image(
-            tex,
-            rect,
-            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-            egui::Color32::WHITE,
-        );
-    } else {
-        // Diagonal stripes as a stand-in until the thumbnail lands.
-        p.rect_filled(rect, 6.0, RAISED);
-        let mut x = rect.min.x - rect.height();
-        while x < rect.max.x {
-            p.line_segment(
-                [
-                    egui::pos2(x, rect.max.y),
-                    egui::pos2(x + rect.height(), rect.min.y),
-                ],
-                egui::Stroke::new(10.0, HOVER.gamma_multiply(0.6)),
-            );
-            x += 26.0;
-        }
-    }
-    p.rect_stroke(
-        rect,
-        6.0,
-        egui::Stroke::new(
-            if accent_edge { 1.5 } else { 1.0 },
-            if accent_edge { ACCENT } else { BORDER_HI },
-        ),
-        egui::StrokeKind::Inside,
-    );
-    let cap_w = (caption.len() as f32 * 7.0 + 16.0).clamp(48.0, w - 12.0);
-    let cap_r = egui::Rect::from_min_max(
-        egui::pos2(rect.min.x + 8.0, rect.max.y - 26.0),
-        egui::pos2(rect.min.x + 8.0 + cap_w, rect.max.y - 8.0),
-    );
-    p.rect_filled(cap_r, 4.0, INSET.gamma_multiply(0.85));
-    p.text(
-        cap_r.center(),
-        egui::Align2::CENTER_CENTER,
-        caption,
-        egui::FontId::monospace(11.0),
-        if accent_edge { TEXT } else { MUTED },
-    );
-}
 
 /// One palette swatch — a small gradient chip that selects the palette.
 fn palette_swatch(ui: &mut egui::Ui, s: &mut Settings, name: &str, w: f32, h: f32) {
@@ -570,342 +481,6 @@ fn palette_swatch(ui: &mut egui::Ui, s: &mut Settings, name: &str, w: f32, h: f3
     resp.on_hover_text(name);
 }
 
-/// One sidebar nav row: label left, optional count right, dark pill when
-/// selected (mockup 1a). Returns true when clicked.
-fn nav_item(ui: &mut egui::Ui, label: &str, count: Option<usize>, sel: bool) -> bool {
-    use crate::ui_theme::*;
-    let w = ui.available_width();
-    let (rect, resp) =
-        ui.allocate_exact_size(egui::vec2(w, 28.0), egui::Sense::click());
-    let bg = if sel {
-        RAISED
-    } else if resp.hovered() {
-        HOVER.gamma_multiply(0.5)
-    } else {
-        egui::Color32::TRANSPARENT
-    };
-    ui.painter().rect_filled(rect, 6.0, bg);
-    ui.painter().text(
-        egui::pos2(rect.min.x + 10.0, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        label,
-        egui::FontId::proportional(13.0),
-        if sel { TEXT } else { MUTED },
-    );
-    if let Some(n) = count {
-        ui.painter().text(
-            egui::pos2(rect.max.x - 8.0, rect.center().y),
-            egui::Align2::RIGHT_CENTER,
-            n.to_string(),
-            egui::FontId::monospace(11.0),
-            FAINT,
-        );
-    }
-    resp.clicked()
-}
-
-/// Left nav rail (mockup 1a): one row per screen with counts where they
-/// make sense; Blackout + Fullscreen pinned to the foot.
-fn sidebar(
-    ui: &mut egui::Ui,
-    tab: &mut Tab,
-    s: &Settings,
-    st: &Status,
-    n_scenes: usize,
-    n_clips: usize,
-    cmd: &mut Vec<UiCommand>,
-) {
-    use crate::ui_theme::*;
-    ui.spacing_mut().item_spacing.y = 3.0;
-    for t in Tab::ALL {
-        let count = match t {
-            Tab::Perform => Some(n_scenes),
-            Tab::DancerFx => Some(n_clips),
-            Tab::Keys => Some(s.keys.len()),
-            _ => None,
-        };
-        if nav_item(ui, t.label(), count, *tab == t) {
-            *tab = t;
-        }
-    }
-
-    // Blackout + Fullscreen pinned to the foot of the rail.
-    ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
-        ui.add_space(2.0);
-        let w = ui.available_width();
-        let bw = (w - 30.0).max(60.0);
-        ui.horizontal(|ui| {
-            let fs = if st.fullscreen {
-                "Leave fullscreen"
-            } else {
-                "Fullscreen"
-            };
-            if ui
-                .add_sized([bw, 30.0], egui::Button::new(fs))
-                .clicked()
-            {
-                cmd.push(UiCommand::Do(Action::Fullscreen));
-            }
-            key_badge(ui, &key_short(s.keys.get(&Action::Fullscreen).map_or("", String::as_str)));
-        });
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            let bo = if st.blackout { "Blackout: ON" } else { "Blackout" };
-            if ui
-                .add_sized(
-                    [bw, 30.0],
-                    egui::Button::new(egui::RichText::new(bo).color(if st.blackout {
-                        TEXT
-                    } else {
-                        DANGER
-                    }))
-                    .fill(if st.blackout { DANGER } else { DANGER_BG }),
-                )
-                .clicked()
-            {
-                cmd.push(UiCommand::Do(Action::Blackout));
-            }
-            key_badge(ui, &key_short(s.keys.get(&Action::Blackout).map_or("", String::as_str)));
-        });
-    });
-}
-
-/// Mockup 1a: the console. Now/up-next previews over Director, Scene sets,
-/// Palette and Sync cards.
-#[allow(clippy::too_many_arguments)]
-fn show_tab(
-    ui: &mut egui::Ui,
-    s: &mut Settings,
-    st: &Status,
-    scenes: &[String],
-    heavy: &[bool],
-    heavy_ok: bool,
-    thumbs: &mut HashMap<String, egui::TextureHandle>,
-    want: &mut HashMap<String, Instant>,
-    cmd: &mut Vec<UiCommand>,
-) {
-    use crate::ui_theme::*;
-    let now = scenes.get(st.scene).cloned().unwrap_or_else(|| "—".into());
-    let next = st.next_scene.map(|i| scenes.get(i).cloned().unwrap_or_else(|| "?".into()));
-
-    // Row 1: NOW card | prev/next column | UP NEXT card.
-    let avail = ui.available_width();
-    let btn_w = 150.0;
-    let gap = ui.spacing().item_spacing.x * 2.0;
-    let card_w = ((avail - btn_w - gap) / 2.0).max(120.0);
-    let card_h = card_w * 9.0 / 16.0;
-    ui.horizontal(|ui| {
-        ui.vertical(|ui| {
-            section_label(ui, "now");
-            preview_card(
-                ui, &now, &format!("{now} · live"), true, card_w, thumbs, want, cmd,
-            );
-        });
-        ui.allocate_ui(egui::vec2(btn_w, card_h + 18.0), |ui| {
-            ui.vertical(|ui| {
-                ui.add_space(14.0);
-                let bw = ui.available_width();
-                if ui
-                    .add_sized([bw, 30.0], egui::Button::new("◀ Prev"))
-                    .clicked()
-                {
-                    cmd.push(UiCommand::Do(Action::PrevScene));
-                }
-                ui.add_space(6.0);
-                if ui
-                    .add_sized(
-                        [bw, 30.0],
-                        egui::Button::new("Next ▶").fill(ACCENT_SEL),
-                    )
-                    .clicked()
-                {
-                    cmd.push(UiCommand::Do(Action::NextScene));
-                }
-                ui.add_space(6.0);
-                let cut = if st.bars_total > 0 {
-                    let rem = st.bars_total.saturating_sub(st.bar_in_scene);
-                    if rem == 0 { "cut now".into() } else { format!("cut in {rem} bars") }
-                } else {
-                    "held".into()
-                };
-                ui.label(egui::RichText::new(cut).size(11.0).color(MUTED).monospace());
-            });
-        });
-        ui.vertical(|ui| {
-            section_label(
-                ui,
-                if s.random_order { "up next · random" } else { "up next" },
-            );
-            match &next {
-                Some(n) => {
-                    let tag = if heavy.get(st.next_scene.unwrap()).copied().unwrap_or(false) {
-                        "3D"
-                    } else {
-                        "2D"
-                    };
-                    preview_card(
-                        ui, n, &format!("{n} ({tag})"), false, card_w, thumbs, want, cmd,
-                    );
-                }
-                None => {
-                    let (rect, _) =
-                        ui.allocate_exact_size(egui::vec2(card_w, card_h), egui::Sense::hover());
-                    ui.painter().rect_filled(rect, 6.0, CARD);
-                    ui.painter().rect_stroke(
-                        rect,
-                        6.0,
-                        egui::Stroke::new(1.0, BORDER),
-                        egui::StrokeKind::Inside,
-                    );
-                    ui.painter().text(
-                        rect.center(),
-                        egui::Align2::CENTER_CENTER,
-                        "manual — nothing queued",
-                        egui::FontId::monospace(11.0),
-                        FAINT,
-                    );
-                }
-            }
-        });
-    });
-
-    ui.add_space(8.0);
-
-    // Row 2: Director card left; Palette + Sync stacked right.
-    ui.columns(2, |cols| {
-        let ui = &mut cols[0];
-        card().show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.label(egui::RichText::new("Director").size(14.0).strong());
-            ui.add_space(4.0);
-            ui.label(egui::RichText::new("Mode").size(11.0).color(MUTED));
-            segmented_wide(
-                ui,
-                &mut s.mode,
-                &[(Mode::Auto, "Auto"), (Mode::Static, "Static"), (Mode::Manual, "Manual")],
-            );
-            ui.small(match s.mode {
-                Mode::Auto => "Cuts on phrases and drops; the dancer follows the track.",
-                Mode::Static => "Holds the current scene until you change it.",
-                Mode::Manual => "Nothing changes by itself — you drive every cut.",
-            });
-            ui.add_space(6.0);
-            ui.label(egui::RichText::new("Scene length (bars)").size(11.0).color(MUTED));
-            segmented_wide(
-                ui,
-                &mut s.phrase_bars,
-                &[(4u32, "4"), (8, "8"), (16, "16"), (32, "32")],
-            );
-            ui.add_space(6.0);
-            ui.checkbox(&mut s.breakdown_mode, "Detect breakdowns");
-            ui.checkbox(&mut s.cut_on_drops, "Cut early when a drop lands");
-            ui.checkbox(&mut s.random_order, "Random order");
-        });
-
-        ui.add_space(6.0);
-        card().show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.label(egui::RichText::new("Scene sets").size(14.0).strong());
-            ui.add_space(4.0);
-            ui.label(egui::RichText::new("Seasonal").size(11.0).color(MUTED));
-            segmented_wide(
-                ui,
-                &mut s.seasonal,
-                &[
-                    (Seasonal::Auto, "Auto"),
-                    (Seasonal::Always, "Always"),
-                    (Seasonal::Off, "Off"),
-                ],
-            );
-            let in_now: Vec<&str> = scenes
-                .iter()
-                .map(String::as_str)
-                .filter(|n| in_season(n, today()) == Some(true))
-                .collect();
-            ui.small(if in_now.is_empty() {
-                "Nothing seasonal today.".to_string()
-            } else {
-                format!("In season: {}", in_now.join(", "))
-            });
-            ui.add_space(6.0);
-            ui.label(egui::RichText::new("3D scenes").size(11.0).color(MUTED));
-            segmented_wide(
-                ui,
-                &mut s.heavy_scenes,
-                &[
-                    (Tristate::Auto, "Auto"),
-                    (Tristate::On, "On"),
-                    (Tristate::Off, "Off"),
-                ],
-            );
-            ui.small(match s.heavy_scenes {
-                Tristate::Auto if heavy_ok => {
-                    "Raymarched scenes are in rotation — this GPU can handle them."
-                }
-                Tristate::Auto => {
-                    "Raymarched scenes are off — this GPU can't keep up. Force them with On."
-                }
-                Tristate::On => {
-                    "Raymarched scenes forced on — may drop frames on a weak GPU."
-                }
-                Tristate::Off => "Raymarched scenes are off.",
-            });
-            ui.add_space(6.0);
-            ui.label(egui::RichText::new("2D scenes").size(11.0).color(MUTED));
-            segmented_wide(ui, &mut s.flat_scenes, &[(true, "On"), (false, "Off")]);
-        });
-
-        let ui = &mut cols[1];
-        card().show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Palette").size(14.0).strong());
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(
-                        egui::RichText::new(&s.palette).size(11.0).color(ACCENT).monospace(),
-                    );
-                });
-            });
-            ui.add_space(4.0);
-            let names: Vec<&str> = crate::palettes::names().collect();
-            let n_per_row = 7usize;
-            let sw_w = ((ui.available_width() - (n_per_row as f32 - 1.0) * 6.0)
-                / n_per_row as f32)
-                .max(28.0);
-            for row_names in names.chunks(n_per_row) {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 6.0;
-                    for name in row_names {
-                        palette_swatch(ui, s, name, sw_w, 18.0);
-                    }
-                });
-            }
-        });
-        ui.add_space(6.0);
-        card().show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.label(egui::RichText::new("Sync").size(14.0).strong());
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Latency").size(11.0).color(MUTED));
-                ui.add(
-                    egui::Slider::new(&mut s.latency_ms, -100.0..=200.0)
-                        .step_by(5.0)
-                        .show_value(false),
-                );
-                ui.label(
-                    egui::RichText::new(format!("{:+.0} ms", s.latency_ms))
-                        .size(11.0)
-                        .color(MUTED)
-                        .monospace(),
-                );
-            });
-            if ui.button("Mark this beat as the downbeat (the \"one\")").clicked() {
-                cmd.push(UiCommand::Do(Action::MarkDownbeat));
-            }
-        });
-    });
-}
-
 // ---------------------------------------------------------------------------
 // Perform tab (mockup 1b): scene library grid left, inspector on the right.
 // ---------------------------------------------------------------------------
@@ -925,35 +500,6 @@ fn perform_tab(
     cmd: &mut Vec<UiCommand>,
 ) {
     use crate::ui_theme::*;
-    // Library / Pads switch (persisted) — then the view's own toolbar bits.
-    ui.horizontal(|ui| {
-        segmented(
-            ui,
-            &mut s.perform_pads,
-            &[(false, "Library"), (true, "Pads")],
-        );
-    });
-
-    if s.perform_pads {
-        pads_view(ui, s, st, scenes, thumbs, want, cmd);
-        return;
-    }
-
-    // Right inspector — fixed width; not resizable (the default-resizable
-    // panel draws a grab pill on the border).
-    egui::Panel::right("inspector")
-        .resizable(false)
-        .exact_size(292.0)
-        .frame(
-            egui::Frame::NONE
-                .fill(PANEL)
-                .inner_margin(egui::Margin::symmetric(12, 10))
-                .stroke(egui::Stroke::new(1.0, BORDER)),
-        )
-        .show(ui, |ui| {
-            inspector(ui, s, st, scenes, thumbs, want, cmd);
-        });
-
     let date = today();
     let heavy_on = match s.heavy_scenes {
         Tristate::Auto => heavy_ok,
@@ -973,6 +519,7 @@ fn perform_tab(
                 LibChip::Flat => !is_heavy,
                 LibChip::Heavy => is_heavy,
                 LibChip::Seasonal => in_season(n, date).is_some(),
+                LibChip::Fav => s.favourite_scenes.iter().any(|f| f == n),
             }
         })
         .collect();
@@ -989,7 +536,10 @@ fn perform_tab(
 
     // Toolbar: search field, filter pills (active one is bright, like the
     // mockup), then the stats line with all on/off at its right edge.
-    ui.horizontal(|ui| {
+    // horizontal_wrapped: a non-wrapping row that overflows its allocation
+    // re-expands the parent's cursor and the grid would slide back under
+    // the inspector at narrow widths.
+    ui.horizontal_wrapped(|ui| {
         ui.add_space(2.0);
         ui.add(
             egui::TextEdit::singleline(filter)
@@ -1001,6 +551,7 @@ fn perform_tab(
             (LibChip::Flat, "2D"),
             (LibChip::Heavy, "3D"),
             (LibChip::Seasonal, "Seasonal"),
+            (LibChip::Fav, "fav"),
         ] {
             let on = *chip == c;
             let b = egui::Button::new(
@@ -1014,24 +565,77 @@ fn perform_tab(
                 *chip = c;
             }
         }
-    });
-    // Keep the right-aligned controls inside the library column — the
-    // central panel underlaps the inspector by ~15px, so unconstrained
-    // right alignment would paint into the gutter.
-    let stat_w = (ui.available_width() - 24.0).max(80.0);
-    ui.allocate_ui(egui::vec2(stat_w, 18.0), |ui| {
-        ui.horizontal(|ui| {
+        // Rotation rules live beside the filters they affect (mockup 1b).
+        let rules = ui.add(
+            egui::Button::new(egui::RichText::new("rules").size(11.5).color(MUTED))
+                .fill(RAISED)
+                .corner_radius(egui::CornerRadius::same(9)),
+        );
+        rules.clone().on_hover_text("Which scene sets may rotate in");
+        egui::Popup::menu(&rules).show(|ui| {
+            ui.set_min_width(230.0);
             ui.label(
-                egui::RichText::new(format!(
-                    "{} shown · {} of {} in rotation · click to preview · toggle to add/remove from rotation",
-                    shown.len(),
-                    in_rotation,
-                    scenes.len()
-                ))
-                .size(10.5)
-                .color(FAINT),
+                egui::RichText::new("rotation rules")
+                    .size(10.0)
+                    .color(crate::ui_theme::FAINT),
             );
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.add_space(4.0);
+            ui.label(egui::RichText::new("Seasonal").size(11.5).color(MUTED));
+            segmented_wide(
+                ui,
+                &mut s.seasonal,
+                &[
+                    (Seasonal::Auto, "auto"),
+                    (Seasonal::Always, "always"),
+                    (Seasonal::Off, "off"),
+                ],
+            );
+            ui.label(egui::RichText::new("3D (raymarched)").size(11.5).color(MUTED));
+            segmented_wide(
+                ui,
+                &mut s.heavy_scenes,
+                &[
+                    (Tristate::Auto, "auto"),
+                    (Tristate::On, "on"),
+                    (Tristate::Off, "off"),
+                ],
+            );
+            ui.label(egui::RichText::new("2D").size(11.5).color(MUTED));
+            segmented_wide(ui, &mut s.flat_scenes, &[(true, "on"), (false, "off")]);
+            ui.label(
+                egui::RichText::new(if heavy_ok {
+                    "GPU is fine with 3D scenes"
+                } else {
+                    "auto: 3D scenes are off — weak GPU"
+                })
+                .size(10.0)
+                .color(crate::ui_theme::FAINT),
+            );
+        });
+    });
+    // Stats line: counts left, all on/off at the library's right edge.
+    // allocate_ui_with_layout pins the right edge to the real content width
+    // (a panel doesn't shrink the parent's max_rect — right_to_left on the
+    // parent would anchor into the inspector's gutter).
+    // Wrapped for the same reason as the toolbar — at narrow widths the
+    // counts + buttons won't fit on one row, and overflowing would re-widen
+    // the parent cursor under the inspector.
+    ui.horizontal_wrapped(|ui| {
+        ui.label(
+            egui::RichText::new(format!(
+                "{} shown · {} of {} in rotation · click to preview · toggle to add/remove from rotation",
+                shown.len(),
+                in_rotation,
+                scenes.len()
+            ))
+            .size(10.5)
+            .color(FAINT),
+        );
+        let rem = (ui.available_width() - 6.0).max(40.0);
+        ui.allocate_ui_with_layout(
+            egui::vec2(rem, 16.0),
+            egui::Layout::right_to_left(egui::Align::Center),
+            |ui| {
                 if ui
                     .add(egui::Button::new(
                         egui::RichText::new("all off").size(11.0).color(ACCENT),
@@ -1049,24 +653,30 @@ fn perform_tab(
                 {
                     s.disabled_scenes.clear();
                 }
-            });
-        });
+            },
+        );
     });
     ui.add_space(2.0);
 
-    // Thumbnail grid — reflows with the column width. The scrollbar is
-    // hidden (mockups show none; wheel/drag still scroll) so no handle can
-    // float in the gutter beside the inspector. x-offset is pinned: a
-    // stray horizontal offset has no scrollbar to undo it.
+    // Thumbnail grid — fluid: columns fill the available width, tiles
+    // stretch to fit. The scrollbar appears when needed; the x-offset is
+    // pinned because a stray horizontal offset has no bar to undo it.
+    const GAP: f32 = 10.0;
+    const MIN_TILE: f32 = 140.0;
+    // Non-floating bar so it reserves width instead of overlaying the last
+    // column; a small outer margin keeps it off the inspector edge. (Set on
+    // the parent — inside the closure it's too late for the ScrollArea.)
+    ui.spacing_mut().scroll.floating = false;
+    ui.spacing_mut().scroll.bar_outer_margin = 4.0;
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
-        .max_width(ui.available_width() - 16.0)
         .horizontal_scroll_offset(0.0)
-        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
         .show(ui, |ui| {
-            ui.spacing_mut().item_spacing = egui::vec2(10.0, 10.0);
-            let avail = ui.available_width() - 4.0;
-            let cols = ((avail + 10.0) / 160.0).floor().max(2.0) as usize;
+            ui.spacing_mut().item_spacing = egui::vec2(GAP, GAP);
+            let avail = ui.available_width();
+            let cols = ((avail + GAP) / MIN_TILE).floor().max(2.0) as usize;
+            let tile_w = (avail - GAP * (cols - 1) as f32) / cols as f32;
             for chunk in shown.chunks(cols) {
                 ui.horizontal(|ui| {
                     for &i in chunk {
@@ -1079,6 +689,7 @@ fn perform_tab(
                             heavy.get(i).copied().unwrap_or(false),
                             heavy_on,
                             date,
+                            tile_w,
                             thumbs,
                             want,
                             cmd,
@@ -1090,8 +701,81 @@ fn perform_tab(
         });
 }
 
+/// A 16:9 scene thumbnail (or striped placeholder) painted through a
+/// rect-clipped painter so nothing bleeds past the frame. Shared by the
+/// library tiles, inspector preview, and Pads now/next cards.
+fn scene_thumb(
+    ui: &egui::Ui,
+    rect: egui::Rect,
+    key: &str,
+    dim: f32,
+    thumbs: &mut HashMap<String, egui::TextureHandle>,
+    want: &mut HashMap<String, Instant>,
+    cmd: &mut Vec<UiCommand>,
+) {
+    use crate::ui_theme::*;
+    let p = ui.painter_at(rect);
+    if let Some(tex) = thumb_tex(ui, thumbs, want, key, cmd) {
+        p.image(
+            tex,
+            rect,
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            egui::Color32::WHITE.gamma_multiply(dim),
+        );
+    } else {
+        // Diagonal stripes as a stand-in until the thumbnail lands.
+        p.rect_filled(rect, 4.0, RAISED);
+        let mut x = rect.min.x - rect.height();
+        while x < rect.max.x {
+            p.line_segment(
+                [
+                    egui::pos2(x, rect.max.y),
+                    egui::pos2(x + rect.height(), rect.min.y),
+                ],
+                egui::Stroke::new(10.0, HOVER.gamma_multiply(0.6 * dim)),
+            );
+            x += 26.0;
+        }
+    }
+    p.rect_stroke(
+        rect,
+        4.0,
+        egui::Stroke::new(1.0, BORDER),
+        egui::StrokeKind::Inside,
+    );
+}
+
+/// Truncate `text` to `max_w` with an ellipsis, measured with real
+/// galleys and safe for multi-byte characters (never slices mid-char).
+fn ellipsize(p: &egui::Painter, text: &str, font: &egui::FontId, max_w: f32) -> String {
+    let measure = |s: String| {
+        p.layout_no_wrap(s, font.clone(), egui::Color32::WHITE)
+            .size()
+            .x
+    };
+    if measure(text.to_string()) <= max_w {
+        return text.to_string();
+    }
+    let mut out = String::new();
+    for ch in text.chars() {
+        if measure(format!("{out}{ch}…")) > max_w {
+            break;
+        }
+        out.push(ch);
+    }
+    format!("{out}…")
+}
+
+/// Width of `text` in `font`, measured with a real galley.
+fn text_w(p: &egui::Painter, text: &str, font: &egui::FontId) -> f32 {
+    p.layout_no_wrap(text.to_string(), font.clone(), egui::Color32::WHITE)
+        .size()
+        .x
+}
+
 /// One scene-library tile: thumbnail, type tag, rotation checkbox, name.
-/// Click the tile to cut to the scene (mockup 1b).
+/// Click cuts to the scene; right-click or shift-click queues it as the
+/// next scene (mockup 1b).
 #[allow(clippy::too_many_arguments)]
 fn scene_tile(
     ui: &mut egui::Ui,
@@ -1102,16 +786,18 @@ fn scene_tile(
     is_heavy: bool,
     heavy_on: bool,
     date: (u32, u32),
+    w: f32,
     thumbs: &mut HashMap<String, egui::TextureHandle>,
     want: &mut HashMap<String, Instant>,
     cmd: &mut Vec<UiCommand>,
 ) {
     use crate::ui_theme::*;
-    const TW: f32 = 150.0;
-    const TH: f32 = 108.0;
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(TW, TH), egui::Sense::click());
+    let img_h = (w - 10.0) * 9.0 / 16.0;
+    let h = 5.0 + img_h + 5.0 + 15.0 + 4.0;
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::click());
     let p = ui.painter();
     let live = i == st.scene;
+    let queued = st.next_scene == Some(i);
     let on = !s.disabled_scenes.iter().any(|d| d == name);
     let seasonal = in_season(name, date).is_some();
     // Can't join rotation at all — dimmed and click does nothing.
@@ -1121,50 +807,72 @@ fn scene_tile(
     p.rect_filled(rect, 6.0, CARD);
     let img_r = egui::Rect::from_min_size(
         rect.min + egui::vec2(5.0, 5.0),
-        egui::vec2(TW - 10.0, 78.0),
+        egui::vec2(w - 10.0, img_h),
     );
     let key = format!("scene:{name}");
-    if let Some(tex) = thumb_tex(ui, thumbs, want, &key, cmd) {
-        p.image(
-            tex,
-            img_r,
-            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-            egui::Color32::WHITE.gamma_multiply(dim),
-        );
-    } else {
-        p.rect_filled(img_r, 4.0, RAISED);
-        p.text(
-            img_r.center(),
-            egui::Align2::CENTER_CENTER,
-            name.get(..2).unwrap_or(name),
-            egui::FontId::monospace(13.0),
-            FAINT,
-        );
-    }
-    p.rect_stroke(
-        img_r,
-        4.0,
-        egui::Stroke::new(1.0, BORDER),
-        egui::StrokeKind::Inside,
-    );
+    scene_thumb(ui, img_r, &key, dim, thumbs, want, cmd);
 
-    // Type tag, top-left over the thumbnail.
+    // Type tag, top-left over the thumbnail. Plain ASCII-ish labels — the
+    // bundled font has no ❄ glyph.
     let tag = if seasonal {
-        "❄"
+        "season"
     } else if is_heavy {
         "3D"
     } else {
         "2D"
     };
-    let tag_r = egui::Rect::from_min_size(img_r.min + egui::vec2(4.0, 4.0), egui::vec2(22.0, 13.0));
+    let tag_font = egui::FontId::monospace(9.0);
+    let tag_w = text_w(p, tag, &tag_font) + 8.0;
+    let tag_r =
+        egui::Rect::from_min_size(img_r.min + egui::vec2(4.0, 4.0), egui::vec2(tag_w, 13.0));
     p.rect_filled(tag_r, 3.0, INSET.gamma_multiply(0.85));
     p.text(
         tag_r.center(),
         egui::Align2::CENTER_CENTER,
         tag,
-        egui::FontId::monospace(9.0),
+        tag_font,
         if seasonal { LANE_FX } else { MUTED },
     );
+
+    // Favourite star, left of the checkbox — drawn, not a glyph (the
+    // bundled font has no ★). Filled amber when starred.
+    let fav = s.favourite_scenes.iter().any(|f| f == name);
+    let star_r = egui::Rect::from_center_size(
+        egui::pos2(img_r.max.x - 32.0, img_r.min.y + 12.0),
+        egui::vec2(15.0, 15.0),
+    );
+    let star = ui.interact(star_r, resp.id.with("fav"), egui::Sense::click());
+    let star_clicked = star.clicked();
+    let pts: Vec<egui::Pos2> = (0..10)
+        .map(|i| {
+            let a = -std::f32::consts::FRAC_PI_2 + i as f32 * std::f32::consts::PI / 5.0;
+            let r = if i % 2 == 0 { 6.5 } else { 2.9 };
+            star_r.center() + egui::vec2(a.cos() * r, a.sin() * r)
+        })
+        .collect();
+    if fav {
+        p.add(egui::Shape::convex_polygon(pts, WARN, egui::Stroke::NONE));
+    } else {
+        p.add(egui::Shape::closed_line(
+            pts,
+            egui::Stroke::new(
+                1.0,
+                if star.hovered() { MUTED } else { FAINT.gamma_multiply(0.7) },
+            ),
+        ));
+    }
+    if star_clicked {
+        if fav {
+            s.favourite_scenes.retain(|f| f != name);
+        } else {
+            s.favourite_scenes.push(name.to_string());
+        }
+    }
+    star.on_hover_text(if fav {
+        "Starred — click to unfavourite"
+    } else {
+        "Favourite — shows under the fav filter"
+    });
 
     // Rotation checkbox, top-right — register the interact after the tile so
     // it wins the click inside its rect.
@@ -1211,17 +919,19 @@ fn scene_tile(
         "Out of rotation — click to include it"
     });
 
-    // Name row under the thumbnail.
-    let shown = if name.len() > 20 {
-        format!("{}…", &name[..19])
+    // Name row under the thumbnail — ellipsized with real galley metrics.
+    let name_font = egui::FontId::monospace(11.0);
+    let live_w = if live || queued {
+        text_w(p, "LIVE", &egui::FontId::proportional(9.0)) + 10.0
     } else {
-        name.to_string()
+        0.0
     };
+    let shown = ellipsize(p, name, &name_font, w - 12.0 - live_w);
     p.text(
-        egui::pos2(rect.min.x + 6.0, img_r.max.y + 5.0),
+        egui::pos2(rect.min.x + 6.0, img_r.max.y + 9.0),
         egui::Align2::LEFT_TOP,
         shown,
-        egui::FontId::monospace(11.0),
+        name_font,
         if live {
             ACCENT
         } else {
@@ -1230,258 +940,433 @@ fn scene_tile(
     );
     if live {
         p.text(
-            egui::pos2(rect.max.x - 6.0, img_r.max.y + 5.0),
+            egui::pos2(rect.max.x - 6.0, img_r.max.y + 9.0),
             egui::Align2::RIGHT_TOP,
             "LIVE",
             egui::FontId::proportional(9.0),
             ACCENT,
         );
+    } else if queued {
+        p.text(
+            egui::pos2(rect.max.x - 6.0, img_r.max.y + 9.0),
+            egui::Align2::RIGHT_TOP,
+            "NEXT",
+            egui::FontId::proportional(9.0),
+            BREAKDOWN,
+        );
     }
     p.rect_stroke(
         rect,
         6.0,
-        egui::Stroke::new(if live { 1.5 } else { 1.0 }, if live { ACCENT } else { BORDER }),
+        egui::Stroke::new(
+            if live { 1.5 } else { 1.0 },
+            if live {
+                ACCENT
+            } else if queued {
+                BREAKDOWN
+            } else {
+                BORDER
+            },
+        ),
         egui::StrokeKind::Inside,
     );
-    if resp.clicked() && !cb_clicked && !blocked {
+    let queued_click =
+        resp.secondary_clicked() || (resp.clicked() && ui.input(|i| i.modifiers.shift));
+    if queued_click && !blocked {
+        cmd.push(UiCommand::QueueNext(i));
+    } else if resp.clicked() && !cb_clicked && !star_clicked && !blocked {
         cmd.push(UiCommand::GoToScene(i));
     }
     resp.on_hover_text(if blocked {
         format!("{name} — out of rotation (scene set off)")
     } else {
-        name.to_string()
+        format!("{name} — click to cut · right-click to play next")
     });
 }
 
-/// Mockup 1b right column: live preview, transport, and the look controls.
-/// Director / scene-sets settings live on the Show page instead.
+/// Mockup 1b right column: live preview, transport, summary rows that
+/// navigate to the owning settings tab, and a collapsible director &amp;
+/// sync section — Blackout / Fullscreen pinned to the foot.
 #[allow(clippy::too_many_arguments)]
 fn inspector(
     ui: &mut egui::Ui,
     s: &mut Settings,
     st: &Status,
     scenes: &[String],
+    tab: &mut Tab,
     thumbs: &mut HashMap<String, egui::TextureHandle>,
     want: &mut HashMap<String, Instant>,
     cmd: &mut Vec<UiCommand>,
 ) {
     use crate::ui_theme::*;
-    ui.spacing_mut().scroll.floating = false;
+    // Pinned foot: reserve the button row, scroll the rest above it.
+    let foot_h = 38.0;
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
+        .max_height(ui.available_height() - foot_h)
         .horizontal_scroll_offset(0.0)
+        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
         .show(ui, |ui| {
-            // Live preview with the accent frame + a "live output" caption
-            // baked into its lower-left corner (mockup 1b).
-            let name = scenes.get(st.scene).cloned().unwrap_or_default();
-            let w = ui.available_width();
-            let (rect, _) =
-                ui.allocate_exact_size(egui::vec2(w, w * 9.0 / 16.0), egui::Sense::hover());
-            let p = ui.painter();
-            let key = format!("scene:{name}");
-            if let Some(tex) = thumb_tex(ui, thumbs, want, &key, cmd) {
-                p.image(
-                    tex,
-                    rect,
-                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                    egui::Color32::WHITE,
-                );
+            ui.spacing_mut().scroll.floating = false;
+            inspector_body(ui, s, st, scenes, tab, thumbs, want, cmd);
+        });
+
+    // Blackout + Fullscreen, always reachable (1b foot).
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        let bw = ((ui.available_width() - ui.spacing().item_spacing.x) / 2.0).max(40.0);
+        let bo = egui::Button::new(
+            egui::RichText::new("Blackout").size(12.0).color(if st.blackout {
+                DANGER
             } else {
-                p.rect_filled(rect, 6.0, RAISED);
+                TEXT
+            }),
+        )
+        .fill(if st.blackout { DANGER_BG } else { RAISED })
+        .corner_radius(egui::CornerRadius::same(5));
+        if ui.add_sized([bw, 30.0], bo).clicked() {
+            cmd.push(UiCommand::Do(Action::Blackout));
+        }
+        let fs = egui::Button::new(egui::RichText::new("Fullscreen").size(12.0).color(TEXT))
+            .fill(RAISED)
+            .corner_radius(egui::CornerRadius::same(5));
+        if ui.add_sized([bw, 30.0], fs).clicked() {
+            cmd.push(UiCommand::Do(Action::Fullscreen));
+        }
+    });
+}
+
+/// Everything in the inspector above the pinned foot buttons.
+#[allow(clippy::too_many_arguments)]
+fn inspector_body(
+    ui: &mut egui::Ui,
+    s: &mut Settings,
+    st: &Status,
+    scenes: &[String],
+    tab: &mut Tab,
+    thumbs: &mut HashMap<String, egui::TextureHandle>,
+    want: &mut HashMap<String, Instant>,
+    cmd: &mut Vec<UiCommand>,
+) {
+    use crate::ui_theme::*;
+    // Live preview with the accent frame + a "live output" caption baked
+    // into its lower-left corner (mockup 1b).
+    let name = scenes.get(st.scene).cloned().unwrap_or_default();
+    let w = ui.available_width();
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(w, w * 9.0 / 16.0), egui::Sense::hover());
+    let key = format!("scene:{name}");
+    scene_thumb(ui, rect, &key, 1.0, thumbs, want, cmd);
+    ui.painter().rect_stroke(
+        rect,
+        6.0,
+        egui::Stroke::new(1.5, ACCENT),
+        egui::StrokeKind::Inside,
+    );
+    let p = ui.painter();
+    let cap = "live output";
+    let cap_font = egui::FontId::monospace(10.0);
+    let cap_w = text_w(p, cap, &cap_font) + 14.0;
+    let cap_r = egui::Rect::from_min_max(
+        egui::pos2(rect.min.x + 6.0, rect.max.y - 22.0),
+        egui::pos2(rect.min.x + 6.0 + cap_w, rect.max.y - 6.0),
+    );
+    p.rect_filled(cap_r, 4.0, INSET.gamma_multiply(0.85));
+    p.text(cap_r.center(), egui::Align2::CENTER_CENTER, cap, cap_font, MUTED);
+
+    // Name left, "bar N of M" right — then the thin cut-progress bar.
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(&name).monospace().size(16.0).strong());
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if st.bars_total > 0 {
+                ui.label(
+                    egui::RichText::new(format!("bar {} of {}", st.bar_in_scene, st.bars_total))
+                        .monospace()
+                        .size(11.0)
+                        .color(MUTED),
+                );
             }
-            p.rect_stroke(
+        });
+    });
+    if st.bars_total > 0 {
+        let frac = (st.bar_in_scene as f32 / st.bars_total.max(1) as f32).clamp(0.0, 1.0);
+        let (br, _) = ui.allocate_exact_size(
+            egui::vec2(ui.available_width(), 4.0),
+            egui::Sense::hover(),
+        );
+        let pp = ui.painter();
+        pp.rect_filled(br, 2.0, INSET);
+        pp.rect_filled(
+            egui::Rect::from_min_size(br.min, egui::vec2(br.width() * frac, br.height())),
+            2.0,
+            ACCENT,
+        );
+    } else {
+        ui.label(
+            egui::RichText::new(match s.mode {
+                Mode::Static => "static — held until you change it",
+                Mode::Manual => "manual — nothing changes by itself",
+                Mode::Auto => "",
+            })
+            .size(11.0)
+            .color(MUTED),
+        );
+    }
+
+    // Next-scene line left; a breakdown pill sits at the right edge.
+    ui.add_space(2.0);
+    ui.horizontal(|ui| {
+        if let Some(nx) = st.next_scene {
+            let raw = format!("next → {}", scenes.get(nx).map(String::as_str).unwrap_or("?"));
+            let font = egui::FontId::monospace(11.0);
+            let shown = ellipsize(ui.painter(), &raw, &font, ui.available_width() - 60.0);
+            ui.label(egui::RichText::new(shown).size(11.0).color(ACCENT).monospace())
+                .on_hover_text(raw);
+        } else {
+            ui.label(
+                egui::RichText::new(bar_progress_line(st)).size(11.0).color(FAINT),
+            );
+        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if st.calm > 0.5 {
+                pill(ui, "● breakdown", BREAKDOWN, BREAKDOWN_BG);
+            }
+        });
+    });
+    ui.add_space(4.0);
+
+    // Prev / Next — Next carries the accent like the mockup.
+    ui.horizontal(|ui| {
+        let bw = ((ui.available_width() - ui.spacing().item_spacing.x) / 2.0).max(40.0);
+        if ui
+            .add_sized([bw, 28.0], egui::Button::new("< Prev"))
+            .clicked()
+        {
+            cmd.push(UiCommand::Do(Action::PrevScene));
+        }
+        if ui
+            .add_sized([bw, 28.0], egui::Button::new("Next >").fill(ACCENT_SEL))
+            .clicked()
+        {
+            cmd.push(UiCommand::Do(Action::NextScene));
+        }
+    });
+
+    ui.add_space(8.0);
+    section_label(ui, "controls");
+    card().show(ui, |ui| {
+        ui.spacing_mut().item_spacing.y = 8.0;
+        ui.label(egui::RichText::new("Mode").size(12.0).color(MUTED));
+        segmented_wide(
+            ui,
+            &mut s.mode,
+            &[
+                (Mode::Auto, "Auto"),
+                (Mode::Static, "Static"),
+                (Mode::Manual, "Manual"),
+            ],
+        );
+        ui.label(egui::RichText::new("Bars").size(12.0).color(MUTED));
+        segmented_wide(
+            ui,
+            &mut s.phrase_bars,
+            &[(4u32, "4"), (8, "8"), (16, "16"), (32, "32")],
+        );
+        ctl_row(ui, "Dancer", |ui| {
+            // Button first via right-to-left so a long clip name can't push
+            // it past the panel edge; the value gets the leftover width.
+            let bw = 44.0;
+            let vw = (ui.available_width() - bw - 8.0).max(40.0);
+            ui.allocate_ui_with_layout(
+                egui::vec2(vw, 20.0),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    let look = s.dancer_style.map(|i| STYLES[i]).unwrap_or("auto");
+                    let val = format!(
+                        "{} · {look} · {:.0}%",
+                        st.clip.as_deref().unwrap_or("off"),
+                        st.confidence * 100.0
+                    );
+                    let shown = ellipsize(
+                        ui.painter(),
+                        &val,
+                        &egui::FontId::monospace(12.0),
+                        vw - 4.0,
+                    );
+                    ui.label(egui::RichText::new(shown).monospace().size(12.0))
+                        .on_hover_text(format!("{val} — routine · look · beat confidence"));
+                },
+            );
+            if ui.button("next").clicked() {
+                cmd.push(UiCommand::Do(Action::NextClip));
+            }
+        });
+        // Look / Effect / Palette summarise and navigate to the owning
+        // settings page — the inspector isn't a second settings panel.
+        nav_row(
+            ui,
+            "Look",
+            s.dancer_style.map(|i| STYLES[i]).unwrap_or("auto").to_string(),
+            || {
+                *tab = Tab::DancerFx;
+            },
+        );
+        nav_row(
+            ui,
+            "Effect",
+            if s.fx_auto {
+                format!("{} (auto)", s.fx.label())
+            } else {
+                s.fx.label().to_string()
+            },
+            || {
+                *tab = Tab::DancerFx;
+            },
+        );
+        // Palette row: a clickable gradient strip opening a swatch popover.
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("Palette").size(12.0).color(MUTED));
+            let w = ui.available_width();
+            let (rect, resp) =
+                ui.allocate_exact_size(egui::vec2(w, 18.0), egui::Sense::click());
+            palette_fill(ui.painter_at(rect), rect, &s.palette);
+            ui.painter().rect_stroke(
                 rect,
-                6.0,
-                egui::Stroke::new(1.5, ACCENT),
+                4.0,
+                egui::Stroke::new(1.0, BORDER_HI),
                 egui::StrokeKind::Inside,
             );
-            let cap_r = egui::Rect::from_min_max(
-                egui::pos2(rect.min.x + 6.0, rect.max.y - 22.0),
-                egui::pos2(rect.min.x + 92.0, rect.max.y - 6.0),
-            );
-            p.rect_filled(cap_r, 4.0, INSET.gamma_multiply(0.85));
-            p.text(
-                cap_r.center(),
-                egui::Align2::CENTER_CENTER,
-                "live output",
-                egui::FontId::monospace(10.0),
-                MUTED,
-            );
-
-            // Name left, "bar N of M" right — then the thin cut-progress bar.
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(&name).monospace().size(16.0).strong());
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if st.bars_total > 0 {
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "bar {} of {}",
-                                st.bar_in_scene, st.bars_total
-                            ))
-                            .monospace()
-                            .size(11.0)
-                            .color(MUTED),
-                        );
-                    }
-                });
-            });
-            if st.bars_total > 0 {
-                let frac = (st.bar_in_scene as f32 / st.bars_total.max(1) as f32).clamp(0.0, 1.0);
-                let (br, _) = ui.allocate_exact_size(
-                    egui::vec2(ui.available_width(), 4.0),
-                    egui::Sense::hover(),
-                );
-                let pp = ui.painter();
-                pp.rect_filled(br, 2.0, INSET);
-                pp.rect_filled(
-                    egui::Rect::from_min_size(
-                        br.min,
-                        egui::vec2(br.width() * frac, br.height()),
-                    ),
-                    2.0,
-                    ACCENT,
-                );
-            } else {
-                ui.label(
-                    egui::RichText::new(match s.mode {
-                        Mode::Static => "static — held until you change it",
-                        Mode::Manual => "manual — nothing changes by itself",
-                        Mode::Auto => "",
-                    })
-                    .size(11.0)
-                    .color(MUTED),
-                );
-            }
-
-            // Next-scene line left; a breakdown pill sits at the right edge.
-            ui.add_space(2.0);
-            ui.horizontal(|ui| {
-                if let Some(nx) = st.next_scene {
-                    ui.label(
-                        egui::RichText::new(format!(
-                            "next → {}",
-                            scenes.get(nx).map(String::as_str).unwrap_or("?")
-                        ))
-                        .size(11.0)
-                        .color(ACCENT)
-                        .monospace(),
-                    );
-                } else {
-                    ui.label(
-                        egui::RichText::new(bar_progress_line(st))
-                            .size(11.0)
-                            .color(FAINT),
-                    );
+            let popup = egui::Popup::menu(&resp);
+            resp.on_hover_text(format!("{} — click to pick a palette", s.palette));
+            popup.show(|ui| {
+                ui.set_min_width(280.0);
+                let names: Vec<_> = crate::palettes::names().collect();
+                for chunk in names.chunks(2) {
+                    ui.horizontal(|ui| {
+                        for name in chunk {
+                            palette_swatch(ui, s, name, 132.0, 20.0);
+                        }
+                    });
                 }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if st.calm > 0.5 {
-                        pill(ui, "● breakdown", BREAKDOWN, BREAKDOWN_BG);
-                    }
-                });
-            });
-            ui.add_space(4.0);
-
-            // Prev / Next — Next carries the accent like the mockup.
-            ui.horizontal(|ui| {
-                let bw = ((ui.available_width() - ui.spacing().item_spacing.x) / 2.0).max(40.0);
-                if ui
-                    .add_sized([bw, 28.0], egui::Button::new("◀ Prev"))
-                    .clicked()
-                {
-                    cmd.push(UiCommand::Do(Action::PrevScene));
-                }
-                if ui
-                    .add_sized(
-                        [bw, 28.0],
-                        egui::Button::new("Next ▶").fill(ACCENT_SEL),
-                    )
-                    .clicked()
-                {
-                    cmd.push(UiCommand::Do(Action::NextScene));
-                }
-            });
-
-            ui.add_space(8.0);
-            section_label(ui, "controls");
-            card().show(ui, |ui| {
-                ui.spacing_mut().item_spacing.y = 8.0;
-                ui.label(egui::RichText::new("Mode").size(12.0).color(MUTED));
-                segmented_wide(
-                    ui,
-                    &mut s.mode,
-                    &[
-                        (Mode::Auto, "Auto"),
-                        (Mode::Static, "Static"),
-                        (Mode::Manual, "Manual"),
-                    ],
-                );
-                ui.label(egui::RichText::new("Bars").size(12.0).color(MUTED));
-                segmented_wide(
-                    ui,
-                    &mut s.phrase_bars,
-                    &[(4u32, "4"), (8, "8"), (16, "16"), (32, "32")],
-                );
-                ctl_row(ui, "Dancer", |ui| {
-                    let look = s.dancer_style.map(|i| STYLES[i]).unwrap_or("auto");
-                    ui.label(
-                        egui::RichText::new(format!(
-                            "{} · {look}",
-                            st.clip.as_deref().unwrap_or("off")
-                        ))
-                        .monospace()
-                        .size(12.0),
-                    );
-                    if ui.button("next").clicked() {
-                        cmd.push(UiCommand::Do(Action::NextClip));
-                    }
-                });
-                ctl_row(ui, "Look", |ui| {
-                    egui::ComboBox::from_id_salt("look")
-                        .width(ui.available_width().max(80.0))
-                        .selected_text(
-                            egui::RichText::new(
-                                s.dancer_style.map(|i| STYLES[i]).unwrap_or("auto"),
-                            )
-                            .size(12.0),
-                        )
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut s.dancer_style, None, "auto");
-                            for (i, name) in STYLES.iter().enumerate() {
-                                ui.selectable_value(&mut s.dancer_style, Some(i), *name);
-                            }
-                        });
-                });
-                ctl_row(ui, "Effect", |ui| {
-                    egui::ComboBox::from_id_salt("fx")
-                        .width((ui.available_width() - 30.0).max(60.0))
-                        .selected_text(egui::RichText::new(s.fx.label()).size(12.0))
-                        .show_ui(ui, |ui| {
-                            for f in Fx::ALL {
-                                if ui
-                                    .selectable_value(&mut s.fx, f, f.label())
-                                    .clicked()
-                                {
-                                    s.fx_auto = false;
-                                }
-                            }
-                        });
-                    ui.checkbox(&mut s.fx_auto, "")
-                        .on_hover_text("Auto — a fresh effect on every scene cut");
-                });
-                ctl_row(ui, "Palette", |ui| {
-                    egui::ComboBox::from_id_salt("pal")
-                        .width(ui.available_width().max(80.0))
-                        .selected_text(egui::RichText::new(s.palette.as_str()).size(12.0))
-                        .show_ui(ui, |ui| {
-                            for name in crate::palettes::names() {
-                                ui.selectable_value(&mut s.palette, name.to_string(), name);
-                            }
-                        });
-                });
-                palette_strip(ui, &s.palette);
             });
         });
+    });
+
+    ui.add_space(6.0);
+    // The quiet stuff: what the auto-pilot is allowed to do, plus sync.
+    egui::CollapsingHeader::new(
+        egui::RichText::new("director & sync").size(12.0).color(MUTED),
+    )
+    .default_open(false)
+    .show(ui, |ui| {
+        card().show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 6.0;
+            ui.checkbox(&mut s.breakdown_mode, "Detect breakdowns")
+                .on_hover_text("Quiet sections switch the show into calm mode");
+            ui.checkbox(&mut s.cut_on_drops, "Cut early on a drop")
+                .on_hover_text("A drop lands early — cut to the next scene with it");
+            ui.checkbox(&mut s.random_order, "Random order")
+                .on_hover_text("Shuffle the rotation instead of playing it in order");
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Latency").size(12.0).color(MUTED));
+                ui.add(
+                    egui::Slider::new(&mut s.latency_ms, 0.0..=200.0)
+                        .suffix(" ms")
+                        .fixed_decimals(0),
+                );
+            });
+            // Audio in + groove: how steadily kicks are landing (sustained
+            // low groove = the show's in a breakdown).
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(format!("in: {}", st.device))
+                        .size(10.5)
+                        .color(FAINT),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let (r, _) =
+                        ui.allocate_exact_size(egui::vec2(46.0, 6.0), egui::Sense::hover());
+                    let pp = ui.painter();
+                    pp.rect_filled(r, 3.0, INSET);
+                    pp.rect_filled(
+                        egui::Rect::from_min_size(
+                            r.min,
+                            egui::vec2(r.width() * st.groove.clamp(0.0, 1.0), r.height()),
+                        ),
+                        3.0,
+                        BREAKDOWN,
+                    );
+                    ui.label(egui::RichText::new("groove").size(10.5).color(FAINT));
+                });
+            });
+            if ui
+                .button("Mark this beat as the downbeat (the \"one\")")
+                .clicked()
+            {
+                cmd.push(UiCommand::Do(Action::MarkDownbeat));
+            }
+        });
+    });
+}
+
+/// A summary row — label left, monospaced value right, chevron — that
+/// navigates to the tab owning the setting.
+fn nav_row(ui: &mut egui::Ui, label: &str, value: String, go: impl FnOnce()) {
+    use crate::ui_theme::*;
+    let h = 24.0;
+    let w = ui.available_width();
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::click());
+    if resp.hovered() {
+        ui.painter().rect_filled(rect, 4.0, HOVER.gamma_multiply(0.5));
+    }
+    let p = ui.painter();
+    p.text(
+        egui::pos2(rect.min.x + 2.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        label,
+        egui::FontId::proportional(12.0),
+        MUTED,
+    );
+    let val_font = egui::FontId::monospace(12.0);
+    let vw = text_w(p, &value, &val_font);
+    p.text(
+        egui::pos2(rect.max.x - 18.0 - vw, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        &value,
+        val_font,
+        TEXT,
+    );
+    p.text(
+        egui::pos2(rect.max.x - 6.0, rect.center().y),
+        egui::Align2::RIGHT_CENTER,
+        ">",
+        egui::FontId::monospace(12.0),
+        ACCENT,
+    );
+    if resp.clicked() {
+        go();
+    }
+}
+
+/// Paint a palette's gradient into `rect` through a clipped painter.
+fn palette_fill(p: egui::Painter, rect: egui::Rect, palette: &str) {
+    let lut = crate::palettes::lut(palette);
+    let n = 32usize;
+    for i in 0..n {
+        let c = &lut[i * (crate::palettes::LUT_SIZE / n) * 4..];
+        p.rect_filled(
+            egui::Rect::from_min_max(
+                egui::pos2(rect.min.x + rect.width() * i as f32 / n as f32, rect.min.y),
+                egui::pos2(
+                    rect.min.x + rect.width() * (i + 1) as f32 / n as f32 + 1.0,
+                    rect.max.y,
+                ),
+            ),
+            0.0,
+            egui::Color32::from_rgb(c[0], c[1], c[2]),
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1500,8 +1385,10 @@ fn pads_view(
     cmd: &mut Vec<UiCommand>,
 ) {
     use crate::ui_theme::*;
-    // Palette column on the right.
+    // Palette column on the right — fixed width; resizable panels draw a
+    // grab pill on the border.
     egui::Panel::right("palettes")
+        .resizable(false)
         .exact_size(196.0)
         .frame(
             egui::Frame::NONE
@@ -1511,39 +1398,44 @@ fn pads_view(
         )
         .show(ui, |ui| palette_column(ui, s));
 
-    // BPM + the four beat blocks.
+    // BPM at ~40px mono + four big beat blocks (1c).
     ui.horizontal(|ui| {
         ui.add_space(6.0);
         ui.label(
             egui::RichText::new(format!("{:.0}", st.bpm))
                 .monospace()
-                .size(34.0)
+                .size(40.0)
                 .strong(),
         );
         ui.label(egui::RichText::new("BPM").size(11.0).color(FAINT));
-        ui.add_space(10.0);
-        let (r, _) = ui.allocate_exact_size(egui::vec2(96.0, 22.0), egui::Sense::hover());
+        ui.add_space(14.0);
+        let (r, _) = ui.allocate_exact_size(egui::vec2(4.0 * 36.0 - 6.0, 30.0), egui::Sense::hover());
         for i in 0..4u64 {
             let c = egui::Rect::from_min_size(
-                egui::pos2(r.min.x + i as f32 * 26.0, r.min.y),
-                egui::vec2(20.0, 20.0),
+                egui::pos2(r.min.x + i as f32 * 36.0, r.min.y),
+                egui::vec2(28.0, 28.0),
             );
             ui.painter().rect_filled(
                 c,
-                4.0,
+                5.0,
                 if i == st.beat_in_bar % 4 { ACCENT } else { BORDER },
             );
         }
         if st.silent {
             pill(ui, "no signal", WARN, WARN_BG);
         }
+        if st.calm > 0.5 {
+            pill(ui, "breakdown", BREAKDOWN, BREAKDOWN_BG);
+        }
     });
     ui.add_space(6.0);
 
-    // NOW / UP NEXT.
+    // NOW / UP NEXT — big previews, ≥35% of the window height when there's
+    // room (mockup 1c).
+    let preview_h = (ui.available_height() * 0.35).max(110.0);
     ui.horizontal(|ui| {
         let w = (ui.available_width() - 10.0) / 2.0;
-        pad_preview(ui, thumbs, want, cmd, w, "NOW", scenes.get(st.scene), {
+        pad_preview(ui, thumbs, want, cmd, w, preview_h, "NOW", scenes.get(st.scene), {
             if st.bars_total > 0 {
                 bar_progress_line(st)
             } else {
@@ -1562,6 +1454,7 @@ fn pads_view(
             want,
             cmd,
             w,
+            preview_h,
             "UP NEXT",
             st.next_scene.and_then(|i| scenes.get(i)),
             next_line,
@@ -1569,45 +1462,63 @@ fn pads_view(
     });
     ui.add_space(8.0);
 
-    // Action pads — same Actions as the hotkeys, badge shows the binding.
+    // Action pads — the same Actions the hotkeys fire, with the current
+    // binding badged top-right and a live sub-state under the label (1c).
     section_label(ui, "pads");
-    let pads: [(Action, &str); 8] = [
-        (Action::NextScene, "next scene"),
-        (Action::PrevScene, "prev scene"),
-        (Action::ModeStatic, "hold / static"),
-        (Action::Blackout, "blackout"),
-        (Action::MarkDownbeat, "mark the one"),
-        (Action::CycleFx, "next fx"),
-        (Action::NextStyle, "dancer look"),
-        (Action::CycleCanon, "canon"),
+    let canon_now = match s.canon {
+        Tristate::Auto => "auto",
+        Tristate::On => "on",
+        Tristate::Off => "off",
+    };
+    let pads: [(Action, &str, String, PadKind); 8] = [
+        (
+            Action::NextScene,
+            "next scene",
+            st.next_scene
+                .and_then(|i| scenes.get(i))
+                .map_or("cut now".to_string(), |n| n.clone()),
+            PadKind::Go,
+        ),
+        (Action::PrevScene, "prev scene", "back one".to_string(), PadKind::Neutral),
+        (
+            Action::ModeStatic,
+            "hold / static",
+            match s.mode {
+                Mode::Auto => "mode: auto".into(),
+                Mode::Static => "mode: static".into(),
+                Mode::Manual => "mode: manual".into(),
+            },
+            PadKind::Hold,
+        ),
+        (
+            Action::Blackout,
+            "blackout",
+            if st.blackout { "on — tap to lift" } else { "off" }.to_string(),
+            PadKind::Danger,
+        ),
+        (
+            Action::MarkDownbeat,
+            "mark the one",
+            "tap on the 1".to_string(),
+            PadKind::Warn,
+        ),
+        (Action::CycleFx, "next fx", st.fx.label().to_string(), PadKind::Neutral),
+        (
+            Action::NextStyle,
+            "dancer look",
+            s.dancer_style.map(|i| STYLES[i]).unwrap_or("auto").to_string(),
+            PadKind::Dancer,
+        ),
+        (Action::CycleCanon, "canon", canon_now.to_string(), PadKind::Dancer),
     ];
     let pad_w = ((ui.available_width() - 3.0 * 10.0) / 4.0).max(100.0);
+    // Fill the remaining height across the two rows — at least 72px each.
+    let pad_h = ((ui.available_height() - 14.0) / 2.0).max(72.0);
     for row in pads.chunks(4) {
         ui.horizontal(|ui| {
-            for (a, label) in row {
-                let key =
-                    key_short(s.keys.get(a).map_or("", String::as_str));
-                let mut job = egui::text::LayoutJob::default();
-                job.append(
-                    label,
-                    0.0,
-                    egui::TextFormat::simple(
-                        egui::FontId::proportional(13.0),
-                        TEXT,
-                    ),
-                );
-                job.append(
-                    &format!("\n{key}"),
-                    0.0,
-                    egui::TextFormat::simple(egui::FontId::monospace(10.0), MUTED),
-                );
-                if ui
-                    .add_sized(
-                        [pad_w, 52.0],
-                        egui::Button::new(job).fill(CARD),
-                    )
-                    .clicked()
-                {
+            for (a, label, sub, kind) in row {
+                let key = key_short(s.keys.get(a).map_or("", String::as_str));
+                if pad_button(ui, pad_w, pad_h, label, sub, &key, *kind) {
                     cmd.push(UiCommand::Do(*a));
                 }
             }
@@ -1615,7 +1526,85 @@ fn pads_view(
     }
 }
 
-/// A NOW / UP NEXT card: thumbnail + name + timing line.
+/// Pad colour by meaning: primary transport, destructive, warning/timing,
+/// hold-state, dancer, neutral.
+#[derive(Clone, Copy)]
+enum PadKind {
+    Go,
+    Neutral,
+    Hold,
+    Danger,
+    Warn,
+    Dancer,
+}
+
+/// One big action pad: label + sub-state bottom-left, key badge top-right.
+fn pad_button(
+    ui: &mut egui::Ui,
+    w: f32,
+    h: f32,
+    label: &str,
+    sub: &str,
+    key: &str,
+    kind: PadKind,
+) -> bool {
+    use crate::ui_theme::*;
+    let (fill, fg, sub_c) = match kind {
+        PadKind::Go => (ACCENT_SEL, TEXT, ACCENT),
+        PadKind::Hold => (BREAKDOWN_BG, BREAKDOWN, BREAKDOWN),
+        PadKind::Danger => (DANGER_BG, DANGER, DANGER),
+        PadKind::Warn => (WARN_BG, WARN, WARN),
+        PadKind::Dancer => (CARD, TEXT, LANE_DANCER),
+        PadKind::Neutral => (CARD, TEXT, MUTED),
+    };
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::click());
+    let p = ui.painter();
+    p.rect_filled(
+        rect,
+        8.0,
+        if resp.hovered() {
+            fill.gamma_multiply(1.35)
+        } else {
+            fill
+        },
+    );
+    p.rect_stroke(
+        rect,
+        8.0,
+        egui::Stroke::new(1.0, if resp.hovered() { BORDER_HI } else { BORDER }),
+        egui::StrokeKind::Inside,
+    );
+    p.text(
+        egui::pos2(rect.min.x + 12.0, rect.max.y - 34.0),
+        egui::Align2::LEFT_TOP,
+        label,
+        egui::FontId::proportional(14.0),
+        fg,
+    );
+    p.text(
+        egui::pos2(rect.min.x + 12.0, rect.max.y - 16.0),
+        egui::Align2::LEFT_TOP,
+        ellipsize(p, sub, &egui::FontId::monospace(10.5), w - 24.0),
+        egui::FontId::monospace(10.5),
+        sub_c.gamma_multiply(0.9),
+    );
+    // Key badge, top-right (same chips as ui_theme::key_badge).
+    if !key.is_empty() {
+        let kf = egui::FontId::monospace(11.0);
+        let kw = text_w(p, key, &kf) + 12.0;
+        let kr = egui::Rect::from_min_max(
+            egui::pos2(rect.max.x - 8.0 - kw, rect.min.y + 8.0),
+            egui::pos2(rect.max.x - 8.0, rect.min.y + 8.0 + 18.0),
+        );
+        p.rect_filled(kr, 4.0, INSET);
+        p.rect_stroke(kr, 4.0, egui::Stroke::new(1.0, BORDER_HI), egui::StrokeKind::Inside);
+        p.text(kr.center(), egui::Align2::CENTER_CENTER, key, kf, MUTED);
+    }
+    resp.clicked()
+}
+
+/// A NOW / UP NEXT card: big thumbnail filling the card, name + timing
+/// caption baked into its lower-left corner.
 #[allow(clippy::too_many_arguments)]
 fn pad_preview(
     ui: &mut egui::Ui,
@@ -1623,6 +1612,7 @@ fn pad_preview(
     want: &mut HashMap<String, Instant>,
     cmd: &mut Vec<UiCommand>,
     w: f32,
+    h: f32,
     title: &str,
     scene: Option<&String>,
     line: String,
@@ -1636,46 +1626,43 @@ fn pad_preview(
         .show(ui, |ui| {
             ui.set_width(w - 20.0);
             section_label(ui, title);
-            ui.horizontal(|ui| {
-                let (rect, _) = ui
-                    .allocate_exact_size(egui::vec2(96.0, 54.0), egui::Sense::hover());
-                let p = ui.painter();
-                if let Some(name) = scene {
-                    let key = format!("scene:{name}");
-                    if let Some(tex) = thumb_tex(ui, thumbs, want, &key, cmd) {
-                        p.image(
-                            tex,
-                            rect,
-                            egui::Rect::from_min_max(
-                                egui::pos2(0.0, 0.0),
-                                egui::pos2(1.0, 1.0),
-                            ),
-                            egui::Color32::WHITE,
-                        );
-                    } else {
-                        p.rect_filled(rect, 4.0, RAISED);
-                    }
-                } else {
-                    p.rect_filled(rect, 4.0, RAISED);
-                }
-                p.rect_stroke(
+            let iw = ui.available_width();
+            let ih = (h - 34.0).min(iw * 9.0 / 16.0).max(60.0);
+            let (rect, _) =
+                ui.allocate_exact_size(egui::vec2(iw, ih), egui::Sense::hover());
+            if let Some(name) = scene {
+                let key = format!("scene:{name}");
+                scene_thumb(ui, rect, &key, 1.0, thumbs, want, cmd);
+            } else {
+                ui.painter().rect_filled(rect, 4.0, RAISED);
+                ui.painter().rect_stroke(
                     rect,
                     4.0,
                     egui::Stroke::new(1.0, BORDER),
                     egui::StrokeKind::Inside,
                 );
-                ui.vertical(|ui| {
-                    ui.label(
-                        egui::RichText::new(scene.map_or("—", String::as_str))
-                            .monospace()
-                            .size(14.0)
-                            .strong(),
-                    );
-                    if !line.is_empty() {
-                        ui.label(egui::RichText::new(line).size(11.0).color(MUTED));
-                    }
-                });
-            });
+            }
+            // Name + timing caption inside the frame, lower-left.
+            let p = ui.painter();
+            let caption = match scene {
+                Some(n) if line.is_empty() => n.clone(),
+                Some(n) => format!("{n} · {line}"),
+                None => "—".to_string(),
+            };
+            let cf = egui::FontId::monospace(11.0);
+            let cw = text_w(p, &caption, &cf) + 14.0;
+            let cr = egui::Rect::from_min_max(
+                egui::pos2(rect.min.x + 6.0, rect.max.y - 24.0),
+                egui::pos2(rect.min.x + 6.0 + cw.min(iw - 12.0), rect.max.y - 6.0),
+            );
+            p.rect_filled(cr, 4.0, INSET.gamma_multiply(0.85));
+            p.text(
+                cr.center(),
+                egui::Align2::CENTER_CENTER,
+                ellipsize(p, &caption, &cf, cr.width() - 10.0),
+                cf,
+                if title == "NOW" { TEXT } else { MUTED },
+            );
         });
 }
 
@@ -1755,30 +1742,6 @@ fn ctl_row(ui: &mut egui::Ui, label: &str, body: impl FnOnce(&mut egui::Ui)) {
         );
         body(ui);
     });
-}
-
-/// The palette gradient strip — the actual LUT the GPU gets.
-fn palette_strip(ui: &mut egui::Ui, palette: &str) {
-    let lut = crate::palettes::lut(palette);
-    let (rect, _) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), 8.0),
-        egui::Sense::hover(),
-    );
-    let n = 64usize;
-    for i in 0..n {
-        let c = &lut[i * (crate::palettes::LUT_SIZE / n) * 4..];
-        ui.painter().rect_filled(
-            egui::Rect::from_min_max(
-                egui::pos2(rect.min.x + rect.width() * i as f32 / n as f32, rect.min.y),
-                egui::pos2(
-                    rect.min.x + rect.width() * (i + 1) as f32 / n as f32 + 1.0,
-                    rect.max.y,
-                ),
-            ),
-            0.0,
-            egui::Color32::from_rgb(c[0], c[1], c[2]),
-        );
-    }
 }
 
 /// Texture id for a "scene:<name>" thumbnail — serves the memory map, then

@@ -38,6 +38,10 @@ pub struct Director {
     recent_low: f32,
     rng: u64,
     pending_cut: bool,
+    /// The scene the next cut will land on — picked when the current scene
+    /// starts (every mode except Manual), or set by a "play next" click.
+    /// Consumed by the cut; re-picked afterwards.
+    pub next: Option<usize>,
 }
 
 impl Director {
@@ -62,6 +66,7 @@ impl Director {
             recent_low: 1.0,
             rng,
             pending_cut: false,
+            next: None,
         }
     }
 
@@ -92,14 +97,17 @@ impl Director {
         // A cut in a breakdown is a soft dissolve-ish lift, not a white-out.
         self.flash = 1.0 - 0.7 * self.calm;
         self.pending_cut = true;
+        // New scene → the next pick is stale; `update` re-picks it.
+        self.next = None;
     }
 
-    /// Next scene among `usable`: random (never the current one) or in order.
-    pub fn next_scene(&mut self, usable: &[usize], random: bool) {
+    /// The scene that would play next — random (never the current one) or
+    /// in rotation order. Doesn't cut.
+    pub fn pick_next(&mut self, usable: &[usize], random: bool) -> Option<usize> {
         if usable.is_empty() {
-            return;
+            return None;
         }
-        let pick = if random && usable.len() > 1 {
+        Some(if random && usable.len() > 1 {
             let others: Vec<usize> = usable
                 .iter()
                 .copied()
@@ -112,6 +120,25 @@ impl Director {
                 .position(|&s| s == self.scene)
                 .map_or(0, |i| i + 1);
             usable[i % usable.len()]
+        })
+    }
+
+    /// Queue a specific scene for the next cut — the panel's "play next".
+    /// A pick that's left `usable` by cut time is dropped for a fresh one
+    /// (a disabled scene would be cut away again immediately anyway).
+    pub fn queue_next(&mut self, scene: usize) {
+        self.next = Some(scene);
+    }
+
+    /// Next scene among `usable`: the queued pick if there is one, else
+    /// random (never the current one) or in order.
+    pub fn next_scene(&mut self, usable: &[usize], random: bool) {
+        if usable.is_empty() {
+            return;
+        }
+        let pick = match self.next.take() {
+            Some(n) if usable.contains(&n) => n,
+            _ => self.pick_next(usable, random).unwrap_or(self.scene),
         };
         self.cut_to(pick);
     }
@@ -141,6 +168,11 @@ impl Director {
         };
         self.flash = (self.flash - dt * 2.5).max(0.0);
         self.calm = f.calm;
+        // A fresh scene gets its next pick right away so the panel can show
+        // what's coming — in every mode that ever cuts by itself.
+        if self.next.is_none() && s.mode != Mode::Manual {
+            self.next = self.pick_next(usable, s.random_order);
+        }
         // Two modes. With drums, intensity follows loudness *and* how hard
         // the groove is driving; in a breakdown it's capped low and follows
         // the (pad/vocal) energy gently, so loud pads don't read as a peak.

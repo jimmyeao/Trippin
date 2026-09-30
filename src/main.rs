@@ -110,6 +110,8 @@ enum Msg {
     Resize(u32, u32),
     Act(Action),
     GoToScene(usize),
+    /// Queue a scene as the next cut ("play next" — panel right-click).
+    QueueNext(usize),
     ShowClip(usize),
     /// Decode an audio file and append it to the current timeline as a clip
     /// (a fresh doc is created when none is loaded).
@@ -531,6 +533,7 @@ fn render_loop(
                 // transitions emit a burst of sizes.
                 Msg::Resize(w, h) => r.note_size(w, h),
                 Msg::GoToScene(i) => dir.cut_to(i),
+                Msg::QueueNext(i) => dir.queue_next(i),
                 Msg::ShowClip(i) => {
                     dancer.pin(i);
                     dancer.showing = true;
@@ -1265,16 +1268,9 @@ fn render_loop(
                 fps,
                 device: audio.device_name.clone(),
                 scene: dir.scene,
-                // Ordered mode can name the next scene; random is a surprise.
-                next_scene: if s.mode == Mode::Auto && !s.random_order && !usable.is_empty() {
-                    usable
-                        .iter()
-                        .position(|&x| x == dir.scene)
-                        .map(|i| usable[(i + 1) % usable.len()])
-                        .or(Some(usable[0]))
-                } else {
-                    None
-                },
+                // The director picks the next scene when the current one
+                // starts — the pick is known in every mode that can cut.
+                next_scene: dir.next,
                 bar_in_scene: if s.mode == Mode::Auto {
                     dir.bars_progress(s.phrase_bars).0
                 } else {
@@ -1637,6 +1633,7 @@ impl App {
                 }
                 self.send(Msg::GoToScene(i));
             }
+            UiCommand::QueueNext(i) => self.send(Msg::QueueNext(i)),
             UiCommand::ShowClip(i) => {
                 if let Some(name) = shared.clip_names.get(i) {
                     self.record_cue(CueKind::Clip(name.clone()));

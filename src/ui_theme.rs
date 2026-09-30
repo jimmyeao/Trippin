@@ -133,23 +133,6 @@ pub fn pill(ui: &mut Ui, text: &str, fg: Color32, bg: Color32) {
         });
 }
 
-/// A hotkey badge: bordered mono chip, e.g. `B`.
-pub fn key_badge(ui: &mut Ui, text: &str) {
-    Frame::default()
-        .fill(INSET)
-        .stroke(Stroke::new(1.0, BORDER_HI))
-        .corner_radius(CornerRadius::same(4))
-        .inner_margin(Margin::symmetric(6, 2))
-        .show(ui, |ui| {
-            ui.label(
-                egui::RichText::new(text)
-                    .monospace()
-                    .size(11.0)
-                    .color(MUTED),
-            );
-        });
-}
-
 /// Segmented control on an inset track: one option highlighted at a time.
 /// Returns true when the selection changed.
 pub fn segmented<T: PartialEq + Copy>(

@@ -288,6 +288,8 @@ pub struct Settings {
     /// Cut early when a drop lands.
     pub cut_on_drops: bool,
     pub disabled_scenes: Vec<String>,
+    /// Starred scenes — the Perform "fav" chip filters to these.
+    pub favourite_scenes: Vec<String>,
     pub seasonal: Seasonal,
     pub dancer_enabled: bool,
     /// None = auto-pilot picks the look; Some(i) = always that look.
@@ -390,6 +392,7 @@ impl Default for Settings {
             phrase_bars: 16,
             cut_on_drops: true,
             disabled_scenes: Vec::new(),
+            favourite_scenes: Vec::new(),
             seasonal: Seasonal::Auto,
             dancer_enabled: true,
             dancer_style: None,
