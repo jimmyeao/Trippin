@@ -325,6 +325,7 @@ fn build_ui(
         _ => {
             egui::ScrollArea::vertical()
                 .auto_shrink([false, true])
+                .horizontal_scroll_offset(0.0)
                 .show(ui, |ui| match *tab {
                     Tab::DancerFx => {
                         dancer_fx_tab(ui, s, st, clips, clip_thumbs, cmd)
@@ -537,13 +538,14 @@ fn perform_tab(
         })
         .count();
 
-    // Toolbar: search, filter chips, all on/off.
+    // Toolbar: search field, filter pills (active one is bright, like the
+    // mockup), then the stats line with all on/off at its right edge.
     ui.horizontal(|ui| {
-        ui.add_space(4.0);
+        ui.add_space(2.0);
         ui.add(
             egui::TextEdit::singleline(filter)
-                .desired_width(150.0)
-                .hint_text("search scenes"),
+                .desired_width((ui.available_width() * 0.5).min(320.0))
+                .hint_text(format!("filter {} scenes…", scenes.len())),
         );
         for (c, l) in [
             (LibChip::All, "All"),
@@ -551,35 +553,72 @@ fn perform_tab(
             (LibChip::Heavy, "3D"),
             (LibChip::Seasonal, "Seasonal"),
         ] {
-            ui.selectable_value(chip, c, l);
+            let on = *chip == c;
+            let b = egui::Button::new(
+                egui::RichText::new(l)
+                    .size(11.5)
+                    .color(if on { INSET } else { MUTED }),
+            )
+            .fill(if on { TEXT } else { RAISED })
+            .corner_radius(egui::CornerRadius::same(9));
+            if ui.add(b).clicked() {
+                *chip = c;
+            }
         }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.small_button("all off").clicked() {
-                s.disabled_scenes = scenes.to_vec();
-            }
-            if ui.small_button("all on").clicked() {
-                s.disabled_scenes.clear();
-            }
+    });
+    // Keep the right-aligned controls inside the library column — the
+    // central panel underlaps the inspector by ~15px, so unconstrained
+    // right alignment would paint into the gutter.
+    let stat_w = (ui.available_width() - 24.0).max(80.0);
+    ui.allocate_ui(egui::vec2(stat_w, 18.0), |ui| {
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new(format!(
+                    "{} shown · {} of {} in rotation · click to preview · toggle to add/remove from rotation",
+                    shown.len(),
+                    in_rotation,
+                    scenes.len()
+                ))
+                .size(10.5)
+                .color(FAINT),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .add(egui::Button::new(
+                        egui::RichText::new("all off").size(11.0).color(ACCENT),
+                    ).fill(egui::Color32::TRANSPARENT).frame(false))
+                    .clicked()
+                {
+                    s.disabled_scenes = scenes.to_vec();
+                }
+                ui.label(egui::RichText::new("·").size(11.0).color(FAINT));
+                if ui
+                    .add(egui::Button::new(
+                        egui::RichText::new("all on").size(11.0).color(ACCENT),
+                    ).fill(egui::Color32::TRANSPARENT).frame(false))
+                    .clicked()
+                {
+                    s.disabled_scenes.clear();
+                }
+            });
         });
     });
-    ui.label(
-        egui::RichText::new(format!(
-            "{} shown · {} of {} in rotation",
-            shown.len(),
-            in_rotation,
-            scenes.len()
-        ))
-        .size(11.0)
-        .color(MUTED),
-    );
+    ui.add_space(2.0);
 
-    // Thumbnail grid — reflows with the column width.
-    let avail = ui.available_width();
-    let cols = ((avail + 10.0) / 160.0).floor().max(2.0) as usize;
+    // Thumbnail grid — reflows with the column width. The scrollbar takes
+    // real layout space (non-floating) and `max_width` leaves a gap before
+    // the inspector so the handle can't sit on its border. x-offset is
+    // pinned: a stray horizontal offset has no scrollbar to undo it.
+    ui.spacing_mut().scroll.floating = false;
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
+        .max_width(ui.available_width() - 16.0)
+        .horizontal_scroll_offset(0.0)
+        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing = egui::vec2(10.0, 10.0);
+            let avail = ui.available_width() - 4.0;
+            let cols = ((avail + 10.0) / 160.0).floor().max(2.0) as usize;
             for chunk in shown.chunks(cols) {
                 ui.horizontal(|ui| {
                     for &i in chunk {
@@ -599,6 +638,7 @@ fn perform_tab(
                     }
                 });
             }
+            ui.add_space(4.0);
         });
 }
 
@@ -780,11 +820,14 @@ fn inspector(
 ) {
     use crate::ui_theme::*;
     let scroll_h = (ui.available_height() - 44.0).max(80.0);
+    ui.spacing_mut().scroll.floating = false;
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .max_height(scroll_h)
+        .horizontal_scroll_offset(0.0)
         .show(ui, |ui| {
-            // Live scene preview.
+            // Live preview with the accent frame + a "live output" caption
+            // baked into its lower-left corner (mockup 1b).
             let name = scenes.get(st.scene).cloned().unwrap_or_default();
             let w = ui.available_width();
             let (rect, _) =
@@ -799,22 +842,60 @@ fn inspector(
                     egui::Color32::WHITE,
                 );
             } else {
-                p.rect_filled(rect, 4.0, RAISED);
+                p.rect_filled(rect, 6.0, RAISED);
             }
             p.rect_stroke(
                 rect,
-                4.0,
-                egui::Stroke::new(1.0, BORDER),
+                6.0,
+                egui::Stroke::new(1.5, ACCENT),
                 egui::StrokeKind::Inside,
             );
+            let cap_r = egui::Rect::from_min_max(
+                egui::pos2(rect.min.x + 6.0, rect.max.y - 22.0),
+                egui::pos2(rect.min.x + 92.0, rect.max.y - 6.0),
+            );
+            p.rect_filled(cap_r, 4.0, INSET.gamma_multiply(0.85));
+            p.text(
+                cap_r.center(),
+                egui::Align2::CENTER_CENTER,
+                "live output",
+                egui::FontId::monospace(10.0),
+                MUTED,
+            );
 
+            // Name left, "bar N of M" right — then the thin cut-progress bar.
             ui.add_space(4.0);
-            ui.label(egui::RichText::new(&name).monospace().size(16.0).strong());
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(&name).monospace().size(16.0).strong());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if st.bars_total > 0 {
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "bar {} of {}",
+                                st.bar_in_scene, st.bars_total
+                            ))
+                            .monospace()
+                            .size(11.0)
+                            .color(MUTED),
+                        );
+                    }
+                });
+            });
             if st.bars_total > 0 {
-                ui.label(
-                    egui::RichText::new(bar_progress_line(st))
-                        .size(11.0)
-                        .color(MUTED),
+                let frac = (st.bar_in_scene as f32 / st.bars_total.max(1) as f32).clamp(0.0, 1.0);
+                let (br, _) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), 4.0),
+                    egui::Sense::hover(),
+                );
+                let pp = ui.painter();
+                pp.rect_filled(br, 2.0, INSET);
+                pp.rect_filled(
+                    egui::Rect::from_min_size(
+                        br.min,
+                        egui::vec2(br.width() * frac, br.height()),
+                    ),
+                    2.0,
+                    ACCENT,
                 );
             } else {
                 ui.label(
@@ -827,23 +908,51 @@ fn inspector(
                     .color(MUTED),
                 );
             }
-            if let Some(nx) = st.next_scene {
-                ui.label(
-                    egui::RichText::new(format!(
-                        "next → {}",
-                        scenes.get(nx).map(String::as_str).unwrap_or("?")
-                    ))
-                    .size(11.0)
-                    .color(ACCENT)
-                    .monospace(),
-                );
-            }
-            ui.add_space(4.0);
+
+            // Next-scene line left; a breakdown pill sits at the right edge.
+            ui.add_space(2.0);
             ui.horizontal(|ui| {
-                if ui.button("◀ prev").clicked() {
+                if let Some(nx) = st.next_scene {
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "next → {}",
+                            scenes.get(nx).map(String::as_str).unwrap_or("?")
+                        ))
+                        .size(11.0)
+                        .color(ACCENT)
+                        .monospace(),
+                    );
+                } else {
+                    ui.label(
+                        egui::RichText::new(bar_progress_line(st))
+                            .size(11.0)
+                            .color(FAINT),
+                    );
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if st.calm > 0.5 {
+                        pill(ui, "● breakdown", BREAKDOWN, BREAKDOWN_BG);
+                    }
+                });
+            });
+            ui.add_space(4.0);
+
+            // Prev / Next — Next carries the accent like the mockup.
+            ui.horizontal(|ui| {
+                let bw = ((ui.available_width() - ui.spacing().item_spacing.x) / 2.0).max(40.0);
+                if ui
+                    .add_sized([bw, 28.0], egui::Button::new("◀ Prev"))
+                    .clicked()
+                {
                     cmd.push(UiCommand::Do(Action::PrevScene));
                 }
-                if ui.add(egui::Button::new("next ▶").fill(ACCENT_SEL)).clicked() {
+                if ui
+                    .add_sized(
+                        [bw, 28.0],
+                        egui::Button::new("Next ▶").fill(ACCENT_SEL),
+                    )
+                    .clicked()
+                {
                     cmd.push(UiCommand::Do(Action::NextScene));
                 }
             });
@@ -870,10 +979,14 @@ fn inspector(
                     );
                 });
                 ctl_row(ui, "Dancer", |ui| {
+                    let look = s.dancer_style.map(|i| STYLES[i]).unwrap_or("auto");
                     ui.label(
-                        egui::RichText::new(st.clip.as_deref().unwrap_or("off"))
-                            .monospace()
-                            .size(11.0),
+                        egui::RichText::new(format!(
+                            "{} · {look}",
+                            st.clip.as_deref().unwrap_or("off")
+                        ))
+                        .monospace()
+                        .size(11.0),
                     );
                     if ui.small_button("next").clicked() {
                         cmd.push(UiCommand::Do(Action::NextClip));
@@ -1012,10 +1125,26 @@ fn inspector(
             });
         });
 
-    ui.separator();
+    ui.add_space(4.0);
     ui.horizontal(|ui| {
-        let bo = if st.blackout { "Blackout: ON" } else { "Blackout" };
-        if ui.add_sized([110.0, 26.0], egui::Button::new(bo)).clicked() {
+        let bw = ((ui.available_width() - ui.spacing().item_spacing.x - 56.0) / 2.0).max(40.0);
+        let bo = if st.blackout {
+            "Blackout: ON"
+        } else {
+            "Blackout"
+        };
+        if ui
+            .add_sized(
+                [bw, 28.0],
+                egui::Button::new(egui::RichText::new(bo).color(if st.blackout {
+                    TEXT
+                } else {
+                    DANGER
+                }))
+                .fill(if st.blackout { DANGER } else { DANGER_BG }),
+            )
+            .clicked()
+        {
             cmd.push(UiCommand::Do(Action::Blackout));
         }
         key_badge(ui, &key_short(s.keys.get(&Action::Blackout).map_or("", String::as_str)));
@@ -1024,7 +1153,7 @@ fn inspector(
         } else {
             "Fullscreen"
         };
-        if ui.add_sized([112.0, 26.0], egui::Button::new(fs)).clicked() {
+        if ui.add_sized([bw, 28.0], egui::Button::new(fs)).clicked() {
             cmd.push(UiCommand::Do(Action::Fullscreen));
         }
         key_badge(ui, &key_short(s.keys.get(&Action::Fullscreen).map_or("", String::as_str)));
@@ -1232,6 +1361,7 @@ fn palette_column(ui: &mut egui::Ui, s: &mut Settings) {
     section_label(ui, "palette");
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
+        .horizontal_scroll_offset(0.0)
         .show(ui, |ui| {
             for name in crate::palettes::names() {
                 let sel = s.palette == name;
@@ -1420,197 +1550,202 @@ fn status_dot(ui: &mut egui::Ui, ok: bool, text: &str) {
 fn stream_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<UiCommand>) {
     use crate::nowplaying::NpSource;
     use crate::ui_theme::*;
-    card().show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        section_label(ui, "now playing");
-        status_dot(
-            ui,
-            st.np_track.is_some(),
-            &st.np_track.clone().unwrap_or_else(|| "no track".into()),
+    // Two columns like the Dancer & FX page — input-ish cards on the left,
+    // on-screen dressing on the right, output full width at the bottom.
+    ui.columns(2, |cols| {
+        let ui = &mut cols[0];
+        card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            section_label(ui, "now playing");
+            status_dot(
+                ui,
+                st.np_track.is_some(),
+                &st.np_track.clone().unwrap_or_else(|| "no track".into()),
+            );
+        row(ui, "Source", |ui| {
+            egui::ComboBox::from_id_salt("np_src")
+                .width(130.0)
+                .selected_text(s.np_source.label())
+                .show_ui(ui, |ui| {
+                    for src in NpSource::ALL {
+                        ui.selectable_value(&mut s.np_source, src, src.label());
+                    }
+                });
+        });
+        ui.small(
+            "Auto follows whichever source changed last: Spotify / Apple Music / any media \
+             player, Serato, VirtualDJ, rekordbox, Mixxx, or a text file.",
         );
-    row(ui, "Source", |ui| {
-        egui::ComboBox::from_id_salt("np_src")
-            .width(130.0)
-            .selected_text(s.np_source.label())
-            .show_ui(ui, |ui| {
-                for src in NpSource::ALL {
-                    ui.selectable_value(&mut s.np_source, src, src.label());
+        if s.np_source == NpSource::File || s.np_source == NpSource::Auto {
+            row(ui, "Text file", |ui| {
+                ui.add(egui::TextEdit::singleline(&mut s.np_file).desired_width(150.0).hint_text("optional"));
+                if ui.button("…").clicked() {
+                    if let Some(p) = rfd::FileDialog::new().add_filter("text", &["txt"]).pick_file() {
+                        s.np_file = p.display().to_string();
+                    }
                 }
             });
-    });
-    ui.small(
-        "Auto follows whichever source changed last: Spotify / Apple Music / any media \
-         player, Serato, VirtualDJ, rekordbox, Mixxx, or a text file.",
-    );
-    if s.np_source == NpSource::File || s.np_source == NpSource::Auto {
-        row(ui, "Text file", |ui| {
-            ui.add(egui::TextEdit::singleline(&mut s.np_file).desired_width(150.0).hint_text("optional"));
+        }
+        row(ui, "Delay", |ui| {
+            ui.add(egui::Slider::new(&mut s.np_delay_s, 0.0..=60.0).step_by(1.0).suffix(" s"));
+        });
+        ui.small("A new track must stay loaded this long before it's shown — skips headphone cue-ups.");
+        for (name, line) in &st.np_status {
+            ui.small(format!("{name}: {line}"));
+        }
+        ui.small(format!(
+            "OBS: add a Text source reading {}",
+            crate::config::data_dir().join("nowplaying.txt").display()
+        ));
+        row(ui, "Card", |ui| {
+            ui.checkbox(&mut s.np_card, "Show on screen");
+            if ui.button("Show again").clicked() {
+                cmd.push(UiCommand::Do(Action::ShowNowPlaying));
+            }
+        });
+        row(ui, "Card time", |ui| {
+            ui.add(egui::Slider::new(&mut s.np_hold_s, 0.0..=60.0).step_by(1.0).suffix(" s"));
+            ui.small("0 = always");
+        });
+        row(ui, "Card size", |ui| {
+            ui.add(egui::Slider::new(&mut s.np_size, 0.5..=2.0));
+        });
+
+        });
+        ui.add_space(6.0);
+        card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            section_label(ui, "recording");
+            status_dot(
+                ui,
+                st.rec.is_some() && st.rec_err.is_none(),
+                &match (&st.rec_err, &st.rec) {
+                    (Some(e), _) => format!("{e}"),
+                    (None, Some(r)) => format!("{} · {} s buffered", r.encoder, r.buffered_s),
+                    (None, None) => "recorder off".to_string(),
+                },
+            );
+        row(ui, "Replay", |ui| {
+            ui.checkbox(&mut s.rec_buffer, "Keep the last");
+            ui.add(egui::DragValue::new(&mut s.rec_keep_s).range(10..=600).suffix(" s"));
+        });
+        row(ui, "Format", |ui| {
+            for l in crate::rec::Layout::ALL {
+                ui.selectable_value(&mut s.rec_layout, l, l.label());
+            }
+        });
+        row(ui, "", |ui| {
+            let can = st.rec.is_some();
+            if ui.add_enabled(can, egui::Button::new("💾 Save clip")).on_hover_text("Hotkey K").clicked() {
+                cmd.push(UiCommand::Do(Action::SaveClip));
+            }
+            let rolling = st.rec.as_ref().and_then(|r| r.set_since);
+            let label = match rolling {
+                Some(t) => {
+                    let e = t.elapsed().as_secs();
+                    format!("⏹ Stop set ({}:{:02}:{:02})", e / 3600, e / 60 % 60, e % 60)
+                }
+                None => "⏺ Record set".into(),
+            };
+            if ui.button(label).on_hover_text("Hotkey J — records until you stop it").clicked() {
+                cmd.push(UiCommand::Do(Action::RecordSet));
+            }
+        });
+        if let Some(e) = &st.rec_err {
+            ui.colored_label(egui::Color32::from_rgb(255, 160, 60), e);
+        }
+        if let Some(r) = &st.rec {
+            let mut line = format!("{} · {} s buffered", r.encoder, r.buffered_s);
+            if r.saving {
+                line.push_str(" · saving…");
+            }
+            ui.small(line);
+            if let Some(e) = &r.err {
+                ui.colored_label(egui::Color32::from_rgb(255, 120, 120), e);
+            } else if let Some(p) = &r.last {
+                ui.small(format!("Saved {p}"));
+            }
+        }
+        row(ui, "Folder", |ui| {
+            ui.add(egui::TextEdit::singleline(&mut s.rec_dir).desired_width(150.0).hint_text("Videos/Trippin"));
             if ui.button("…").clicked() {
-                if let Some(p) = rfd::FileDialog::new().add_filter("text", &["txt"]).pick_file() {
-                    s.np_file = p.display().to_string();
+                if let Some(p) = rfd::FileDialog::new().pick_folder() {
+                    s.rec_dir = p.display().to_string();
                 }
             }
         });
-    }
-    row(ui, "Delay", |ui| {
-        ui.add(egui::Slider::new(&mut s.np_delay_s, 0.0..=60.0).step_by(1.0).suffix(" s"));
-    });
-    ui.small("A new track must stay loaded this long before it's shown — skips headphone cue-ups.");
-    for (name, line) in &st.np_status {
-        ui.small(format!("{name}: {line}"));
-    }
-    ui.small(format!(
-        "OBS: add a Text source reading {}",
-        crate::config::data_dir().join("nowplaying.txt").display()
-    ));
-    row(ui, "Card", |ui| {
-        ui.checkbox(&mut s.np_card, "Show on screen");
-        if ui.button("Show again").clicked() {
-            cmd.push(UiCommand::Do(Action::ShowNowPlaying));
-        }
-    });
-    row(ui, "Card time", |ui| {
-        ui.add(egui::Slider::new(&mut s.np_hold_s, 0.0..=60.0).step_by(1.0).suffix(" s"));
-        ui.small("0 = always");
-    });
-    row(ui, "Card size", |ui| {
-        ui.add(egui::Slider::new(&mut s.np_size, 0.5..=2.0));
-    });
+        row(ui, "ffmpeg", |ui| {
+            ui.add(egui::TextEdit::singleline(&mut s.ffmpeg_path).desired_width(150.0).hint_text("auto"));
+            if ui.button("…").clicked() {
+                if let Some(p) = rfd::FileDialog::new().pick_file() {
+                    s.ffmpeg_path = p.display().to_string();
+                }
+            }
+        });
+        ui.small("Clips include the overlays and the audio. Size/fps follow the video output settings below.");
 
-    });
-    ui.add_space(6.0);
-    card().show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        section_label(ui, "recording");
-        status_dot(
-            ui,
-            st.rec.is_some() && st.rec_err.is_none(),
-            &match (&st.rec_err, &st.rec) {
-                (Some(e), _) => format!("{e}"),
-                (None, Some(r)) => format!("{} · {} s buffered", r.encoder, r.buffered_s),
-                (None, None) => "recorder off".to_string(),
-            },
+        });
+        let ui = &mut cols[1];
+        card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            section_label(ui, "branding");
+            status_dot(ui, s.brand_on, if s.brand_on { "showing" } else { "off" });
+        ui.checkbox(&mut s.brand_on, "Show logo / name");
+        row(ui, "DJ name", |ui| {
+            ui.add(egui::TextEdit::singleline(&mut s.brand_name).desired_width(180.0));
+        });
+        row(ui, "Handles", |ui| {
+            ui.add(egui::TextEdit::singleline(&mut s.brand_handles).desired_width(180.0).hint_text("@you · twitch.tv/you"));
+        });
+        row(ui, "Logo", |ui| {
+            ui.add(egui::TextEdit::singleline(&mut s.brand_logo).desired_width(150.0).hint_text("PNG, optional"));
+            if ui.button("…").clicked() {
+                if let Some(p) = rfd::FileDialog::new().add_filter("PNG", &["png"]).pick_file() {
+                    s.brand_logo = p.display().to_string();
+                }
+            }
+        });
+        row(ui, "Corner", |ui| {
+            for (i, l) in ["↖", "↗", "↙", "↘"].iter().enumerate() {
+                ui.selectable_value(&mut s.brand_corner, i as u8, *l);
+            }
+        });
+        row(ui, "Size", |ui| {
+            ui.add(egui::Slider::new(&mut s.brand_size, 0.5..=2.0));
+        });
+        row(ui, "Opacity", |ui| {
+            ui.add(egui::Slider::new(&mut s.brand_opacity, 0.1..=1.0));
+        });
+        row(ui, "Accent", |ui| {
+            let mut c = crate::overlay::parse_hex(&s.brand_color, [0.25, 0.85, 1.0]);
+            if ui.color_edit_button_rgb(&mut c).changed() {
+                s.brand_color = format!(
+                    "#{:02x}{:02x}{:02x}",
+                    (c[0] * 255.0) as u8,
+                    (c[1] * 255.0) as u8,
+                    (c[2] * 255.0) as u8
+                );
+            }
+        });
+
+        });
+        ui.add_space(6.0);
+        card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            section_label(ui, "ticker");
+            status_dot(ui, s.ticker_on, if s.ticker_on { "scrolling" } else { "off" });
+        ui.checkbox(&mut s.ticker_on, "Scroll a message along the bottom");
+        ui.add(
+            egui::TextEdit::multiline(&mut s.ticker_text)
+                .desired_rows(2)
+                .desired_width(280.0)
+                .hint_text("Requests in chat · follow for the next set"),
         );
-    row(ui, "Replay", |ui| {
-        ui.checkbox(&mut s.rec_buffer, "Keep the last");
-        ui.add(egui::DragValue::new(&mut s.rec_keep_s).range(10..=600).suffix(" s"));
-    });
-    row(ui, "Format", |ui| {
-        for l in crate::rec::Layout::ALL {
-            ui.selectable_value(&mut s.rec_layout, l, l.label());
-        }
-    });
-    row(ui, "", |ui| {
-        let can = st.rec.is_some();
-        if ui.add_enabled(can, egui::Button::new("💾 Save clip")).on_hover_text("Hotkey K").clicked() {
-            cmd.push(UiCommand::Do(Action::SaveClip));
-        }
-        let rolling = st.rec.as_ref().and_then(|r| r.set_since);
-        let label = match rolling {
-            Some(t) => {
-                let e = t.elapsed().as_secs();
-                format!("⏹ Stop set ({}:{:02}:{:02})", e / 3600, e / 60 % 60, e % 60)
-            }
-            None => "⏺ Record set".into(),
-        };
-        if ui.button(label).on_hover_text("Hotkey J — records until you stop it").clicked() {
-            cmd.push(UiCommand::Do(Action::RecordSet));
-        }
-    });
-    if let Some(e) = &st.rec_err {
-        ui.colored_label(egui::Color32::from_rgb(255, 160, 60), e);
-    }
-    if let Some(r) = &st.rec {
-        let mut line = format!("{} · {} s buffered", r.encoder, r.buffered_s);
-        if r.saving {
-            line.push_str(" · saving…");
-        }
-        ui.small(line);
-        if let Some(e) = &r.err {
-            ui.colored_label(egui::Color32::from_rgb(255, 120, 120), e);
-        } else if let Some(p) = &r.last {
-            ui.small(format!("Saved {p}"));
-        }
-    }
-    row(ui, "Folder", |ui| {
-        ui.add(egui::TextEdit::singleline(&mut s.rec_dir).desired_width(150.0).hint_text("Videos/Trippin"));
-        if ui.button("…").clicked() {
-            if let Some(p) = rfd::FileDialog::new().pick_folder() {
-                s.rec_dir = p.display().to_string();
-            }
-        }
-    });
-    row(ui, "ffmpeg", |ui| {
-        ui.add(egui::TextEdit::singleline(&mut s.ffmpeg_path).desired_width(150.0).hint_text("auto"));
-        if ui.button("…").clicked() {
-            if let Some(p) = rfd::FileDialog::new().pick_file() {
-                s.ffmpeg_path = p.display().to_string();
-            }
-        }
-    });
-    ui.small("Clips include the overlays and the audio. Size/fps follow the video output settings below.");
+        row(ui, "Speed", |ui| {
+            ui.add(egui::Slider::new(&mut s.ticker_speed, 0.3..=3.0));
+        });
 
-    });
-    ui.add_space(6.0);
-    card().show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        section_label(ui, "branding");
-        status_dot(ui, s.brand_on, if s.brand_on { "showing" } else { "off" });
-    ui.checkbox(&mut s.brand_on, "Show logo / name");
-    row(ui, "DJ name", |ui| {
-        ui.add(egui::TextEdit::singleline(&mut s.brand_name).desired_width(180.0));
-    });
-    row(ui, "Handles", |ui| {
-        ui.add(egui::TextEdit::singleline(&mut s.brand_handles).desired_width(180.0).hint_text("@you · twitch.tv/you"));
-    });
-    row(ui, "Logo", |ui| {
-        ui.add(egui::TextEdit::singleline(&mut s.brand_logo).desired_width(150.0).hint_text("PNG, optional"));
-        if ui.button("…").clicked() {
-            if let Some(p) = rfd::FileDialog::new().add_filter("PNG", &["png"]).pick_file() {
-                s.brand_logo = p.display().to_string();
-            }
-        }
-    });
-    row(ui, "Corner", |ui| {
-        for (i, l) in ["↖", "↗", "↙", "↘"].iter().enumerate() {
-            ui.selectable_value(&mut s.brand_corner, i as u8, *l);
-        }
-    });
-    row(ui, "Size", |ui| {
-        ui.add(egui::Slider::new(&mut s.brand_size, 0.5..=2.0));
-    });
-    row(ui, "Opacity", |ui| {
-        ui.add(egui::Slider::new(&mut s.brand_opacity, 0.1..=1.0));
-    });
-    row(ui, "Accent", |ui| {
-        let mut c = crate::overlay::parse_hex(&s.brand_color, [0.25, 0.85, 1.0]);
-        if ui.color_edit_button_rgb(&mut c).changed() {
-            s.brand_color = format!(
-                "#{:02x}{:02x}{:02x}",
-                (c[0] * 255.0) as u8,
-                (c[1] * 255.0) as u8,
-                (c[2] * 255.0) as u8
-            );
-        }
-    });
-
-    });
-    ui.add_space(6.0);
-    card().show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        section_label(ui, "ticker");
-        status_dot(ui, s.ticker_on, if s.ticker_on { "scrolling" } else { "off" });
-    ui.checkbox(&mut s.ticker_on, "Scroll a message along the bottom");
-    ui.add(
-        egui::TextEdit::multiline(&mut s.ticker_text)
-            .desired_rows(2)
-            .desired_width(280.0)
-            .hint_text("Requests in chat · follow for the next set"),
-    );
-    row(ui, "Speed", |ui| {
-        ui.add(egui::Slider::new(&mut s.ticker_speed, 0.3..=3.0));
-    });
-
+        });
     });
     ui.add_space(6.0);
     card().show(ui, |ui| {

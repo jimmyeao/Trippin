@@ -679,6 +679,7 @@ impl Editor {
                     let show = |name: &str| filt.is_empty() || name.to_lowercase().contains(&filt);
                     egui::ScrollArea::vertical()
                         .auto_shrink([false, false])
+                        .horizontal_scroll_offset(0.0)
                         .show(ui, |ui| match *lib_tab {
                             LibTab::Scenes => {
                                 for name in scenes.iter().filter(|n| show(n)) {
