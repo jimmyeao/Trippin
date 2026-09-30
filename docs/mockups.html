@@ -1,0 +1,142 @@
+# UI redesign — build brief for Devin
+
+Read `AGENTS.md` first (branching, lock order, settings rules all apply).
+Work on `feat/ui-redesign`. Small commits, one step per commit. Don't merge to master unless the owner asks.
+
+Mockups (source of truth for look and layout):
+- `mockups.html` — open in a browser; interactive.
+- `1a-console.png`, `1b-library-inspector.png`, `1c-perform.png`, `1d-timeline-editor.png`.
+
+**Chosen direction:** 1b (library + inspector) is the default control-window layout. 1c is a second
+"Perform" view the user can toggle to. 1a is reference only — reuse its grouped-card
+styling for the settings pages (Dancer & FX, Stream, Keys). 1d replaces the timeline editor layout.
+*(If the owner picks differently, swap the default; the building blocks are the same.)*
+
+Everything must stay plain egui 0.36: `Frame`, `SelectableLabel`, `Slider`, `Grid`, `ScrollArea`,
+`Image`, painter rects. No custom shaders in the UI, no blur, no drop shadows inside windows.
+
+---
+
+## 1. Theme (do this first)
+
+Add `src/ui_theme.rs` with one `apply(ctx: &egui::Context)` called from `EguiWin::new`
+(replacing `Visuals::dark()`), plus shared helpers (`card()`, `segmented()`, `pill()`, `key_badge()`).
+
+| Token | Hex | Use |
+|---|---|---|
+| bg | `#0E0F11` | window / central panel |
+| panel | `#121416` | side panels, header |
+| card | `#141619` | grouped cards, 1px `#24272B` stroke, 8px radius |
+| raised | `#1F2226` | buttons |
+| inset | `#0E0F11` | segmented-control track |
+| border | `#24272B` / `#2A2E33` | separators / inputs |
+| text | `#E6E7E9` | primary |
+| muted | `#8B9096` | labels |
+| faint | `#6C7177` | help text |
+| accent | `#3FB0D8` | live outline, checkbox fill, active beat |
+| accent-sel | `#1A4D61` | selected segmented / tab fill |
+| breakdown | `#A9A6F0` on `#1E1D33` | breakdown pill |
+| warn | `#F0A650` on `#33230F` | "no signal" pill |
+| danger | `#F08A84` on `#3A1716` | Blackout, Delete |
+
+Timeline lane colours: scenes `#8A7FF0`, dancer `#E25FA8`, fx `#3FB0D8`, show `#F0A650`, text `#5FD39A`.
+Clip fill = lane colour at 20% alpha, stroke at 60%.
+
+Fonts: keep egui's defaults (Ubuntu-Light + Hack) — the mockup uses Ubuntu / Ubuntu Mono to match.
+Scene/dancer names, BPM, timecodes and key names always use monospace.
+Sizes: body 13, help 11, section label 10 uppercase + letter-spacing, current scene 16–22 mono bold.
+Spacing: 12–16px panel padding, 10–12px gaps, 5px button radius.
+
+## 2. Live status header (shared by all views)
+
+Replace the current one-line status strip in `panel.rs`. Reads from `Status` (take **one** guard).
+- Current scene (mono bold) and "next →" scene.
+- BPM + a **4-pip beat indicator** from `Features::beat_in_bar` — the active pip is accent.
+- Bar-progress bar toward the next auto cut ("bar 2 of 4" / "cut in 3 bars"). Needs director to
+  expose bars-until-cut in `Status` (add a field; default 0).
+- Pills: `breakdown` (when `calm` > 0.5), `no signal`, fps, dancer + confidence, audio device (muted text).
+- Request repaint every frame while visible so the pips animate.
+
+## 3. Control window — 1b layout (default)
+
+Window default size ~900×640 (resizable; min 720×520). Top tabs reduced to:
+**Perform · Dancer & FX · Stream · Timeline · Keys** (Scenes merges into Perform).
+
+**Left / central: scene library**
+- Search field (filters by substring, live) + filter chips: All / 2D / 3D / Seasonal.
+- Count line: "N shown · X of 130 in rotation" + "all on / all off".
+- Grid of thumbnail tiles (4 cols at 900px, reflow by width). Each tile: thumbnail, 2D/3D/season tag
+  (top-left), rotation checkbox (top-right), name below. Out-of-rotation tiles at 45% opacity.
+  Live scene gets a 2px accent outline + "● LIVE".
+- Click tile = preview/show (same as current "show"). Checkbox = toggle rotation.
+- Seasonal/3D auto-on-off controls from the old Scenes tab go in a small "Rotation rules" popover
+  next to the filter chips.
+
+**Thumbnails:** `render.rs::thumbnail` already exists. Render each scene once (e.g. 160×90) on a
+background pass at startup / on shader hot-reload, cache to `data_dir()/thumbs/<scene>.png`, load as
+`egui::TextureHandle`. Show a striped placeholder until ready. Must not stall the render thread —
+spread over frames, a few per frame max. `@heavy` scenes on weak GPUs: render once, cache, done.
+
+**Right inspector (280px, `SidePanel::right`)**
+- Live preview box (the thumbnail of the live scene is fine; a live downscaled output texture is a nice-to-have).
+- Current scene name, bar progress, next scene, breakdown pill.
+- Prev / Next buttons (Next is accent-sel).
+- Compact grid: Mode (Auto/Static/Manual), Bars (4/8/16/32), Dancer (routine · look, click → Dancer tab),
+  Effect (click → FX tab), Palette strip (click opens palette picker popover).
+- Pinned at bottom: Blackout (danger) + Fullscreen, each with its key badge.
+
+Checkboxes from the old Show tab (Detect breakdowns, Cut early on drop, Random order) and Sync
+(latency slider, "Mark the one") go in a collapsible "Director & sync" section at the bottom of the inspector.
+
+## 4. Perform view — 1c
+
+Toggle from the Perform tab (a small "Library / Pads" segmented control in the tab bar), persisted in Settings.
+- Big BPM (40px mono) + 4 large beat blocks.
+- Now (large, accent border) and Up next (dashed border) previews with names and "in N bars".
+- 4×2 pad grid, each pad: label, sub-state, key badge. Pads: Next scene, Prev scene, Hold (static),
+  Blackout, Mark the one, Effect cycle, Dancer look, Canon. Each pad fires the same `Action` as its hotkey
+  and shows the key from the user's current bindings (not hard-coded).
+- Right column: palette list with gradient strips; click to set.
+
+## 5. Settings pages (use 1a card styling)
+
+- **Dancer & FX:** two cards side by side. Dancer: on/off, look segmented, canon, size, motion trails,
+  routine list as a thumbnail grid (first frame of each clip) with rotation checkboxes.
+  FX: effect as a segmented grid, strength slider, "auto on cut".
+- **Stream:** cards for Now playing, Recording, Branding, Ticker, Video output — same fields as today,
+  each card with a status line (e.g. "NDI Trippin — waiting for receivers", "Spout — live") shown as a coloured dot.
+- **Keys:** table with a search field; key names in key-badge style; "Rebind" per row; conflicts highlighted in warn.
+
+## 6. Timeline editor — 1d (`editor.rs`)
+
+- Transport bar: round Play / Stop / Rec buttons, big timecode "0:12.4 / 3:41.0", bar·beat readout,
+  snap and follow-live as pills, zoom slider + fit.
+- Left library (220px): tabs Scenes / Dancer / FX / Cues, search, list rows with small thumbnail and
+  lane-colour left edge. Drag onto a lane (existing behaviour).
+- Lanes: 110px header with colour square, name, sub-line (e.g. song title, "8 cues"). Clips are rounded
+  rects in lane colour. Audio lane shows the waveform. Vertical grid lines on bars; red playhead.
+- **Right inspector (new, replaces the bottom cue dump):** selected clip preview, name, Start, Length
+  (bar presets), Transition dropdown, Palette, Duplicate / Delete. The old Text / Effects / Actions /
+  Palettes bottom panel moves into the library's **Cues** tab.
+- "+ add lane" at the bottom of the lane stack.
+
+## 7. New features to add (in priority order)
+
+1. **Scene thumbnails** (section 3) — the biggest win; used everywhere.
+2. **Beat pips + bars-until-cut** in the header.
+3. **Queue next scene:** right-click (or shift-click) a tile to set "up next"; the director uses it on the
+   next cut instead of picking one. Shows in the inspector and Perform view.
+4. **Favourites:** star on tiles, "★" filter chip; stored in Settings.
+5. **Perform view** with pads bound to current hotkeys.
+6. **Clip inspector** in the timeline editor.
+7. Nice-to-have: live mini output preview in the inspector (downscaled copy from the output tap —
+   must not block rendering, drop frames instead).
+
+## 8. Done when
+
+- `cargo build --release` and `cargo test --release` pass; no new warnings.
+- Every existing control from the old tabs is still reachable (checklist it in the PR description).
+- Old `trippin.json` files still load; new Settings fields have defaults.
+- Screenshots of each new screen attached to the PR, compared side by side with the mockup PNGs.
+- README updated for any new hotkeys/features (see AGENTS.md §9).
+- Add a short "UI theme" note to AGENTS.md pointing at `src/ui_theme.rs`.
