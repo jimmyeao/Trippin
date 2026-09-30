@@ -101,7 +101,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         // Direction: the wind (rain slant) swings side to side. The fall
         // rides the smooth high clock (raw energy here made it lurch).
         let cx = floor((p.x + p.y * 0.2 * sin(u.clock4.x * 0.02)) * cells);
-        let ry = fract(p.y * 2.2 * fi + u.clock4.w * 5.0 / fi + hash21(vec2<f32>(cx, fi * 4.0)));
+        // p.y grows DOWN the screen: subtract time so the streaks fall.
+        let ry = fract(p.y * 2.2 * fi - u.clock4.w * 5.0 / fi + hash21(vec2<f32>(cx, fi * 4.0)));
         let dash = step(0.5, hash21(vec2<f32>(cx, fi))) * smoothstep(0.12, 0.0, abs(ry - 0.5)) * 0.12 / fi;
         col += vec3<f32>(0.5, 0.6, 0.7) * dash * (0.4 + 0.6 * u.intensity);
     }

@@ -25,8 +25,8 @@ fn block(c: vec2<f32>) -> vec4<f32> {
     let half = S * (0.3 + 0.12 * h.y);
     let downtown = exp(-length(ctr - vec2<f32>(0.0, 300.0)) / 260.0);
     let n = tnoise(vec3<f32>(c * 0.07, 0.3)).b;
-    // Shape: the whole skyline rises and falls like an equaliser.
-    var hgt = (8.0 + pow(h.x, 3.0) * 50.0 + pow(hash21(c + 5.5), 8.0) * 160.0 + downtown * 180.0 * n * n) * (0.75 + 0.5 * spec(fract(h.y * 3.1)));
+    // Buildings stay put — only the billboards and windows react.
+    var hgt = 8.0 + pow(h.x, 3.0) * 50.0 + pow(hash21(c + 5.5), 8.0) * 160.0 + downtown * 180.0 * n * n;
     // Empty lots — and a clearing round our own tower at the origin.
     if hash21(c + 9.1) < 0.08 || length(ctr - vec2<f32>(3.0, -20.0)) < 40.0 {
         hgt = 0.0;
