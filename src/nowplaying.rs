@@ -704,19 +704,23 @@ mod media {
         }
     }
 
-    const SCRIPT: &str = r#"
-if application "Spotify" is running then
-  tell application "Spotify"
-    if player state is playing then return "Spotify" & tab & (artist of current track) & tab & (name of current track)
-  end tell
-end if
-if application "Music" is running then
-  tell application "Music"
-    if player state is playing then return "Music" & tab & (artist of current track) & tab & (name of current track)
-  end tell
-end if
-return ""
-"#;
+    /// Per-app script. Only run for an app that's running: a script naming
+    /// an app that isn't installed fails to compile (and asks "Where is…?").
+    fn script(app: &str) -> String {
+        format!(
+            "tell application \"{app}\"\n\
+             if player state is playing then return (artist of current track) & tab & (name of current track)\n\
+             end tell\n\
+             return \"\""
+        )
+    }
+
+    fn running(proc_name: &str) -> bool {
+        std::process::Command::new("pgrep")
+            .args(["-xq", proc_name])
+            .status()
+            .is_ok_and(|s| s.success())
+    }
 
     impl Source for MediaSession {
         fn kind(&self) -> NpSource {
@@ -726,20 +730,26 @@ return ""
             true
         }
         fn poll(&mut self) -> Result<Option<Track>, String> {
-            let out = std::process::Command::new("osascript")
-                .args(["-e", SCRIPT])
-                .output()
-                .map_err(|e| e.to_string())?;
-            let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            let mut it = s.split('\t');
-            match (it.next(), it.next(), it.next()) {
-                (Some(src), Some(artist), Some(title)) if !title.is_empty() => Ok(Some(Track {
-                    artist: artist.into(),
-                    title: title.into(),
-                    source: src.into(),
-                })),
-                _ => Ok(None),
+            for app in ["Spotify", "Music"] {
+                if !running(app) {
+                    continue;
+                }
+                let out = std::process::Command::new("osascript")
+                    .args(["-e", &script(app)])
+                    .output()
+                    .map_err(|e| e.to_string())?;
+                let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if let Some((artist, title)) = s.split_once('\t') {
+                    if !title.is_empty() {
+                        return Ok(Some(Track {
+                            artist: artist.into(),
+                            title: title.into(),
+                            source: app.into(),
+                        }));
+                    }
+                }
             }
+            Ok(None)
         }
     }
 }
