@@ -7,6 +7,21 @@ to whatever your DJ software is playing and drives GPU shader scenes from it. It
 tracks band energy, onsets, tempo and beat phase, and an auto-pilot cuts between
 scenes on phrase boundaries and drops.
 
+![A stage_rig scene with a silhouette dancer, the now-playing card, branding and the ticker](docs/media/hero.jpg)
+
+<p align="center"><img src="docs/media/laser_show.gif" width="640" alt="laser_show: beams through fog-machine smoke, changing formation every four bars"><br>
+<em>laser_show: the rig changes formation every four bars, and the beams cut through drifting smoke</em></p>
+
+| | | | |
+|---|---|---|---|
+| ![chrome_bloom](docs/media/chrome_bloom.jpg) | ![glass_monoliths](docs/media/glass_monoliths.jpg) | ![gyro_core](docs/media/gyro_core.jpg) | ![kifs_cathedral](docs/media/kifs_cathedral.jpg) |
+| chrome_bloom | glass_monoliths | gyro_core | kifs_cathedral |
+| ![neon_coaster](docs/media/neon_coaster.jpg) | ![rooftop_city](docs/media/rooftop_city.jpg) | ![stage_rig](docs/media/stage_rig.jpg) | ![morph_sculpture](docs/media/morph_sculpture.jpg) |
+| neon_coaster | rooftop_city | stage_rig | morph_sculpture |
+
+<p align="center"><img src="docs/media/panel.png" width="360" alt="The control panel"><br>
+<em>The control panel runs in its own window beside the visuals.</em></p>
+
 ## Install
 
 Download `Trippin-Setup-<version>.exe` from the GitHub **Releases** page (or
