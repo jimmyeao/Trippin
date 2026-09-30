@@ -1901,6 +1901,7 @@ fn keys_tab(
     }
     let q = filter.to_lowercase();
     card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
         for a in Action::ALL {
             if !q.is_empty() && !a.label().to_lowercase().contains(&q) {
                 continue;
