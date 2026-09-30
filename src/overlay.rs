@@ -313,8 +313,14 @@ pub struct Overlays {
 
 /// Ease `vis` toward `target` — in over ~0.45 s, out over ~0.3 s.
 fn ease_vis(vis: &mut f32, target: f32, dt: f32) {
-    let rate = if target > *vis { 2.2 } else { 3.2 };
-    *vis = (*vis + rate * dt * (target - *vis).signum()).clamp(0.0, 1.0);
+    let d = target - *vis;
+    // signum(+0.0) is 1.0, not 0.0: an at-rest overlay would otherwise ping
+    // `rate*dt` up and back every other frame (the logo's fast judder).
+    if d == 0.0 {
+        return;
+    }
+    let rate = if d > 0.0 { 2.2 } else { 3.2 };
+    *vis = (*vis + rate * dt * d.signum()).clamp(0.0, 1.0);
     if (target - *vis).abs() < 0.02 {
         *vis = target;
     }
@@ -540,5 +546,25 @@ mod tests {
         save("brand", &b);
         let t = render_ticker("Requests in chat · follow for the next set", acc).unwrap();
         save("ticker", &t);
+    }
+
+    /// signum(+0.0) is 1.0 — an at-rest vis used to ping `rate*dt` up and
+    /// back every other frame (the logo juddered while the name was off).
+    #[test]
+    fn vis_ease_is_stable_at_rest() {
+        let mut v = 0.0f32;
+        for _ in 0..120 {
+            ease_vis(&mut v, 0.0, 0.016);
+        }
+        assert_eq!(v, 0.0);
+        // And still converges both ways.
+        for _ in 0..120 {
+            ease_vis(&mut v, 1.0, 0.016);
+        }
+        assert_eq!(v, 1.0);
+        for _ in 0..120 {
+            ease_vis(&mut v, 0.0, 0.016);
+        }
+        assert_eq!(v, 0.0);
     }
 }

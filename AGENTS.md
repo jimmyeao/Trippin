@@ -228,6 +228,13 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   pass `/SUBSYSTEM:WINDOWS` via `RUSTFLAGS`.
 - Worker threads must always reply to their channel, even when they panic
   (use `catch_unwind`). A dropped reply wedged the editor.
+- `f32::signum(+0.0)` is **1.0**, not 0.0. An ease like
+  `v += rate*dt*(target - v).signum()` never rests: at `v == target` it
+  steps up `rate*dt` then eases back — a two-frame judder (this made the
+  branding logo wobble horizontally whenever the DJ name was off). Guard
+  the at-rest case (see `overlay.rs::ease_vis`).
+- The pointer over the visuals is hidden while fullscreen (synced in
+  `about_to_wait`); the panel/editor windows keep theirs.
 - **MIDI** (`midi.rs`): midir's callback thread posts `AppEvent::MidiNote`
   through an `EventLoopProxy` — the event loop type is
   `EventLoop<AppEvent>`, so `ApplicationHandler<AppEvent>::user_event`

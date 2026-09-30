@@ -75,8 +75,7 @@ prompts once for screen/system-audio recording permission on first launch
 (macOS 13+; on older systems it falls back to the default input). `--mic`
 forces the microphone, and `--device "<name>"` picks a specific input or
 interface for a DJ booth-out. `--list-devices` shows what's available.
-The panel key is **P** on macOS (F1 is a brightness key on Touch Bar
-machines; Fn+F1 also works). On macOS, presents are ungated from vsync and
+On macOS, presents are ungated from vsync and
 the render
 loop self-paces at the display's refresh — vsync-gated presents stall ~2
 frames whenever the compositor is loaded (e.g. another app fullscreen on a
@@ -147,7 +146,7 @@ Default keys (all rebindable in the panel):
 | N | show the now-playing card again |
 | K | save a clip (the replay buffer) |
 | J | record the whole set: start / stop |
-| F1 (P on macOS) | show / hide the control panel |
+| F1 | show / hide the control panel |
 | Esc | leave fullscreen (it never quits; close the window to quit) |
 
 **MIDI controllers:** every action above can also sit on a MIDI pad or key.
