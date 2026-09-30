@@ -247,3 +247,40 @@ fn cam_ray(p: vec2<f32>, ro: vec3<f32>, ta: vec3<f32>, roll: f32, fl: f32) -> ve
     let v = cross(f, r);
     return normalize(r * p.x - v * p.y + f * fl);
 }
+
+// ---- Lasers through fog-machine smoke (2D, screen space) ------------------
+
+// Billowing smoke density 0..1 at screen point p: large domain-warped
+// clouds drifting slowly upward, with real gaps (dark air) between them.
+fn smoke2d(p: vec2<f32>, t: f32) -> f32 {
+    let q = vec3<f32>(p * 0.28 + vec2<f32>(0.0, t * 0.02), t * 0.006);
+    let w = tnoise(q * 0.7 + 0.3).b - 0.5;
+    let w2 = tnoise(q * 0.7 + 1.7).b - 0.5;
+    let q2 = q + vec3<f32>(w, w2, 0.0) * 0.5;
+    let big = tnoise(q2).b * 0.65 + tnoise(q2 * 2.3 + 0.5).b * 0.35;
+    let fine = tnoise(q2 * 5.0 + 0.9).r;
+    // B channel spans ~0.37..0.64: stretch, then carve gaps.
+    let d = clamp((big - 0.5) * 4.0 + 0.5, 0.0, 1.0);
+    return smoothstep(0.25, 0.85, d) * (0.75 + 0.5 * fine);
+}
+
+// One laser beam from origin o along angle ang (y-down screen coords).
+// Returns (thin core, wide scatter halo) — the caller multiplies the core
+// by the smoke density (a laser is only visible where there's smoke to
+// scatter it) and uses the halo to light the smoke around the beam.
+fn laser_line(p: vec2<f32>, o: vec2<f32>, ang: f32) -> vec2<f32> {
+    let d = p - o;
+    let dir = vec2<f32>(cos(ang), sin(ang));
+    let along = dot(d, dir);
+    if along < 0.0 {
+        return vec2<f32>(0.0);
+    }
+    let perp = abs(d.x * dir.y - d.y * dir.x);
+    let px = 1.0 / u.res_y;
+    // Real lasers barely diverge: ~1.5 px core, widening a touch far out.
+    let w = px * (1.3 + along * 2.0);
+    let core = exp(-perp * perp / (w * w));
+    // Scatter: a tight glow plus a broad one that lights whole clouds.
+    let halo = exp(-perp / (0.012 + along * 0.02)) + 0.35 * exp(-perp / (0.08 + along * 0.1));
+    return vec2<f32>(core, halo);
+}
