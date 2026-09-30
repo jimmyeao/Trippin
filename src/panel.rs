@@ -135,6 +135,11 @@ pub struct Panel {
     /// Thumbnails we've asked the render thread for (Instant = last request,
     /// for re-requesting a thumb that never came back).
     want_thumbs: HashMap<String, Instant>,
+    /// Dancer mid-frame thumbs, keyed by clip name — decoded straight from
+    /// the clip's frames on disk (no render thread involved).
+    clip_thumbs: HashMap<String, Option<egui::TextureHandle>>,
+    /// Text filter on the Keys page.
+    keys_filter: String,
 }
 
 impl Panel {
@@ -166,6 +171,8 @@ impl Panel {
             chip: LibChip::All,
             thumbs: HashMap::new(),
             want_thumbs: HashMap::new(),
+            clip_thumbs: HashMap::new(),
+            keys_filter: String::new(),
         })
     }
 
@@ -216,6 +223,8 @@ impl Panel {
         let chip = &mut self.chip;
         let thumbs = &mut self.thumbs;
         let want_thumbs = &mut self.want_thumbs;
+        let clip_thumbs = &mut self.clip_thumbs;
+        let keys_filter = &mut self.keys_filter;
         let frame = self.win.frame(|ui| {
             ui.add_space(6.0);
             for (key, w, h, px) in &got {
@@ -246,6 +255,8 @@ impl Panel {
                 chip,
                 thumbs,
                 want_thumbs,
+                clip_thumbs,
+                keys_filter,
                 &mut commands,
             );
         });
@@ -275,6 +286,8 @@ fn build_ui(
     chip: &mut LibChip,
     thumbs: &mut HashMap<String, egui::TextureHandle>,
     want_thumbs: &mut HashMap<String, Instant>,
+    clip_thumbs: &mut HashMap<String, Option<egui::TextureHandle>>,
+    keys_filter: &mut String,
     cmd: &mut Vec<UiCommand>,
 ) -> bool {
     let before = serde_json::to_string(s).unwrap_or_default();
@@ -314,13 +327,11 @@ fn build_ui(
                 .auto_shrink([false, true])
                 .show(ui, |ui| match *tab {
                     Tab::DancerFx => {
-                        dancer_tab(ui, s, st, clips, cmd);
-                        ui.separator();
-                        effects_tab(ui, s, st);
+                        dancer_fx_tab(ui, s, st, clips, clip_thumbs, cmd)
                     }
                     Tab::Stream => stream_tab(ui, s, st, cmd),
                     Tab::Timeline => timeline_tab(ui, tl_shared, cmd),
-                    Tab::Keys => keys_tab(ui, s, rebinding),
+                    Tab::Keys => keys_tab(ui, s, rebinding, keys_filter),
                     Tab::Perform => unreachable!(),
                 });
         }
@@ -1388,9 +1399,35 @@ fn key_short(k: &str) -> String {
     }
 }
 
+/// Coloured status dot + line at the top of a Stream card.
+fn status_dot(ui: &mut egui::Ui, ok: bool, text: &str) {
+    ui.horizontal(|ui| {
+        let (r, _) =
+            ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
+        ui.painter().circle_filled(
+            r.center(),
+            3.5,
+            if ok { crate::ui_theme::GOOD } else { crate::ui_theme::FAINT },
+        );
+        ui.label(
+            egui::RichText::new(text)
+                .size(11.0)
+                .color(crate::ui_theme::MUTED),
+        );
+    });
+}
+
 fn stream_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<UiCommand>) {
     use crate::nowplaying::NpSource;
-    ui.label(egui::RichText::new("Now playing").strong());
+    use crate::ui_theme::*;
+    card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        section_label(ui, "now playing");
+        status_dot(
+            ui,
+            st.np_track.is_some(),
+            &st.np_track.clone().unwrap_or_else(|| "no track".into()),
+        );
     row(ui, "Source", |ui| {
         egui::ComboBox::from_id_salt("np_src")
             .width(130.0)
@@ -1419,10 +1456,6 @@ fn stream_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<Ui
         ui.add(egui::Slider::new(&mut s.np_delay_s, 0.0..=60.0).step_by(1.0).suffix(" s"));
     });
     ui.small("A new track must stay loaded this long before it's shown — skips headphone cue-ups.");
-    match &st.np_track {
-        Some(t) => ui.label(format!("♪ {t}")),
-        None => ui.weak("No track yet"),
-    };
     for (name, line) in &st.np_status {
         ui.small(format!("{name}: {line}"));
     }
@@ -1444,8 +1477,20 @@ fn stream_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<Ui
         ui.add(egui::Slider::new(&mut s.np_size, 0.5..=2.0));
     });
 
-    ui.separator();
-    ui.label(egui::RichText::new("Recording").strong());
+    });
+    ui.add_space(6.0);
+    card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        section_label(ui, "recording");
+        status_dot(
+            ui,
+            st.rec.is_some() && st.rec_err.is_none(),
+            &match (&st.rec_err, &st.rec) {
+                (Some(e), _) => format!("{e}"),
+                (None, Some(r)) => format!("{} · {} s buffered", r.encoder, r.buffered_s),
+                (None, None) => "recorder off".to_string(),
+            },
+        );
     row(ui, "Replay", |ui| {
         ui.checkbox(&mut s.rec_buffer, "Keep the last");
         ui.add(egui::DragValue::new(&mut s.rec_keep_s).range(10..=600).suffix(" s"));
@@ -1505,8 +1550,12 @@ fn stream_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<Ui
     });
     ui.small("Clips include the overlays and the audio. Size/fps follow the video output settings below.");
 
-    ui.separator();
-    ui.label(egui::RichText::new("Branding").strong());
+    });
+    ui.add_space(6.0);
+    card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        section_label(ui, "branding");
+        status_dot(ui, s.brand_on, if s.brand_on { "showing" } else { "off" });
     ui.checkbox(&mut s.brand_on, "Show logo / name");
     row(ui, "DJ name", |ui| {
         ui.add(egui::TextEdit::singleline(&mut s.brand_name).desired_width(180.0));
@@ -1545,8 +1594,12 @@ fn stream_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<Ui
         }
     });
 
-    ui.separator();
-    ui.label(egui::RichText::new("Ticker").strong());
+    });
+    ui.add_space(6.0);
+    card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        section_label(ui, "ticker");
+        status_dot(ui, s.ticker_on, if s.ticker_on { "scrolling" } else { "off" });
     ui.checkbox(&mut s.ticker_on, "Scroll a message along the bottom");
     ui.add(
         egui::TextEdit::multiline(&mut s.ticker_text)
@@ -1558,8 +1611,16 @@ fn stream_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<Ui
         ui.add(egui::Slider::new(&mut s.ticker_speed, 0.3..=3.0));
     });
 
-    ui.separator();
-    ui.label(egui::RichText::new("Video output (OBS)").strong());
+    });
+    ui.add_space(6.0);
+    card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        section_label(ui, "video output");
+        status_dot(
+            ui,
+            st.output.is_some(),
+            st.output.as_deref().unwrap_or("off — enable Spout or NDI"),
+        );
     row(ui, "Name", |ui| {
         ui.add(egui::TextEdit::singleline(&mut s.ndi_name).desired_width(140.0));
     });
@@ -1587,129 +1648,304 @@ fn stream_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<Ui
             ui.selectable_value(&mut s.ndi_fps, f, format!("{f} fps"));
         }
     });
-    match &st.output {
-        Some(line) => {
-            ui.small(line);
-        }
-        None => {
-            ui.small(
-                "Sends the finished frame (overlays included) to OBS or another display. \
-                 Spout for OBS on this PC, NDI across the network.",
-            );
-        }
+    if st.output.is_none() {
+        ui.small(
+            "Sends the finished frame (overlays included) to OBS or another display. \
+             Spout for OBS on this PC, NDI across the network.",
+        );
     }
+    });
 }
 
 
-fn dancer_tab(
+/// Dancer & FX page (mockup 1a styling): two control cards side by side,
+/// then the routine thumbnail library underneath.
+fn dancer_fx_tab(
     ui: &mut egui::Ui,
     s: &mut Settings,
     st: &Status,
     clips: &[String],
+    clip_thumbs: &mut HashMap<String, Option<egui::TextureHandle>>,
     cmd: &mut Vec<UiCommand>,
 ) {
-    ui.checkbox(&mut s.dancer_enabled, "Dancer layer on");
-    row(ui, "Look", |ui| {
-        ui.selectable_value(&mut s.dancer_style, None, "Auto");
-        for (i, name) in STYLES.iter().enumerate() {
-            ui.selectable_value(&mut s.dancer_style, Some(i), *name);
-        }
-    });
-    row(ui, "Canon", |ui| {
-        ui.selectable_value(&mut s.canon, Tristate::Auto, "Auto");
-        ui.selectable_value(&mut s.canon, Tristate::On, "On");
-        ui.selectable_value(&mut s.canon, Tristate::Off, "Off");
-        ui.small("three dancers");
-    });
-    row(ui, "Size", |ui| {
-        ui.add(egui::Slider::new(&mut s.dancer_size, 0.4..=1.0));
-    });
-    ui.checkbox(
-        &mut s.dancer_trails,
-        "Motion trails (echoes behind the dancer)",
-    );
-    ui.separator();
-    ui.small("Auto-pilot picks among the ticked routines:");
-    egui::Grid::new("clips")
-        .num_columns(2)
-        .striped(true)
-        .show(ui, |ui| {
-            for (i, name) in clips.iter().enumerate() {
-                let mut on = !s.disabled_clips.contains(name);
-                if ui.checkbox(&mut on, name).changed() {
-                    if on {
-                        s.disabled_clips.retain(|n| n != name);
-                    } else {
-                        s.disabled_clips.push(name.clone());
+    use crate::ui_theme::*;
+    ui.columns(2, |cols| {
+        card().show(&mut cols[0], |ui| {
+            ui.set_width(ui.available_width());
+            section_label(ui, "dancer");
+            ui.checkbox(&mut s.dancer_enabled, "Dancer layer on");
+            ctl_row(ui, "Look", |ui| {
+                let mut opts: Vec<(Option<usize>, &str)> = vec![(None, "auto")];
+                for (i, name) in STYLES.iter().enumerate() {
+                    opts.push((Some(i), *name));
+                }
+                segmented(ui, &mut s.dancer_style, &opts);
+            });
+            ctl_row(ui, "Canon", |ui| {
+                segmented(
+                    ui,
+                    &mut s.canon,
+                    &[
+                        (Tristate::Auto, "auto"),
+                        (Tristate::On, "on"),
+                        (Tristate::Off, "off"),
+                    ],
+                );
+            });
+            ui.small("Canon: three dancers");
+            ctl_row(ui, "Size", |ui| {
+                ui.add(egui::Slider::new(&mut s.dancer_size, 0.4..=1.0));
+            });
+            ui.checkbox(&mut s.dancer_trails, "Motion trails");
+            ui.small("Ghost echoes trail the dancer's movement.");
+        });
+        card().show(&mut cols[1], |ui| {
+            ui.set_width(ui.available_width());
+            section_label(ui, "fx");
+            ui.small("Whole-frame transforms — live, so your pick is the preview.");
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
+                for f in Fx::ALL {
+                    let on = s.fx == f && !s.fx_auto;
+                    if ui.selectable_label(on, f.label()).clicked() {
+                        s.fx = f;
+                        s.fx_auto = false;
                     }
                 }
-                let showing = st.clip.as_deref() == Some(name.as_str());
-                if ui
-                    .add_enabled(
-                        !showing,
-                        egui::Button::new(if showing { "▶" } else { "show" }).small(),
-                    )
-                    .clicked()
-                {
-                    cmd.push(UiCommand::ShowClip(i));
-                }
-                ui.end_row();
+            });
+            ctl_row(ui, "Strength", |ui| {
+                ui.add_enabled(
+                    s.fx != Fx::Off,
+                    egui::Slider::new(&mut s.fx_amt, 0.0..=1.0),
+                );
+            });
+            ui.checkbox(&mut s.fx_auto, "Auto — a fresh effect on every scene cut");
+            if s.fx_auto {
+                ui.small(format!("On screen now: {}", st.fx.label()));
+            } else if s.fx == Fx::MirrorY {
+                ui.small("Mirror Y flips top-to-bottom — dancers end up upside-down; auto never picks it.");
             }
         });
-}
+    });
+    ui.add_space(6.0);
 
-fn effects_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status) {
-    ui.small("Whole-frame transforms — they apply live, so what you pick here is the preview.");
-    ui.add_space(4.0);
-    egui::Grid::new("fx").num_columns(3).show(ui, |ui| {
-        for (i, f) in Fx::ALL.iter().enumerate() {
-            if ui.selectable_value(&mut s.fx, *f, f.label()).clicked() {
-                s.fx_auto = false;
-            }
-            if i % 3 == 2 {
-                ui.end_row();
-            }
+    // Routine library: thumbnail tiles, tick to keep in rotation, click to
+    // preview live.
+    card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        section_label(ui, "routines");
+        ui.small("Auto-pilot picks among the ticked routines — click a tile to preview it live.");
+        ui.add_space(4.0);
+        let avail = ui.available_width();
+        let cols = ((avail + 8.0) / 108.0).floor().max(3.0) as usize;
+        for (row, chunk) in clips.chunks(cols).enumerate() {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+                for (ci, name) in chunk.iter().enumerate() {
+                    clip_tile(ui, s, st, row * cols + ci, name, clip_thumbs, cmd);
+                }
+            });
         }
     });
-    row(ui, "Strength", |ui| {
-        ui.add_enabled(s.fx != Fx::Off, egui::Slider::new(&mut s.fx_amt, 0.0..=1.0));
-    });
-    ui.checkbox(&mut s.fx_auto, "Auto — a fresh effect on every scene cut");
-    if s.fx_auto {
-        ui.small(format!("On screen now: {}", st.fx.label()));
-    } else if s.fx == Fx::MirrorY {
-        ui.small("Mirror Y flips the frame top-to-bottom — dancers end up upside-down; it's manual-only, auto never picks it.");
+}
+
+/// One routine tile in the Dancer & FX library.
+fn clip_tile(
+    ui: &mut egui::Ui,
+    s: &mut Settings,
+    st: &Status,
+    i: usize,
+    name: &str,
+    clip_thumbs: &mut HashMap<String, Option<egui::TextureHandle>>,
+    cmd: &mut Vec<UiCommand>,
+) {
+    use crate::ui_theme::*;
+    const TW: f32 = 100.0;
+    const TH: f32 = 116.0;
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(TW, TH), egui::Sense::click());
+    let p = ui.painter();
+    let live = st.clip.as_deref() == Some(name);
+    let on = !s.disabled_clips.iter().any(|d| d == name);
+    let dim = if on { 1.0 } else { 0.45 };
+
+    p.rect_filled(rect, 6.0, CARD);
+    let img_r = egui::Rect::from_min_size(
+        rect.min + egui::vec2(5.0, 5.0),
+        egui::vec2(TW - 10.0, 84.0),
+    );
+    match clip_tex(ui, clip_thumbs, name) {
+        Some((tex, sz)) => {
+            // Letterbox: clips are portrait, the box isn't.
+            let sc = (img_r.width() / sz.x).min(img_r.height() / sz.y);
+            let fit = egui::vec2(sz.x * sc, sz.y * sc);
+            let fr = egui::Rect::from_center_size(img_r.center(), fit);
+            p.rect_filled(img_r, 4.0, INSET);
+            p.image(
+                tex,
+                fr,
+                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                egui::Color32::WHITE.gamma_multiply(dim),
+            );
+        }
+        None => {
+            p.rect_filled(img_r, 4.0, RAISED);
+            p.text(
+                img_r.center(),
+                egui::Align2::CENTER_CENTER,
+                name.get(..2).unwrap_or(name),
+                egui::FontId::monospace(13.0),
+                FAINT,
+            );
+        }
+    }
+    p.rect_stroke(
+        img_r,
+        4.0,
+        egui::Stroke::new(1.0, BORDER),
+        egui::StrokeKind::Inside,
+    );
+
+    // Rotation checkbox top-right (registered last so it wins its clicks).
+    let cb_r = egui::Rect::from_min_size(
+        egui::pos2(img_r.max.x - 18.0, img_r.min.y + 3.0),
+        egui::vec2(15.0, 15.0),
+    );
+    let cb = ui.interact(cb_r, resp.id.with("rot"), egui::Sense::click());
+    let cb_clicked = cb.clicked();
+    p.rect_filled(cb_r, 3.0, if on { LANE_DANCER } else { INSET.gamma_multiply(0.9) });
+    p.rect_stroke(cb_r, 3.0, egui::Stroke::new(1.0, BORDER_HI), egui::StrokeKind::Inside);
+    if on {
+        p.text(
+            cb_r.center(),
+            egui::Align2::CENTER_CENTER,
+            "✓",
+            egui::FontId::proportional(10.0),
+            TEXT,
+        );
+    }
+    if cb_clicked {
+        if on {
+            s.disabled_clips.push(name.to_string());
+        } else {
+            s.disabled_clips.retain(|d| d != name);
+        }
+    }
+
+    let shown = if name.len() > 13 {
+        format!("{}…", &name[..12])
+    } else {
+        name.to_string()
+    };
+    p.text(
+        egui::pos2(rect.min.x + 6.0, img_r.max.y + 5.0),
+        egui::Align2::LEFT_TOP,
+        shown,
+        egui::FontId::monospace(10.0),
+        if live { LANE_DANCER } else { TEXT.gamma_multiply(dim) },
+    );
+    p.rect_stroke(
+        rect,
+        6.0,
+        egui::Stroke::new(
+            if live { 1.5 } else { 1.0 },
+            if live { LANE_DANCER } else { BORDER },
+        ),
+        egui::StrokeKind::Inside,
+    );
+    if resp.clicked() && !cb_clicked {
+        cmd.push(UiCommand::ShowClip(i));
+    }
+    resp.on_hover_text(name);
+}
+
+/// Mid-frame texture for a dancer clip, decoded once and cached.
+fn clip_tex(
+    ui: &egui::Ui,
+    clip_thumbs: &mut HashMap<String, Option<egui::TextureHandle>>,
+    name: &str,
+) -> Option<(egui::TextureId, egui::Vec2)> {
+    match clip_thumbs.entry(name.to_string()).or_insert_with(|| {
+        crate::editor::load_clip_thumb(ui.ctx(), name)
+    }) {
+        Some(t) => Some((t.id(), t.size_vec2())),
+        None => None,
     }
 }
 
-fn keys_tab(ui: &mut egui::Ui, s: &mut Settings, rebinding: &mut Option<Action>) {
-    ui.small("Keys work in both windows. Click Rebind, then press the new key.");
-    ui.add_space(4.0);
-    egui::Grid::new("keys")
-        .num_columns(3)
-        .striped(true)
-        .show(ui, |ui| {
-            for a in Action::ALL {
-                ui.label(a.label());
-                let key = s.keys.get(&a).cloned().unwrap_or_default();
+/// Keys page (mockup 1a card): filter, key badges, rebind, conflict warn.
+fn keys_tab(
+    ui: &mut egui::Ui,
+    s: &mut Settings,
+    rebinding: &mut Option<Action>,
+    filter: &mut String,
+) {
+    use crate::ui_theme::*;
+    ui.horizontal(|ui| {
+        ui.add(
+            egui::TextEdit::singleline(filter)
+                .desired_width(160.0)
+                .hint_text("filter actions"),
+        );
+        ui.label(
+            egui::RichText::new("keys work in both windows — rebind, then press the key")
+                .size(11.0)
+                .color(FAINT),
+        );
+    });
+    // A key bound to two actions fires both — flag it.
+    let mut bound: HashMap<&str, u32> = HashMap::new();
+    for k in s.keys.values() {
+        if !k.is_empty() {
+            *bound.entry(k.as_str()).or_default() += 1;
+        }
+    }
+    let q = filter.to_lowercase();
+    card().show(ui, |ui| {
+        for a in Action::ALL {
+            if !q.is_empty() && !a.label().to_lowercase().contains(&q) {
+                continue;
+            }
+            let key = s.keys.get(&a).cloned().unwrap_or_default();
+            let conflict = bound.get(key.as_str()).copied().unwrap_or(0) > 1;
+            ui.horizontal(|ui| {
+                ui.add_sized(
+                    [300.0, 20.0],
+                    egui::Label::new(egui::RichText::new(a.label()).size(12.0)),
+                );
+                egui::Frame::NONE
+                    .fill(INSET)
+                    .stroke(egui::Stroke::new(
+                        1.0,
+                        if conflict { WARN } else { BORDER_HI },
+                    ))
+                    .corner_radius(egui::CornerRadius::same(4))
+                    .inner_margin(egui::Margin::symmetric(6, 2))
+                    .show(ui, |ui| {
+                        ui.label(
+                            egui::RichText::new(if key.is_empty() { "—" } else { &key })
+                                .monospace()
+                                .size(11.0)
+                                .color(if conflict { WARN } else { MUTED }),
+                        );
+                    });
                 if *rebinding == Some(a) {
-                    ui.colored_label(egui::Color32::YELLOW, "press a key…");
-                    if ui.button("Cancel").clicked() {
+                    ui.colored_label(WARN, "press a key…");
+                    if ui.small_button("cancel").clicked() {
                         *rebinding = None;
                     }
-                } else {
-                    ui.monospace(if key.is_empty() {
-                        "—".to_string()
-                    } else {
-                        key
-                    });
-                    if ui.button("Rebind").clicked() {
-                        *rebinding = Some(a);
-                    }
+                } else if ui.small_button("rebind").clicked() {
+                    *rebinding = Some(a);
                 }
-                ui.end_row();
-            }
-        });
+                if conflict {
+                    ui.label(
+                        egui::RichText::new("conflict")
+                            .size(10.0)
+                            .color(WARN),
+                    );
+                }
+            });
+        }
+    });
     ui.add_space(4.0);
     if ui.button("Reset all keys to defaults").clicked() {
         s.keys = Settings::default().keys;

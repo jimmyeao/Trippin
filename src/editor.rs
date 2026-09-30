@@ -1737,7 +1737,7 @@ fn inspector(
 }
 
 /// Load a mid-sequence frame from `dancers/<name>/frames/` as an egui texture.
-fn load_clip_thumb(ctx: &egui::Context, name: &str) -> Option<egui::TextureHandle> {
+pub(crate) fn load_clip_thumb(ctx: &egui::Context, name: &str) -> Option<egui::TextureHandle> {
     let dir = crate::dancer::find_dancer_dir()?.join(name).join("frames");
     let n = std::fs::read_dir(&dir).ok()?.filter_map(|e| e.ok()).count();
     if n == 0 {
