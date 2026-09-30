@@ -181,3 +181,38 @@ pub fn segmented<T: PartialEq + Copy>(
         });
     changed
 }
+
+/// Segmented control stretched to the full width — equal-width options,
+/// as in mockup 1a's Mode/Scene-length pickers.
+pub fn segmented_wide<T: PartialEq + Copy>(
+    ui: &mut Ui,
+    value: &mut T,
+    options: &[(T, &str)],
+) -> bool {
+    let mut changed = false;
+    let w = ((ui.available_width() - 4.0 - (options.len() as f32 - 1.0) * 2.0)
+        / options.len() as f32)
+        .max(30.0);
+    Frame::default()
+        .fill(INSET)
+        .corner_radius(CornerRadius::same(6))
+        .inner_margin(Margin::same(2))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 2.0;
+                for (v, label) in options {
+                    let on = *value == *v;
+                    let b = egui::Button::new(
+                        egui::RichText::new(*label).color(if on { TEXT } else { MUTED }),
+                    )
+                    .fill(if on { ACCENT_SEL } else { Color32::TRANSPARENT })
+                    .corner_radius(CornerRadius::same(4));
+                    if ui.add_sized([w, 24.0], b).clicked() && !on {
+                        *value = *v;
+                        changed = true;
+                    }
+                }
+            });
+        });
+    changed
+}

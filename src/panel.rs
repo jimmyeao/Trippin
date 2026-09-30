@@ -80,6 +80,8 @@ pub struct Status {
 
 #[derive(Clone, Copy, PartialEq)]
 enum Tab {
+    /// The console: now/next previews, director, palette, sync (mockup 1a).
+    Show,
     /// Scene library + inspector — the old Show and Scenes tabs merged
     /// (mockup 1b).
     Perform,
@@ -100,7 +102,8 @@ enum LibChip {
 }
 
 impl Tab {
-    const ALL: [Tab; 5] = [
+    const ALL: [Tab; 6] = [
+        Tab::Show,
         Tab::Perform,
         Tab::DancerFx,
         Tab::Stream,
@@ -110,6 +113,7 @@ impl Tab {
 
     fn label(self) -> &'static str {
         match self {
+            Tab::Show => "Show",
             Tab::Perform => "Perform",
             Tab::DancerFx => "Dancer & FX",
             Tab::Stream => "Stream",
@@ -166,7 +170,7 @@ impl Panel {
             window,
             win,
             rebinding: None,
-            tab: Tab::Perform,
+            tab: Tab::Show,
             scene_filter: String::new(),
             chip: LibChip::All,
             thumbs: HashMap::new(),
@@ -327,6 +331,9 @@ fn build_ui(
                 .auto_shrink([false, true])
                 .horizontal_scroll_offset(0.0)
                 .show(ui, |ui| match *tab {
+                    Tab::Show => {
+                        show_tab(ui, s, st, scenes, scene_heavy, thumbs, want_thumbs, cmd)
+                    }
                     Tab::DancerFx => {
                         dancer_fx_tab(ui, s, st, clips, clip_thumbs, cmd)
                     }
@@ -456,6 +463,312 @@ fn row(ui: &mut egui::Ui, label: &str, body: impl FnOnce(&mut egui::Ui)) {
     ui.horizontal(|ui| {
         ui.add_sized([92.0, 20.0], egui::Label::new(label));
         body(ui);
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Show tab (mockup 1a): now/next previews, director, palette, sync.
+// ---------------------------------------------------------------------------
+
+/// A framed scene preview: thumbnail with a caption bar baked into its
+/// lower-left corner, like the NOW / UP NEXT cards in mockup 1a.
+#[allow(clippy::too_many_arguments)]
+fn preview_card(
+    ui: &mut egui::Ui,
+    name: &str,
+    caption: &str,
+    accent_edge: bool,
+    w: f32,
+    thumbs: &mut HashMap<String, egui::TextureHandle>,
+    want: &mut HashMap<String, Instant>,
+    cmd: &mut Vec<UiCommand>,
+) {
+    use crate::ui_theme::*;
+    let h = w * 9.0 / 16.0;
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::hover());
+    let p = ui.painter();
+    let key = format!("scene:{name}");
+    if let Some(tex) = thumb_tex(ui, thumbs, want, &key, cmd) {
+        p.image(
+            tex,
+            rect,
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            egui::Color32::WHITE,
+        );
+    } else {
+        // Diagonal stripes as a stand-in until the thumbnail lands.
+        p.rect_filled(rect, 6.0, RAISED);
+        let mut x = rect.min.x - rect.height();
+        while x < rect.max.x {
+            p.line_segment(
+                [
+                    egui::pos2(x, rect.max.y),
+                    egui::pos2(x + rect.height(), rect.min.y),
+                ],
+                egui::Stroke::new(10.0, HOVER.gamma_multiply(0.6)),
+            );
+            x += 26.0;
+        }
+    }
+    p.rect_stroke(
+        rect,
+        6.0,
+        egui::Stroke::new(
+            if accent_edge { 1.5 } else { 1.0 },
+            if accent_edge { ACCENT } else { BORDER_HI },
+        ),
+        egui::StrokeKind::Inside,
+    );
+    let cap_w = (caption.len() as f32 * 7.0 + 16.0).clamp(48.0, w - 12.0);
+    let cap_r = egui::Rect::from_min_max(
+        egui::pos2(rect.min.x + 8.0, rect.max.y - 26.0),
+        egui::pos2(rect.min.x + 8.0 + cap_w, rect.max.y - 8.0),
+    );
+    p.rect_filled(cap_r, 4.0, INSET.gamma_multiply(0.85));
+    p.text(
+        cap_r.center(),
+        egui::Align2::CENTER_CENTER,
+        caption,
+        egui::FontId::monospace(11.0),
+        if accent_edge { TEXT } else { MUTED },
+    );
+}
+
+/// One palette swatch — a small gradient chip that selects the palette.
+fn palette_swatch(ui: &mut egui::Ui, s: &mut Settings, name: &str, w: f32, h: f32) {
+    use crate::ui_theme::*;
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::click());
+    let lut = crate::palettes::lut(name);
+    let n = 24usize;
+    for i in 0..n {
+        let c = &lut[i * (crate::palettes::LUT_SIZE / n) * 4..];
+        ui.painter().rect_filled(
+            egui::Rect::from_min_max(
+                egui::pos2(rect.min.x + w * i as f32 / n as f32, rect.min.y),
+                egui::pos2(rect.min.x + w * (i + 1) as f32 / n as f32 + 1.0, rect.max.y),
+            ),
+            0.0,
+            egui::Color32::from_rgb(c[0], c[1], c[2]),
+        );
+    }
+    let sel = s.palette == name;
+    ui.painter().rect_stroke(
+        rect,
+        3.0,
+        egui::Stroke::new(if sel { 2.0 } else { 1.0 }, if sel { TEXT } else { BORDER }),
+        egui::StrokeKind::Inside,
+    );
+    if resp.clicked() {
+        s.palette = name.to_string();
+    }
+    resp.on_hover_text(name);
+}
+
+/// Mockup 1a: the console. Now/up-next previews over Director, Palette and
+/// Sync cards, with Blackout + Fullscreen at the foot.
+#[allow(clippy::too_many_arguments)]
+fn show_tab(
+    ui: &mut egui::Ui,
+    s: &mut Settings,
+    st: &Status,
+    scenes: &[String],
+    heavy: &[bool],
+    thumbs: &mut HashMap<String, egui::TextureHandle>,
+    want: &mut HashMap<String, Instant>,
+    cmd: &mut Vec<UiCommand>,
+) {
+    use crate::ui_theme::*;
+    let now = scenes.get(st.scene).cloned().unwrap_or_else(|| "—".into());
+    let next = st.next_scene.map(|i| scenes.get(i).cloned().unwrap_or_else(|| "?".into()));
+
+    // Row 1: NOW card | prev/next column | UP NEXT card.
+    let avail = ui.available_width();
+    let btn_w = 150.0;
+    let gap = ui.spacing().item_spacing.x * 2.0;
+    let card_w = ((avail - btn_w - gap) / 2.0).max(120.0);
+    let card_h = card_w * 9.0 / 16.0;
+    ui.horizontal(|ui| {
+        ui.vertical(|ui| {
+            section_label(ui, "now");
+            preview_card(
+                ui, &now, &format!("{now} · live"), true, card_w, thumbs, want, cmd,
+            );
+        });
+        ui.allocate_ui(egui::vec2(btn_w, card_h + 18.0), |ui| {
+            ui.vertical(|ui| {
+                ui.add_space(14.0);
+                let bw = ui.available_width();
+                if ui
+                    .add_sized([bw, 30.0], egui::Button::new("◀ Prev"))
+                    .clicked()
+                {
+                    cmd.push(UiCommand::Do(Action::PrevScene));
+                }
+                ui.add_space(6.0);
+                if ui
+                    .add_sized(
+                        [bw, 30.0],
+                        egui::Button::new("Next ▶").fill(ACCENT_SEL),
+                    )
+                    .clicked()
+                {
+                    cmd.push(UiCommand::Do(Action::NextScene));
+                }
+                ui.add_space(6.0);
+                let cut = if st.bars_total > 0 {
+                    let rem = st.bars_total.saturating_sub(st.bar_in_scene);
+                    if rem == 0 { "cut now".into() } else { format!("cut in {rem} bars") }
+                } else {
+                    "held".into()
+                };
+                ui.label(egui::RichText::new(cut).size(11.0).color(MUTED).monospace());
+            });
+        });
+        ui.vertical(|ui| {
+            section_label(
+                ui,
+                if s.random_order { "up next · random" } else { "up next" },
+            );
+            match &next {
+                Some(n) => {
+                    let tag = if heavy.get(st.next_scene.unwrap()).copied().unwrap_or(false) {
+                        "3D"
+                    } else {
+                        "2D"
+                    };
+                    preview_card(
+                        ui, n, &format!("{n} ({tag})"), false, card_w, thumbs, want, cmd,
+                    );
+                }
+                None => {
+                    let (rect, _) =
+                        ui.allocate_exact_size(egui::vec2(card_w, card_h), egui::Sense::hover());
+                    ui.painter().rect_filled(rect, 6.0, CARD);
+                    ui.painter().rect_stroke(
+                        rect,
+                        6.0,
+                        egui::Stroke::new(1.0, BORDER),
+                        egui::StrokeKind::Inside,
+                    );
+                    ui.painter().text(
+                        rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        "manual — nothing queued",
+                        egui::FontId::monospace(11.0),
+                        FAINT,
+                    );
+                }
+            }
+        });
+    });
+
+    ui.add_space(8.0);
+
+    // Row 2: Director card left; Palette + Sync stacked right.
+    ui.columns(2, |cols| {
+        let ui = &mut cols[0];
+        card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(egui::RichText::new("Director").size(14.0).strong());
+            ui.add_space(4.0);
+            ui.label(egui::RichText::new("Mode").size(11.0).color(MUTED));
+            segmented_wide(
+                ui,
+                &mut s.mode,
+                &[(Mode::Auto, "Auto"), (Mode::Static, "Static"), (Mode::Manual, "Manual")],
+            );
+            ui.small(match s.mode {
+                Mode::Auto => "Cuts on phrases and drops; the dancer follows the track.",
+                Mode::Static => "Holds the current scene until you change it.",
+                Mode::Manual => "Nothing changes by itself — you drive every cut.",
+            });
+            ui.add_space(6.0);
+            ui.label(egui::RichText::new("Scene length (bars)").size(11.0).color(MUTED));
+            segmented_wide(
+                ui,
+                &mut s.phrase_bars,
+                &[(4u32, "4"), (8, "8"), (16, "16"), (32, "32")],
+            );
+            ui.add_space(6.0);
+            ui.checkbox(&mut s.breakdown_mode, "Detect breakdowns");
+            ui.checkbox(&mut s.cut_on_drops, "Cut early when a drop lands");
+            ui.checkbox(&mut s.random_order, "Random order");
+        });
+
+        let ui = &mut cols[1];
+        card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Palette").size(14.0).strong());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(
+                        egui::RichText::new(&s.palette).size(11.0).color(ACCENT).monospace(),
+                    );
+                });
+            });
+            ui.add_space(4.0);
+            let names: Vec<&str> = crate::palettes::names().collect();
+            let n_per_row = 7usize;
+            let sw_w = ((ui.available_width() - (n_per_row as f32 - 1.0) * 6.0)
+                / n_per_row as f32)
+                .max(28.0);
+            for row_names in names.chunks(n_per_row) {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    for name in row_names {
+                        palette_swatch(ui, s, name, sw_w, 18.0);
+                    }
+                });
+            }
+        });
+        ui.add_space(6.0);
+        card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(egui::RichText::new("Sync").size(14.0).strong());
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Latency").size(11.0).color(MUTED));
+                ui.add(
+                    egui::Slider::new(&mut s.latency_ms, -100.0..=200.0)
+                        .step_by(5.0)
+                        .show_value(false),
+                );
+                ui.label(
+                    egui::RichText::new(format!("{:+.0} ms", s.latency_ms))
+                        .size(11.0)
+                        .color(MUTED)
+                        .monospace(),
+                );
+            });
+            if ui.button("Mark this beat as the downbeat (the \"one\")").clicked() {
+                cmd.push(UiCommand::Do(Action::MarkDownbeat));
+            }
+        });
+    });
+
+    ui.add_space(10.0);
+    ui.horizontal(|ui| {
+        let bw = ((ui.available_width() - ui.spacing().item_spacing.x - 56.0) / 2.0).max(40.0);
+        let bo = if st.blackout { "Blackout: ON" } else { "Blackout" };
+        if ui
+            .add_sized(
+                [bw, 28.0],
+                egui::Button::new(egui::RichText::new(bo).color(if st.blackout {
+                    TEXT
+                } else {
+                    DANGER
+                }))
+                .fill(if st.blackout { DANGER } else { DANGER_BG }),
+            )
+            .clicked()
+        {
+            cmd.push(UiCommand::Do(Action::Blackout));
+        }
+        key_badge(ui, &key_short(s.keys.get(&Action::Blackout).map_or("", String::as_str)));
+        let fs = if st.fullscreen { "Leave fullscreen" } else { "Fullscreen" };
+        if ui.add_sized([bw, 28.0], egui::Button::new(fs)).clicked() {
+            cmd.push(UiCommand::Do(Action::Fullscreen));
+        }
+        key_badge(ui, &key_short(s.keys.get(&Action::Fullscreen).map_or("", String::as_str)));
     });
 }
 
