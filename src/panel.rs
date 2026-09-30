@@ -1470,7 +1470,8 @@ fn pads_view(
         Tristate::On => "on",
         Tristate::Off => "off",
     };
-    let pads: [(Action, &str, String, PadKind); 8] = [
+    let holding = s.mode == Mode::Static;
+    let pads: [(Action, &str, String, PadKind, bool); 8] = [
         (
             Action::NextScene,
             "next scene",
@@ -1478,47 +1479,82 @@ fn pads_view(
                 .and_then(|i| scenes.get(i))
                 .map_or("cut now".to_string(), |n| n.clone()),
             PadKind::Go,
+            false,
         ),
-        (Action::PrevScene, "prev scene", "back one".to_string(), PadKind::Neutral),
         (
-            Action::ModeStatic,
+            Action::PrevScene,
+            "prev scene",
+            "back one".to_string(),
+            PadKind::Neutral,
+            false,
+        ),
+        // Hold is a toggle: lit while static, tap again to release to Auto.
+        (
+            if holding { Action::ModeAuto } else { Action::ModeStatic },
             "hold / static",
-            match s.mode {
-                Mode::Auto => "mode: auto".into(),
-                Mode::Static => "mode: static".into(),
-                Mode::Manual => "mode: manual".into(),
+            if holding {
+                "on — tap to release".into()
+            } else {
+                match s.mode {
+                    Mode::Auto => "mode: auto".into(),
+                    Mode::Static => unreachable!(),
+                    Mode::Manual => "mode: manual".into(),
+                }
             },
             PadKind::Hold,
+            holding,
         ),
         (
             Action::Blackout,
             "blackout",
             if st.blackout { "on — tap to lift" } else { "off" }.to_string(),
             PadKind::Danger,
+            st.blackout,
         ),
         (
             Action::MarkDownbeat,
             "mark the one",
             "tap on the 1".to_string(),
             PadKind::Warn,
+            false,
         ),
-        (Action::CycleFx, "next fx", st.fx.label().to_string(), PadKind::Neutral),
+        (
+            Action::CycleFx,
+            "next fx",
+            st.fx.label().to_string(),
+            PadKind::Neutral,
+            false,
+        ),
         (
             Action::NextStyle,
             "dancer look",
             s.dancer_style.map(|i| STYLES[i]).unwrap_or("auto").to_string(),
             PadKind::Dancer,
+            false,
         ),
-        (Action::CycleCanon, "canon", canon_now.to_string(), PadKind::Dancer),
+        (
+            Action::CycleCanon,
+            "canon",
+            canon_now.to_string(),
+            PadKind::Dancer,
+            false,
+        ),
     ];
     let pad_w = ((ui.available_width() - 3.0 * 10.0) / 4.0).max(100.0);
     // Fill the remaining height across the two rows — at least 72px each.
     let pad_h = ((ui.available_height() - 14.0) / 2.0).max(72.0);
     for row in pads.chunks(4) {
         ui.horizontal(|ui| {
-            for (a, label, sub, kind) in row {
-                let key = key_short(s.keys.get(a).map_or("", String::as_str));
-                if pad_button(ui, pad_w, pad_h, label, sub, &key, *kind) {
+            for (a, label, sub, kind, active) in row {
+                // The hold pad fires ModeAuto to release, but its badge
+                // stays the hold key.
+                let key_of = if *a == Action::ModeAuto {
+                    &Action::ModeStatic
+                } else {
+                    a
+                };
+                let key = key_short(s.keys.get(key_of).map_or("", String::as_str));
+                if pad_button(ui, pad_w, pad_h, label, sub, &key, *kind, *active) {
                     cmd.push(UiCommand::Do(*a));
                 }
             }
@@ -1539,6 +1575,7 @@ enum PadKind {
 }
 
 /// One big action pad: label + sub-state bottom-left, key badge top-right.
+/// `active` lights the pad — brighter fill, colour-keyed border, status dot.
 fn pad_button(
     ui: &mut egui::Ui,
     w: f32,
@@ -1547,6 +1584,7 @@ fn pad_button(
     sub: &str,
     key: &str,
     kind: PadKind,
+    active: bool,
 ) -> bool {
     use crate::ui_theme::*;
     let (fill, fg, sub_c) = match kind {
@@ -1559,21 +1597,32 @@ fn pad_button(
     };
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::click());
     let p = ui.painter();
-    p.rect_filled(
-        rect,
-        8.0,
-        if resp.hovered() {
-            fill.gamma_multiply(1.35)
-        } else {
-            fill
-        },
-    );
+    let fill = if active {
+        fill.gamma_multiply(1.9)
+    } else if resp.hovered() {
+        fill.gamma_multiply(1.35)
+    } else {
+        fill
+    };
+    p.rect_filled(rect, 8.0, fill);
     p.rect_stroke(
         rect,
         8.0,
-        egui::Stroke::new(1.0, if resp.hovered() { BORDER_HI } else { BORDER }),
+        if active {
+            egui::Stroke::new(1.5, fg.gamma_multiply(0.85))
+        } else {
+            egui::Stroke::new(1.0, if resp.hovered() { BORDER_HI } else { BORDER })
+        },
         egui::StrokeKind::Inside,
     );
+    if active {
+        // Live-status dot, top-left — same language as the tab pills.
+        p.circle_filled(
+            egui::pos2(rect.min.x + 13.0, rect.min.y + 13.0),
+            4.0,
+            fg,
+        );
+    }
     p.text(
         egui::pos2(rect.min.x + 12.0, rect.max.y - 34.0),
         egui::Align2::LEFT_TOP,

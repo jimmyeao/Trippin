@@ -17,6 +17,7 @@ struct D {
     count: f32,    // 1, or 3 for the canon
     scale: f32,    // main dancer height as a fraction of screen height
     trail: f32,    // 1 = ghost echoes of earlier frames trail her movement
+    canon_fade: f32, // companions' fade 0..1 (eases with the canon toggle)
 };
 
 @group(1) @binding(0) var masks0: texture_2d_array<f32>;
@@ -155,8 +156,9 @@ fn shaded_with_trails(
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
     var out = vec4<f32>(0.0);
-    if d.count > 1.5 {
+    if d.count > 1.5 && d.canon_fade > 0.001 {
         // Canon: a companion either side, smaller, each with its own routine.
+        // canon_fade eases them in/out when the toggle flips.
         let side = 0.8;
         let w0 = 2.0 * d.scale * d.slots[0].aspect;
         for (var i = 1; i < 3; i++) {
@@ -167,7 +169,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
             // Clear of the main dancer, but kept inside the screen edges.
             let x = min((w0 * 0.5 + wi * 0.5) * 1.05, aspect() - wi * 0.5);
             let sx = select(x, -x, i == 1);
-            out = over(shaded_with_trails(p, i, sx, side, i == 1, f32(i) * 0.33), out);
+            let c = shaded_with_trails(p, i, sx, side, i == 1, f32(i) * 0.33)
+                  * vec4<f32>(vec3<f32>(d.canon_fade), d.canon_fade);
+            out = over(c, out);
         }
     }
     out = over(shaded_with_trails(p, 0, 0.0, 1.0, false, 0.0), out);

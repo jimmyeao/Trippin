@@ -82,7 +82,9 @@ pub struct DancerUniforms {
     pub scale: f32,
     /// 1.0 = ghost echoes of earlier frames trail her movement.
     pub trail: f32,
-    pub _pad2: [f32; 3],
+    /// Canon companions' fade 0..1 — eases toward `canon` so they don't pop.
+    pub canon_fade: f32,
+    pub _pad2: [f32; 2],
 }
 
 pub fn find_dancer_dir() -> Option<PathBuf> {
@@ -261,6 +263,8 @@ pub struct DancerLayer {
     pub clips: Vec<ClipEntry>,
     slots: [Slot; SLOTS],
     opacity: f32,
+    /// Companions fade in/out around the bool — 0..1 eased toward `canon`.
+    canon_amt: f32,
     rng: u64,
     /// True once we've swapped to a gentle routine for the current calm
     /// spell; re-arms when the track picks up again.
@@ -287,6 +291,7 @@ impl DancerLayer {
             clips,
             slots: Default::default(),
             opacity: 0.0,
+            canon_amt: 0.0,
             rng: 0x9E37_79B9_7F4A_7C15,
             calm_swap: false,
             bpm: 120.0,
@@ -516,6 +521,10 @@ impl DancerLayer {
             0.0
         };
         self.opacity += (target - self.opacity) * (dt * 4.0).min(1.0);
+        // Companions ease in/out over ~1s rather than popping when canon
+        // flips; keep drawing until they've fully faded out.
+        let canon_target = if self.canon { 1.0 } else { 0.0 };
+        self.canon_amt += (canon_target - self.canon_amt) * (dt * 3.0).min(1.0);
         self.slots[0].loaded.as_ref()?;
         if self.opacity < 0.01 {
             return None;
@@ -572,10 +581,11 @@ impl DancerLayer {
             slots,
             opacity: self.opacity,
             style: self.style as f32,
-            count: if self.canon { 3.0 } else { 1.0 },
+            count: if self.canon || self.canon_amt > 0.01 { 3.0 } else { 1.0 },
             scale: size,
             trail: if trails { 1.0 } else { 0.0 },
-            _pad2: [0.0; 3],
+            canon_fade: self.canon_amt,
+            _pad2: [0.0; 2],
         })
     }
 }
