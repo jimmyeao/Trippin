@@ -301,6 +301,8 @@ pub struct Settings {
     /// Global colour palette — a WLED-style named gradient (see
     /// `palettes::PALETTES`) every scene's `palette()` samples.
     pub palette: String,
+    /// Perform tab: false = scene library (1b), true = live pads view (1c).
+    pub perform_pads: bool,
     /// Fixed post effect (ignored while `fx_auto` is on).
     pub fx: Fx,
     /// Pick a fresh post effect on every scene cut.
@@ -396,6 +398,7 @@ impl Default for Settings {
             dancer_size: 0.85,
             dancer_trails: false,
             palette: "rainbow".into(),
+            perform_pads: false,
             fx: Fx::Off,
             fx_auto: false,
             fx_amt: 1.0,

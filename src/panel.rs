@@ -303,7 +303,6 @@ fn build_ui(
             scenes,
             scene_heavy,
             heavy_ok,
-            clips,
             scene_filter,
             chip,
             thumbs,
@@ -460,7 +459,6 @@ fn perform_tab(
     scenes: &[String],
     heavy: &[bool],
     heavy_ok: bool,
-    clips: &[String],
     filter: &mut String,
     chip: &mut LibChip,
     thumbs: &mut HashMap<String, egui::TextureHandle>,
@@ -468,6 +466,20 @@ fn perform_tab(
     cmd: &mut Vec<UiCommand>,
 ) {
     use crate::ui_theme::*;
+    // Library / Pads switch (persisted) — then the view's own toolbar bits.
+    ui.horizontal(|ui| {
+        segmented(
+            ui,
+            &mut s.perform_pads,
+            &[(false, "Library"), (true, "Pads")],
+        );
+    });
+
+    if s.perform_pads {
+        pads_view(ui, s, st, scenes, thumbs, want, cmd);
+        return;
+    }
+
     // Right inspector — fixed width; blackout/fullscreen pinned at its foot.
     egui::Panel::right("inspector")
         .exact_size(292.0)
@@ -478,7 +490,7 @@ fn perform_tab(
                 .stroke(egui::Stroke::new(1.0, BORDER)),
         )
         .show(ui, |ui| {
-            inspector(ui, s, st, scenes, clips, heavy_ok, thumbs, want, cmd);
+            inspector(ui, s, st, scenes, heavy_ok, thumbs, want, cmd);
         });
 
     let date = today();
@@ -516,6 +528,7 @@ fn perform_tab(
 
     // Toolbar: search, filter chips, all on/off.
     ui.horizontal(|ui| {
+        ui.add_space(4.0);
         ui.add(
             egui::TextEdit::singleline(filter)
                 .desired_width(150.0)
@@ -749,14 +762,12 @@ fn inspector(
     s: &mut Settings,
     st: &Status,
     scenes: &[String],
-    clips: &[String],
     heavy_ok: bool,
     thumbs: &mut HashMap<String, egui::TextureHandle>,
     want: &mut HashMap<String, Instant>,
     cmd: &mut Vec<UiCommand>,
 ) {
     use crate::ui_theme::*;
-    let _ = clips;
     let scroll_h = (ui.available_height() - 44.0).max(80.0);
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
@@ -1007,6 +1018,263 @@ fn inspector(
         }
         key_badge(ui, &key_short(s.keys.get(&Action::Fullscreen).map_or("", String::as_str)));
     });
+}
+
+// ---------------------------------------------------------------------------
+// Pads view (mockup 1c): big BPM + beat blocks, NOW / UP NEXT, action pads,
+// palette column on the right.
+// ---------------------------------------------------------------------------
+
+#[allow(clippy::too_many_arguments)]
+fn pads_view(
+    ui: &mut egui::Ui,
+    s: &mut Settings,
+    st: &Status,
+    scenes: &[String],
+    thumbs: &mut HashMap<String, egui::TextureHandle>,
+    want: &mut HashMap<String, Instant>,
+    cmd: &mut Vec<UiCommand>,
+) {
+    use crate::ui_theme::*;
+    // Palette column on the right.
+    egui::Panel::right("palettes")
+        .exact_size(196.0)
+        .frame(
+            egui::Frame::NONE
+                .fill(PANEL)
+                .inner_margin(egui::Margin::symmetric(12, 10))
+                .stroke(egui::Stroke::new(1.0, BORDER)),
+        )
+        .show(ui, |ui| palette_column(ui, s));
+
+    // BPM + the four beat blocks.
+    ui.horizontal(|ui| {
+        ui.add_space(6.0);
+        ui.label(
+            egui::RichText::new(format!("{:.0}", st.bpm))
+                .monospace()
+                .size(34.0)
+                .strong(),
+        );
+        ui.label(egui::RichText::new("BPM").size(11.0).color(FAINT));
+        ui.add_space(10.0);
+        let (r, _) = ui.allocate_exact_size(egui::vec2(96.0, 22.0), egui::Sense::hover());
+        for i in 0..4u64 {
+            let c = egui::Rect::from_min_size(
+                egui::pos2(r.min.x + i as f32 * 26.0, r.min.y),
+                egui::vec2(20.0, 20.0),
+            );
+            ui.painter().rect_filled(
+                c,
+                4.0,
+                if i == st.beat_in_bar % 4 { ACCENT } else { BORDER },
+            );
+        }
+        if st.silent {
+            pill(ui, "no signal", WARN, WARN_BG);
+        }
+    });
+    ui.add_space(6.0);
+
+    // NOW / UP NEXT.
+    ui.horizontal(|ui| {
+        let w = (ui.available_width() - 10.0) / 2.0;
+        pad_preview(ui, thumbs, want, cmd, w, "NOW", scenes.get(st.scene), {
+            if st.bars_total > 0 {
+                bar_progress_line(st)
+            } else {
+                String::new()
+            }
+        });
+        let next_line = if st.bars_total > 0 {
+            let rem = st.bars_total.saturating_sub(st.bar_in_scene);
+            format!("in {rem} bar{}", if rem == 1 { "" } else { "s" })
+        } else {
+            String::new()
+        };
+        pad_preview(
+            ui,
+            thumbs,
+            want,
+            cmd,
+            w,
+            "UP NEXT",
+            st.next_scene.and_then(|i| scenes.get(i)),
+            next_line,
+        );
+    });
+    ui.add_space(8.0);
+
+    // Action pads — same Actions as the hotkeys, badge shows the binding.
+    section_label(ui, "pads");
+    let pads: [(Action, &str); 8] = [
+        (Action::NextScene, "next scene"),
+        (Action::PrevScene, "prev scene"),
+        (Action::ModeStatic, "hold / static"),
+        (Action::Blackout, "blackout"),
+        (Action::MarkDownbeat, "mark the one"),
+        (Action::CycleFx, "next fx"),
+        (Action::NextStyle, "dancer look"),
+        (Action::CycleCanon, "canon"),
+    ];
+    let pad_w = ((ui.available_width() - 3.0 * 10.0) / 4.0).max(100.0);
+    for row in pads.chunks(4) {
+        ui.horizontal(|ui| {
+            for (a, label) in row {
+                let key =
+                    key_short(s.keys.get(a).map_or("", String::as_str));
+                let mut job = egui::text::LayoutJob::default();
+                job.append(
+                    label,
+                    0.0,
+                    egui::TextFormat::simple(
+                        egui::FontId::proportional(13.0),
+                        TEXT,
+                    ),
+                );
+                job.append(
+                    &format!("\n{key}"),
+                    0.0,
+                    egui::TextFormat::simple(egui::FontId::monospace(10.0), MUTED),
+                );
+                if ui
+                    .add_sized(
+                        [pad_w, 52.0],
+                        egui::Button::new(job).fill(CARD),
+                    )
+                    .clicked()
+                {
+                    cmd.push(UiCommand::Do(*a));
+                }
+            }
+        });
+    }
+}
+
+/// A NOW / UP NEXT card: thumbnail + name + timing line.
+#[allow(clippy::too_many_arguments)]
+fn pad_preview(
+    ui: &mut egui::Ui,
+    thumbs: &mut HashMap<String, egui::TextureHandle>,
+    want: &mut HashMap<String, Instant>,
+    cmd: &mut Vec<UiCommand>,
+    w: f32,
+    title: &str,
+    scene: Option<&String>,
+    line: String,
+) {
+    use crate::ui_theme::*;
+    egui::Frame::NONE
+        .fill(CARD)
+        .stroke(egui::Stroke::new(1.0, BORDER))
+        .corner_radius(egui::CornerRadius::same(8))
+        .inner_margin(egui::Margin::same(10))
+        .show(ui, |ui| {
+            ui.set_width(w - 20.0);
+            section_label(ui, title);
+            ui.horizontal(|ui| {
+                let (rect, _) = ui
+                    .allocate_exact_size(egui::vec2(96.0, 54.0), egui::Sense::hover());
+                let p = ui.painter();
+                if let Some(name) = scene {
+                    let key = format!("scene:{name}");
+                    if let Some(tex) = thumb_tex(ui, thumbs, want, &key, cmd) {
+                        p.image(
+                            tex,
+                            rect,
+                            egui::Rect::from_min_max(
+                                egui::pos2(0.0, 0.0),
+                                egui::pos2(1.0, 1.0),
+                            ),
+                            egui::Color32::WHITE,
+                        );
+                    } else {
+                        p.rect_filled(rect, 4.0, RAISED);
+                    }
+                } else {
+                    p.rect_filled(rect, 4.0, RAISED);
+                }
+                p.rect_stroke(
+                    rect,
+                    4.0,
+                    egui::Stroke::new(1.0, BORDER),
+                    egui::StrokeKind::Inside,
+                );
+                ui.vertical(|ui| {
+                    ui.label(
+                        egui::RichText::new(scene.map_or("—", String::as_str))
+                            .monospace()
+                            .size(14.0)
+                            .strong(),
+                    );
+                    if !line.is_empty() {
+                        ui.label(egui::RichText::new(line).size(11.0).color(MUTED));
+                    }
+                });
+            });
+        });
+}
+
+/// The scrollable palette column on the pads view's right edge.
+fn palette_column(ui: &mut egui::Ui, s: &mut Settings) {
+    use crate::ui_theme::*;
+    section_label(ui, "palette");
+    egui::ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            for name in crate::palettes::names() {
+                let sel = s.palette == name;
+                let w = ui.available_width();
+                let (rect, resp) = ui.allocate_exact_size(
+                    egui::vec2(w, 34.0),
+                    egui::Sense::click(),
+                );
+                let p = ui.painter();
+                p.rect_filled(rect, 5.0, CARD);
+                p.rect_stroke(
+                    rect,
+                    5.0,
+                    egui::Stroke::new(1.0, if sel { ACCENT } else { BORDER }),
+                    egui::StrokeKind::Inside,
+                );
+                p.text(
+                    rect.min + egui::vec2(8.0, 5.0),
+                    egui::Align2::LEFT_TOP,
+                    name,
+                    egui::FontId::monospace(10.0),
+                    if sel { ACCENT } else { TEXT },
+                );
+                // mini gradient strip along the bottom of the row
+                let lut = crate::palettes::lut(name);
+                let strip = egui::Rect::from_min_max(
+                    egui::pos2(rect.min.x + 6.0, rect.max.y - 9.0),
+                    egui::pos2(rect.max.x - 6.0, rect.max.y - 4.0),
+                );
+                let n = 48usize;
+                for i in 0..n {
+                    let c = &lut[i * (crate::palettes::LUT_SIZE / n) * 4..];
+                    p.rect_filled(
+                        egui::Rect::from_min_max(
+                            egui::pos2(
+                                strip.min.x + strip.width() * i as f32 / n as f32,
+                                strip.min.y,
+                            ),
+                            egui::pos2(
+                                strip.min.x
+                                    + strip.width() * (i + 1) as f32 / n as f32
+                                    + 1.0,
+                                strip.max.y,
+                            ),
+                        ),
+                        0.0,
+                        egui::Color32::from_rgb(c[0], c[1], c[2]),
+                    );
+                }
+                if resp.clicked() {
+                    s.palette = name.to_string();
+                }
+            }
+        });
 }
 
 /// A labelled control row for the inspector — tighter than `row`.
