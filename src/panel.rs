@@ -496,12 +496,25 @@ fn stream_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<Ui
     });
 
     ui.separator();
-    ui.label(egui::RichText::new("Network output").strong());
-    row(ui, "NDI", |ui| {
-        ui.checkbox(&mut s.ndi_enabled, "Send");
-        ui.label("as");
-        ui.add(egui::TextEdit::singleline(&mut s.ndi_name).desired_width(110.0));
+    ui.label(egui::RichText::new("Video output (OBS)").strong());
+    row(ui, "Name", |ui| {
+        ui.add(egui::TextEdit::singleline(&mut s.ndi_name).desired_width(140.0));
     });
+    row(ui, "Send", |ui| {
+        if cfg!(windows) {
+            ui.checkbox(&mut s.spout_enabled, "Spout")
+                .on_hover_text("Same PC: OBS → Add source → Spout2 Capture (needs the free Spout2 OBS plugin).");
+        }
+        ui.checkbox(&mut s.ndi_enabled, "NDI")
+            .on_hover_text("Over the network: OBS → NDI Source (needs the free NDI runtime / DistroAV plugin).");
+    });
+    row(ui, "Background", |ui| {
+        ui.selectable_value(&mut s.out_transparent, false, "Scenes");
+        ui.selectable_value(&mut s.out_transparent, true, "Transparent");
+    });
+    if s.out_transparent {
+        ui.small("Scenes off: only the dancer, glow, overlays and text go out, with alpha — layer them over your camera in OBS.");
+    }
     row(ui, "Size", |ui| {
         for h in [720u32, 1080, 2160] {
             ui.selectable_value(&mut s.ndi_height, h, format!("{h}p"));
@@ -517,8 +530,8 @@ fn stream_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<Ui
         }
         None => {
             ui.small(
-                "Sends the composited frame to OBS / other displays. \
-                 Needs the free NDI runtime installed (NDI Tools).",
+                "Sends the finished frame (overlays included) to OBS or another display. \
+                 Spout for OBS on this PC, NDI across the network.",
             );
         }
     }

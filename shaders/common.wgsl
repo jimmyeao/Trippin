@@ -43,6 +43,8 @@ struct U {
     // surge on the drop. Smooth (built from smoothed levels): safe to drive
     // camera travel, rotation and flow with. Like u.flow, wrap at 4096.
     clock4: vec4<f32>,
+    // x: 1 = transparent background (present writes alpha); yzw spare.
+    misc4: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> u: U;

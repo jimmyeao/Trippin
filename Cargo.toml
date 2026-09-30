@@ -39,7 +39,19 @@ gui = []
 
 [target.'cfg(windows)'.dependencies]
 # Now-playing from the OS media session (Spotify etc.).
-windows = { version = "0.62", features = ["Media_Control", "Foundation"] }
+# Spout output: D3D11 shared texture + the Spout shared-memory registry.
+windows = { version = "0.62", features = [
+    "Media_Control",
+    "Foundation",
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_System_Memory",
+    "Win32_System_Threading",
+    "Win32_Security",
+] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6"

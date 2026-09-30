@@ -35,6 +35,8 @@ mod egui_win;
 mod ndi;
 mod nowplaying;
 mod overlay;
+#[cfg(windows)]
+mod spout;
 mod output;
 mod palettes;
 mod panel;
@@ -781,8 +783,12 @@ fn render_loop(
         // Global palette — a no-op while the name is unchanged.
         r.set_palette(&s.palette);
         // NDI output — a conf change rebuilds it; otherwise a cheap no-op.
-        r.set_output(s.ndi_enabled.then(|| output::Conf {
+        r.transparent = s.out_transparent;
+        r.set_output((s.ndi_enabled || s.spout_enabled).then(|| output::Conf {
             name: s.ndi_name.clone(),
+            ndi: s.ndi_enabled,
+            spout: s.spout_enabled,
+            transparent: s.out_transparent,
             height: s.ndi_height,
             fps: s.ndi_fps,
         }));
@@ -1110,6 +1116,7 @@ fn render_loop(
             hits4: f.hits4,
             pres4: f.pres4,
             clock4: clock4.map(|c| c as f32),
+            misc4: [0.0; 4],
         };
         // Text overlays: fade in over 0.35 s, out over 0.5 s; a faded-out
         // slot drops off (its texture stays bound but the shader skips it).
@@ -1949,6 +1956,7 @@ fn check_shaders() -> Result<()> {
     paths.push(dir.join("present.wgsl"));
     paths.push(dir.join("dancer.wgsl"));
     paths.push(dir.join("text.wgsl"));
+    paths.push(dir.join("overlay.wgsl"));
     let mut bad = 0;
     for p in &paths {
         let body = std::fs::read_to_string(p)?;
@@ -2032,6 +2040,18 @@ fn main() -> Result<()> {
         return snap::run(&args);
     }
     // `--nowplaying`: watch what each track source (Spotify, Serato, …) sees.
+    #[cfg(windows)]
+    if let Some(name) = arg_value(&args, "--spout-grab") {
+        let (w, h, px) = spout::grab(name)?;
+        let out = args.last().filter(|a| a.ends_with(".png")).cloned().unwrap_or("spout.png".into());
+        image::save_buffer(&out, &px, w, h, image::ColorType::Rgba8)?;
+        println!("{w}x{h} → {out}");
+        return Ok(());
+    }
+    #[cfg(windows)]
+    if args.iter().any(|a| a == "--spout-test") {
+        return spout::test();
+    }
     if args.iter().any(|a| a == "--nowplaying") {
         return nowplaying::monitor();
     }

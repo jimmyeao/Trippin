@@ -325,6 +325,12 @@ pub struct Settings {
     pub ndi_height: u32,
     /// Output cadence cap.
     pub ndi_fps: u32,
+    /// Spout output (Windows): GPU texture sharing with OBS's Spout2 source
+    /// on the same PC — no network, no runtime to install.
+    pub spout_enabled: bool,
+    /// Transparent background: scenes off, the dancer + overlays go out with
+    /// alpha (NDI/Spout) to layer over a camera in OBS.
+    pub out_transparent: bool,
     /// Now playing: where tracks come from (Auto = whichever changed last).
     pub np_source: crate::nowplaying::NpSource,
     /// Hold a new track back until it has stayed this long (seconds) — skips
@@ -390,6 +396,8 @@ impl Default for Settings {
             ndi_name: "Trippin".into(),
             ndi_height: 1080,
             ndi_fps: 60,
+            spout_enabled: false,
+            out_transparent: false,
             np_source: Default::default(),
             np_delay_s: 0.0,
             np_file: String::new(),

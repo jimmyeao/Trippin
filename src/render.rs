@@ -82,6 +82,9 @@ pub struct Uniforms {
     /// Energy clocks (beats): (whole mix, bass, mid, high) — advance faster
     /// the louder the band. Integrated in main.rs from smoothed levels.
     pub clock4: [f32; 4],
+    /// x: 1 = transparent background (the renderer sets it — scenes are
+    /// skipped and present writes real alpha for OBS/NDI/Spout); yzw spare.
+    pub misc4: [f32; 4],
 }
 
 #[derive(Default, Clone, Copy, PartialEq)]
@@ -324,6 +327,8 @@ pub struct Renderer {
     out_present: Option<wgpu::RenderPipeline>,
     out_text: Option<wgpu::RenderPipeline>,
     out_overlay: Option<wgpu::RenderPipeline>,
+    /// Transparent-background mode: no scene, alpha out (see Uniforms::misc4).
+    pub transparent: bool,
 }
 
 pub fn find_shader_dir() -> Result<PathBuf> {
@@ -723,6 +728,7 @@ impl Renderer {
             out_present: None,
             out_text: None,
             out_overlay: None,
+            transparent: false,
         };
         r.reload_shaders(true);
         if r.present.pipeline.is_none() {
@@ -1302,6 +1308,7 @@ impl Renderer {
         uu.bloom = self.bloom_amt;
         uu.tonemap = tonemap;
         uu.frame = (self.frame % 4096) as f32;
+        uu.misc4[0] = if self.transparent { 1.0 } else { 0.0 };
         let u = &uu;
         self.queue
             .write_buffer(&self.uniform_buf, 0, bytemuck::bytes_of(u));
@@ -1371,7 +1378,8 @@ impl Renderer {
         let next = 1 - prev;
         let mut enc = self.device.create_command_encoder(&Default::default());
 
-        if let Some(pipeline) = self.scenes.get(scene).and_then(|s| s.pipeline.as_ref()) {
+        let scene_pipe = self.scenes.get(scene).and_then(|s| s.pipeline.as_ref());
+        if scene_pipe.is_some() || self.transparent {
             let view = self.targets[next].create_view(&Default::default());
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("scene"),
@@ -1380,15 +1388,23 @@ impl Renderer {
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
+                        // Transparent mode: no scene, just the dancer on
+                        // a cleared (alpha 0) target.
+                        load: if self.transparent {
+                            wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT)
+                        } else {
+                            wgpu::LoadOp::Load
+                        },
                         store: wgpu::StoreOp::Store,
                     },
                 })],
                 ..Default::default()
             });
-            pass.set_pipeline(pipeline);
             pass.set_bind_group(0, &self.bind_groups[prev], &[]);
-            pass.draw(0..3, 0..1);
+            if let (Some(pipeline), false) = (scene_pipe, self.transparent) {
+                pass.set_pipeline(pipeline);
+                pass.draw(0..3, 0..1);
+            }
             if let (Some(_), Some(dancer), Some(dancer_bg)) = (
                 dancer,
                 self.dancer.pipeline.as_ref(),
@@ -1592,8 +1608,8 @@ impl Renderer {
         }
         self.out_err
             .as_ref()
-            .map(|(_, _, e)| format!("NDI: {e}"))
-            .or_else(|| Some("NDI: starting…".into()))
+            .map(|(_, _, e)| e.clone())
+            .or_else(|| Some("Output: starting…".into()))
     }
 
     /// Render one scene once into a small RGBA8 image — the editor's cue
@@ -1646,6 +1662,7 @@ impl Renderer {
             hits4: [1.0, 0.5, 0.3, 0.3],
             pres4: [0.6, 0.5, 0.45, 0.4],
             clock4: [8.0, 8.0, 8.0, 8.0],
+            misc4: [0.0; 4],
         };
         self.queue
             .write_buffer(&self.uniform_buf, 0, bytemuck::bytes_of(&u));

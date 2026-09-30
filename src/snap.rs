@@ -83,6 +83,7 @@ fn groove(t: f32, w: u32, h: u32, frame: u32, bloom: f32, tonemap: f32, calm: f3
         hits4: [kick, if ph < 0.05 { 0.6 } else { 0.0 } * (1.0 - calm), 0.0, if (beat * 2.0).fract() < 0.05 { 0.5 } else { 0.0 }],
         pres4: [0.55 - 0.3 * calm, 0.5, 0.45, 0.4],
         clock4: [beat * (1.0 - 0.3 * calm); 4],
+        misc4: [0.0; 4],
     }
 }
 

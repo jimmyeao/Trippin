@@ -1,11 +1,10 @@
 //! External video output. When enabled, `Renderer::render` re-runs the
-//! present pass (post FX + text included) into an offscreen BGRA target at
-//! the output resolution, copies it to a staging buffer, and a worker thread
-//! ships each frame to NDI. The render thread never waits on the network —
-//! if both staging buffers are still in flight the frame is just dropped.
-//!
-//! The sink is deliberately thin (`ndi::Sender`) so Spout/Syphon/FFmpeg can
-//! join later behind the same tap.
+//! present pass (post FX, overlays and text included) into an offscreen BGRA
+//! target at the output resolution, copies it to a staging buffer, and a
+//! worker thread ships each frame to the sinks: NDI (network) and Spout
+//! (Windows GPU texture sharing — OBS's Spout2 source). The render thread
+//! never waits on a sink — if both staging buffers are still in flight the
+//! frame is just dropped. Frames carry alpha (transparent-background mode).
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
@@ -24,11 +23,35 @@ pub const OUT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8UnormSrgb;
 
 const STAGING: usize = 2;
 
+/// `lut[a * 256 + v]`: sRGB byte `v` of a premultiplied colour at alpha
+/// `a` → the straight-alpha sRGB byte (divide in linear light).
+fn unpremul_lut() -> Vec<u8> {
+    let dec = |v: f32| if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) };
+    let enc = |l: f32| if l <= 0.0031308 { l * 12.92 } else { 1.055 * l.powf(1.0 / 2.4) - 0.055 };
+    let mut lut = vec![0u8; 256 * 256];
+    for a in 0..256usize {
+        for v in 0..256usize {
+            lut[a * 256 + v] = if a == 0 {
+                0
+            } else {
+                let l = (dec(v as f32 / 255.0) / (a as f32 / 255.0)).min(1.0);
+                (enc(l) * 255.0 + 0.5) as u8
+            };
+        }
+    }
+    lut
+}
+
 /// User-facing output configuration — any change rebuilds the output.
 #[derive(Clone, PartialEq)]
 pub struct Conf {
-    /// NDI source name as receivers (OBS) will see it.
+    /// Source name as receivers (OBS) will see it — NDI and Spout alike.
     pub name: String,
+    pub ndi: bool,
+    pub spout: bool,
+    /// Transparent background: frames are un-premultiplied before sending
+    /// (NDI and Spout receivers expect straight alpha).
+    pub transparent: bool,
     /// Frame height; width is the 16:9 match (720→1280, 1080→1920, 2160→3840).
     pub height: u32,
     /// Frame cadence cap.
@@ -61,6 +84,10 @@ pub struct Output {
     tx: Option<mpsc::Sender<usize>>,
     worker: Option<JoinHandle<()>>,
     conns: Arc<AtomicI32>,
+    /// Sinks that came up (for the status line), and why others didn't.
+    ndi_on: bool,
+    spout_name: Option<String>,
+    errs: Vec<String>,
     interval: Duration,
     last: Instant,
 }
@@ -74,12 +101,28 @@ impl Output {
         res: &crate::render::FrameRes,
         conf: Conf,
     ) -> Result<Output> {
-        // Fail cheap: the runtime probe happens before any GPU allocation.
-        let lib = ndi::Ndi::load()?;
-        let sender = lib.sender(&conf.name)?;
-        println!("NDI runtime {} — sender \"{}\"", lib.version(), conf.name);
-
         let (width, height) = conf.size();
+        let mut errs = Vec::new();
+        // Fail cheap: the runtime probe happens before any GPU allocation.
+        let sender = if conf.ndi {
+            match ndi::Ndi::load().and_then(|lib| {
+                let s = lib.sender(&conf.name)?;
+                println!("NDI runtime {} — sender \"{}\"", lib.version(), conf.name);
+                Ok(s)
+            }) {
+                Ok(s) => Some(s),
+                // With Spout also on, a missing NDI runtime shouldn't take
+                // Spout down with it.
+                Err(e) if conf.spout => {
+                    errs.push(format!("NDI: {e:#}"));
+                    None
+                }
+                Err(e) => return Err(e),
+            }
+        } else {
+            None
+        };
+        let ndi_on = sender.is_some();
         let tex = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("ndi out"),
             size: wgpu::Extent3d {
@@ -123,12 +166,40 @@ impl Output {
         let conns = Arc::new(AtomicI32::new(0));
 
         let (tx, rx) = mpsc::channel::<usize>();
+        // The Spout sender's D3D11 objects live on the worker thread; it
+        // reports back whether the sender came up.
+        let (up_tx, up_rx) = mpsc::channel::<Result<String, String>>();
         let worker = {
             let staging = staging.clone();
             let in_flight = in_flight.clone();
             let conns = conns.clone();
             let fps = conf.fps.max(1);
+            let want_spout = conf.spout;
+            let unpremul = conf.transparent.then(unpremul_lut);
+            let mut scratch = Vec::new();
+            let spout_name = conf.name.clone();
             std::thread::spawn(move || {
+                #[cfg(windows)]
+                let spout = if want_spout {
+                    match crate::spout::Sender::new(&spout_name, width, height) {
+                        Ok(s) => {
+                            let _ = up_tx.send(Ok(s.name.clone()));
+                            Some(s)
+                        }
+                        Err(e) => {
+                            let _ = up_tx.send(Err(format!("Spout: {e:#}")));
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
+                #[cfg(not(windows))]
+                {
+                    let _ = (&spout_name, want_spout);
+                    let _ = up_tx.send(Err("Spout is Windows-only (use NDI on macOS)".into()));
+                }
+                drop(up_tx);
                 let mut counted = Instant::now() - Duration::from_secs(10);
                 let mut sent = 0u64;
                 let mut logged = Instant::now();
@@ -136,8 +207,26 @@ impl Output {
                     match rx.recv_timeout(Duration::from_secs(2)) {
                         Ok(i) => {
                             let buf = &staging[i];
-                            {
-                                if let Ok(range) = buf.slice(..).get_mapped_range() {
+                            if let Ok(mapped) = buf.slice(..).get_mapped_range() {
+                                let range: &[u8] = match &unpremul {
+                                    Some(lut) => {
+                                        scratch.clear();
+                                        scratch.extend_from_slice(&mapped);
+                                        for p in scratch.chunks_exact_mut(4) {
+                                            let row = &lut[p[3] as usize * 256..][..256];
+                                            p[0] = row[p[0] as usize];
+                                            p[1] = row[p[1] as usize];
+                                            p[2] = row[p[2] as usize];
+                                        }
+                                        &scratch
+                                    }
+                                    None => &mapped,
+                                };
+                                #[cfg(windows)]
+                                if let Some(s) = &spout {
+                                    s.send(range, row_bytes);
+                                }
+                                if let Some(sender) = &sender {
                                     let frame = ndi::VideoFrameV2::bgra(
                                         width,
                                         height,
@@ -156,7 +245,9 @@ impl Output {
                             buf.unmap();
                             in_flight[i].store(false, Ordering::Release);
                             sent += 1;
-                            if logged.elapsed() > Duration::from_secs(5) {
+                            if let (Some(sender), true) =
+                                (&sender, logged.elapsed() > Duration::from_secs(5))
+                            {
                                 logged = Instant::now();
                                 eprintln!("ndi: {sent} sent, {} receivers", sender.connections(0));
                             }
@@ -164,7 +255,9 @@ impl Output {
                         Err(mpsc::RecvTimeoutError::Timeout) => {}
                         Err(mpsc::RecvTimeoutError::Disconnected) => break,
                     }
-                    if counted.elapsed() > Duration::from_secs(2) {
+                    if let (Some(sender), true) =
+                        (&sender, counted.elapsed() > Duration::from_secs(2))
+                    {
                         counted = Instant::now();
                         conns.store(sender.connections(0), Ordering::Relaxed);
                     }
@@ -172,7 +265,27 @@ impl Output {
             })
         };
 
+        let mut spout_name = None;
+        if conf.spout {
+            match up_rx.recv_timeout(Duration::from_secs(5)) {
+                Ok(Ok(n)) => {
+                    println!("Spout sender \"{n}\"");
+                    spout_name = Some(n);
+                }
+                Ok(Err(e)) => errs.push(e),
+                Err(_) => errs.push("Spout: sender didn't start".into()),
+            }
+        }
+        if !ndi_on && spout_name.is_none() {
+            drop(tx);
+            let _ = worker.join();
+            return Err(anyhow::anyhow!(errs.join(" · ")));
+        }
+
         Ok(Output {
+            ndi_on,
+            spout_name,
+            errs,
             interval: Duration::from_secs_f64(1.0 / f64::from(conf.fps.max(1))),
             last: Instant::now() - Duration::from_secs(1),
             conf,
@@ -292,12 +405,20 @@ impl Output {
 
     /// One-line status for the panel.
     pub fn status(&self) -> String {
-        let n = self.conns.load(Ordering::Relaxed);
-        match n {
-            0 => format!("NDI \"{}\" — waiting for receivers", self.conf.name),
-            1 => format!("NDI \"{}\" — 1 receiver", self.conf.name),
-            n => format!("NDI \"{}\" — {n} receivers", self.conf.name),
+        let mut parts = Vec::new();
+        if self.ndi_on {
+            let n = self.conns.load(Ordering::Relaxed);
+            parts.push(match n {
+                0 => format!("NDI \"{}\" — waiting for receivers", self.conf.name),
+                1 => format!("NDI \"{}\" — 1 receiver", self.conf.name),
+                n => format!("NDI \"{}\" — {n} receivers", self.conf.name),
+            });
         }
+        if let Some(n) = &self.spout_name {
+            parts.push(format!("Spout \"{n}\" — live"));
+        }
+        parts.extend(self.errs.iter().cloned());
+        parts.join("\n")
     }
 }
 
