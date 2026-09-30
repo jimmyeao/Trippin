@@ -1900,49 +1900,63 @@ fn keys_tab(
         }
     }
     let q = filter.to_lowercase();
-    card().show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        for a in Action::ALL {
-            if !q.is_empty() && !a.label().to_lowercase().contains(&q) {
-                continue;
-            }
-            let key = s.keys.get(&a).cloned().unwrap_or_default();
-            let conflict = bound.get(key.as_str()).copied().unwrap_or(0) > 1;
-            ui.horizontal(|ui| {
-                ui.add_sized(
-                    [300.0, 20.0],
-                    egui::Label::new(egui::RichText::new(a.label()).size(12.0)),
-                );
-                egui::Frame::NONE
-                    .fill(INSET)
-                    .stroke(egui::Stroke::new(
-                        1.0,
-                        if conflict { WARN } else { BORDER_HI },
-                    ))
-                    .corner_radius(egui::CornerRadius::same(4))
-                    .inner_margin(egui::Margin::symmetric(6, 2))
-                    .show(ui, |ui| {
-                        ui.label(
-                            egui::RichText::new(if key.is_empty() { "—" } else { &key })
-                                .monospace()
-                                .size(11.0)
-                                .color(if conflict { WARN } else { MUTED }),
+    let acts: Vec<Action> = Action::ALL
+        .iter()
+        .copied()
+        .filter(|a| q.is_empty() || a.label().to_lowercase().contains(&q))
+        .collect();
+    // Two cards side by side — the window is wide, a single list wastes it.
+    let mid = acts.len().div_ceil(2);
+    ui.columns(2, |cols| {
+        for (ci, col) in cols.iter_mut().enumerate() {
+            card().show(col, |ui| {
+                ui.set_width(ui.available_width());
+                let lbl_w = (ui.available_width() - 158.0).max(110.0);
+                for &a in acts.iter().skip(ci * mid).take(mid) {
+                    let key = s.keys.get(&a).cloned().unwrap_or_default();
+                    let conflict = bound.get(key.as_str()).copied().unwrap_or(0) > 1;
+                    ui.horizontal(|ui| {
+                        ui.add_sized(
+                            [lbl_w, 20.0],
+                            egui::Label::new(
+                                egui::RichText::new(a.label()).size(12.0),
+                            )
+                            .truncate(),
                         );
+                        egui::Frame::NONE
+                            .fill(INSET)
+                            .stroke(egui::Stroke::new(
+                                1.0,
+                                if conflict { WARN } else { BORDER_HI },
+                            ))
+                            .corner_radius(egui::CornerRadius::same(4))
+                            .inner_margin(egui::Margin::symmetric(6, 2))
+                            .show(ui, |ui| {
+                                ui.label(
+                                    egui::RichText::new(if key.is_empty() {
+                                        "—"
+                                    } else {
+                                        &key
+                                    })
+                                    .monospace()
+                                    .size(11.0)
+                                    .color(if conflict { WARN } else { MUTED }),
+                                );
+                            });
+                        if *rebinding == Some(a) {
+                            ui.colored_label(WARN, "press a key…");
+                            if ui.small_button("cancel").clicked() {
+                                *rebinding = None;
+                            }
+                        } else if ui.small_button("rebind").clicked() {
+                            *rebinding = Some(a);
+                        }
+                        if conflict {
+                            ui.label(
+                                egui::RichText::new("conflict").size(10.0).color(WARN),
+                            );
+                        }
                     });
-                if *rebinding == Some(a) {
-                    ui.colored_label(WARN, "press a key…");
-                    if ui.small_button("cancel").clicked() {
-                        *rebinding = None;
-                    }
-                } else if ui.small_button("rebind").clicked() {
-                    *rebinding = Some(a);
-                }
-                if conflict {
-                    ui.label(
-                        egui::RichText::new("conflict")
-                            .size(10.0)
-                            .color(WARN),
-                    );
                 }
             });
         }
