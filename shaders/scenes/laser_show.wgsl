@@ -53,22 +53,6 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         halo += bc * bl.y * lv;
     }
 
-    // Side rigs near the top corners firing down across the fan.
-    for (var i = 0; i < 2; i++) {
-        let side = f32(i) * 2.0 - 1.0;
-        let so = vec2<f32>(side * asp * 0.92, -0.85);
-        for (var j = 0; j < 4; j++) {
-            let fj = f32(j);
-            let ang = PI * 0.5 - side * (0.5 + fj * 0.35)
-                    + 0.25 * sin(u.flow * 0.5 + fj * 1.3 + side * 2.0);
-            let bc = palette(0.6 + fj * 0.11 + u.hue * 0.15);
-            let bl = beam(p, so, ang);
-            let lv = (0.5 + 0.5 * beat_pulse(2.0)) * 0.9;
-            beams += bc * bc * bl.x * lv;
-            halo += bc * bc * bl.y * lv;
-        }
-    }
-
     // Shafts: the beam's own light, brighter and sharper where the smoke is
     // thick, plus a diffuse scatter so the fog bank itself glows where the
     // beams cross it.

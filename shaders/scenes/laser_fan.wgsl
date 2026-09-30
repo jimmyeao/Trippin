@@ -25,7 +25,11 @@ fn fan(p: vec2<f32>, o: vec2<f32>, centre: f32, span: f32, n: i32, hue0: f32, ts
         let band = spec(fi * 0.8 + 0.05);
         let bc = palette(hue0 + fi * 0.35);
         let c = bc * bc * 1.2 + bc * 0.2;          // saturated laser colour
-        let lvl = (0.35 + 1.4 * band) * (0.6 + 0.6 * u.intensity);
+        // Fixed beam count (changing it re-spaced every beam = jumps);
+        // outer beams fade in smoothly as the mids build instead.
+        let edge = abs(fi - 0.5) * 2.0;
+        let fade_in = smoothstep(edge - 0.2, edge + 0.05, 0.35 + 0.75 * u.pres4.y);
+        let lvl = (0.35 + 1.4 * band) * (0.6 + 0.6 * u.intensity) * fade_in;
         // Visible where the smoke is: patchy along the beam's length.
         col += c * l.x * lvl * (0.15 + 2.6 * smoke);
         lit += c * l.y * lvl;
@@ -45,7 +49,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // Near-black room; unlit smoke barely visible.
     var col = vec3<f32>(0.002, 0.002, 0.005) + vec3<f32>(0.012, 0.014, 0.025) * smoke;
 
-    let n = 9 + i32(u.energy * 6.0);
+    let n = 13;
     let span = 0.7 + 0.8 * u.pres4.y;
     // Main projector low-left, sweeping up-right; direction swings each phrase.
     let o1 = vec2<f32>(-0.25 * asp, 0.55);
@@ -54,7 +58,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // Second projector on the right edge, firing left across the first.
     let o2 = vec2<f32>(0.98 * asp, 0.1);
     let c2 = PI + 0.2 * sin(u.clock4.x * 0.025 + 1.5) - 0.15;
-    col += fan(p, o2, c2, span * 0.7, n - 3, 0.75 + u.hue, tsm + 5.0, smoke);
+    col += fan(p, o2, c2, span * 0.7, 10, 0.75 + u.hue, tsm + 5.0, smoke);
 
     // Projector hot spots (lens flare), flaring on kicks.
     for (var k = 0; k < 2; k++) {
