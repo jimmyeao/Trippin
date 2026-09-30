@@ -1,12 +1,15 @@
 //! Control panel: a second window (egui) for modes, scene playlist, dancer
 //! options, sync and hotkey bindings. It shares the renderer's GPU device.
 //!
-//! Layout: a slim status header, a tab strip, then one tab of content at a
-//! time — Show, Scenes, Dancer, Effects, Keys — so it stays tidy even with
-//! 50+ scenes.
+//! Layout (Docs/mockups.html): a live-status header, a tab strip — Perform,
+//! Dancer & FX, Stream, Timeline, Keys — then one page at a time. Perform is
+//! the default: a thumbnail scene library on the left and a live inspector
+//! on the right (mockup 1b).
 
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
@@ -77,21 +80,29 @@ pub struct Status {
 
 #[derive(Clone, Copy, PartialEq)]
 enum Tab {
-    Show,
-    Scenes,
-    Dancer,
-    Effects,
+    /// Scene library + inspector — the old Show and Scenes tabs merged
+    /// (mockup 1b).
+    Perform,
+    /// Dancer routines and whole-frame FX on one page.
+    DancerFx,
     Stream,
     Timeline,
     Keys,
 }
 
+/// Scene-library filter chip (mockup 1b toolbar).
+#[derive(Clone, Copy, PartialEq)]
+enum LibChip {
+    All,
+    Flat,
+    Heavy,
+    Seasonal,
+}
+
 impl Tab {
-    const ALL: [Tab; 7] = [
-        Tab::Show,
-        Tab::Scenes,
-        Tab::Dancer,
-        Tab::Effects,
+    const ALL: [Tab; 5] = [
+        Tab::Perform,
+        Tab::DancerFx,
         Tab::Stream,
         Tab::Timeline,
         Tab::Keys,
@@ -99,10 +110,8 @@ impl Tab {
 
     fn label(self) -> &'static str {
         match self {
-            Tab::Show => "Show",
-            Tab::Scenes => "Scenes",
-            Tab::Dancer => "Dancer",
-            Tab::Effects => "Effects",
+            Tab::Perform => "Perform",
+            Tab::DancerFx => "Dancer & FX",
             Tab::Stream => "Stream",
             Tab::Timeline => "Timeline",
             Tab::Keys => "Keys",
@@ -119,6 +128,13 @@ pub struct Panel {
     tab: Tab,
     /// Text filter for the scene list.
     scene_filter: String,
+    /// Library filter chip (All / 2D / 3D / Seasonal).
+    chip: LibChip,
+    /// Uploaded scene thumbnails, keyed "scene:<name>".
+    thumbs: HashMap<String, egui::TextureHandle>,
+    /// Thumbnails we've asked the render thread for (Instant = last request,
+    /// for re-requesting a thumb that never came back).
+    want_thumbs: HashMap<String, Instant>,
 }
 
 impl Panel {
@@ -133,17 +149,23 @@ impl Panel {
             gpu,
             icon,
             "Trippin — control",
-            winit::dpi::PhysicalSize::new(480, 620),
+            winit::dpi::PhysicalSize::new(980, 640),
             anchor,
             true, // floats above a fullscreen visuals window
         )?;
+        // Library grid + inspector need room; below this it gets cramped.
+        win.window
+            .set_min_inner_size(Some(winit::dpi::PhysicalSize::new(720, 520)));
         let window = win.window.clone();
         Ok(Self {
             window,
             win,
             rebinding: None,
-            tab: Tab::Show,
+            tab: Tab::Perform,
             scene_filter: String::new(),
+            chip: LibChip::All,
+            thumbs: HashMap::new(),
+            want_thumbs: HashMap::new(),
         })
     }
 
@@ -168,15 +190,47 @@ impl Panel {
         heavy_ok: bool,
         clips: &[String],
         tl_shared: &crate::timeline::Shared,
+        thumb_store: &Mutex<HashMap<String, (u32, u32, Vec<u8>)>>,
     ) -> (Vec<UiCommand>, bool, PanelFrame) {
         let mut commands = Vec::new();
         let mut changed = false;
 
+        // Collect finished thumbs we asked the render thread for. The store
+        // is shared with the editor window — we only take keys we requested.
+        let mut got: Vec<(String, u32, u32, Vec<u8>)> = Vec::new();
+        {
+            let store = thumb_store.lock().unwrap_or_else(|e| e.into_inner());
+            for k in self.want_thumbs.keys() {
+                if self.thumbs.contains_key(k) {
+                    continue;
+                }
+                if let Some((w, h, px)) = store.get(k) {
+                    got.push((k.clone(), *w, *h, px.clone()));
+                }
+            }
+        }
+
         let rebinding = &mut self.rebinding;
         let tab = &mut self.tab;
         let scene_filter = &mut self.scene_filter;
+        let chip = &mut self.chip;
+        let thumbs = &mut self.thumbs;
+        let want_thumbs = &mut self.want_thumbs;
         let frame = self.win.frame(|ui| {
             ui.add_space(6.0);
+            for (key, w, h, px) in &got {
+                let img = egui::ColorImage::from_rgba_unmultiplied(
+                    [*w as usize, *h as usize],
+                    px,
+                );
+                let tex = ui.ctx().load_texture(
+                    format!("panel_thumb:{key}"),
+                    img,
+                    egui::TextureOptions::LINEAR,
+                );
+                thumbs.insert(key.clone(), tex);
+                cache_thumb_png(key, *w, *h, px);
+            }
             changed |= build_ui(
                 ui,
                 settings,
@@ -189,6 +243,9 @@ impl Panel {
                 rebinding,
                 tab,
                 scene_filter,
+                chip,
+                thumbs,
+                want_thumbs,
                 &mut commands,
             );
         });
@@ -215,6 +272,9 @@ fn build_ui(
     rebinding: &mut Option<Action>,
     tab: &mut Tab,
     scene_filter: &mut String,
+    chip: &mut LibChip,
+    thumbs: &mut HashMap<String, egui::TextureHandle>,
+    want_thumbs: &mut HashMap<String, Instant>,
     cmd: &mut Vec<UiCommand>,
 ) -> bool {
     let before = serde_json::to_string(s).unwrap_or_default();
@@ -235,17 +295,37 @@ fn build_ui(
     });
     ui.separator();
 
-    egui::ScrollArea::vertical()
-        .auto_shrink([false, true])
-        .show(ui, |ui| match *tab {
-            Tab::Show => show_tab(ui, s, st, cmd),
-            Tab::Scenes => scenes_tab(ui, s, st, scenes, scene_heavy, heavy_ok, scene_filter, cmd),
-            Tab::Dancer => dancer_tab(ui, s, st, clips, cmd),
-            Tab::Effects => effects_tab(ui, s, st),
-            Tab::Stream => stream_tab(ui, s, st, cmd),
-            Tab::Timeline => timeline_tab(ui, tl_shared, cmd),
-            Tab::Keys => keys_tab(ui, s, rebinding),
-        });
+    match *tab {
+        Tab::Perform => perform_tab(
+            ui,
+            s,
+            st,
+            scenes,
+            scene_heavy,
+            heavy_ok,
+            clips,
+            scene_filter,
+            chip,
+            thumbs,
+            want_thumbs,
+            cmd,
+        ),
+        _ => {
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, true])
+                .show(ui, |ui| match *tab {
+                    Tab::DancerFx => {
+                        dancer_tab(ui, s, st, clips, cmd);
+                        ui.separator();
+                        effects_tab(ui, s, st);
+                    }
+                    Tab::Stream => stream_tab(ui, s, st, cmd),
+                    Tab::Timeline => timeline_tab(ui, tl_shared, cmd),
+                    Tab::Keys => keys_tab(ui, s, rebinding),
+                    Tab::Perform => unreachable!(),
+                });
+        }
+    }
 
     serde_json::to_string(s).unwrap_or_default() != before
 }
@@ -321,14 +401,9 @@ fn header(ui: &mut egui::Ui, st: &Status, scenes: &[String]) {
                     .show_percentage(),
             );
             ui.label(
-                egui::RichText::new(format!(
-                    "bar {} of {} · cut in {}",
-                    st.bar_in_scene,
-                    st.bars_total,
-                    st.bars_total - st.bar_in_scene
-                ))
-                .size(11.0)
-                .color(MUTED),
+                egui::RichText::new(bar_progress_line(st))
+                    .size(11.0)
+                    .color(MUTED),
             );
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -355,6 +430,16 @@ fn header(ui: &mut egui::Ui, st: &Status, scenes: &[String]) {
     });
 }
 
+/// "bar N of M · cut in K" — reads "cut now" on the phrase's last bar.
+fn bar_progress_line(st: &Status) -> String {
+    let rem = st.bars_total.saturating_sub(st.bar_in_scene);
+    if rem == 0 {
+        format!("bar {} of {} · cut now", st.bar_in_scene, st.bars_total)
+    } else {
+        format!("bar {} of {} · cut in {}", st.bar_in_scene, st.bars_total, rem)
+    }
+}
+
 /// A labelled row of content with the label kept a fixed width.
 fn row(ui: &mut egui::Ui, label: &str, body: impl FnOnce(&mut egui::Ui)) {
     ui.horizontal(|ui| {
@@ -363,108 +448,675 @@ fn row(ui: &mut egui::Ui, label: &str, body: impl FnOnce(&mut egui::Ui)) {
     });
 }
 
-fn show_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<UiCommand>) {
-    row(ui, "Mode", |ui| {
-        ui.selectable_value(&mut s.mode, Mode::Auto, "Auto");
-        ui.selectable_value(&mut s.mode, Mode::Static, "Static");
-        ui.selectable_value(&mut s.mode, Mode::Manual, "Manual");
-    });
-    ui.small(match s.mode {
-        Mode::Auto => "Cuts scenes on phrases (and drops); the dancer follows the track.",
-        Mode::Static => "Holds the current scene; the dancer still changes with the phrases.",
-        Mode::Manual => "Nothing changes unless you change it.",
-    });
-    row(ui, "Breakdowns", |ui| {
-        ui.selectable_value(&mut s.breakdown_mode, true, "Detect");
-        ui.selectable_value(&mut s.breakdown_mode, false, "Off");
-    });
-    ui.small(if s.breakdown_mode {
-        "When the drums drop out, visuals calm down (no beat flashes, slower camera, gentle dancer)."
-    } else {
-        "Always react as if the beat is playing."
-    });
-    row(ui, "Scene", |ui| {
-        if ui.button("◀ Prev").clicked() {
-            cmd.push(UiCommand::Do(Action::PrevScene));
-        }
-        if ui.button("Next ▶").clicked() {
-            cmd.push(UiCommand::Do(Action::NextScene));
-        }
-        ui.checkbox(&mut s.random_order, "Random order");
-    });
-    row(ui, "Length", |ui| {
-        for bars in [4, 8, 16, 32] {
-            ui.selectable_value(&mut s.phrase_bars, bars, format!("{bars}"));
-        }
-        ui.label("bars");
-    });
-    ui.checkbox(&mut s.cut_on_drops, "Cut early when a drop lands");
-    ui.separator();
-    ui.label(egui::RichText::new("Look").strong());
-    row(ui, "Palette", |ui| {
-        egui::ComboBox::from_id_salt("pal_pick")
-            .width(110.0)
-            .selected_text(s.palette.as_str())
-            .show_ui(ui, |ui| {
-                for name in crate::palettes::names() {
-                    ui.selectable_value(&mut s.palette, name.to_string(), name);
+// ---------------------------------------------------------------------------
+// Perform tab (mockup 1b): scene library grid left, inspector on the right.
+// ---------------------------------------------------------------------------
+
+#[allow(clippy::too_many_arguments)]
+fn perform_tab(
+    ui: &mut egui::Ui,
+    s: &mut Settings,
+    st: &Status,
+    scenes: &[String],
+    heavy: &[bool],
+    heavy_ok: bool,
+    clips: &[String],
+    filter: &mut String,
+    chip: &mut LibChip,
+    thumbs: &mut HashMap<String, egui::TextureHandle>,
+    want: &mut HashMap<String, Instant>,
+    cmd: &mut Vec<UiCommand>,
+) {
+    use crate::ui_theme::*;
+    // Right inspector — fixed width; blackout/fullscreen pinned at its foot.
+    egui::Panel::right("inspector")
+        .exact_size(292.0)
+        .frame(
+            egui::Frame::NONE
+                .fill(PANEL)
+                .inner_margin(egui::Margin::symmetric(12, 10))
+                .stroke(egui::Stroke::new(1.0, BORDER)),
+        )
+        .show(ui, |ui| {
+            inspector(ui, s, st, scenes, clips, heavy_ok, thumbs, want, cmd);
+        });
+
+    let date = today();
+    let heavy_on = match s.heavy_scenes {
+        Tristate::Auto => heavy_ok,
+        Tristate::On => true,
+        Tristate::Off => false,
+    };
+    let q = filter.to_lowercase();
+    let shown: Vec<usize> = (0..scenes.len())
+        .filter(|&i| {
+            let n = &scenes[i];
+            if !q.is_empty() && !n.to_lowercase().contains(&q) {
+                return false;
+            }
+            let is_heavy = heavy.get(i).copied().unwrap_or(false);
+            match *chip {
+                LibChip::All => true,
+                LibChip::Flat => !is_heavy,
+                LibChip::Heavy => is_heavy,
+                LibChip::Seasonal => in_season(n, date).is_some(),
+            }
+        })
+        .collect();
+    let in_rotation = (0..scenes.len())
+        .filter(|&i| {
+            !s.disabled_scenes.contains(&scenes[i])
+                && if heavy.get(i).copied().unwrap_or(false) {
+                    heavy_on
+                } else {
+                    s.flat_scenes
                 }
-            });
+        })
+        .count();
+
+    // Toolbar: search, filter chips, all on/off.
+    ui.horizontal(|ui| {
+        ui.add(
+            egui::TextEdit::singleline(filter)
+                .desired_width(150.0)
+                .hint_text("search scenes"),
+        );
+        for (c, l) in [
+            (LibChip::All, "All"),
+            (LibChip::Flat, "2D"),
+            (LibChip::Heavy, "3D"),
+            (LibChip::Seasonal, "Seasonal"),
+        ] {
+            ui.selectable_value(chip, c, l);
+        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui.small_button("all off").clicked() {
+                s.disabled_scenes = scenes.to_vec();
+            }
+            if ui.small_button("all on").clicked() {
+                s.disabled_scenes.clear();
+            }
+        });
     });
-    // Gradient preview strip — the actual LUT the GPU gets.
-    {
-        let lut = crate::palettes::lut(&s.palette);
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(190.0, 9.0), egui::Sense::hover());
-        let n = 64usize;
-        for i in 0..n {
-            let c = &lut[i * (crate::palettes::LUT_SIZE / n) * 4..];
-            ui.painter().rect_filled(
-                egui::Rect::from_min_max(
-                    egui::pos2(rect.min.x + rect.width() * i as f32 / n as f32, rect.min.y),
-                    egui::pos2(
-                        rect.min.x + rect.width() * (i + 1) as f32 / n as f32 + 1.0,
-                        rect.max.y,
-                    ),
-                ),
-                0.0,
-                egui::Color32::from_rgb(c[0], c[1], c[2]),
-            );
+    ui.label(
+        egui::RichText::new(format!(
+            "{} shown · {} of {} in rotation",
+            shown.len(),
+            in_rotation,
+            scenes.len()
+        ))
+        .size(11.0)
+        .color(MUTED),
+    );
+
+    // Thumbnail grid — reflows with the column width.
+    let avail = ui.available_width();
+    let cols = ((avail + 10.0) / 160.0).floor().max(2.0) as usize;
+    egui::ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(10.0, 10.0);
+            for chunk in shown.chunks(cols) {
+                ui.horizontal(|ui| {
+                    for &i in chunk {
+                        scene_tile(
+                            ui,
+                            s,
+                            st,
+                            i,
+                            scenes[i].as_str(),
+                            heavy.get(i).copied().unwrap_or(false),
+                            heavy_on,
+                            date,
+                            thumbs,
+                            want,
+                            cmd,
+                        );
+                    }
+                });
+            }
+        });
+}
+
+/// One scene-library tile: thumbnail, type tag, rotation checkbox, name.
+/// Click the tile to cut to the scene (mockup 1b).
+#[allow(clippy::too_many_arguments)]
+fn scene_tile(
+    ui: &mut egui::Ui,
+    s: &mut Settings,
+    st: &Status,
+    i: usize,
+    name: &str,
+    is_heavy: bool,
+    heavy_on: bool,
+    date: (u32, u32),
+    thumbs: &mut HashMap<String, egui::TextureHandle>,
+    want: &mut HashMap<String, Instant>,
+    cmd: &mut Vec<UiCommand>,
+) {
+    use crate::ui_theme::*;
+    const TW: f32 = 150.0;
+    const TH: f32 = 108.0;
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(TW, TH), egui::Sense::click());
+    let p = ui.painter();
+    let live = i == st.scene;
+    let on = !s.disabled_scenes.iter().any(|d| d == name);
+    let seasonal = in_season(name, date).is_some();
+    // Can't join rotation at all — dimmed and click does nothing.
+    let blocked = (is_heavy && !heavy_on) || (!is_heavy && !s.flat_scenes);
+    let dim = if blocked || !on { 0.45 } else { 1.0 };
+
+    p.rect_filled(rect, 6.0, CARD);
+    let img_r = egui::Rect::from_min_size(
+        rect.min + egui::vec2(5.0, 5.0),
+        egui::vec2(TW - 10.0, 78.0),
+    );
+    let key = format!("scene:{name}");
+    if let Some(tex) = thumb_tex(ui, thumbs, want, &key, cmd) {
+        p.image(
+            tex,
+            img_r,
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            egui::Color32::WHITE.gamma_multiply(dim),
+        );
+    } else {
+        p.rect_filled(img_r, 4.0, RAISED);
+        p.text(
+            img_r.center(),
+            egui::Align2::CENTER_CENTER,
+            name.get(..2).unwrap_or(name),
+            egui::FontId::monospace(13.0),
+            FAINT,
+        );
+    }
+    p.rect_stroke(
+        img_r,
+        4.0,
+        egui::Stroke::new(1.0, BORDER),
+        egui::StrokeKind::Inside,
+    );
+
+    // Type tag, top-left over the thumbnail.
+    let tag = if seasonal {
+        "❄"
+    } else if is_heavy {
+        "3D"
+    } else {
+        "2D"
+    };
+    let tag_r = egui::Rect::from_min_size(img_r.min + egui::vec2(4.0, 4.0), egui::vec2(22.0, 13.0));
+    p.rect_filled(tag_r, 3.0, INSET.gamma_multiply(0.85));
+    p.text(
+        tag_r.center(),
+        egui::Align2::CENTER_CENTER,
+        tag,
+        egui::FontId::monospace(9.0),
+        if seasonal { LANE_FX } else { MUTED },
+    );
+
+    // Rotation checkbox, top-right — register the interact after the tile so
+    // it wins the click inside its rect.
+    let cb_r = egui::Rect::from_min_size(
+        egui::pos2(img_r.max.x - 20.0, img_r.min.y + 4.0),
+        egui::vec2(16.0, 16.0),
+    );
+    let cb = ui.interact(cb_r, resp.id.with("rot"), egui::Sense::click());
+    let cb_clicked = cb.clicked();
+    p.rect_filled(
+        cb_r,
+        3.0,
+        if on {
+            ACCENT
+        } else {
+            INSET.gamma_multiply(0.9)
+        },
+    );
+    p.rect_stroke(
+        cb_r,
+        3.0,
+        egui::Stroke::new(1.0, BORDER_HI),
+        egui::StrokeKind::Inside,
+    );
+    if on {
+        p.text(
+            cb_r.center(),
+            egui::Align2::CENTER_CENTER,
+            "✓",
+            egui::FontId::proportional(11.0),
+            TEXT,
+        );
+    }
+    if cb_clicked {
+        if on {
+            s.disabled_scenes.push(name.to_string());
+        } else {
+            s.disabled_scenes.retain(|d| d != name);
         }
     }
-    ui.small("Applies to every scene — dancer glow and text follow it too.");
-    row(ui, "Output", |ui| {
-        let bo = if st.blackout {
-            "Blackout: ON"
+    cb.on_hover_text(if on {
+        "In rotation — click to leave it out"
+    } else {
+        "Out of rotation — click to include it"
+    });
+
+    // Name row under the thumbnail.
+    let shown = if name.len() > 20 {
+        format!("{}…", &name[..19])
+    } else {
+        name.to_string()
+    };
+    p.text(
+        egui::pos2(rect.min.x + 6.0, img_r.max.y + 5.0),
+        egui::Align2::LEFT_TOP,
+        shown,
+        egui::FontId::monospace(11.0),
+        if live {
+            ACCENT
         } else {
-            "Blackout"
-        };
-        if ui.button(bo).clicked() {
+            TEXT.gamma_multiply(dim)
+        },
+    );
+    if live {
+        p.text(
+            egui::pos2(rect.max.x - 6.0, img_r.max.y + 5.0),
+            egui::Align2::RIGHT_TOP,
+            "LIVE",
+            egui::FontId::proportional(9.0),
+            ACCENT,
+        );
+    }
+    p.rect_stroke(
+        rect,
+        6.0,
+        egui::Stroke::new(if live { 1.5 } else { 1.0 }, if live { ACCENT } else { BORDER }),
+        egui::StrokeKind::Inside,
+    );
+    if resp.clicked() && !cb_clicked && !blocked {
+        cmd.push(UiCommand::GoToScene(i));
+    }
+    resp.on_hover_text(if blocked {
+        format!("{name} — out of rotation (scene set off)")
+    } else {
+        name.to_string()
+    });
+}
+
+/// Mockup 1b right column: live preview, transport, look controls, and the
+/// advanced knobs folded under collapsing headers.
+#[allow(clippy::too_many_arguments)]
+fn inspector(
+    ui: &mut egui::Ui,
+    s: &mut Settings,
+    st: &Status,
+    scenes: &[String],
+    clips: &[String],
+    heavy_ok: bool,
+    thumbs: &mut HashMap<String, egui::TextureHandle>,
+    want: &mut HashMap<String, Instant>,
+    cmd: &mut Vec<UiCommand>,
+) {
+    use crate::ui_theme::*;
+    let _ = clips;
+    let scroll_h = (ui.available_height() - 44.0).max(80.0);
+    egui::ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .max_height(scroll_h)
+        .show(ui, |ui| {
+            // Live scene preview.
+            let name = scenes.get(st.scene).cloned().unwrap_or_default();
+            let w = ui.available_width();
+            let (rect, _) =
+                ui.allocate_exact_size(egui::vec2(w, w * 9.0 / 16.0), egui::Sense::hover());
+            let p = ui.painter();
+            let key = format!("scene:{name}");
+            if let Some(tex) = thumb_tex(ui, thumbs, want, &key, cmd) {
+                p.image(
+                    tex,
+                    rect,
+                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+            } else {
+                p.rect_filled(rect, 4.0, RAISED);
+            }
+            p.rect_stroke(
+                rect,
+                4.0,
+                egui::Stroke::new(1.0, BORDER),
+                egui::StrokeKind::Inside,
+            );
+
+            ui.add_space(4.0);
+            ui.label(egui::RichText::new(&name).monospace().size(16.0).strong());
+            if st.bars_total > 0 {
+                ui.label(
+                    egui::RichText::new(bar_progress_line(st))
+                        .size(11.0)
+                        .color(MUTED),
+                );
+            } else {
+                ui.label(
+                    egui::RichText::new(match s.mode {
+                        Mode::Static => "static — held until you change it",
+                        Mode::Manual => "manual — nothing changes by itself",
+                        Mode::Auto => "",
+                    })
+                    .size(11.0)
+                    .color(MUTED),
+                );
+            }
+            if let Some(nx) = st.next_scene {
+                ui.label(
+                    egui::RichText::new(format!(
+                        "next → {}",
+                        scenes.get(nx).map(String::as_str).unwrap_or("?")
+                    ))
+                    .size(11.0)
+                    .color(ACCENT)
+                    .monospace(),
+                );
+            }
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                if ui.button("◀ prev").clicked() {
+                    cmd.push(UiCommand::Do(Action::PrevScene));
+                }
+                if ui.add(egui::Button::new("next ▶").fill(ACCENT_SEL)).clicked() {
+                    cmd.push(UiCommand::Do(Action::NextScene));
+                }
+            });
+
+            ui.add_space(8.0);
+            section_label(ui, "controls");
+            card().show(ui, |ui| {
+                ctl_row(ui, "Mode", |ui| {
+                    segmented(
+                        ui,
+                        &mut s.mode,
+                        &[
+                            (Mode::Auto, "Auto"),
+                            (Mode::Static, "Static"),
+                            (Mode::Manual, "Manual"),
+                        ],
+                    );
+                });
+                ctl_row(ui, "Bars", |ui| {
+                    segmented(
+                        ui,
+                        &mut s.phrase_bars,
+                        &[(4u32, "4"), (8, "8"), (16, "16"), (32, "32")],
+                    );
+                });
+                ctl_row(ui, "Dancer", |ui| {
+                    ui.label(
+                        egui::RichText::new(st.clip.as_deref().unwrap_or("off"))
+                            .monospace()
+                            .size(11.0),
+                    );
+                    if ui.small_button("next").clicked() {
+                        cmd.push(UiCommand::Do(Action::NextClip));
+                    }
+                });
+                ctl_row(ui, "Look", |ui| {
+                    egui::ComboBox::from_id_salt("look")
+                        .width(120.0)
+                        .selected_text(s.dancer_style.map(|i| STYLES[i]).unwrap_or("auto"))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut s.dancer_style, None, "auto");
+                            for (i, name) in STYLES.iter().enumerate() {
+                                ui.selectable_value(&mut s.dancer_style, Some(i), *name);
+                            }
+                        });
+                });
+                ctl_row(ui, "Effect", |ui| {
+                    egui::ComboBox::from_id_salt("fx")
+                        .width(88.0)
+                        .selected_text(s.fx.label())
+                        .show_ui(ui, |ui| {
+                            for f in Fx::ALL {
+                                if ui
+                                    .selectable_value(&mut s.fx, f, f.label())
+                                    .clicked()
+                                {
+                                    s.fx_auto = false;
+                                }
+                            }
+                        });
+                    ui.checkbox(&mut s.fx_auto, "")
+                        .on_hover_text("Auto — a fresh effect on every scene cut");
+                });
+                ctl_row(ui, "Palette", |ui| {
+                    egui::ComboBox::from_id_salt("pal")
+                        .width(110.0)
+                        .selected_text(s.palette.as_str())
+                        .show_ui(ui, |ui| {
+                            for name in crate::palettes::names() {
+                                ui.selectable_value(&mut s.palette, name.to_string(), name);
+                            }
+                        });
+                });
+                palette_strip(ui, &s.palette);
+            });
+
+            ui.add_space(8.0);
+            egui::CollapsingHeader::new(
+                egui::RichText::new("director & sync").size(11.0).color(MUTED),
+            )
+            .default_open(false)
+            .show(ui, |ui| {
+                ctl_row(ui, "Breakdowns", |ui| {
+                    segmented(
+                        ui,
+                        &mut s.breakdown_mode,
+                        &[(true, "Detect"), (false, "Off")],
+                    );
+                });
+                ui.small(if s.breakdown_mode {
+                    "When the drums drop out, visuals calm down."
+                } else {
+                    "Always react as if the beat is playing."
+                });
+                ui.checkbox(&mut s.cut_on_drops, "Cut early when a drop lands");
+                ui.checkbox(&mut s.random_order, "Random scene order");
+                ctl_row(ui, "Latency", |ui| {
+                    ui.add(
+                        egui::Slider::new(&mut s.latency_ms, -100.0..=200.0)
+                            .step_by(5.0)
+                            .suffix(" ms"),
+                    );
+                });
+                ui.small(
+                    "Raise it if the visuals land after the beat, lower it if they land before.",
+                );
+                if ui
+                    .button("Mark this beat as the downbeat (the \"one\")")
+                    .clicked()
+                {
+                    cmd.push(UiCommand::Do(Action::MarkDownbeat));
+                }
+            });
+            egui::CollapsingHeader::new(
+                egui::RichText::new("scene sets").size(11.0).color(MUTED),
+            )
+            .default_open(false)
+            .show(ui, |ui| {
+                ctl_row(ui, "Seasonal", |ui| {
+                    segmented(
+                        ui,
+                        &mut s.seasonal,
+                        &[
+                            (Seasonal::Auto, "Auto"),
+                            (Seasonal::Always, "Always"),
+                            (Seasonal::Off, "Off"),
+                        ],
+                    );
+                });
+                ctl_row(ui, "3D scenes", |ui| {
+                    segmented(
+                        ui,
+                        &mut s.heavy_scenes,
+                        &[
+                            (Tristate::Auto, "Auto"),
+                            (Tristate::On, "On"),
+                            (Tristate::Off, "Off"),
+                        ],
+                    );
+                });
+                ui.small(match s.heavy_scenes {
+                    Tristate::Auto if heavy_ok => {
+                        "Raymarched scenes are in rotation — this GPU can handle them."
+                    }
+                    Tristate::Auto => {
+                        "Raymarched scenes are off — this GPU can't keep up. Force them with On."
+                    }
+                    Tristate::On => {
+                        "Raymarched scenes forced on — may drop frames on a weak GPU."
+                    }
+                    Tristate::Off => "Raymarched scenes are off.",
+                });
+                ctl_row(ui, "2D scenes", |ui| {
+                    segmented(ui, &mut s.flat_scenes, &[(true, "On"), (false, "Off")]);
+                });
+                let in_now: Vec<&str> = scenes
+                    .iter()
+                    .map(String::as_str)
+                    .filter(|n| in_season(n, today()) == Some(true))
+                    .collect();
+                ui.small(if in_now.is_empty() {
+                    "Nothing seasonal today.".to_string()
+                } else {
+                    format!("In season: {}", in_now.join(", "))
+                });
+            });
+        });
+
+    ui.separator();
+    ui.horizontal(|ui| {
+        let bo = if st.blackout { "Blackout: ON" } else { "Blackout" };
+        if ui.add_sized([110.0, 26.0], egui::Button::new(bo)).clicked() {
             cmd.push(UiCommand::Do(Action::Blackout));
         }
+        key_badge(ui, &key_short(s.keys.get(&Action::Blackout).map_or("", String::as_str)));
         let fs = if st.fullscreen {
             "Leave fullscreen"
         } else {
             "Fullscreen"
         };
-        if ui.button(fs).clicked() {
+        if ui.add_sized([112.0, 26.0], egui::Button::new(fs)).clicked() {
             cmd.push(UiCommand::Do(Action::Fullscreen));
         }
+        key_badge(ui, &key_short(s.keys.get(&Action::Fullscreen).map_or("", String::as_str)));
     });
-    ui.separator();
-    ui.label(egui::RichText::new("Sync").strong());
-    row(ui, "Latency", |ui| {
-        ui.add(
-            egui::Slider::new(&mut s.latency_ms, -100.0..=200.0)
-                .step_by(5.0)
-                .suffix(" ms"),
+}
+
+/// A labelled control row for the inspector — tighter than `row`.
+fn ctl_row(ui: &mut egui::Ui, label: &str, body: impl FnOnce(&mut egui::Ui)) {
+    ui.horizontal(|ui| {
+        ui.add_sized(
+            [56.0, 20.0],
+            egui::Label::new(
+                egui::RichText::new(label)
+                    .size(11.0)
+                    .color(crate::ui_theme::MUTED),
+            ),
         );
+        body(ui);
     });
-    ui.small("Raise it if the visuals land after the beat, lower it if they land before.");
-    if ui
-        .button("Mark this beat as the downbeat (the \"one\")")
-        .clicked()
-    {
-        cmd.push(UiCommand::Do(Action::MarkDownbeat));
+}
+
+/// The palette gradient strip — the actual LUT the GPU gets.
+fn palette_strip(ui: &mut egui::Ui, palette: &str) {
+    let lut = crate::palettes::lut(palette);
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), 8.0),
+        egui::Sense::hover(),
+    );
+    let n = 64usize;
+    for i in 0..n {
+        let c = &lut[i * (crate::palettes::LUT_SIZE / n) * 4..];
+        ui.painter().rect_filled(
+            egui::Rect::from_min_max(
+                egui::pos2(rect.min.x + rect.width() * i as f32 / n as f32, rect.min.y),
+                egui::pos2(
+                    rect.min.x + rect.width() * (i + 1) as f32 / n as f32 + 1.0,
+                    rect.max.y,
+                ),
+            ),
+            0.0,
+            egui::Color32::from_rgb(c[0], c[1], c[2]),
+        );
+    }
+}
+
+/// Texture id for a "scene:<name>" thumbnail — serves the memory map, then
+/// the disk cache, and finally queues a render (re-requesting every few
+/// seconds while it stays missing).
+fn thumb_tex(
+    ui: &egui::Ui,
+    thumbs: &mut HashMap<String, egui::TextureHandle>,
+    want: &mut HashMap<String, Instant>,
+    key: &str,
+    cmd: &mut Vec<UiCommand>,
+) -> Option<egui::TextureId> {
+    if let Some(t) = thumbs.get(key) {
+        return Some(t.id());
+    }
+    if !want.contains_key(key) {
+        // First time we've seen this key this run — try the disk cache
+        // before paying for a GPU render.
+        if let Some(t) = cached_thumb(ui.ctx(), key) {
+            let id = t.id();
+            thumbs.insert(key.to_string(), t);
+            return Some(id);
+        }
+    }
+    let stale = match want.get(key) {
+        None => true,
+        Some(t) => t.elapsed() > Duration::from_secs(3),
+    };
+    if stale {
+        want.insert(key.to_string(), Instant::now());
+        cmd.push(UiCommand::Thumb(key.to_string()));
+    }
+    None
+}
+
+/// On-disk thumbnail cache — scene looks barely change, so render once.
+fn thumbs_dir() -> PathBuf {
+    crate::config::data_dir().join("thumbs")
+}
+
+fn thumb_file(key: &str) -> PathBuf {
+    thumbs_dir().join(format!("{}.png", key.replace(':', "_")))
+}
+
+fn cached_thumb(ctx: &egui::Context, key: &str) -> Option<egui::TextureHandle> {
+    let img = image::open(thumb_file(key)).ok()?.to_rgba8();
+    let (w, h) = img.dimensions();
+    Some(ctx.load_texture(
+        format!("panel_thumb:{key}"),
+        egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &img),
+        egui::TextureOptions::LINEAR,
+    ))
+}
+
+fn cache_thumb_png(key: &str, w: u32, h: u32, px: &[u8]) {
+    let dir = thumbs_dir();
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let _ = image::save_buffer(thumb_file(key), px, w, h, image::ColorType::Rgba8);
+}
+
+/// Compact key name for the badges under buttons.
+fn key_short(k: &str) -> String {
+    match k {
+        "ArrowRight" => "→".into(),
+        "ArrowLeft" => "←".into(),
+        "ArrowUp" => "↑".into(),
+        "ArrowDown" => "↓".into(),
+        "Space" => "␣".into(),
+        other => other.to_string(),
     }
 }
 
@@ -680,136 +1332,6 @@ fn stream_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<Ui
     }
 }
 
-fn scenes_tab(
-    ui: &mut egui::Ui,
-    s: &mut Settings,
-    st: &Status,
-    scenes: &[String],
-    heavy: &[bool],
-    heavy_ok: bool,
-    filter: &mut String,
-    cmd: &mut Vec<UiCommand>,
-) {
-    row(ui, "Seasonal", |ui| {
-        ui.selectable_value(&mut s.seasonal, Seasonal::Auto, "Auto");
-        ui.selectable_value(&mut s.seasonal, Seasonal::Always, "Always");
-        ui.selectable_value(&mut s.seasonal, Seasonal::Off, "Off");
-    });
-    row(ui, "3D scenes", |ui| {
-        ui.selectable_value(&mut s.heavy_scenes, Tristate::Auto, "Auto");
-        ui.selectable_value(&mut s.heavy_scenes, Tristate::On, "On");
-        ui.selectable_value(&mut s.heavy_scenes, Tristate::Off, "Off");
-    });
-    ui.small(match s.heavy_scenes {
-        Tristate::Auto if heavy_ok => {
-            "Raymarched scenes are in rotation — this GPU can handle them."
-        }
-        Tristate::Auto => "Raymarched scenes are off — this GPU can't keep up. Force them with On.",
-        Tristate::On => "Raymarched scenes forced on — may drop frames on a weak GPU.",
-        Tristate::Off => "Raymarched scenes are off.",
-    });
-    let heavy_on = match s.heavy_scenes {
-        Tristate::Auto => heavy_ok,
-        Tristate::On => true,
-        Tristate::Off => false,
-    };
-    row(ui, "2D scenes", |ui| {
-        ui.selectable_value(&mut s.flat_scenes, true, "On");
-        ui.selectable_value(&mut s.flat_scenes, false, "Off");
-    });
-    ui.small(match (s.flat_scenes, heavy_on) {
-        (true, _) => "Flat (2D) scenes are in rotation.",
-        (false, true) => "Flat (2D) scenes are off — only 3D scenes play.",
-        (false, false) => "2D and 3D are both off — every scene plays as a fallback.",
-    });
-    let date = today();
-    let in_now: Vec<&str> = scenes
-        .iter()
-        .map(String::as_str)
-        .filter(|n| in_season(n, date) == Some(true))
-        .collect();
-    ui.small(if in_now.is_empty() {
-        "Nothing seasonal today.".to_string()
-    } else {
-        format!("In season: {}", in_now.join(", "))
-    });
-    ui.horizontal(|ui| {
-        ui.label("Filter");
-        ui.add(
-            egui::TextEdit::singleline(filter)
-                .desired_width(120.0)
-                .hint_text("name…"),
-        );
-        if ui.small_button("all on").clicked() {
-            s.disabled_scenes.clear();
-        }
-        if ui.small_button("all off").clicked() {
-            s.disabled_scenes = scenes.to_vec();
-        }
-    });
-    let blocked = (0..scenes.len())
-        .filter(|&i| {
-            let is_heavy = heavy.get(i).copied().unwrap_or(false);
-            ((is_heavy && !heavy_on) || (!is_heavy && !s.flat_scenes))
-                && !s.disabled_scenes.contains(&scenes[i])
-        })
-        .count();
-    ui.small(format!(
-        "{} of {} scenes in rotation",
-        scenes.len() - s.disabled_scenes.len().min(scenes.len()) - blocked,
-        scenes.len()
-    ));
-    ui.separator();
-    let q = filter.to_lowercase();
-    egui::Grid::new("scenes")
-        .num_columns(2)
-        .striped(true)
-        .show(ui, |ui| {
-            for (i, name) in scenes.iter().enumerate() {
-                if !q.is_empty() && !name.to_lowercase().contains(&q) {
-                    continue;
-                }
-                let is_heavy = heavy.get(i).copied().unwrap_or(false);
-                let off_gpu = is_heavy && !heavy_on;
-                let off_flat = !is_heavy && !s.flat_scenes;
-                let mut on = !s.disabled_scenes.contains(name);
-                let mut label = match in_season(name, date) {
-                    Some(true) => format!("{name} (in season)"),
-                    Some(false) => format!("{name} (out of season)"),
-                    None => name.clone(),
-                };
-                if is_heavy {
-                    label += if off_gpu {
-                        " (3D — needs dGPU)"
-                    } else {
-                        " (3D)"
-                    };
-                } else if off_flat {
-                    label += " (2D — off)";
-                }
-                // Greyed out when the GPU can't run it — it can't join
-                // rotation anyway, and "show" would just drop frames.
-                if ui
-                    .add_enabled(!off_gpu && !off_flat, egui::Checkbox::new(&mut on, label))
-                    .changed()
-                {
-                    if on {
-                        s.disabled_scenes.retain(|n| n != name);
-                    } else {
-                        s.disabled_scenes.push(name.clone());
-                    }
-                }
-                let label = if i == st.scene { "▶" } else { "show" };
-                if ui
-                    .add_enabled(i != st.scene && !off_gpu, egui::Button::new(label).small())
-                    .clicked()
-                {
-                    cmd.push(UiCommand::GoToScene(i));
-                }
-                ui.end_row();
-            }
-        });
-}
 
 fn dancer_tab(
     ui: &mut egui::Ui,

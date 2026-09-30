@@ -142,19 +142,36 @@ impl Editor {
         tl_shared: &crate::timeline::Shared,
         settings: &Mutex<crate::config::Settings>,
         settings_dirty: &std::sync::atomic::AtomicBool,
-        new_thumbs: &[(String, u32, u32, Vec<u8>)],
+        thumb_store: &Mutex<HashMap<String, (u32, u32, Vec<u8>)>>,
     ) -> (Vec<UiCommand>, Frame) {
         let mut cmd = Vec::new();
 
-        // Scene thumbnails rendered on the render thread land here.
-        for (name, w, h, px) in new_thumbs {
-            let img = egui::ColorImage::from_rgba_unmultiplied([*w as usize, *h as usize], px);
-            let tex = self.win.ctx.load_texture(
-                format!("thumb:{name}"),
-                img,
-                egui::TextureOptions::LINEAR,
-            );
-            self.thumbs.insert(name.clone(), tex);
+        // Scene thumbnails rendered on the render thread land in the shared
+        // store; the panel reads from it too, so we only take keys we asked
+        // for and leave entries in place.
+        {
+            let store = thumb_store.lock().unwrap_or_else(|e| e.into_inner());
+            let got: Vec<(String, u32, u32, Vec<u8>)> = self
+                .want_thumbs
+                .iter()
+                .filter(|k| !self.thumbs.contains_key(*k))
+                .filter_map(|k| {
+                    store
+                        .get(k)
+                        .map(|(w, h, px)| (k.clone(), *w, *h, px.clone()))
+                })
+                .collect();
+            drop(store);
+            for (name, w, h, px) in got {
+                let img =
+                    egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &px);
+                let tex = self.win.ctx.load_texture(
+                    format!("thumb:{name}"),
+                    img,
+                    egui::TextureOptions::LINEAR,
+                );
+                self.thumbs.insert(name, tex);
+            }
         }
 
         // A file picked in the native dialog lands here.

@@ -98,9 +98,11 @@ struct Shared {
     /// Clip recorder requests from hotkeys/panel, handled on the render thread.
     rec_clip: AtomicBool,
     rec_set: AtomicBool,
-    /// Finished scene thumbnails for the editor: (name, w, h, RGBA8).
-    /// Produced on the render thread, drained by `draw_editor`.
-    thumbs: Mutex<Vec<(String, u32, u32, Vec<u8>)>>,
+    /// Finished scene thumbnails: key ("scene:<name>") → (w, h, RGBA8).
+    /// Produced on the render thread. A store, not a queue — the panel and
+    /// the editor each look up the keys they asked for, so the two windows
+    /// can't eat each other's results.
+    thumbs: Mutex<std::collections::HashMap<String, (u32, u32, Vec<u8>)>>,
 }
 
 /// Work the event thread hands to the render thread.
@@ -646,7 +648,7 @@ fn render_loop(
                     match r.scene_names().iter().position(|n| *n == name) {
                         Some(i) => match r.thumbnail(i, 128, 72) {
                             Some(px) => {
-                                lock(&shared.thumbs).push((key.clone(), 128, 72, px));
+                                lock(&shared.thumbs).insert(key.clone(), (128, 72, px));
                             }
                             None => eprintln!("Thumb: render failed for {name}"),
                         },
@@ -1611,6 +1613,7 @@ impl App {
                 shared.heavy_ok,
                 &shared.clip_names,
                 &shared.timeline,
+                &shared.thumbs,
             )
         };
         if let Some(p) = self.panel.as_mut() {
@@ -1672,7 +1675,6 @@ impl App {
         let Some(shared) = self.shared.clone() else {
             return;
         };
-        let new_thumbs = std::mem::take(&mut *lock(&shared.thumbs));
         let (commands, frame) = {
             let Some(e) = self.editor.as_mut() else {
                 return;
@@ -1686,7 +1688,7 @@ impl App {
                 &shared.timeline,
                 &shared.settings,
                 &shared.dirty,
-                &new_thumbs,
+                &shared.thumbs,
             )
         };
         if let Some(e) = self.editor.as_mut() {
@@ -1770,7 +1772,7 @@ impl ApplicationHandler for App {
                 .as_ref()
                 .map(|d| d.clip_names())
                 .unwrap_or_default(),
-            thumbs: Mutex::new(Vec::new()),
+            thumbs: Mutex::new(std::collections::HashMap::new()),
         });
         self.shared = Some(shared.clone());
         let (tx, rx) = mpsc::channel();
