@@ -254,6 +254,9 @@ pub struct Panel {
     win: crate::egui_win::EguiWin,
     /// Waiting for a key press to bind to this action.
     pub rebinding: Option<Action>,
+    /// Waiting for a MIDI pad press (note-on) to bind to this action —
+    /// captured globally by `App::midi_note`, whichever window is focused.
+    pub midi_learn: Option<Action>,
     tab: Tab,
     /// Text filter for the scene list.
     scene_filter: String,
@@ -298,6 +301,7 @@ impl Panel {
             window,
             win,
             rebinding: None,
+            midi_learn: None,
             tab: Tab::Perform,
             scene_filter: String::new(),
             chip: LibChip::All,
@@ -331,6 +335,7 @@ impl Panel {
         clips: &[String],
         tl_shared: &crate::timeline::Shared,
         thumb_store: &Mutex<HashMap<String, (u32, u32, Vec<u8>)>>,
+        midi_status: &(bool, String),
     ) -> (Vec<UiCommand>, bool, PanelFrame) {
         let mut commands = Vec::new();
         let mut changed = false;
@@ -351,6 +356,7 @@ impl Panel {
         }
 
         let rebinding = &mut self.rebinding;
+        let midi_learn = &mut self.midi_learn;
         let tab = &mut self.tab;
         let scene_filter = &mut self.scene_filter;
         let chip = &mut self.chip;
@@ -384,6 +390,8 @@ impl Panel {
                 clips,
                 tl_shared,
                 rebinding,
+                midi_learn,
+                midi_status,
                 tab,
                 scene_filter,
                 chip,
@@ -416,6 +424,8 @@ fn build_ui(
     clips: &[String],
     tl_shared: &crate::timeline::Shared,
     rebinding: &mut Option<Action>,
+    midi_learn: &mut Option<Action>,
+    midi_status: &(bool, String),
     tab: &mut Tab,
     scene_filter: &mut String,
     chip: &mut LibChip,
@@ -494,7 +504,7 @@ fn build_ui(
                         }
                         Tab::Stream => stream_tab(ui, s, st, cmd),
                         Tab::Timeline => timeline_tab(ui, tl_shared, saved, cmd),
-                        Tab::Keys => keys_tab(ui, s, rebinding, keys_filter),
+                        Tab::Keys => keys_tab(ui, s, rebinding, midi_learn, midi_status, keys_filter),
                         Tab::Perform => unreachable!(),
                     });
             }
@@ -1844,6 +1854,15 @@ fn pads_view(
                     a
                 };
                 let key = key_short(s.keys.get(key_of).map_or("", String::as_str));
+                // No key bound? Show the MIDI note instead ("n36").
+                let key = if key.is_empty() {
+                    s.midi_notes
+                        .get(key_of)
+                        .map(|n| format!("n{n}"))
+                        .unwrap_or_default()
+                } else {
+                    key
+                };
                 if pad_button(ui, pad_w, pad_h, label, sub, &key, *kind, *active) {
                     cmd.push(UiCommand::Do(*a));
                 }
@@ -2923,12 +2942,13 @@ fn clip_tex(
     }
 }
 
-/// One `action | key badge | rebind` row inside a keys-page Grid (must
-/// emit exactly three cells + `end_row`).
+/// One `action | key badge | rebind | midi` row inside a keys-page Grid
+/// (must emit exactly four cells + `end_row`).
 fn key_row(
     ui: &mut egui::Ui,
     s: &mut Settings,
     rebinding: &mut Option<Action>,
+    midi_learn: &mut Option<Action>,
     bound: &HashMap<String, u32>,
     a: Action,
 ) {
@@ -2938,7 +2958,7 @@ fn key_row(
     // Column 1: action label, left-aligned — fixed generous width so
     // full names show (truncate() alone let the grid squeeze the column).
     ui.add_sized(
-        [220.0, 18.0],
+        [200.0, 18.0],
         egui::Label::new(egui::RichText::new(a.label()).size(12.0).color(TEXT)).truncate(),
     );
     // Column 2: key badge, fixed 90px.
@@ -2982,6 +3002,35 @@ fn key_row(
             }
         }
     });
+    // Column 4: MIDI pad binding — click to learn the next note-on,
+    // right-click a bound note to clear it.
+    ui.scope(|ui| {
+        if *midi_learn == Some(a) {
+            ui.label(
+                egui::RichText::new("hit a pad…")
+                    .size(11.0)
+                    .color(WARN),
+            );
+            if ui.small_button("cancel").clicked() {
+                *midi_learn = None;
+            }
+        } else {
+            let note = s.midi_notes.get(&a).copied();
+            let txt = note.map_or_else(|| "midi".to_string(), |n| n.to_string());
+            let mut b = ui.add_sized(
+                [56.0, 24.0],
+                egui::Button::new(egui::RichText::new(txt).size(11.0)),
+            );
+            if let Some(n) = note {
+                b = b.on_hover_text(format!("note {n} = {}", crate::midi::note_name(n)));
+            }
+            if b.clicked() {
+                *midi_learn = Some(a);
+            } else if b.secondary_clicked() {
+                s.midi_notes.remove(&a);
+            }
+        }
+    });
     ui.end_row();
     if conflict {
         ui.label("");
@@ -2990,6 +3039,7 @@ fn key_row(
                 .size(10.0)
                 .color(WARN),
         );
+        ui.label("");
         ui.label("");
         ui.end_row();
     }
@@ -3000,9 +3050,43 @@ fn keys_tab(
     ui: &mut egui::Ui,
     s: &mut Settings,
     rebinding: &mut Option<Action>,
+    midi_learn: &mut Option<Action>,
+    midi_status: &(bool, String),
     filter: &mut String,
 ) {
     use crate::ui_theme::*;
+    // MIDI input: pick the controller port, then the per-action "midi"
+    // buttons learn whatever pad is hit next. Ports are listed only while
+    // the dropdown is open — enumeration creates a fresh client each call.
+    ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new("midi input")
+                .size(11.0)
+                .color(MUTED),
+        );
+        egui::ComboBox::from_id_salt("midi_in")
+            .width(200.0)
+            .selected_text(if s.midi_in.is_empty() {
+                "off".to_string()
+            } else {
+                s.midi_in.clone()
+            })
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut s.midi_in, String::new(), "off");
+                for name in crate::midi::ports() {
+                    ui.selectable_value(&mut s.midi_in, name.clone(), name);
+                }
+            });
+        status_dot(
+            ui,
+            midi_status.0,
+            if s.midi_in.is_empty() {
+                "off"
+            } else {
+                midi_status.1.as_str()
+            },
+        );
+    });
     // Filter styled like the library search, aligned with the card's edge.
     egui::Frame::NONE
         .fill(INSET)
@@ -3099,9 +3183,9 @@ fn keys_tab(
         })
         .collect();
     let avail = ui.available_width();
-    // A row needs ~400px: label 220 + badge 90 + rebind 70 + grid spacing
-    // + card margin. Two columns fit a 900px window, three at ~1400px.
-    let ncol = ((avail / 410.0) as usize).clamp(1, 3).min(groups.len().max(1));
+    // A row needs ~470px: label 200 + badge 90 + rebind 70 + midi 56 +
+    // grid spacing + card margin. Two columns fit a 980px window.
+    let ncol = ((avail / 470.0) as usize).clamp(1, 3).min(groups.len().max(1));
     // Greedy balance by row count — a group is never split across columns.
     let total: usize = groups.iter().map(|(_, a)| a.len() + 1).sum();
     let target = total.div_ceil(ncol);
@@ -3133,11 +3217,11 @@ fn keys_tab(
             for (group, acts) in bucket {
                 section_label(ui, group);
                 egui::Grid::new(egui::Id::new("keys_grid").with(group))
-                    .num_columns(3)
+                    .num_columns(4)
                     .spacing(egui::vec2(8.0, 6.0))
                     .show(ui, |ui| {
                         for &a in acts {
-                            key_row(ui, s, rebinding, &bound, a);
+                            key_row(ui, s, rebinding, midi_learn, &bound, a);
                         }
                     });
                 ui.add_space(6.0);

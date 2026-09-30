@@ -87,6 +87,7 @@ second display); `--vsync` restores them if that ever causes trouble.
 ```
 cargo run --release                         # capture what you hear (loopback / system audio)
 cargo run --release -- --list-devices       # list capture devices
+cargo run --release -- --list-midi          # list MIDI inputs (pad/key controllers)
 cargo run --release -- --device "Serato"    # a specific input (or output-as-loopback)
 cargo run --release -- --mic                # force the default input instead of system audio
 cargo run --release -- --scene tunnel       # start on a scene, auto-pilot off
@@ -148,6 +149,13 @@ Default keys (all rebindable in the panel):
 | J | record the whole set: start / stop |
 | F1 (P on macOS) | show / hide the control panel |
 | Esc | leave fullscreen (it never quits; close the window to quit) |
+
+**MIDI controllers:** every action above can also sit on a MIDI pad or key.
+Pick the input at the top of the Keys tab (`--list-midi` shows the names),
+then click a row's **midi** button and hit the pad — the note is bound.
+Pressing the pad fires the action exactly like the hotkey, including while
+the timeline is recording. Right-click a bound note to clear it. Unplugging
+and replugging the controller is picked up automatically.
 
 ## Scenes
 
