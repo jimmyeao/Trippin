@@ -129,8 +129,12 @@ impl EguiWin {
         r.consumed
     }
 
+    /// True only while a TextEdit holds focus. `egui_wants_keyboard_input`
+    /// reports ANY focused widget — a clicked pad/button counts too, which
+    /// made the panel swallow Space (and re-trigger the focused widget)
+    /// instead of firing the bound hotkey.
     pub fn wants_keyboard(&self) -> bool {
-        self.ctx.egui_wants_keyboard_input()
+        self.ctx.text_edit_focused()
     }
 
     /// Run the egui UI and tessellate. Pure CPU work — safe under a lock as

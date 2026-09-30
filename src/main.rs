@@ -1557,8 +1557,11 @@ impl App {
         }
     }
 
-    fn key(&mut self, event_loop: &ActiveEventLoop, key: &Key) {
-        let Some(name) = key_name(key) else { return };
+    /// Dispatch a key through the binding map. Returns false when no action
+    /// is bound, letting callers offer the key a fallback meaning (the
+    /// editor's unbound-Space transport toggle).
+    fn key(&mut self, event_loop: &ActiveEventLoop, key: &Key) -> bool {
+        let Some(name) = key_name(key) else { return false };
         // Rebinding: the next key press becomes the action's key (Esc cancels).
         if let Some(action) = self.panel.as_mut().and_then(|p| p.rebinding.take()) {
             if name != "Escape" {
@@ -1573,15 +1576,15 @@ impl App {
             if let Some(p) = &self.panel {
                 p.window.request_redraw();
             }
-            return;
+            return true;
         }
         let action = self
             .shared
             .as_ref()
             .and_then(|sh| lock(&sh.settings).action_for(&name));
-        if let Some(action) = action {
-            self.apply(action, event_loop);
-        }
+        let Some(action) = action else { return false };
+        self.apply(action, event_loop);
+        true
     }
 
     fn draw_panel(&mut self, event_loop: &ActiveEventLoop) {
@@ -1869,7 +1872,12 @@ impl ApplicationHandler for App {
                             event.logical_key,
                             Key::Named(winit::keyboard::NamedKey::Space)
                         ) {
-                            self.send(Msg::Transport(SongCtl::Toggle));
+                            // An explicit Space binding wins; only an
+                            // unbound Space toggles transport here.
+                            let key = event.logical_key.clone();
+                            if !self.key(event_loop, &key) {
+                                self.send(Msg::Transport(SongCtl::Toggle));
+                            }
                             return;
                         } else {
                             let key = event.logical_key.clone();
@@ -1962,7 +1970,7 @@ impl ApplicationHandler for App {
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 if event.state == ElementState::Pressed && !event.repeat {
-                    self.key(event_loop, &event.logical_key)
+                    self.key(event_loop, &event.logical_key);
                 }
             }
             // The render thread draws continuously; nothing to do here.

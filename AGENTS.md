@@ -246,6 +246,11 @@ cargo run --release -- --ndi-monitor [name]
     checkboxes/ticks (`paint_check`), transport buttons (`t::tr_btn`), and
     the record dot (`t::rec_btn`) instead. `key_short` maps key names to
     words (`Space`, `Right`) for the same reason.
+  - `wants_keyboard_input()` is true for ANY focused widget — a clicked
+    pad/button counts, so "is the user typing?" gates must use
+    `text_edit_focused()` (`EguiWin::wants_keyboard`). Otherwise egui
+    swallows Space and re-triggers the focused widget instead of firing
+    the bound hotkey.
 
 ## 8. Streaming features: how they work
 
