@@ -463,7 +463,7 @@ fn render_loop(
     mut dir: Director,
     mut dancer: DancerLayer,
     mut audio: AudioEngine,
-    audio_cfg: (Option<String>, bool),
+    mut audio_cfg: (Option<String>, bool),
     shared: Arc<Shared>,
     rx: mpsc::Receiver<Msg>,
 ) {
@@ -518,6 +518,9 @@ fn render_loop(
     // Global seconds up to which cues were already dispatched — one-shot.
     let mut fired_past = f64::MIN;
     let mut was_locked = false;
+    // The saved audio source the running engine corresponds to — a panel
+    // change to `audio_in` restarts capture live (see the frame loop).
+    let mut audio_sel = lock(&shared.settings).audio_in.clone();
     let spawn_load = |tx: &mpsc::Sender<(std::path::PathBuf, Result<song::Song, String>)>,
                       path: std::path::PathBuf| {
         let tx = tx.clone();
@@ -803,6 +806,26 @@ fn render_loop(
                     delay_s: s.np_delay_s,
                     file: s.np_file.clone(),
                 };
+            }
+        }
+        // Audio-in picker: switching the saved source swaps the capture
+        // live. While a show plays the engine belongs to it — the new
+        // source takes over when the show ends (audio_cfg feeds stop_song).
+        if s.audio_in != audio_sel {
+            audio_sel = s.audio_in.clone();
+            audio_cfg.0 = (!audio_sel.is_empty()).then(|| audio_sel.clone());
+            if player.is_none() {
+                match AudioEngine::start(
+                    audio_cfg.0.as_deref(),
+                    audio_cfg.1,
+                    Some(shared.env.clone()),
+                ) {
+                    Ok(eng) => {
+                        println!("Audio: {}", eng.device_name);
+                        audio = eng;
+                    }
+                    Err(e) => eprintln!("audio input switch failed: {e:#}"),
+                }
             }
         }
         // Global palette — a no-op while the name is unchanged.
@@ -2291,6 +2314,36 @@ fn main() -> Result<()> {
     if args.iter().any(|a| a == "--list-devices") {
         return audio::list_devices();
     }
+    // `--probe-audio [name]` captures ~6 s on a device (or the default tap)
+    // and prints the analysed level — verifies a source carries signal
+    // without opening the window.
+    if args.iter().any(|a| a == "--probe-audio") {
+        let name = arg_value(&args, "--probe-audio").filter(|s| !s.is_empty());
+        let eng = AudioEngine::start(name, false, None)?;
+        println!("Listening on {} …", eng.device_name);
+        let mut peak = [0f32; 4];
+        let mut silent = true;
+        let end = Instant::now() + Duration::from_secs(6);
+        while Instant::now() < end {
+            std::thread::sleep(Duration::from_millis(200));
+            let f = eng.features.lock().unwrap_or_else(|e| e.into_inner()).clone();
+            for (i, v) in f.lvl4.iter().enumerate() {
+                peak[i] = peak[i].max(*v);
+            }
+            silent &= f.silent;
+        }
+        let f = eng.features.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        println!(
+            "signal: {}  peak bands [{:.2} {:.2} {:.2} {:.2}]  bpm {:.1}",
+            if silent { "none (silent)" } else { "OK" },
+            peak[0], peak[1], peak[2], peak[3], f.bpm,
+        );
+        return if silent {
+            Err(anyhow::anyhow!("no signal on {}", eng.device_name))
+        } else {
+            Ok(())
+        };
+    }
     // `--list-midi`: print MIDI input port names (what the Keys page lists).
     if args.iter().any(|a| a == "--list-midi") {
         let ports = midi::ports();
@@ -2347,14 +2400,29 @@ fn main() -> Result<()> {
         let name = arg_value(&args, "--ndi-monitor");
         return ndi::Ndi::load().and_then(|n| n.monitor(name.as_deref(), 12));
     }
-    let device = arg_value(&args, "--device");
+    let cli_device = arg_value(&args, "--device");
     let mic = args.iter().any(|a| a == "--mic");
     let env = audio::EnvLog::new();
-    let audio = AudioEngine::start(device, mic, Some(env.clone()))?;
+
+    let mut settings = Settings::load();
+    // Audio source: --device/--mic win for this run; otherwise the saved
+    // panel choice ("" = the platform default tap).
+    let device: Option<String> = cli_device.map(str::to_string).or_else(|| {
+        (!mic && !settings.audio_in.is_empty()).then(|| settings.audio_in.clone())
+    });
+    let audio = match AudioEngine::start(device.as_deref(), mic, Some(env.clone())) {
+        Ok(a) => a,
+        // A saved device that's gone (controller unplugged) falls back to
+        // the default tap rather than blocking startup.
+        Err(e) if cli_device.is_none() && device.is_some() => {
+            eprintln!("saved audio input {device:?} unavailable: {e:#} — using the default");
+            AudioEngine::start(None, mic, Some(env.clone()))?
+        }
+        Err(e) => return Err(e),
+    };
     println!("Audio: {}", audio.device_name);
     let start_song = arg_value(&args, "--song").map(std::path::PathBuf::from);
 
-    let mut settings = Settings::load();
     let mut no_save = false;
     if args.iter().any(|a| a == "--no-dancer") {
         settings.dancer_enabled = false;
@@ -2408,7 +2476,7 @@ fn main() -> Result<()> {
         settings,
         shared: None,
         render_tx: None,
-        audio_cfg: (device.map(str::to_string), mic),
+        audio_cfg: (device, mic),
         start_song,
         env,
         dirty_since: None,

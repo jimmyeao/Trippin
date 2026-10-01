@@ -190,6 +190,36 @@ pub fn list_devices() -> Result<()> {
     Ok(())
 }
 
+/// Device names for the panel's audio-in picker. On Windows the outputs
+/// are listed too — they capture via loopback (same as `--device`).
+pub fn capture_device_names() -> Vec<String> {
+    let host = cpal::default_host();
+    let names: Vec<String> = host
+        .input_devices()
+        .map(|ds| ds.map(|d| device_name(&d)).collect())
+        .unwrap_or_default();
+    #[cfg(windows)]
+    let names = {
+        let mut names = names;
+        if let Ok(outs) = host.output_devices() {
+            names.extend(outs.map(|d| device_name(&d)));
+        }
+        names
+    };
+    names
+}
+
+/// Label for `Settings::audio_in == ""` — the platform default tap.
+pub fn system_audio_label() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "System audio (output mix)"
+    } else if cfg!(windows) {
+        "System output (loopback)"
+    } else {
+        "Default input"
+    }
+}
+
 fn device_name(d: &cpal::Device) -> String {
     d.description()
         .map(|desc| desc.name().to_string())

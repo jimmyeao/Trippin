@@ -342,6 +342,10 @@ pub struct Settings {
     pub ai_model: String,
     pub ai_key: String,
     pub latency_ms: f32,
+    /// Audio capture source: a device-name substring resolved like
+    /// `--device`. "" = the platform default tap (ScreenCaptureKit output
+    /// mix on macOS, output loopback on Windows).
+    pub audio_in: String,
     pub show_panel: bool,
     /// NDI network output — sends the composited frame (FX + text included)
     /// to OBS/another display. Needs the free NDI runtime installed; a
@@ -436,6 +440,7 @@ impl Default for Settings {
             ai_model: String::new(),
             ai_key: String::new(),
             latency_ms: 30.0,
+            audio_in: String::new(),
             show_panel: true,
             ndi_enabled: false,
             ndi_name: "Trippin".into(),
