@@ -215,6 +215,9 @@ enum Tab {
     Stream,
     Timeline,
     Keys,
+    /// App-wide preferences: audio source & sync, auto-pilot rules, and
+    /// the AI show builder's provider/key.
+    Settings,
 }
 
 /// Scene-library filter chip (mockup 1b toolbar).
@@ -229,12 +232,13 @@ enum LibChip {
 }
 
 impl Tab {
-    const ALL: [Tab; 5] = [
+    const ALL: [Tab; 6] = [
         Tab::Perform,
         Tab::DancerFx,
         Tab::Stream,
         Tab::Timeline,
         Tab::Keys,
+        Tab::Settings,
     ];
 
     fn label(self) -> &'static str {
@@ -244,6 +248,7 @@ impl Tab {
             Tab::Stream => "Stream",
             Tab::Timeline => "Timeline",
             Tab::Keys => "Keys",
+            Tab::Settings => "Settings",
         }
     }
 }
@@ -505,6 +510,7 @@ fn build_ui(
                         Tab::Stream => stream_tab(ui, s, st, cmd),
                         Tab::Timeline => timeline_tab(ui, tl_shared, saved, cmd),
                         Tab::Keys => keys_tab(ui, s, rebinding, midi_learn, midi_status, keys_filter),
+                        Tab::Settings => settings_tab(ui, s, st, cmd),
                         Tab::Perform => unreachable!(),
                     });
             }
@@ -1462,86 +1468,6 @@ fn inspector_body(
         });
     });
 
-    ui.add_space(6.0);
-    // The quiet stuff: what the auto-pilot is allowed to do, plus sync.
-    egui::CollapsingHeader::new(
-        egui::RichText::new("director & sync").size(12.0).color(MUTED),
-    )
-    .default_open(false)
-    .show(ui, |ui| {
-        card().show(ui, |ui| {
-            ui.spacing_mut().item_spacing.y = 6.0;
-            ui.checkbox(&mut s.breakdown_mode, "Detect breakdowns")
-                .on_hover_text("Quiet sections switch the show into calm mode");
-            ui.checkbox(&mut s.cut_on_drops, "Cut early on a drop")
-                .on_hover_text("A drop lands early — cut to the next scene with it");
-            ui.checkbox(&mut s.random_order, "Random order")
-                .on_hover_text("Shuffle the rotation instead of playing it in order");
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Latency").size(12.0).color(MUTED));
-                ui.add(
-                    egui::Slider::new(&mut s.latency_ms, 0.0..=200.0)
-                        .suffix(" ms")
-                        .fixed_decimals(0),
-                );
-            });
-            // Audio source — saved, restarts capture live. A DJ controller
-            // fed straight from the software (Serato → controller's USB
-            // return) bypasses the system mix, so its input must be picked.
-            let combo_w = (ui.available_width() - 68.0).max(80.0);
-            ctl_row(ui, "Audio in", |ui| {
-                let sel = if s.audio_in.is_empty() {
-                    crate::audio::system_audio_label()
-                } else {
-                    s.audio_in.as_str()
-                };
-                egui::ComboBox::from_id_salt("audio_in")
-                    .width(combo_w)
-                    .selected_text(sel)
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(
-                            &mut s.audio_in,
-                            String::new(),
-                            crate::audio::system_audio_label(),
-                        );
-                        // Only built while the popup is open.
-                        for n in crate::audio::capture_device_names() {
-                            ui.selectable_value(&mut s.audio_in, n.clone(), n);
-                        }
-                    });
-            });
-            // Audio in + groove: how steadily kicks are landing (sustained
-            // low groove = the show's in a breakdown).
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(format!("in: {}", st.device))
-                        .size(10.5)
-                        .color(FAINT),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let (r, _) =
-                        ui.allocate_exact_size(egui::vec2(46.0, 6.0), egui::Sense::hover());
-                    let pp = ui.painter();
-                    pp.rect_filled(r, 3.0, INSET);
-                    pp.rect_filled(
-                        egui::Rect::from_min_size(
-                            r.min,
-                            egui::vec2(r.width() * st.groove.clamp(0.0, 1.0), r.height()),
-                        ),
-                        3.0,
-                        BREAKDOWN,
-                    );
-                    ui.label(egui::RichText::new("groove").size(10.5).color(FAINT));
-                });
-            });
-            if ui
-                .button("Mark this beat as the downbeat (the \"one\")")
-                .clicked()
-            {
-                cmd.push(UiCommand::Do(Action::MarkDownbeat));
-            }
-        });
-    });
 }
 
 /// A summary row — label left, monospaced value right, chevron — that
@@ -3417,6 +3343,206 @@ pub(crate) fn cue_param_ui(
         }
         _ => false,
     }
+}
+
+/// Settings page: app-wide preferences that aren't part of performing —
+/// audio source & sync, what the auto-pilot may do, and the AI show
+/// builder's provider. Two bounded columns, like the Stream page (A1).
+fn settings_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<UiCommand>) {
+    use crate::ui_theme::*;
+    ui.spacing_mut().item_spacing = egui::vec2(12.0, 12.0);
+    let row_w = ui.available_width();
+    let col_w = ((row_w - 12.0) / 2.0).max(220.0);
+    let top = ui.cursor().min;
+    let mut mk_col = |x: f32, w: f32| {
+        ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(egui::Rect::from_min_size(
+                    egui::pos2(top.x + x, top.y),
+                    egui::vec2(w, 4000.0),
+                ))
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+        )
+    };
+    let left_h = {
+        let ui = &mut mk_col(0.0, col_w);
+        card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            section_label(ui, "audio & sync");
+            status_dot(
+                ui,
+                !st.silent,
+                &if st.silent {
+                    format!("{} · no signal", st.device)
+                } else {
+                    st.device.clone()
+                },
+            );
+            ui.small(
+                "Pick your controller's input if the DJ software sends audio straight \
+                 to it (Serato into a Rane's USB card never reaches the system mix).",
+            );
+            // Measured outside the grid: inside a cell available_width
+            // reads the unshrunk max_rect (A1).
+            let combo_w = (ui.available_width() - 112.0).max(80.0);
+            egui::Grid::new("set_audio_grid")
+                .num_columns(2)
+                .min_col_width(96.0)
+                .spacing(egui::vec2(8.0, 8.0))
+                .show(ui, |ui| {
+                    // Audio source — saved, restarts capture live.
+                    grow(ui, "Audio in", |ui| {
+                        let sel = if s.audio_in.is_empty() {
+                            crate::audio::system_audio_label()
+                        } else {
+                            s.audio_in.as_str()
+                        };
+                        let shown = ellipsize(
+                            ui.painter(),
+                            sel,
+                            &egui::FontId::proportional(12.0),
+                            combo_w - 24.0,
+                        );
+                        egui::ComboBox::from_id_salt("audio_in")
+                            .width(combo_w)
+                            .selected_text(shown)
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(
+                                    &mut s.audio_in,
+                                    String::new(),
+                                    crate::audio::system_audio_label(),
+                                );
+                                // Only built while the popup is open.
+                                for n in crate::audio::capture_device_names() {
+                                    ui.selectable_value(&mut s.audio_in, n.clone(), n);
+                                }
+                            });
+                    });
+                    grow(ui, "Latency", |ui| {
+                        ui.add(
+                            egui::Slider::new(&mut s.latency_ms, 0.0..=200.0)
+                                .suffix(" ms")
+                                .fixed_decimals(0),
+                        )
+                        .on_hover_text("Delay the visuals to line up with what the crowd hears");
+                    });
+                    // How steadily kicks are landing (sustained low groove =
+                    // the show's in a breakdown).
+                    grow(ui, "Groove", |ui| {
+                        let (r, _) = ui
+                            .allocate_exact_size(egui::vec2(120.0, 6.0), egui::Sense::hover());
+                        let pp = ui.painter();
+                        pp.rect_filled(r, 3.0, INSET);
+                        pp.rect_filled(
+                            egui::Rect::from_min_size(
+                                r.min,
+                                egui::vec2(r.width() * st.groove.clamp(0.0, 1.0), r.height()),
+                            ),
+                            3.0,
+                            BREAKDOWN,
+                        );
+                    });
+                });
+            if ui
+                .button("Mark this beat as the downbeat (the \"one\")")
+                .clicked()
+            {
+                cmd.push(UiCommand::Do(Action::MarkDownbeat));
+            }
+        });
+        ui.add_space(12.0);
+        card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.spacing_mut().item_spacing.y = 6.0;
+            section_label(ui, "director");
+            ui.small("What the auto-pilot is allowed to do when it cuts scenes.");
+            ui.checkbox(&mut s.breakdown_mode, "Detect breakdowns")
+                .on_hover_text("Quiet sections switch the show into calm mode");
+            ui.checkbox(&mut s.cut_on_drops, "Cut early on a drop")
+                .on_hover_text("A drop lands early — cut to the next scene with it");
+            ui.checkbox(&mut s.random_order, "Random order")
+                .on_hover_text("Shuffle the rotation instead of playing it in order");
+        });
+        ui.min_rect().height()
+    };
+    let right_h = {
+        let ui = &mut mk_col(col_w + 12.0, col_w);
+        card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            section_label(ui, "ai show builder");
+            let saved = !s.ai_key.trim().is_empty();
+            let env = s
+                .ai_provider
+                .env_keys()
+                .iter()
+                .any(|k| std::env::var(k).is_ok_and(|v| !v.trim().is_empty()));
+            status_dot(
+                ui,
+                saved || env,
+                if saved {
+                    "key saved"
+                } else if env {
+                    "key from environment"
+                } else {
+                    "no key"
+                },
+            );
+            ui.small("Used by the timeline editor's AI build (F2) to design cues for a show.");
+            let field_w = (ui.available_width() - 112.0).max(80.0);
+            egui::Grid::new("set_ai_grid")
+                .num_columns(2)
+                .min_col_width(96.0)
+                .spacing(egui::vec2(8.0, 8.0))
+                .show(ui, |ui| {
+                    grow(ui, "Provider", |ui| {
+                        egui::ComboBox::from_id_salt("ai_prov")
+                            .width(field_w)
+                            .selected_text(s.ai_provider.label())
+                            .show_ui(ui, |ui| {
+                                for p in crate::ai::AiProvider::ALL {
+                                    if ui
+                                        .selectable_label(s.ai_provider == p, p.label())
+                                        .clicked()
+                                    {
+                                        crate::ai::set_provider(s, p);
+                                    }
+                                }
+                            });
+                    });
+                    let def_ep = s.ai_provider.default_endpoint();
+                    grow(ui, "Endpoint", |ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut s.ai_endpoint)
+                                .hint_text(def_ep)
+                                .desired_width(field_w),
+                        );
+                    });
+                    let def_model = s.ai_provider.default_model();
+                    grow(ui, "Model", |ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut s.ai_model)
+                                .hint_text(def_model)
+                                .desired_width(field_w),
+                        );
+                    });
+                    grow(ui, "API key", |ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut s.ai_key)
+                                .password(true)
+                                .hint_text("or env var")
+                                .desired_width(field_w),
+                        );
+                    });
+                });
+            ui.small(format!(
+                "A blank key tries {}. A saved key lives in trippin.json.",
+                s.ai_provider.env_keys().join(" / ")
+            ));
+        });
+        ui.min_rect().height()
+    };
+    // Claim the taller column so the ScrollArea knows the page height.
+    ui.add_space(left_h.max(right_h));
 }
 
 #[allow(clippy::too_many_arguments)]

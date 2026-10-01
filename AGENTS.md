@@ -143,7 +143,7 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
 | `src/ndi.rs`, `src/spout.rs` | NDI (runtime loaded dynamically), and a native Spout2 sender (D3D11 shared texture plus the Spout shared-memory registry). |
 | `src/rec.rs` | Clip recording: the ffmpeg replay buffer and set recording. |
 | `src/timeline.rs`, `src/song.rs`, `src/editor.rs`, `src/ai.rs` | The timeline show editor (F2), song playback, and the AI show builder. |
-| `src/panel.rs` | The egui control panel. Tabs: Perform, Dancer & FX, Stream, Timeline, Keys. |
+| `src/panel.rs` | The egui control panel. Tabs: Perform, Dancer & FX, Stream, Timeline, Keys, Settings. App-wide preferences (audio in, latency, director rules, AI provider/key) live on **Settings** (`settings_tab`), not in collapsibles on other pages or in the timeline editor. |
 | `src/config.rs` | `Settings` (serde, `#[serde(default)]`), actions and hotkeys, and `data_dir()`. |
 | `src/midi.rs` | MIDI input (midir): one port, note-ons become `Action`s. |
 | `src/snap.rs` | Headless snapshot and benchmark rendering. |
@@ -255,7 +255,7 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   Rane's USB card) never enters it — capture shows "no signal" while music
   plays, and the tap is flaky even when the audio does enter the mix.
   The fix is the controller's input device: `Settings::audio_in`
-  (panel picker under Perform → director & sync, live-restarts the engine
+  (panel picker on the Settings tab, live-restarts the engine
   via the settings diff in `render_loop`), or `--device`/`--mic` per run.
   `audio_in` is a device-name substring resolved by `AudioEngine::start`,
   and a stale value falls back to the default tap rather than blocking

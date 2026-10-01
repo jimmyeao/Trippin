@@ -82,6 +82,24 @@ impl AiProvider {
     }
 }
 
+/// Switch provider, clearing endpoint/model fields that still hold another
+/// provider's defaults (a custom value is kept).
+pub fn set_provider(s: &mut crate::config::Settings, p: AiProvider) {
+    if AiProvider::ALL
+        .iter()
+        .any(|o| s.ai_endpoint == o.default_endpoint())
+    {
+        s.ai_endpoint.clear();
+    }
+    if AiProvider::ALL
+        .iter()
+        .any(|o| !o.default_model().is_empty() && s.ai_model == o.default_model())
+    {
+        s.ai_model.clear();
+    }
+    s.ai_provider = p;
+}
+
 /// A snapshot of the provider fields — taken on the UI thread, used by the
 /// worker so no lock is held across the network call.
 #[derive(Clone)]
