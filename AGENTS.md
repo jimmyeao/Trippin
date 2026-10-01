@@ -13,7 +13,7 @@ something durable.
 Trippin is **live, music-reactive visuals for DJ sets**. It's written in
 Rust with wgpu, and the visuals are WGSL fullscreen fragment shaders. It
 listens to the system audio (WASAPI loopback on Windows, ScreenCaptureKit on
-macOS) and analyses it:
+macOS) or a picked input device, and analyses it:
 
 - band levels, onsets and kicks;
 - tempo and the beat/bar phase;
@@ -102,6 +102,8 @@ cargo run --release -- --snap laser_show,stage_rig --snap-size 1920x1080   # hea
 cargo run --release -- --snap all --snap-bench 120   # perf table in snaps/bench.tsv
 cargo run --release -- --snap x --snap-calm 1        # preview breakdown (no drums) mode
 cargo run --release -- --nowplaying       # prints what each now-playing source sees
+cargo run --release -- --list-devices     # capture devices (names for --device / the Audio in picker)
+cargo run --release -- --probe-audio [name]   # capture ~6 s, print band peaks + BPM; exits nonzero on silence
 cargo run --release -- --spout-grab <name> out.png   # receive one Spout frame (Windows)
 cargo run --release -- --ndi-monitor [name]
 cargo run --release -- --list-midi          # MIDI input ports (pad/key controllers)
@@ -126,7 +128,7 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
 | Path | What |
 |---|---|
 | `src/main.rs` | The winit app and CLI flags. `render_loop` runs on **its own thread** (Windows' modal move loop would freeze it otherwise). The event thread runs input and the egui panel. They share `Shared` (a `Mutex<Settings>`, a `Mutex<Status>`, and atomics) and talk over `mpsc::Msg`. |
-| `src/audio.rs` | Capture, FFT, onsets and kicks (level-independent: flux > mean×1.8), tempo PLL, groove, `calm` (breakdown), the four-band vocabulary, and the triggered waveform. |
+| `src/audio.rs`, `src/sysaudio.rs` | Capture (CPAL devices; the macOS system-output tap lives in `sysaudio.rs`), FFT, onsets and kicks (level-independent: flux > mean×1.8), tempo PLL, groove, `calm` (breakdown), the four-band vocabulary, and the triggered waveform. |
 | `src/director.rs` | Auto-pilot: phrase cuts, drop cuts, intensity, and the beats/breakdown modes. |
 | `src/render.rs` | wgpu. Ping-pong Rgba16Float feedback targets, per-scene pipelines, hot reload, and the `Uniforms` struct (**must match `U` in `shaders/common.wgsl`**). |
 | `src/gfx.rs`, `shaders/bloom.wgsl` | The baked 64³ noise volume and blue noise, and the bloom chain. |
@@ -141,7 +143,7 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
 | `src/ndi.rs`, `src/spout.rs` | NDI (runtime loaded dynamically), and a native Spout2 sender (D3D11 shared texture plus the Spout shared-memory registry). |
 | `src/rec.rs` | Clip recording: the ffmpeg replay buffer and set recording. |
 | `src/timeline.rs`, `src/song.rs`, `src/editor.rs`, `src/ai.rs` | The timeline show editor (F2), song playback, and the AI show builder. |
-| `src/panel.rs` | The egui control panel. Tabs: Show, Scenes, Dancer, Effects, Stream, Timeline, Keys. |
+| `src/panel.rs` | The egui control panel. Tabs: Perform, Dancer & FX, Stream, Timeline, Keys. |
 | `src/config.rs` | `Settings` (serde, `#[serde(default)]`), actions and hotkeys, and `data_dir()`. |
 | `src/midi.rs` | MIDI input (midir): one port, note-ons become `Action`s. |
 | `src/snap.rs` | Headless snapshot and benchmark rendering. |
@@ -251,12 +253,15 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
 - **macOS audio:** ScreenCaptureKit hears only the *system output mix*.
   DJ software routed straight to a controller's own interface (Serato → a
   Rane's USB card) never enters it — capture shows "no signal" while music
-  plays. The fix is the controller's input device: `Settings::audio_in`
-  (panel picker under Show → director & sync, live-restarts the engine via
-  the settings diff in `render_loop`), or `--device`/`--mic` per run.
+  plays, and the tap is flaky even when the audio does enter the mix.
+  The fix is the controller's input device: `Settings::audio_in`
+  (panel picker under Perform → director & sync, live-restarts the engine
+  via the settings diff in `render_loop`), or `--device`/`--mic` per run.
   `audio_in` is a device-name substring resolved by `AudioEngine::start`,
   and a stale value falls back to the default tap rather than blocking
-  startup.
+  startup. `Settings::load` runs before `AudioEngine::start` in `main` so
+  the saved source applies at launch — keep that order. Debug capture
+  with `--probe-audio [name]` (no window needed).
 - egui layout rules the UI relies on (learned the hard way, review A1):
   - `ui.horizontal` children see the parent's `max_rect`, not the shrunk
     `cursor` — a `right_to_left` or `available_width()` inside one can
