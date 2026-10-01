@@ -93,12 +93,30 @@ pub fn run(args: &[String]) -> Result<()> {
         .and_then(|s| s.split_once('x'))
         .and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?)))
         .unwrap_or((1280u32, 720u32));
-    let times: Vec<f32> = arg(args, "--snap-at")
-        .map(|s| s.split(',').filter_map(|v| v.parse().ok()).collect())
-        .unwrap_or_else(|| vec![6.0]);
-    let bench: u32 = arg(args, "--snap-bench")
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(60);
+    // `--snap-energy`: rate every scene's visual energy (motion, brightness,
+    // colour) from frame pairs 1/30 s apart, written to
+    // shaders/scene_energy.json for the AI show builder.
+    let energy_mode = args.iter().any(|a| a == "--snap-energy");
+    let (w, h) = if energy_mode && arg(args, "--snap-size").is_none() {
+        (320, 180)
+    } else {
+        (w, h)
+    };
+    let times: Vec<f32> = if energy_mode {
+        vec![3.0, 3.034, 5.0, 5.034, 7.0, 7.034]
+    } else {
+        arg(args, "--snap-at")
+            .map(|s| s.split(',').filter_map(|v| v.parse().ok()).collect())
+            .unwrap_or_else(|| vec![6.0])
+    };
+    let bench: u32 = if energy_mode {
+        0
+    } else {
+        arg(args, "--snap-bench")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(60)
+    };
+    let mut energy_rows: Vec<(String, f32, f32, f32)> = Vec::new();
     let out_dir = PathBuf::from(arg(args, "--snap-out").unwrap_or("snaps"));
     std::fs::create_dir_all(&out_dir)?;
     let low = arg(args, "--gpu") == Some("low");
@@ -317,6 +335,7 @@ pub fn run(args: &[String]) -> Result<()> {
         let mut t = 0.0f32;
         let mut shots = times.clone();
         shots.sort_by(f32::total_cmp);
+        let mut grabs: Vec<Vec<u8>> = Vec::new();
         for (k, &at) in shots.iter().enumerate() {
             while t < at {
                 step(t, frame, &mut cur);
@@ -326,12 +345,22 @@ pub fn run(args: &[String]) -> Result<()> {
                     let _ = device.poll(wgpu::PollType::wait_indefinitely());
                 }
             }
+            if energy_mode {
+                grabs.push(read_pixels(&device, &queue, &out, w, h)?);
+                continue;
+            }
             let file = if shots.len() > 1 {
                 out_dir.join(format!("{name}_{k}.png"))
             } else {
                 out_dir.join(format!("{name}.png"))
             };
             save(&device, &queue, &out, w, h, &file)?;
+        }
+        if energy_mode {
+            let (m, b, c) = frame_stats(&grabs);
+            println!("{name:<18} motion {m:.4} bright {b:.3} colour {c:.3}");
+            energy_rows.push((name, m, b, c));
+            continue;
         }
         if bench > 0 {
             let _ = device.poll(wgpu::PollType::wait_indefinitely());
@@ -349,12 +378,58 @@ pub fn run(args: &[String]) -> Result<()> {
             println!("{name}");
         }
     }
+    if energy_mode && !energy_rows.is_empty() {
+        // Rank-based so one outlier can't squash the scale: motion counts
+        // double (motion, not brightness, is what reads as energy).
+        let pct = |col: &dyn Fn(&(String, f32, f32, f32)) -> f32, v: f32| -> f32 {
+            let below = energy_rows.iter().filter(|r| col(r) < v).count();
+            below as f32 / (energy_rows.len() - 1).max(1) as f32
+        };
+        let mut out = serde_json::Map::new();
+        for r in &energy_rows {
+            let e = 0.5 * pct(&|x| x.1, r.1) + 0.25 * pct(&|x| x.2, r.2) + 0.25 * pct(&|x| x.3, r.3);
+            out.insert(r.0.clone(), serde_json::json!((e as f64 * 100.0).round() / 100.0));
+        }
+        let file = dir.join("scene_energy.json");
+        std::fs::write(&file, serde_json::to_string_pretty(&out)? + "\n")?;
+        println!("wrote {}", file.display());
+    }
     if !report.is_empty() {
         report.sort_by(|a, b| b.1.total_cmp(&a.1));
         let lines: Vec<String> = report.iter().map(|(n, ms)| format!("{n}\t{ms:.3}")).collect();
         std::fs::write(out_dir.join("bench.tsv"), lines.join("\n") + "\n")?;
     }
     Ok(())
+}
+
+/// Mean per-pixel luma change between frame pairs (0/1, 2/3, …), mean
+/// luma, and mean colourfulness (max - min channel), all 0..1.
+fn frame_stats(frames: &[Vec<u8>]) -> (f32, f32, f32) {
+    let luma = |p: &[u8]| (0.2126 * p[0] as f32 + 0.7152 * p[1] as f32 + 0.0722 * p[2] as f32) / 255.0;
+    let (mut motion, mut pairs) = (0.0f32, 0u32);
+    for pair in frames.chunks(2) {
+        if let [a, b] = pair {
+            let n = a.len() / 4;
+            let d: f32 = a.chunks(4).zip(b.chunks(4)).map(|(x, y)| (luma(x) - luma(y)).abs()).sum();
+            motion += d / n as f32;
+            pairs += 1;
+        }
+    }
+    let (mut bright, mut colour, mut n) = (0.0f32, 0.0f32, 0usize);
+    for f in frames {
+        for p in f.chunks(4) {
+            bright += luma(p);
+            let mx = p[0].max(p[1]).max(p[2]) as f32;
+            let mn = p[0].min(p[1]).min(p[2]) as f32;
+            colour += (mx - mn) / 255.0;
+            n += 1;
+        }
+    }
+    (
+        motion / pairs.max(1) as f32,
+        bright / n.max(1) as f32,
+        colour / n.max(1) as f32,
+    )
 }
 
 fn save(
@@ -365,6 +440,19 @@ fn save(
     h: u32,
     path: &std::path::Path,
 ) -> Result<()> {
+    let px = read_pixels(device, queue, tex, w, h)?;
+    image::save_buffer(path, &px, w, h, image::ColorType::Rgba8)?;
+    Ok(())
+}
+
+/// Read the output texture back as tightly packed RGBA8.
+fn read_pixels(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    tex: &wgpu::Texture,
+    w: u32,
+    h: u32,
+) -> Result<Vec<u8>> {
     let bpr = (w * 4).div_ceil(256) * 256;
     let buf = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("snap rb"),
@@ -408,6 +496,5 @@ fn save(
         let s = (y * bpr) as usize;
         px.extend_from_slice(&data[s..s + (w * 4) as usize]);
     }
-    image::save_buffer(path, &px, w, h, image::ColorType::Rgba8)?;
-    Ok(())
+    Ok(px)
 }

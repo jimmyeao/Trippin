@@ -793,6 +793,18 @@ impl Editor {
                                                     );
                                                 }
                                             });
+                                        egui::ComboBox::from_id_salt("text_fx")
+                                            .width(74.0)
+                                            .selected_text(text_draft.fx.label())
+                                            .show_ui(ui, |ui| {
+                                                for v in crate::text::TextFx::ALL {
+                                                    ui.selectable_value(
+                                                        &mut text_draft.fx,
+                                                        v,
+                                                        v.label(),
+                                                    );
+                                                }
+                                            });
                                     });
                                     if !text_draft.text.trim().is_empty() {
                                         let kind = CueKind::Text(text_draft.clone());

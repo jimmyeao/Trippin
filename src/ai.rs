@@ -178,6 +178,8 @@ pub struct ClipAnalysis {
     pub builds: Vec<(usize, usize)>,
     /// (from_bar, to_bar) vocal-heavy spans.
     pub vocals: Vec<(usize, usize)>,
+    /// Drum-fill bars (onset spikes) — phrase ends, strobe/stutter material.
+    pub fills: Vec<usize>,
 }
 
 /// Full analysis from decoded audio (`Song::load` result), measured on the
@@ -201,6 +203,7 @@ pub fn analyze_song(
     let mut onsets = vec![0.0f32; bars];
     let mut voc = vec![0.0f32; bars];
     let mut air = vec![0.0f32; bars];
+    let mut mids = vec![0.0f32; bars];
     let on_floor = onset_floor(&song.onsets);
     for bar in 0..bars {
         let h0 = hop_at_beat(bar as f64 * 4.0);
@@ -217,11 +220,12 @@ pub fn analyze_song(
             / (h1 - h0) as f32;
         voc[bar] = mean(&vocal[h0.min(vocal.len() - 1)..h1.min(vocal.len())]);
         air[bar] = mean(&air_share[h0.min(air_share.len() - 1)..h1.min(air_share.len())]);
+        mids[bar] = mean(&mid_share[h0.min(mid_share.len() - 1)..h1.min(mid_share.len())]);
     }
     norm_inplace(&mut energy);
     norm_inplace(&mut onsets);
     norm_inplace(&mut voc);
-    finish_analysis(clip, &song.name, bpm, beats, energy, onsets, voc, air)
+    finish_analysis(clip, &song.name, bpm, beats, energy, onsets, voc, air, mids)
 }
 
 /// Analysis from a clip's cached strip data (used when the audio file is
@@ -257,6 +261,7 @@ pub fn analyze_cached(clip: usize, c: &Clip) -> ClipAnalysis {
         beats,
         energy,
         onsets,
+        vec![0.0; bars],
         vec![0.0; bars],
         vec![0.0; bars],
     )
@@ -349,7 +354,18 @@ fn onset_floor(env: &[f32]) -> f32 {
     med + (v[(v.len() as f32 * 0.9) as usize] - med) * 0.3
 }
 
-/// Sections + drop/build/vocal markers from the per-bar arrays.
+/// Sections, fills and drop/build/vocal markers from the per-bar arrays.
+///
+/// Structure comes from *change*, not loudness: a lot of house holds one
+/// energy level for the whole track, and its arrangement moves by swapping
+/// instruments, vocals and hats in and out on phrase lines — usually right
+/// after a drum fill. So section boundaries are peaks of a novelty curve
+/// over all the per-bar features (z-scored, so each counts equally),
+/// boosted where the previous bar is a fill, snapped onto the phrase grid
+/// those boundaries vote for, and kept at least 4 bars apart. Section kinds
+/// are then relative to the track's own level, so a flat track still has
+/// light and shade.
+#[allow(clippy::too_many_arguments)]
 fn finish_analysis(
     clip: usize,
     name: &str,
@@ -359,43 +375,76 @@ fn finish_analysis(
     onsets: Vec<f32>,
     vocal: Vec<f32>,
     air: Vec<f32>,
+    mid: Vec<f32>,
 ) -> ClipAnalysis {
     let bars = energy.len();
-    // Smoothed contour for structure decisions (keep raw `energy` for output).
-    let sm: Vec<f32> = (0..bars)
-        .map(|b| mean(&energy[b.saturating_sub(1)..(b + 2).min(bars)]))
-        .collect();
+    let fills = find_fills(&energy, &onsets);
+    let bounds = find_boundaries(&energy, &onsets, &vocal, &air, &mid, &fills);
 
-    // Drops: raw energy leaps to ≥70% of peak after a quieter patch — the raw
-    // value, not the smoothed one, so a sharp 1-2 bar climax still counts.
+    // Sections between boundaries, labelled against the track's own level.
+    let mut spans: Vec<(usize, usize)> = Vec::new();
+    for (i, &s) in bounds.iter().enumerate() {
+        let e = bounds.get(i + 1).map_or(bars, |&n| n) - 1;
+        if e >= s {
+            spans.push((s, e));
+        }
+    }
+    let active: Vec<f32> = energy.iter().copied().filter(|&e| e > 0.08).collect();
+    let med = quantile(&active, 0.5);
+    let p75 = quantile(&active, 0.75);
+    let sec_mean: Vec<f32> = spans.iter().map(|&(s, e)| mean(&energy[s..=e])).collect();
+    let first_loud = sec_mean.iter().position(|&m| m >= 0.35 && m >= med - 0.12);
+    let mut kinds: Vec<&str> = Vec::new();
     let mut drops = Vec::new();
-    for b in 1..bars {
-        if energy[b] >= 0.7 {
-            let from = b.saturating_sub(6);
-            let before = mean(&sm[from..b]);
-            if energy[b] - before >= 0.3 && drops.last().is_none_or(|&d| b - d >= 8) {
-                drops.push(b);
+    for (i, &(s, e)) in spans.iter().enumerate() {
+        let m = sec_mean[i];
+        let calm = m < 0.35 || m < med - 0.12;
+        let kind = if m < 0.08 {
+            "silent"
+        } else if calm {
+            if first_loud.is_none_or(|f| i < f) {
+                "intro"
+            } else if e + 1 == bars || i + 1 == spans.len() {
+                "outro"
+            } else {
+                "breakdown"
             }
+        } else {
+            // A drop: this section lands well above the one before it.
+            let prev = i.checked_sub(1).map(|p| sec_mean[p]);
+            let lift = prev.is_some_and(|p| m - p >= 0.12 && (p < med || m >= p75));
+            if lift {
+                drops.push(s);
+                "drop"
+            } else if m >= p75 && m >= med + 0.04 {
+                "peak"
+            } else {
+                "groove"
+            }
+        };
+        kinds.push(kind);
+    }
+    // A track with no contrast big enough for a drop still gets one climax:
+    // the first section start at the loudest level.
+    if drops.is_empty() {
+        if let Some(i) = (1..spans.len())
+            .filter(|&i| kinds[i] == "peak")
+            .max_by(|&a, &b| sec_mean[a].total_cmp(&sec_mean[b]))
+        {
+            kinds[i] = "drop";
+            drops.push(spans[i].0);
         }
     }
-    // No contrast big enough to call a drop — give the model the loudest bar
-    // anyway so the show still has a climax.
-    if drops.is_empty() && bars >= 8 {
-        if let Some((b, &v)) = energy.iter().enumerate().max_by(|a, b| a.1.total_cmp(b.1)) {
-            if v > 0.6 {
-                drops.push(b);
-            }
-        }
-    }
-    // Builds: a ≥2-bar rising run immediately preceding a drop.
+    // Builds: the last bars before each drop (up to 4, back to the previous
+    // boundary) when they rise or hold a fill.
     let mut builds = Vec::new();
     for &d in &drops {
-        let mut s = d;
-        while s > 0 && sm[s - 1] < sm[s] - 0.01 && d - s < 6 {
-            s -= 1;
-        }
+        let s = d.saturating_sub(4).max(bounds.iter().copied().filter(|&b| b < d).max().unwrap_or(0));
         if d - s >= 2 {
-            builds.push((s, d.saturating_sub(1)));
+            let rising = energy[d - 1] > energy[s] + 0.03 || air[d - 1] > air[s] + 0.03;
+            if rising || fills.contains(&(d - 1)) {
+                builds.push((s, d - 1));
+            }
         }
     }
     // Vocal spans: ≥4-bar runs over the floor.
@@ -414,77 +463,31 @@ fn finish_analysis(
         vocals.push((s, bars - 1));
     }
 
-    // Sections: ~4-bar blocks — musical phrases are 8/16 beats anyway, and
-    // block-grain keeps the labels clean (no 1-bar thrash between classes).
-    // Blocks restart on every drop and build start: counting 4s from bar 0
-    // lets one odd intro bar push every drop into the middle of a block, so
-    // the scene change lands bars late.
-    let mut anchors: Vec<usize> = drops
-        .iter()
-        .copied()
-        .chain(builds.iter().map(|&(s, _)| s))
-        .filter(|&b| b > 0 && b < bars)
-        .collect();
-    anchors.sort_unstable();
-    anchors.dedup();
+    // Blocks: 4-bar phrases from each section start (a 2-3 bar remainder
+    // stays its own block, a 1-bar one joins the previous). The first block
+    // of a drop section is the "drop", builds override the bars they cover.
     let mut sections: Vec<(String, usize, usize)> = Vec::new();
     let mut blocks: Vec<(String, usize, usize)> = Vec::new();
-    let mut seen_loud = false;
-    let mut b = 0usize;
-    while b < bars {
-        let mut e = (b + 4).min(bars) - 1;
-        if let Some(&a) = anchors.iter().find(|&&a| a > b && a <= e) {
-            e = a - 1;
-        }
-        // A 1-bar sliver before an anchor, or a short tail, merges into the
-        // previous block rather than becoming its own mislabelled block.
-        let sliver = e - b + 1 < 2 || (e + 1 == bars && e - b + 1 < 4);
-        if sliver && !blocks.is_empty() {
-            let bk = blocks.last_mut().unwrap();
-            bk.2 = e;
-            let prev = sections.last_mut().unwrap();
-            prev.2 = e;
-            // A quiet tail reads as the outro, not another breakdown.
-            if e + 1 == bars && prev.0 == "breakdown" {
-                prev.0 = "outro".into();
-                bk.0 = "outro".into();
+    for (i, &(s, e)) in spans.iter().enumerate() {
+        let kind = kinds[i];
+        sections.push((kind.to_string(), s, e));
+        let mut b = s;
+        while b <= e {
+            let mut be = (b + 3).min(e);
+            if e > be && e - be < 2 {
+                be = e; // a 1-bar remainder joins this block
             }
-            b = e + 1;
-            continue;
-        }
-        let m = mean(&sm[b..=e]);
-        let has_drop = drops.iter().any(|&d| (b..=e).contains(&d));
-        let has_build = builds.iter().any(|&(s, _)| (b..=e).contains(&s));
-        let kind = if m < 0.08 {
-            "silent"
-        } else if m < 0.35 {
-            if !seen_loud {
-                "intro"
-            } else if e + 1 == bars {
-                "outro"
+            let k = if kind == "drop" && b > s {
+                if mean(&energy[b..=be]) >= p75 { "peak" } else { "groove" }
+            } else if builds.iter().any(|&(bs, bd)| b >= bs && be <= bd) {
+                "build"
             } else {
-                "breakdown"
-            }
-        } else if has_drop {
-            "drop"
-        } else if has_build {
-            "build"
-        } else if m >= 0.75 {
-            "peak"
-        } else {
-            "groove"
-        };
-        if matches!(kind, "drop" | "peak" | "groove") {
-            seen_loud = true;
+                kind
+            };
+            blocks.push((k.to_string(), b, be));
+            b = be + 1;
         }
-        blocks.push((kind.to_string(), b, e));
-        match sections.last_mut() {
-            Some(prev) if prev.0 == kind => prev.2 = e,
-            _ => sections.push((kind.to_string(), b, e)),
-        }
-        b = e + 1;
     }
-
     ClipAnalysis {
         clip,
         name: name.into(),
@@ -500,7 +503,165 @@ fn finish_analysis(
         drops,
         builds,
         vocals,
+        fills,
     }
+}
+
+/// Drum-fill bars: onset density well above the surrounding bars (a roll,
+/// a snare build, a tom run) — they end phrases, so the bar after one is
+/// where arrangements change.
+fn find_fills(energy: &[f32], onsets: &[f32]) -> Vec<usize> {
+    let bars = onsets.len();
+    (1..bars)
+        .filter(|&b| {
+            let around: Vec<f32> = (b.saturating_sub(4)..(b + 5).min(bars))
+                .filter(|&i| i != b)
+                .map(|i| onsets[i])
+                .collect();
+            let med = quantile(&around, 0.5);
+            onsets[b] >= 0.5 && onsets[b] >= 1.3 * med && energy[b] > 0.15
+        })
+        .collect()
+}
+
+/// Section starts (always including bar 0), see `finish_analysis`.
+fn find_boundaries(
+    energy: &[f32],
+    onsets: &[f32],
+    vocal: &[f32],
+    air: &[f32],
+    mid: &[f32],
+    fills: &[usize],
+) -> Vec<usize> {
+    let bars = energy.len();
+    if bars < 8 {
+        return vec![0];
+    }
+    let z = |v: &[f32]| -> Vec<f32> {
+        let m = mean(v);
+        let sd = (v.iter().map(|x| (x - m) * (x - m)).sum::<f32>() / v.len() as f32).sqrt();
+        if sd < 1e-6 {
+            vec![0.0; v.len()]
+        } else {
+            v.iter().map(|x| (x - m) / sd).collect()
+        }
+    };
+    // A 3-bar median first: a single drop-out bar or fill is an event, not
+    // a section change, and would otherwise spike the novelty both sides.
+    let med3 = |v: &[f32]| -> Vec<f32> {
+        (0..v.len())
+            .map(|i| {
+                let mut w = [v[i.saturating_sub(1)], v[i], v[(i + 1).min(v.len() - 1)]];
+                w.sort_by(|a, b| a.total_cmp(b));
+                w[1]
+            })
+            .collect()
+    };
+    let feats = [
+        z(&med3(energy)),
+        z(&med3(onsets)),
+        z(&med3(vocal)),
+        z(&med3(air)),
+        z(&med3(mid)),
+    ];
+    // Novelty: distance between the 4 bars before and the 4 bars after,
+    // plus half the bar-to-bar jump so a change that ramps (a build into a
+    // drop) still lands on the bar where it actually hits. An isolated fill
+    // on the bar before is the classic phrase-end tell.
+    let w = 4usize;
+    let mut score = vec![0.0f32; bars];
+    for b in 2..bars - 1 {
+        let (a, c) = (b.saturating_sub(w), (b + w).min(bars));
+        let d2: f32 = feats
+            .iter()
+            .map(|f| {
+                let d = mean(&f[b..c]) - mean(&f[a..b]);
+                d * d
+            })
+            .sum();
+        let edge: f32 = feats
+            .iter()
+            .map(|f| (f[b] - f[b - 1]) * (f[b] - f[b - 1]))
+            .sum::<f32>()
+            .sqrt();
+        let isolated_fill = fills.contains(&(b - 1)) && !fills.contains(&(b - 2)) && !fills.contains(&b);
+        score[b] = (d2.sqrt() + 0.5 * edge) * if isolated_fill { 1.3 } else { 1.0 };
+    }
+    let inner = &score[2..bars - 1];
+    let (m, sd) = {
+        let m = mean(inner);
+        let sd = (inner.iter().map(|x| (x - m) * (x - m)).sum::<f32>() / inner.len() as f32).sqrt();
+        (m, sd)
+    };
+    if std::env::var("TRIPPIN_AI_DEBUG").is_ok() {
+        for (b, s) in score.iter().enumerate() {
+            eprintln!("nov {b:3} {s:.2} e {:.2} o {:.2} v {:.2}", energy[b], onsets[b], vocal[b]);
+        }
+        eprintln!("mean {m:.2} sd {sd:.2}");
+    }
+    let mut cand: Vec<usize> = (2..bars - 1)
+        .filter(|&b| {
+            let lo = b.saturating_sub(2);
+            let hi = (b + 3).min(bars);
+            score[b] > m + 0.5 * sd && (lo..hi).all(|i| score[i] <= score[b])
+        })
+        .collect();
+    // Phrase grid: candidates vote for their bar mod 4 (by score), with a
+    // prior for phrases counted from bar 0 (the grid starts on the first
+    // downbeat). A peak one bar off the grid moves onto it only when that
+    // bar scores nearly as high (a broad peak); a two-bar shift (a real
+    // phrase change) only stands when it's strong.
+    let mut votes = [0.0f32; 4];
+    for &b in &cand {
+        votes[b % 4] += score[b];
+    }
+    votes[0] += 0.3 * votes.iter().sum::<f32>();
+    let phase = (0..4).max_by(|&a, &b| votes[a].total_cmp(&votes[b])).unwrap_or(0);
+    for b in cand.iter_mut() {
+        let off = (*b + 4 - phase) % 4;
+        if off == 1 && score[*b - 1] >= 0.6 * score[*b] {
+            *b -= 1;
+        } else if off == 3 && *b + 1 < bars && score[*b + 1] >= 0.6 * score[*b] {
+            *b += 1;
+        }
+    }
+    cand.retain(|&b| (b + 4 - phase) % 4 == 0 || score[b] > m + 1.0 * sd);
+    cand.sort_unstable();
+    cand.dedup();
+    // At least 4 bars apart: keep the stronger of two close boundaries.
+    let mut out: Vec<usize> = vec![0];
+    for b in cand {
+        let last = *out.last().unwrap();
+        if b < 4 {
+            continue;
+        }
+        if b - last >= 4 {
+            out.push(b);
+        } else if last > 0 && score[b] > score[last] {
+            *out.last_mut().unwrap() = b;
+        }
+    }
+    // Long stretches with no change in sound (a lot of classic house) still
+    // phrase: the bar after an isolated fill starts a new section when it's
+    // well clear of the others.
+    for &f in fills {
+        let b = f + 1;
+        let isolated = !fills.contains(&(f + 1)) && f.checked_sub(1).is_none_or(|p| !fills.contains(&p));
+        if isolated && b + 4 <= bars && out.iter().all(|&o| o.abs_diff(b) >= 6) {
+            out.push(b);
+        }
+    }
+    out.sort_unstable();
+    out
+}
+
+fn quantile(v: &[f32], q: f32) -> f32 {
+    if v.is_empty() {
+        return 0.0;
+    }
+    let mut s = v.to_vec();
+    s.sort_by(|a, b| a.total_cmp(b));
+    s[((s.len() - 1) as f32 * q).round() as usize]
 }
 
 fn mean(v: &[f32]) -> f32 {
@@ -596,75 +757,91 @@ pub struct ShowBuild {
 fn system_prompt() -> String {
     "You are the show director for Trippin, a music-reactive DJ visuals app. For each song \
 clip you are given a flow map (one char per bar: `.` silent, `-` low, `+` mid, `*` high, \
-`#` peak energy; a `v` on the vocals line marks sung bars) and a `blocks` table that \
-splits the track into ~4-bar phrases, each labelled intro / groove / build / drop / \
-peak / breakdown / outro / silent with its mean energy. You direct the show BLOCK BY \
-BLOCK — that is the job: make a deliberate choice for every phrase.\n\
+`#` peak energy; a `v` on the vocals line marks sung bars), the track's `sections` (where \
+the arrangement changes), its drum `fills` (bars with a roll or snare run — they end \
+phrases), and a `blocks` table: ~4-bar phrases labelled intro / groove / build / drop / \
+peak / breakdown / outro / silent with mean energy and vocal share. `section_start` marks a \
+block that opens a new section; `fill_bars` lists fill bars inside it (0 = its first bar). \
+You direct the show BLOCK BY BLOCK, and inside blocks when the music calls for it.\n\
 \n\
 Output ONLY a JSON object {\"plan\":[...]} — no prose, no markdown. One entry per block, \
 in order, covering EVERY block of every clip:\n\
 {\n\
   \"clip\": 0,       // clip index, optional (default 0)\n\
   \"block\": 3,      // the block's \"i\" from the table — required\n\
-  \"scene\": \"name\", // REQUIRED: scene for this block (ONLY names from the scene list)\n\
+  \"scene\": \"name\", // REQUIRED: scene at the block start (ONLY names from the scene list)\n\
+  \"cuts\": [{\"beat\":4,\"scene\":\"name\"}], // optional: more scene changes INSIDE the block, beat = offset from its start (1..last beat)\n\
+  \"fill\": \"strobe\"|\"stutter\"|\"flash\", // optional: hit on the block's fill bar\n\
   \"dancer\": \"off\" | \"on\" | \"ROUTINE_NAME\",  // optional; routine name implies on\n\
   \"look\": 0|1|2,   // optional: 0=shadow, 1=neon, 2=strobe\n\
   \"trails\": true|false, \"canon\": \"auto\"|\"on\"|\"off\", // optional dancer extras\n\
   \"fx\": \"off\"|\"mirror_x\"|\"mirror_y\"|\"quad\"|\"kaleido6\"|\"kaleido8\"|\"auto\", // optional\n\
   \"palette\": \"PALETTE_NAME\", // optional: global colour palette, latches\n\
   \"blackout\": true, // optional: 1-beat dip to black just before the block starts\n\
-  \"text\": {\"text\":\"...\",\"style\":\"neon|fire|wave|glitch|pulse|chrome\",\"pos\":\"top|middle|bottom\",\"lane\":0|1,\"anim\":\"fade|rise|drop|slide|zoom|type\"}\n\
+  \"text\": {\"text\":\"...\",\"style\":\"neon|fire|wave|glitch|pulse|chrome\",\"pos\":\"top|middle|bottom\",\"anim\":\"fade|rise|drop|slide|zoom|type\",\"fx\":\"punch|shake|strobe|bounce|shatter\",\"size\":0.7-2.0,\"at\":0,\"seq\":\"beat|bar\"}\n\
 }\n\
 Omit optional fields when there's nothing to change — they all latch.\n\
 \n\
 Show-craft rules:\n\
 - EVERY block gets a plan entry, even repeats — no gaps. Scenes latch, so the last \
 block's scene plays the song out.\n\
-- Vary the scene with the music: a new scene whenever the block's kind or energy level \
-changes is the norm; 2-3 consecutive blocks on one scene is the MAXIMUM, and only inside \
-one long uniform section. Across a whole track expect 5-8 different scenes.\n\
-- Pick scenes by their \"about\" line: mellow, dark or slow scenes for intro, breakdown and \
-outro; the biggest, fastest, brightest scenes for drop and peak; something that \
-accelerates for a build.\n\
+- Follow the SECTIONS: the big changes (scene family, palette, dancer in/out, routine \
+change) land on section_start blocks and drops, not at random block edges. Inside a section, \
+vary with the energy.\n\
+- Scenes don't have to last a whole block. Use \"cuts\" for 1-2 bar scenes in drops and \
+peaks, and for an accelerating run of quick cuts across a build (e.g. cuts at beats 8, 12, \
+14, 15). Calm blocks hold one scene. Across a track expect 8-14 different scenes.\n\
+- Match scene ENERGY (1 calm .. 5 intense, in the scene list) to the block: 1-2 for intro, \
+breakdown and outro; 3 for groove; 4-5 for drop and peak; rising through a build. Use the \
+\"about\" line for character (mellow, festival, tunnel…).\n\
+- Fills: a fill bar into a new section or a drop gets a \"fill\" hit — \"strobe\" (black \
+flicker on the eighths), \"stutter\" (flips to the next block's scene and back), or \
+\"flash\" (one dip on the last off-beat). Tunnel and flight scenes never strobe or flash — \
+use stutter. Other fills: use them now and then, not every one.\n\
 - \"void\" is a fade to black: ONLY on the final block, and only when it's the song's \
 outro. Never anywhere else.\n\
 - Dancer pace — every routine is tagged calm, medium or fast:\n\
   - intro, breakdown, outro: dancer \"off\", or a CALM routine. Never medium or fast.\n\
   - groove: medium. build: medium, going fast at the drop. drop and peak: FAST.\n\
-  - Name a routine every time she comes back on, and switch routine every 2-3 blocks \
-while she's on — never one routine for a whole track. Off for roughly a third of a track.\n\
+  - Bring her in or out, and change routine, on section starts and drops — routines start \
+from the top on the bar they're switched in, so the movement lands on the phrase. Change \
+routine every new section while she's on; off for roughly a third of a track.\n\
 - Vocals (a block's \"vocal\" share, and v in the vocals map): a sung breakdown is the \
 dancer's moment — calm routine with \"look\":1 (neon). An instrumental breakdown or intro: \
 dancer off. When vocals come back in a groove, bring her back on.\n\
 - Drops are the big moments. On EVERY drop block change the scene AND at least one more \
-thing: \"blackout\":true (dips the beat before), \"fx\":\"auto\" or a kaleido, a palette \
-change, a look change, or a text hit. Release the fx a block or two later (\"fx\":\"off\") \
-so the next drop can hit again.\n\
+thing: \"blackout\":true, \"fx\":\"auto\" or a kaleido, a palette change, a look change, \
+or a text hit. Release the fx a block or two later (\"fx\":\"off\") so the next drop can \
+hit again.\n\
 - Contrast: a breakdown into a drop is the biggest change in the show — dark, calm and \
 still, then bright, fast and transformed. Quiet blocks should actually be quiet; don't stack \
 dancer+trails+canon+fx everywhere.\n\
-- builds: brighten and accelerate — trails on, canon on, or a sharper scene.\n\
-- text: 2-4 short impact cards per track. The clip's \"title\" on the first drop or the \
-first big vocal entry; one or two punchy words from the title on later drops. Never \
-generic labels like \"DROP\" or \"BUILD\". Vary style; anim \"zoom\" or \"drop\" for drops, \
-\"type\" or \"fade\" in quiet blocks. A card lasts its block.\n\
+- builds: accelerate — quick cuts, trails on, canon on, a fill hit at the end.\n\
+- text is a performance, not a caption. 3-6 text moments per track, each designed:\n\
+  - drops: the title (or its key words) as a \"seq\":\"beat\" hit — one word per beat, \
+big (\"size\":1.6), \"fx\":\"punch\" or \"shake\", \"anim\":\"zoom\" or \"drop\".\n\
+  - vocal hooks (from the web lookup, if you have it): a few hook words landed with \"at\" \
+on the beat they're sung, \"fx\":\"bounce\" or \"strobe\". Never more than four words of a lyric.\n\
+  - breakdowns: one quiet word or the artist, \"anim\":\"type\", style \"neon\" or \"wave\", \
+\"size\":0.8, no fx.\n\
+  - peaks: \"fx\":\"shatter\" or \"glitch\" style for chaos.\n\
+  Vary style, anim and fx across the track; never generic labels like \"DROP\" or \"BUILD\".\n\
 - fx: a show with no transforms looks flat — 1-3 fx stretches per track, never the \
 whole song.\n\
-- palette: recolours the WHOLE look — mark big section shifts (drop, breakdown) with it, \
-not every block. 1-3 switches per track.\n\
+- palette: recolours the WHOLE look — mark section shifts (drop, breakdown) with it. 2-4 \
+switches per track.\n\
 \n\
-Example excerpt (blocks 0-7 of a clip: intro, groove, groove, build, drop, peak, sung \
-breakdown, instrumental breakdown — note the drop stacking changes, the pace following \
-the blocks, and the calm neon dancer in the sung breakdown):\n\
+Example excerpt (blocks 0-7: intro, groove, groove, build with a fill on its last bar, drop, \
+peak, sung breakdown, instrumental breakdown):\n\
 {\"plan\":[\n\
- {\"block\":0,\"scene\":\"aurora\",\"dancer\":\"off\"},\n\
+ {\"block\":0,\"scene\":\"aurora\",\"dancer\":\"off\",\"text\":{\"text\":\"KRUSH\",\"style\":\"neon\",\"anim\":\"type\",\"size\":0.8,\"pos\":\"bottom\"}},\n\
  {\"block\":1,\"scene\":\"levels\"},\n\
- {\"block\":2,\"scene\":\"pulse_grid\",\"dancer\":\"stock_disco\"},\n\
- {\"block\":3,\"scene\":\"pulse_grid\",\"trails\":true,\"canon\":\"on\"},\n\
- {\"block\":4,\"scene\":\"rave_hall\",\"dancer\":\"stock_spin\",\"blackout\":true,\"fx\":\"auto\",\"text\":{\"text\":\"NORTHERN LIGHTS\",\"style\":\"chrome\",\"pos\":\"middle\",\"anim\":\"zoom\"}},\n\
- {\"block\":5,\"scene\":\"chrome_bloom\",\"dancer\":\"stock_break\",\"fx\":\"off\"},\n\
- {\"block\":6,\"scene\":\"bokeh_lights\",\"dancer\":\"stock_dress\",\"look\":1,\"trails\":false,\"canon\":\"off\",\"palette\":\"ocean\"},\n\
- {\"block\":7,\"scene\":\"gyroid_drift\",\"dancer\":\"off\"}\n\
+ {\"block\":2,\"scene\":\"pulse_grid\",\"dancer\":\"stock_disco\",\"cuts\":[{\"beat\":8,\"scene\":\"led_wall\"}]},\n\
+ {\"block\":3,\"scene\":\"warp_grid\",\"trails\":true,\"canon\":\"on\",\"cuts\":[{\"beat\":8,\"scene\":\"beam_sweep\"},{\"beat\":12,\"scene\":\"stripes_flow\"},{\"beat\":14,\"scene\":\"moire\"}],\"fill\":\"stutter\"},\n\
+ {\"block\":4,\"scene\":\"rave_hall\",\"dancer\":\"stock_spin\",\"blackout\":true,\"fx\":\"auto\",\"palette\":\"fire\",\"text\":{\"text\":\"HOUSE ARREST\",\"seq\":\"beat\",\"style\":\"chrome\",\"anim\":\"zoom\",\"fx\":\"punch\",\"size\":1.6}},\n\
+ {\"block\":5,\"scene\":\"sunburst\",\"dancer\":\"stock_break\",\"fx\":\"off\",\"cuts\":[{\"beat\":4,\"scene\":\"prism_field\"},{\"beat\":8,\"scene\":\"sunburst\"},{\"beat\":12,\"scene\":\"lattice\"}]},\n\
+ {\"block\":6,\"scene\":\"bokeh_lights\",\"dancer\":\"stock_dress\",\"look\":1,\"trails\":false,\"canon\":\"off\",\"palette\":\"ocean\",\"text\":{\"text\":\"FREE\",\"at\":4,\"style\":\"wave\",\"fx\":\"bounce\"}},\n\
+ {\"block\":7,\"scene\":\"ink\",\"dancer\":\"off\"}\n\
 ]}"
         .to_string()
 }
@@ -684,6 +861,7 @@ pub fn analyze_file(path: &std::path::Path) -> Result<String> {
         "drops": a.drops,
         "builds": a.builds.iter().map(|(s,e)| json!([s,e])).collect::<Vec<_>>(),
         "vocal_spans": a.vocals.iter().map(|(s,e)| json!([s,e])).collect::<Vec<_>>(),
+        "fills": a.fills,
         "energy": r2(&a.energy), "onsets": r2(&a.onsets),
         "vocal": r2(&a.vocal), "air": r2(&a.air),
     }))?;
@@ -767,20 +945,116 @@ fn is_calm(kind: &str) -> bool {
     matches!(kind, "intro" | "breakdown" | "outro" | "silent")
 }
 
+/// What the show builder knows about a scene: its one-line description,
+/// its visual energy 0..1 (measured by `--snap-energy` into
+/// shaders/scene_energy.json, lifted for laser/festival/rave rigs whose thin
+/// beams barely register as pixel motion), and whether it's a tunnel or
+/// flight scene — no strobes on those, they read as jerky (AGENTS.md).
+#[derive(Clone, Debug)]
+pub struct SceneMeta {
+    pub about: String,
+    pub energy: f32,
+    pub flight: bool,
+}
+
+pub fn scene_meta(name: &str) -> SceneMeta {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    static CACHE: OnceLock<Mutex<HashMap<String, SceneMeta>>> = OnceLock::new();
+    static ENERGY: OnceLock<HashMap<String, f32>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(m) = cache.lock().unwrap_or_else(|e| e.into_inner()).get(name) {
+        return m.clone();
+    }
+    let dir = crate::render::find_shader_dir().ok();
+    let energy = ENERGY.get_or_init(|| {
+        dir.as_ref()
+            .and_then(|d| std::fs::read_to_string(d.join("scene_energy.json")).ok())
+            .and_then(|t| serde_json::from_str::<HashMap<String, f32>>(&t).ok())
+            .unwrap_or_default()
+    });
+    let about = dir
+        .as_ref()
+        .and_then(|d| std::fs::read_to_string(d.join("scenes").join(format!("{name}.wgsl"))).ok())
+        .map(|src| scene_blurb(&src))
+        .unwrap_or_default();
+    let low = format!("{name} {}", about.to_lowercase());
+    let mut e = energy.get(name).copied().unwrap_or(0.5);
+    if ["laser", "festival", "rave", "strobe", "club"].iter().any(|k| low.contains(k)) {
+        e = e.max(0.6);
+    }
+    let flight = [
+        "tunnel", "flight", " fly", "flies", "flying", "drive", "driving", "warp", "corridor",
+        "highway", "road", "racing", "_run", "runner", "zoom",
+    ]
+    .iter()
+    .any(|k| low.contains(k));
+    let m = SceneMeta { about, energy: e, flight };
+    cache
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(name.to_string(), m.clone());
+    m
+}
+
+/// Scene energy a block of this kind wants.
+fn scene_target(kind: &str) -> f32 {
+    match kind {
+        "intro" | "breakdown" | "outro" | "silent" => 0.25,
+        "build" => 0.6,
+        "drop" | "peak" => 0.8,
+        _ => 0.55,
+    }
+}
+
+/// A scene nearest `target` in energy, skipping `avoid` (recent picks and
+/// void), rotating through the four nearest by `salt`.
+fn pick_scene(scenes: &[String], target: f32, avoid: &[String], salt: usize) -> Option<String> {
+    let mut c: Vec<(&String, f32)> = scenes
+        .iter()
+        .filter(|s| s.as_str() != "void" && !avoid.contains(s))
+        .map(|s| (s, (scene_meta(s).energy - target).abs()))
+        .collect();
+    c.sort_by(|a, b| a.1.total_cmp(&b.1));
+    c.truncate(4);
+    (!c.is_empty()).then(|| c[salt % c.len()].0.clone())
+}
+
+/// Text cues for a phrase hit one word at a time — `step` beats each,
+/// alternating lanes so each word replaces the last, the final word holding
+/// to `end`.
+fn word_hits(base: &Value, words: &[&str], start: f64, step: f64, end: f64) -> Vec<Value> {
+    words
+        .iter()
+        .enumerate()
+        .map(|(i, w)| {
+            let at = start + i as f64 * step;
+            let len = if i + 1 == words.len() { (end - at).max(step) } else { step };
+            let mut t = base.clone();
+            t["kind"] = json!("text");
+            t["text"] = json!(w);
+            t["beat"] = json!(at);
+            t["beats"] = json!(len);
+            t["lane"] = json!(i % 2);
+            t
+        })
+        .collect()
+}
+
+
 /// A one-line description of each scene, from the comment block at the top
 /// of its shader — so the model knows "bokeh_lights" is mellow and
 /// "laser_show" is a festival rig, not just two names.
 fn scene_catalogue(scenes: &[String]) -> Vec<Value> {
-    let dir = crate::render::find_shader_dir().ok().map(|d| d.join("scenes"));
     scenes
         .iter()
         .map(|s| {
-            let about = dir
-                .as_ref()
-                .and_then(|d| std::fs::read_to_string(d.join(format!("{s}.wgsl"))).ok())
-                .map(|src| scene_blurb(&src))
-                .unwrap_or_default();
-            json!({"name": s, "about": about})
+            let m = scene_meta(s);
+            json!({
+                "name": s,
+                "energy": (1.0 + m.energy * 4.0).round() as u32,
+                "about": m.about,
+            })
         })
         .collect()
 }
@@ -900,7 +1174,11 @@ fn user_prompt(
                     "beats": [s * 4, (e + 1) * 4 - 1],
                     "energy": (mean(&a.energy[*s..=(*e).min(a.energy.len() - 1)]) * 100.0).round() / 100.0,
                     "vocal": (block_vocal(a, *s, *e) * 10.0).round() / 10.0,
+                    "section_start": a.sections.iter().any(|(_, ss, _)| ss == s),
+                    "fill_bars": a.fills.iter().filter(|&&f| f >= *s && f <= *e).map(|f| f - s).collect::<Vec<_>>(),
                 })).collect::<Vec<_>>(),
+                "sections": a.sections.iter().map(|(k, s, e)| json!({"kind": k, "bars": [s, e]})).collect::<Vec<_>>(),
+                "fills": a.fills,
                 "drops": a.drops, "builds": a.builds.iter().map(|(s,e)| json!([s,e])).collect::<Vec<_>>(),
                 "vocal_spans": a.vocals.iter().map(|(s,e)| json!([s,e])).collect::<Vec<_>>(),
             })
@@ -1299,8 +1577,9 @@ fn expand_plan(
 ) {
     /// Blocks of identical scene before a forced change (~12 bars).
     const MAX_SCENE_RUN: usize = 3;
-    /// Dancer-on blocks between routine rotations (~12 bars).
-    const ROUTINE_STALE: usize = 3;
+    /// Dancer-on blocks between routine rotations (~16 bars) — sooner when
+    /// a new section starts.
+    const ROUTINE_STALE: usize = 4;
 
     let energy_of = |name: &str| {
         routines
@@ -1312,19 +1591,30 @@ fn expand_plan(
     // The routine nearest `target` in energy — never the current one or its
     // mirror, calm targets only from calm routines — rotating through the
     // three nearest by `salt` so repeats vary.
+    // Pace classes never mix: calm targets take only calm routines, fast
+    // targets never a calm one. Rotation only among near-equal matches —
+    // with few routines, "the three nearest" can reach far off the target.
+    let fits = |target: f32, e: f32| {
+        if target <= CALM_MAX {
+            e <= CALM_MAX
+        } else if target >= FAST_MIN {
+            e > CALM_MAX
+        } else {
+            true
+        }
+    };
     let pick = |target: f32, avoid: &str, salt: usize| -> Option<String> {
         let base = |n: &str| n.trim_end_matches("_mir").to_string();
+        let dist = |i: usize| (energy_of(&routines[i]) - target).abs();
         let mut idx: Vec<usize> = (0..routines.len())
             .filter(|&i| avoid.is_empty() || base(&routines[i]) != base(avoid))
-            .filter(|&i| target > CALM_MAX || energy_of(&routines[i]) <= CALM_MAX)
+            .filter(|&i| fits(target, energy_of(&routines[i])))
             .collect();
-        idx.sort_by(|&x, &y| {
-            (energy_of(&routines[x]) - target)
-                .abs()
-                .total_cmp(&(energy_of(&routines[y]) - target).abs())
-        });
+        idx.sort_by(|&x, &y| dist(x).total_cmp(&dist(y)));
+        let best = idx.first().map(|&i| dist(i))?;
+        idx.retain(|&i| dist(i) <= best + 0.15);
         idx.truncate(3);
-        (!idx.is_empty()).then(|| routines[idx[salt % idx.len()]].clone())
+        Some(routines[idx[salt % idx.len()]].clone())
     };
     let null = Value::Null;
 
@@ -1363,6 +1653,15 @@ fn expand_plan(
         let mut pal = String::new(); // current palette — empty until first cue
         let mut paced = 0usize; // routine picks corrected for the block's pace
         let mut burst_until: Option<usize> = None; // auto-fx added on a drop
+        let mut recent: Vec<String> = Vec::new(); // last few scenes shown
+        let mut swapped = 0usize; // scene picks moved for energy
+        let mut n_cuts = 0usize;
+        let mut n_fills = 0usize;
+        let sec_start: Vec<bool> = a
+            .blocks
+            .iter()
+            .map(|(_, s, _)| a.sections.iter().any(|(_, ss, _)| ss == s))
+            .collect();
 
         let last = a.blocks.len().saturating_sub(1);
         for (bi, (kind, from_bar, to_bar)) in a.blocks.iter().enumerate() {
@@ -1398,11 +1697,14 @@ fn expand_plan(
             if (run > MAX_SCENE_RUN || flat_drop) && !effective.is_empty() {
                 // Force a cut: prefer the model's least-recent other pick,
                 // else rotate the palette away from the current scene.
+                let mut avoid = recent.clone();
+                avoid.push(effective.clone());
                 emit = chosen
                     .iter()
                     .rev()
-                    .find(|s| **s != effective)
+                    .find(|s| !avoid.contains(s))
                     .cloned()
+                    .or_else(|| pick_scene(scenes, scene_target(kind), &avoid, bi))
                     .unwrap_or_else(|| {
                         let mut s = effective.clone();
                         for _ in 0..scenes.len().max(1) {
@@ -1421,6 +1723,21 @@ fn expand_plan(
                 });
                 run = 1;
             }
+            // Energy match: a frantic scene in a breakdown, or a near-static
+            // one on a drop, fights the music — swap it for one that fits.
+            if !emit.is_empty() && emit != "void" && emit != scene {
+                let e = scene_meta(&emit).energy;
+                let off = (is_calm(kind) && e > 0.8)
+                    || (matches!(kind, "drop" | "peak") && e < 0.2);
+                if off {
+                    let mut avoid = recent.clone();
+                    avoid.push(scene.clone());
+                    if let Some(s) = pick_scene(scenes, scene_target(kind), &avoid, bi) {
+                        emit = s;
+                        swapped += 1;
+                    }
+                }
+            }
             if !emit.is_empty() && emit != scene {
                 // A void on the final block is the end fade — place it in
                 // the last couple of bars so enforce_void keeps it.
@@ -1436,12 +1753,118 @@ fn expand_plan(
                     kind: CueKind::Scene(emit.clone()),
                 });
                 scene = emit.clone();
+                recent.push(emit.clone());
+                if recent.len() > 6 {
+                    recent.remove(0);
+                }
                 if emit != "void" && !chosen.contains(&emit) {
                     chosen.push(emit);
                 }
             }
 
             let it = item.unwrap_or(&null);
+
+            // --- in-block cuts: extra scene changes on any beat, so scenes
+            // can run a bar or two instead of a whole block.
+            if let Some(arr) = it["cuts"].as_array() {
+                let mut placed: Vec<f64> = Vec::new();
+                for c in arr.iter().take(8) {
+                    let off = c["beat"].as_f64().or_else(|| c["at"].as_f64()).unwrap_or(-1.0).round();
+                    let name = c["scene"].as_str().and_then(|n| find_name(n, scenes));
+                    let Some(name) = name.filter(|n| n != "void" && *n != scene) else {
+                        continue;
+                    };
+                    if off < 1.0 || off >= span || placed.contains(&off) {
+                        continue;
+                    }
+                    placed.push(off);
+                    cues.push(Cue {
+                        clip: a.clip,
+                        beat: beat + off,
+                        beats: a.beats - (beat + off),
+                        kind: CueKind::Scene(name.clone()),
+                    });
+                    scene = name.clone();
+                    recent.push(name.clone());
+                    if recent.len() > 6 {
+                        recent.remove(0);
+                    }
+                    if !chosen.contains(&name) {
+                        chosen.push(name);
+                    }
+                    run = 1;
+                    n_cuts += 1;
+                }
+            }
+
+            // --- drum fills: strobe / stutter / flash on the fill bar. A fill
+            // leading into a new section or a drop always gets one; strobes
+            // and flashes become a stutter on tunnel/flight scenes.
+            for &f in a.fills.iter().filter(|&&f| f >= *from_bar && f <= *to_bar) {
+                let into_change = f == *to_bar
+                    && a.blocks
+                        .get(bi + 1)
+                        .is_some_and(|(k, _, _)| k == "drop" || sec_start[bi + 1]);
+                let mut fx_kind = match it["fill"].as_str() {
+                    Some(k @ ("strobe" | "stutter" | "flash")) => k,
+                    _ if into_change => {
+                        if n_fills % 2 == 0 { "strobe" } else { "stutter" }
+                    }
+                    _ => continue,
+                };
+                let flight = scene_meta(&scene).flight;
+                if flight && fx_kind != "stutter" {
+                    fx_kind = "stutter";
+                }
+                let fb = (f * 4) as f64;
+                match fx_kind {
+                    "strobe" => {
+                        for k in 0..4 {
+                            cues.push(Cue {
+                                clip: a.clip,
+                                beat: fb + 2.0 + k as f64 * 0.5,
+                                beats: 0.25,
+                                kind: CueKind::Blackout(true),
+                            });
+                        }
+                    }
+                    "flash" => cues.push(Cue {
+                        clip: a.clip,
+                        beat: fb + 3.5,
+                        beats: 0.5,
+                        kind: CueKind::Blackout(true),
+                    }),
+                    _ => {
+                        // Flip to the next block's scene and back on the
+                        // eighths of the last two beats.
+                        let next = by_block
+                            .get(bi + 1)
+                            .copied()
+                            .flatten()
+                            .and_then(|n| n["scene"].as_str())
+                            .and_then(|n| find_name(n, scenes))
+                            .filter(|n| *n != scene && n != "void")
+                            .or_else(|| {
+                                let mut avoid = recent.clone();
+                                avoid.push(scene.clone());
+                                pick_scene(scenes, scene_target(kind).max(0.6), &avoid, bi)
+                            });
+                        if let Some(other) = next {
+                            for k in 0..4 {
+                                let s = if k % 2 == 0 { &other } else { &scene };
+                                cues.push(Cue {
+                                    clip: a.clip,
+                                    beat: fb + 2.0 + k as f64 * 0.5,
+                                    beats: 0.5,
+                                    kind: CueKind::Scene(s.clone()),
+                                });
+                            }
+                        }
+                    }
+                }
+                n_fills += 1;
+            }
+
             // A drop-time auto-fx burst ends after two blocks unless the
             // plan takes the fx lane over itself.
             if let Some(u) = burst_until {
@@ -1532,13 +1955,20 @@ fn expand_plan(
                 });
                 let mut next = named.clone();
                 if wrong {
-                    if let Some(p) = pick(block_target(kind), &routine, bi) {
+                    // Nothing else of the right pace: keep the current
+                    // routine if it fits (the only calm one is already on).
+                    let keep = (!routine.is_empty()
+                        && fits(block_target(kind), energy_of(&routine)))
+                    .then(|| routine.clone());
+                    if let Some(p) = pick(block_target(kind), &routine, bi).or(keep) {
                         if e.is_some() {
                             paced += 1;
                         }
                         next = Some(p);
                     }
-                } else if next.is_none() && routine_age >= ROUTINE_STALE {
+                } else if next.is_none()
+                    && (routine_age >= ROUTINE_STALE || (sec_start[bi] && routine_age >= 2))
+                {
                     next = pick(block_target(kind), &routine, bi);
                 }
                 if let Some(n) = next.filter(|n| *n != routine) {
@@ -1676,16 +2106,35 @@ fn expand_plan(
                 });
             }
             if let Some(t) = it.get("text").filter(|v| v.is_object()) {
-                let mut t = t.clone();
-                t["kind"] = json!("text");
-                t["beat"] = json!(beat);
-                t["beats"] = json!(span);
-                match raw_to_cue(&t, &[], scenes, routines) {
-                    Ok(mut c) => {
-                        c.clip = a.clip;
-                        cues.push(c);
+                // "at": beat offset into the block (land a word on a vocal
+                // hook); "seq": "beat"/"bar" hits the phrase a word at a time.
+                let at = t["at"].as_f64().unwrap_or(0.0).round().clamp(0.0, span - 1.0);
+                let words: Vec<&str> = t["text"].as_str().unwrap_or("").split_whitespace().collect();
+                let step = match t["seq"].as_str() {
+                    Some("beat") => Some(1.0),
+                    Some("bar") => Some(4.0),
+                    _ => None,
+                };
+                let items: Vec<Value> = match step {
+                    Some(st) if words.len() > 1 && words.len() <= 8 => {
+                        word_hits(t, &words, beat + at, st, beat + span)
                     }
-                    Err(e) => warnings.push(format!("plan: {e}")),
+                    _ => {
+                        let mut t = t.clone();
+                        t["kind"] = json!("text");
+                        t["beat"] = json!(beat + at);
+                        t["beats"] = json!(span - at);
+                        vec![t]
+                    }
+                };
+                for t in items {
+                    match raw_to_cue(&t, &[], scenes, routines) {
+                        Ok(mut c) => {
+                            c.clip = a.clip;
+                            cues.push(c);
+                        }
+                        Err(e) => warnings.push(format!("plan: {e}")),
+                    }
                 }
             }
 
@@ -1738,6 +2187,15 @@ fn expand_plan(
                 a.clip
             ));
         }
+        if swapped > 0 {
+            warnings.push(format!(
+                "clip {}: {swapped} scene pick(s) swapped to match the energy",
+                a.clip
+            ));
+        }
+        if n_cuts + n_fills > 0 {
+            warnings.push(format!("clip {}: {n_cuts} quick cut(s), {n_fills} fill hit(s)", a.clip));
+        }
 
         // No text at all: put the title on the first drop (or the loudest
         // block) — one impact card beats a show with no words.
@@ -1753,18 +2211,25 @@ fn expand_plan(
                 .or_else(|| a.blocks.iter().position(|(k, _, _)| k == "peak"));
             if let Some(bi) = at {
                 let (_, s, e) = &a.blocks[bi];
-                cues.push(Cue {
-                    clip: a.clip,
-                    beat: (*s * 4) as f64,
-                    beats: (((e - s + 1) * 4) as f64).min(16.0),
-                    kind: CueKind::Text(crate::text::TextSpec {
-                        text: title,
-                        style: TextStyle::Chrome,
-                        pos: TextPos::Center,
-                        lane: 0,
-                        anim: crate::text::TextAnim::Zoom,
-                    }),
-                });
+                let (s, end) = ((*s * 4) as f64, ((*e + 1) * 4) as f64);
+                let words: Vec<&str> = title.split_whitespace().collect();
+                let base = json!({"style": "chrome", "pos": "middle", "anim": "zoom", "fx": "punch", "size": 1.5});
+                let items = if (2..=4).contains(&words.len()) {
+                    word_hits(&base, &words, s, 1.0, end.min(s + 16.0))
+                } else {
+                    let mut b = base.clone();
+                    b["kind"] = json!("text");
+                    b["text"] = json!(title);
+                    b["beat"] = json!(s);
+                    b["beats"] = json!((end - s).min(16.0));
+                    vec![b]
+                };
+                for t in items {
+                    if let Ok(mut c) = raw_to_cue(&t, &[], scenes, routines) {
+                        c.clip = a.clip;
+                        cues.push(c);
+                    }
+                }
                 warnings.push(format!("clip {}: no text in plan — title card on the drop", a.clip));
             }
         }
@@ -1968,6 +2433,15 @@ fn raw_to_cue(item: &Value, clips: &[Clip], scenes: &[String], routines: &[Strin
                     Some("type" | "typewriter") => crate::text::TextAnim::Type,
                     _ => crate::text::TextAnim::Fade,
                 },
+                fx: match str_field(get("fx")).as_deref() {
+                    Some("punch") => crate::text::TextFx::Punch,
+                    Some("shake") => crate::text::TextFx::Shake,
+                    Some("strobe") => crate::text::TextFx::Strobe,
+                    Some("bounce") => crate::text::TextFx::Bounce,
+                    Some("shatter") => crate::text::TextFx::Shatter,
+                    _ => crate::text::TextFx::None,
+                },
+                size: get("size").and_then(as_f64).map(|s| (s as f32).clamp(0.5, 2.2)),
             })
         }
         other => return Err(anyhow!("unknown kind {other:?}")),
@@ -2098,6 +2572,7 @@ mod tests {
             drops: vec![16],
             builds: vec![],
             vocals: vec![],
+            fills: vec![],
         }
     }
 
@@ -2132,10 +2607,10 @@ mod tests {
                 _ => None,
             })
             .collect();
-        // aurora (block 0), forced cut to rave_hall at block 3 (the palette
-        // fallback), then the drop at block 4 would keep rave_hall — a flat
-        // drop — so it cuts back to aurora; levels (5), void (7).
-        assert_eq!(scene_names, vec!["aurora", "rave_hall", "aurora", "levels", "void"]);
+        // aurora (block 0), forced cut at block 3 (aurora ran 4 blocks), the
+        // flat drop at block 4 cuts away from both recent scenes (to levels,
+        // which block 5 then keeps), void (7).
+        assert_eq!(scene_names, vec!["aurora", "rave_hall", "levels", "void"]);
         // Final void lands inside the last 8 beats (128 - 8 = 120).
         let void_cue = cues
             .iter()
@@ -2143,17 +2618,19 @@ mod tests {
             .unwrap();
         assert!(void_cue.beat >= 120.0);
 
-        // Dancer: on with stock_arms at block 1, routine change to
-        // stock_heels at block 5, off at block 6.
+        // Dancer: on with stock_arms at block 1, off at block 6. The plan's
+        // stock_heels (calm) on the peak at block 5 is refused for pace.
         assert!(cues.iter().any(|c| matches!(c.kind, CueKind::Dancer(true))));
         assert!(
             cues.iter()
                 .any(|c| matches!(c.kind, CueKind::Dancer(false)))
         );
         assert!(
-            cues.iter()
+            !cues
+                .iter()
                 .any(|c| matches!(&c.kind, CueKind::Clip(n) if n == "stock_heels"))
         );
+        assert!(warnings.iter().any(|w| w.contains("pace")));
         assert!(
             cues.iter()
                 .any(|c| matches!(c.kind, CueKind::Look(Some(1))))
@@ -2256,9 +2733,71 @@ mod tests {
             .map(|c| c.beat)
             .collect();
         assert_eq!(voids, vec![120.0]);
-        // Title card on the drop.
+        // Title hits the drop a word per beat, punching.
         assert!(cues.iter().any(|c| c.beat == 64.0
-            && matches!(&c.kind, CueKind::Text(s) if s.text == "NORTHERN LIGHTS")));
+            && matches!(&c.kind, CueKind::Text(s) if s.text == "NORTHERN" && s.fx == crate::text::TextFx::Punch)));
+        assert!(cues.iter().any(|c| c.beat == 65.0
+            && matches!(&c.kind, CueKind::Text(s) if s.text == "LIGHTS" && s.lane == 1)));
+        // The peak never gets the calm routine, the sung breakdown does.
+        assert_ne!(routine_at(80.0).as_deref(), Some("stock_dress"));
+    }
+
+    #[test]
+    fn plan_cuts_fills_and_text_seq() {
+        let scenes: Vec<String> = ["aurora", "rave_hall", "tunnel", "levels", "void"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let mut a = analysis();
+        // Fills at the end of block 3 (into the drop) and inside block 5.
+        a.fills = vec![15, 21];
+        let text = r#"{"plan":[
+          {"block":0,"scene":"aurora"},
+          {"block":1,"scene":"levels","cuts":[{"beat":8,"scene":"rave_hall"},{"beat":0,"scene":"aurora"},{"beat":99,"scene":"aurora"}]},
+          {"block":2,"scene":"aurora"},
+          {"block":3,"scene":"levels"},
+          {"block":4,"scene":"rave_hall","text":{"text":"HOUSE ARREST NOW","seq":"beat","fx":"shake","size":1.8}},
+          {"block":5,"scene":"tunnel","fill":"strobe"},
+          {"block":6,"scene":"aurora","text":{"text":"FREE","at":6,"fx":"bounce"}},
+          {"block":7,"scene":"levels"}
+        ]}"#;
+        let (cues, _) = parse_response(text, &[clip()], &[a], &scenes, &[], &[]).unwrap();
+        let at = |b: f64| cues.iter().filter(move |c| c.beat == b);
+        // One valid in-block cut at beat 4+8; offsets 0 and 99 are rejected.
+        assert!(at(24.0).any(|c| matches!(&c.kind, CueKind::Scene(n) if n == "rave_hall")));
+        assert_eq!(
+            cues.iter().filter(|c| matches!(&c.kind, CueKind::Scene(_)) && c.beat > 16.0 && c.beat < 32.0).count(),
+            1
+        );
+        // The fill into the drop (bar 15) gets an automatic hit — on a
+        // non-flight scene, a strobe: four quarter-beat blackouts.
+        let strobe: Vec<f64> = cues
+            .iter()
+            .filter(|c| matches!(c.kind, CueKind::Blackout(true)) && c.beats == 0.25)
+            .map(|c| c.beat)
+            .collect();
+        assert_eq!(strobe, vec![62.0, 62.5, 63.0, 63.5]);
+        // The strobe asked for on the tunnel scene (bar 21) becomes a stutter.
+        assert!(!cues.iter().any(|c| matches!(c.kind, CueKind::Blackout(true)) && c.beat >= 84.0 && c.beat < 88.0));
+        assert!(at(86.0).any(|c| matches!(c.kind, CueKind::Scene(_))));
+        // A word per beat from the drop, the last word holding to block end.
+        let words: Vec<(f64, f64, String)> = cues
+            .iter()
+            .filter_map(|c| match &c.kind {
+                CueKind::Text(s) if c.beat >= 64.0 && c.beat < 80.0 => Some((c.beat, c.beats, s.text.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            words,
+            vec![
+                (64.0, 1.0, "HOUSE".to_string()),
+                (65.0, 1.0, "ARREST".to_string()),
+                (66.0, 14.0, "NOW".to_string()),
+            ]
+        );
+        // "at" lands a word mid-block.
+        assert!(at(102.0).any(|c| matches!(&c.kind, CueKind::Text(s) if s.text == "FREE" && s.fx == crate::text::TextFx::Bounce)));
     }
 
     #[test]
@@ -2269,7 +2808,7 @@ mod tests {
         for e in energy.iter_mut().skip(17) {
             *e = 0.9;
         }
-        let a = finish_analysis(0, "x", 120.0, 160.0, energy, vec![0.5; 40], vec![0.0; 40], vec![0.0; 40]);
+        let a = finish_analysis(0, "x", 120.0, 160.0, energy, vec![0.5; 40], vec![0.0; 40], vec![0.0; 40], vec![0.0; 40]);
         assert!(a.drops.contains(&17), "drops {:?}", a.drops);
         assert!(a.blocks.iter().any(|(_, s, _)| *s == 17), "blocks {:?}", a.blocks);
         // No block shorter than 2 bars.

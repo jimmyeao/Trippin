@@ -194,6 +194,11 @@ struct Slot {
     loop_bpm: f32,
     /// Beat index the loop phase is anchored to (lands on a downbeat).
     anchor: Option<f64>,
+    /// Bar start at the moment a new routine was asked for — the loop is
+    /// re-anchored there when it finishes loading, so a routine switched in
+    /// on a phrase plays from its first frame on that bar instead of
+    /// joining the old loop's phase mid-move.
+    pending_anchor: Option<f64>,
     /// Loop stretch actually in use (1 = original speed).
     stretch: f32,
     /// Stretch we'd like once the loop next wraps.
@@ -276,6 +281,10 @@ pub struct DancerLayer {
     /// timeline clip cue): the calm/tempo watchdogs mustn't swap it away.
     /// Lifts as soon as the auto-pilot itself picks a routine.
     pinned: bool,
+    /// Last beat position / downbeat slot seen — where a routine requested
+    /// between frames should start.
+    last_pos: f64,
+    last_downbeat: u64,
 }
 
 impl DancerLayer {
@@ -296,6 +305,8 @@ impl DancerLayer {
             calm_swap: false,
             bpm: 120.0,
             pinned: false,
+            last_pos: 0.0,
+            last_downbeat: 0,
         }
     }
 
@@ -321,6 +332,10 @@ impl DancerLayer {
             return;
         };
         self.slots[slot].current = Some(index);
+        // The bar this request falls in (the cue fires on the bar line).
+        let b = self.last_pos.floor();
+        let bar = b - (b as i64 - self.last_downbeat as i64).rem_euclid(4) as f64;
+        self.slots[slot].pending_anchor = Some(bar);
         if slot == 0 {
             // Any programmatic pick releases a hand-picked routine.
             self.pinned = false;
@@ -492,6 +507,9 @@ impl DancerLayer {
                         accent: clip.accent,
                     });
                     slot.loop_bpm = 0.0;
+                    if let Some(a) = slot.pending_anchor.take() {
+                        slot.anchor = Some(a);
+                    }
                     done.push((i, clip));
                 }
                 Err(e) => eprintln!("dancer clip failed: {e:#}"),
@@ -515,6 +533,8 @@ impl DancerLayer {
         disabled: &[String],
         auto_pick: bool,
     ) -> Option<DancerUniforms> {
+        self.last_pos = pos;
+        self.last_downbeat = downbeat;
         let target = if self.enabled && self.showing {
             1.0
         } else {

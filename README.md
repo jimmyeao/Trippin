@@ -490,20 +490,33 @@ boundaries and cue transitions land on the "one", not just on beats.
   audio onset envelope against the track's stored envelope, locks on when
   the same song is playing in the room and fires the cues at the matching
   position — a pre-programmed show that follows the DJ's deck.
+- **Text effects** (timeline text cues, or the AI): besides the style and
+  entrance animation, a card can **punch** (pops on every beat), **shake**
+  (jolts on kicks), **strobe** (eighth-note flicker), **bounce** (a wave
+  through the letters) or **shatter** (blocks jump apart on kicks).
 - **✦ AI show…** (editor toolbar) writes the cue list for you. Trippin
   analyses each clip locally — per-bar energy, onset density, a vocal
   likelihood, >5 kHz "air" — and segments the track into labelled ~4-bar
-  phrase blocks (intro / groove / build / drop / peak / breakdown / outro),
-  restarting a block on every build and drop so the big moments land on a
-  block edge. The model sees each scene's one-line description and each
-  routine's pace (calm / medium / fast), directs the show block by block
-  (scene, dancer, routine, look, fx, palette, text per phrase), and Trippin
-  expands that plan into cue blocks — enforcing the show rules itself: a
-  scene can't run longer than ~12 bars, breakdowns and intros only get calm
-  routines (drops and peaks never do), a sung breakdown puts the dancer in
-  neon, every drop changes the scene plus at least one more thing (a
-  blackout dip or an fx burst gets added if not), a track with no text gets
-  its title on the first drop, and `void` only ever plays a song out. With
+  phrase blocks (intro / groove / build / drop / peak / breakdown / outro).
+  Sections come from where the *sound* changes (onset density, vocals,
+  brightness, tonal balance), not just loudness, and drum fills — bars with
+  a roll or snare run — mark the phrase ends, so even a flat-energy house
+  track gets phrased. The model sees each scene's description and measured
+  visual energy (1-5), each routine's pace (calm / medium / fast), the
+  sections and fills, and directs the show block by block — with extra
+  scene cuts inside a block (1-2 bar scenes, accelerating cuts through a
+  build), a strobe / stutter / flash hit on fill bars, and text as a
+  performance (a word per beat on the drop, hook words landed on their
+  beat, beat-driven text effects). Trippin expands that plan into cue
+  blocks, enforcing the show rules itself: a scene can't run longer than
+  ~12 bars, a frantic scene can't sit in a breakdown or a near-static one
+  on a drop, breakdowns and intros only get calm routines (drops and peaks
+  never do), routines rotate on section starts, a sung breakdown puts the
+  dancer in neon, every drop changes the scene plus at least one more thing,
+  a fill leading into a new section or drop always gets a hit (never a
+  strobe on tunnel/flight scenes — those stutter), a track with no text gets
+  its title hit word by word on the first drop, and `void` only ever plays a
+  song out. With
   Anthropic, **Look up each track online first** (Settings, on by default)
   lets the model web-search each track's genre, mood and hook words before
   planning — up to 4 searches per build. BYOAI: Anthropic,

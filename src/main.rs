@@ -1255,7 +1255,7 @@ fn render_loop(
             }
             // 11% of screen height; squeeze wider text to fit the screen.
             let screen_asp = w as f32 / h.max(1) as f32;
-            let mut half_h = 0.11f32;
+            let mut half_h = 0.11f32 * ts.spec.size.unwrap_or(1.0).clamp(0.4, 2.5);
             let mut half_w = half_h * ts.aspect;
             if half_w > screen_asp * 0.92 {
                 half_w = screen_asp * 0.92;
@@ -1270,7 +1270,7 @@ fn render_loop(
                 life: 0.0,
                 hue: (slot as f32) * 0.37 + ts.spec.style.index() * 0.11,
                 anim: ts.spec.anim.index(),
-                _pad: 0.0,
+                fx: ts.spec.fx.index(),
             };
             any_text = true;
         }
@@ -1913,6 +1913,14 @@ impl ApplicationHandler<AppEvent> for App {
             .expect("spawn render thread");
 
         self.window = Some(window);
+        if let Ok(v) = std::env::var("TRIPPIN_TEXT_TEST") {
+            let (w, fx) = v.split_once('|').unwrap_or((v.as_str(), "none"));
+            let spec: text::TextSpec = serde_json::from_value(serde_json::json!({
+                "text": w, "style": "chrome", "anim": "zoom", "fx": fx, "size": 1.6
+            }))
+            .unwrap();
+            self.send(Msg::FireCue(timeline::CueKind::Text(spec)));
+        }
         if let Some(p) = self.start_song.take() {
             if p.extension()
                 .and_then(|e| e.to_str())

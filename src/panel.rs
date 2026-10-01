@@ -3337,6 +3337,14 @@ pub(crate) fn cue_param_ui(
                         changed |= ui.selectable_value(&mut spec.anim, v, v.label()).changed();
                     }
                 });
+            egui::ComboBox::from_id_salt(id.with("tf"))
+                .width(70.0)
+                .selected_text(spec.fx.label())
+                .show_ui(ui, |ui| {
+                    for v in crate::text::TextFx::ALL {
+                        changed |= ui.selectable_value(&mut spec.fx, v, v.label()).changed();
+                    }
+                });
             changed |= ui.selectable_value(&mut spec.lane, 0, "lane 1").changed();
             changed |= ui.selectable_value(&mut spec.lane, 1, "lane 2").changed();
             changed
