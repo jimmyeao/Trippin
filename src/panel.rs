@@ -1485,6 +1485,31 @@ fn inspector_body(
                         .fixed_decimals(0),
                 );
             });
+            // Audio source — saved, restarts capture live. A DJ controller
+            // fed straight from the software (Serato → controller's USB
+            // return) bypasses the system mix, so its input must be picked.
+            let combo_w = (ui.available_width() - 68.0).max(80.0);
+            ctl_row(ui, "Audio in", |ui| {
+                let sel = if s.audio_in.is_empty() {
+                    crate::audio::system_audio_label()
+                } else {
+                    s.audio_in.as_str()
+                };
+                egui::ComboBox::from_id_salt("audio_in")
+                    .width(combo_w)
+                    .selected_text(sel)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut s.audio_in,
+                            String::new(),
+                            crate::audio::system_audio_label(),
+                        );
+                        // Only built while the popup is open.
+                        for n in crate::audio::capture_device_names() {
+                            ui.selectable_value(&mut s.audio_in, n.clone(), n);
+                        }
+                    });
+            });
             // Audio in + groove: how steadily kicks are landing (sustained
             // low groove = the show's in a breakdown).
             ui.horizontal(|ui| {

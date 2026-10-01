@@ -248,6 +248,15 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   drops a connection whose port vanished, so replugging recovers. midir's
   macOS backend is CoreMIDI — the code isn't cfg-gated, but it hasn't been
   compiled for macOS yet.
+- **macOS audio:** ScreenCaptureKit hears only the *system output mix*.
+  DJ software routed straight to a controller's own interface (Serato → a
+  Rane's USB card) never enters it — capture shows "no signal" while music
+  plays. The fix is the controller's input device: `Settings::audio_in`
+  (panel picker under Show → director & sync, live-restarts the engine via
+  the settings diff in `render_loop`), or `--device`/`--mic` per run.
+  `audio_in` is a device-name substring resolved by `AudioEngine::start`,
+  and a stale value falls back to the default tap rather than blocking
+  startup.
 - egui layout rules the UI relies on (learned the hard way, review A1):
   - `ui.horizontal` children see the parent's `max_rect`, not the shrunk
     `cursor` — a `right_to_left` or `available_width()` inside one can

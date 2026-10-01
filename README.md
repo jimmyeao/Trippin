@@ -72,9 +72,12 @@ checkout uses the repo directories as before.
 **Audio:** macOS captures the system output mix directly via ScreenCaptureKit
 — the same API OBS uses — so no mic or BlackHole loopback is needed. macOS
 prompts once for screen/system-audio recording permission on first launch
-(macOS 13+; on older systems it falls back to the default input). `--mic`
-forces the microphone, and `--device "<name>"` picks a specific input or
-interface for a DJ booth-out. `--list-devices` shows what's available.
+(macOS 13+; on older systems it falls back to the default input). If the DJ
+software sends audio straight to a controller's own interface (e.g. Serato
+→ a Rane/Pioneer USB card) it never enters that mix — pick the controller's
+input under Show → "director & sync" → **Audio in** (saved; restarts live),
+or pass `--device "<name>"`. `--mic` forces the microphone, and
+`--list-devices` shows what's available.
 On macOS, presents are ungated from vsync and
 the render
 loop self-paces at the display's refresh — vsync-gated presents stall ~2
