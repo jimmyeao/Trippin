@@ -152,6 +152,7 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
 | `src/config.rs` | `Settings` (serde, `#[serde(default)]`), actions and hotkeys, and `data_dir()`. |
 | `src/midi.rs` | MIDI input (midir): one port, note-ons become `Action`s. |
 | `src/snap.rs` | Headless snapshot and benchmark rendering. |
+| `src/link.rs`, `unity/` | Unity stage prototype: UDP show-state feed out; Spout frames in (`spout::Receiver` into `gfx::Statics::ext`, binding 8 `ext_tex`) shown by `unity_stage.wgsl`. See `unity/README.md`. Spout is local-only — use NDI out for another machine. |
 | `tools/*.py` | Offline pipelines: mocap and stock video to dancer clips, and so on. |
 
 ## 6. Writing a scene

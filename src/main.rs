@@ -27,6 +27,7 @@
 mod ai;
 mod audio;
 mod beats;
+mod link;
 mod config;
 mod dancer;
 mod director;
@@ -59,6 +60,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// through every cue path: it only lives inside a show, and
 /// `apply_playhead` resets it on play / seek / stop.
 static STROBE: AtomicBool = AtomicBool::new(false);
+
+/// Frames are arriving from the external engine (Spout in) — the
+/// `unity_stage` scene is only in rotation while this holds.
+static EXT_LIVE: AtomicBool = AtomicBool::new(false);
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
@@ -172,6 +177,7 @@ fn usable_scenes(r: &Renderer, s: &Settings) -> Vec<usize> {
         // `void` is the timeline's "scenes off" baseline — reachable only
         // via an explicit cue, never by autopilot or next/prev.
         .filter(|&i| names[i] != "void")
+        .filter(|&i| names[i] != "unity_stage" || EXT_LIVE.load(Ordering::Relaxed))
         .filter(|&i| !s.disabled_scenes.contains(&names[i]))
         .filter(|&i| heavy_on || !heavy[i])
         .filter(|&i| s.flat_scenes || heavy[i])
@@ -488,6 +494,11 @@ fn render_loop(
     let mut last_status = Instant::now();
     let mut fps = 0.0f32;
     let mut flow = 0.0f64;
+    // External engine link (Settings > unity_link).
+    let mut link_out: Option<link::Link> = None;
+    #[cfg(windows)]
+    let mut ext_rx: Option<spout::Receiver> = None;
+    let mut ext_seq = 0u64;
     let mut flow_bpm = 120.0f32;
     let groove_log = std::env::var_os("TRIPPIN_GROOVE_LOG").is_some();
     let mut last_groove_log = Instant::now();
@@ -1257,6 +1268,34 @@ fn render_loop(
             clock4: clock4.map(|c| c as f32),
             misc4: [0.0; 4],
         };
+        // External engine link: feed out, frames in (Windows: Spout).
+        if s.unity_link {
+            if link_out.is_none() {
+                link_out = link::Link::new(s.link_port).ok();
+            }
+            if let Some(l) = link_out.as_mut() {
+                l.send(&u, r.scene_name(dir.scene), &s.palette, f.calm < 0.5);
+            }
+            #[cfg(windows)]
+            {
+                let rx = ext_rx.get_or_insert_with(|| spout::Receiver::start(&s.unity_sender));
+                let latest = rx.latest.lock().unwrap_or_else(|e| e.into_inner());
+                if let Some(fr) = latest.as_ref() {
+                    if fr.seq != ext_seq {
+                        ext_seq = fr.seq;
+                        r.upload_external(&fr.rgba);
+                    }
+                    EXT_LIVE.store(fr.at.elapsed().as_secs_f32() < 1.5, Ordering::Relaxed);
+                }
+            }
+        } else if link_out.is_some() || EXT_LIVE.load(Ordering::Relaxed) {
+            link_out = None;
+            #[cfg(windows)]
+            {
+                ext_rx = None;
+            }
+            EXT_LIVE.store(false, Ordering::Relaxed);
+        }
         // Text overlays: fade in over 0.35 s, out over 0.5 s; a faded-out
         // slot drops off (its texture stays bound but the shader skips it).
         let now_t = u.time;
@@ -1940,11 +1979,18 @@ impl ApplicationHandler<AppEvent> for App {
             .unwrap();
             self.send(Msg::FireCue(timeline::CueKind::Text(spec)));
         }
-        // Dev aid: fire any cue at startup, e.g. TRIPPIN_CUE_TEST='{"Strobe":true}'.
+        // Dev aid: fire any cue ~3 s after startup (once the render loop has
+        // settled), e.g. TRIPPIN_CUE_TEST='{"Strobe":true}'.
         if let Ok(v) = std::env::var("TRIPPIN_CUE_TEST") {
-            match serde_json::from_str::<timeline::CueKind>(&v) {
-                Ok(k) => self.send(Msg::FireCue(k)),
-                Err(e) => eprintln!("TRIPPIN_CUE_TEST: {e}"),
+            match (serde_json::from_str::<timeline::CueKind>(&v), self.render_tx.clone()) {
+                (Ok(k), Some(tx)) => {
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_secs(3));
+                        let _ = tx.send(Msg::FireCue(k));
+                    });
+                }
+                (Err(e), _) => eprintln!("TRIPPIN_CUE_TEST: {e}"),
+                _ => {}
             }
         }
         if let Some(p) = self.start_song.take() {

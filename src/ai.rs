@@ -747,6 +747,9 @@ pub fn build_show(
     if clips.is_empty() {
         return Err(anyhow!("no clips on the timeline"));
     }
+    // The external engine's scene is only live while it runs — never plan on it.
+    let scenes: Vec<String> = scenes.iter().filter(|s| *s != "unity_stage").cloned().collect();
+    let scenes = scenes.as_slice();
     let mut notes = Vec::new();
     let mut analyses = Vec::new();
     let mut grids = Vec::new();

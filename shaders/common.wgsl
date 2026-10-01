@@ -64,6 +64,9 @@ struct U {
 @group(0) @binding(6) var rsamp: sampler;
 // Half-res bloom of the previous stage (present.wgsl adds it back).
 @group(0) @binding(7) var bloom_tex: texture_2d<f32>;
+// External frame (Spout in, e.g. the Unity stage) — black when nothing's
+// connected. Scenes sample it with ext_frame().
+@group(0) @binding(8) var ext_tex: texture_2d<f32>;
 
 struct VsOut {
     @builtin(position) pos: vec4<f32>,

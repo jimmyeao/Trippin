@@ -211,6 +211,7 @@ pub fn run(args: &[String]) -> Result<()> {
             blue: &statics.blue_view,
             repeat: &statics.repeat,
             bloom: bloom.view(),
+            ext: &statics.ext_view,
         },
     );
     let out = device.create_texture(&wgpu::TextureDescriptor {
