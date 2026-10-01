@@ -134,9 +134,12 @@ the bar's "one" with the Beat This! model — the same one BeatDis uses —
 instead of guessing the bar from the bass. It fixes bars landing a beat or
 three off after drum-roll intros, and tempos that drifted most of a beat by
 the end of a long track. The ~80 MB model downloads once in the
-background; a song's first analysis takes a few seconds (about 30x faster
-than realtime), then it's cached. **Build cues** in the AI show builder
-re-detects the grid of clips added before the model arrived. Everything is saved to `trippin.json`, and
+background; a song's first analysis takes a few seconds, then it's cached.
+**Build cues** in the AI show builder re-detects the grid of clips added
+before the model arrived. Live, it re-checks the last 15 s of audio every
+5 s on a background thread (two cores, ~0.5 s per check): it moves the beat
+onto the real beat when the tracker has locked onto off-beat bass or hats,
+and sets the bar's "one" — the hand-tap downbeat key stays as an override. Everything is saved to `trippin.json`, and
 the visuals keep animating while the panel is being moved — rendering runs
 on its own thread.
 

@@ -2310,6 +2310,13 @@ fn main() -> Result<()> {
         eprintln!("panic on thread {:?}: {info}", thread.name());
         hook(info);
     }));
+    // Beat This! inference (rten) defaults to every physical core; two keep
+    // the live downbeat check (~0.8 s per 5 s window) clear of the render
+    // and audio threads. Beyond 4 threads it barely speeds up anyway.
+    if std::env::var_os("RTEN_NUM_THREADS").is_none() {
+        // SAFETY: first thing in main, before any other thread exists.
+        unsafe { std::env::set_var("RTEN_NUM_THREADS", "2") };
+    }
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--list-devices") {
         return audio::list_devices();

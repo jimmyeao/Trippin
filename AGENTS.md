@@ -132,7 +132,7 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
 | Path | What |
 |---|---|
 | `src/main.rs` | The winit app and CLI flags. `render_loop` runs on **its own thread** (Windows' modal move loop would freeze it otherwise). The event thread runs input and the egui panel. They share `Shared` (a `Mutex<Settings>`, a `Mutex<Status>`, and atomics) and talk over `mpsc::Msg`. |
-| `src/audio.rs`, `src/sysaudio.rs` | Capture (CPAL devices; the macOS system-output tap lives in `sysaudio.rs`), FFT, onsets and kicks (level-independent: flux > mean×1.8), tempo PLL, groove, `calm` (breakdown), the four-band vocabulary, and the triggered waveform. |
+| `src/audio.rs`, `src/sysaudio.rs` | Capture (CPAL devices; the macOS system-output tap lives in `sysaudio.rs`), FFT, onsets and kicks (level-independent: flux > mean×1.8), tempo PLL, groove, `calm` (breakdown), the four-band vocabulary, the triggered waveform, and the neural downbeat check (`nn_*`: a 15 s window every 5 s to a `beat-nn` worker thread). |
 | `src/beats.rs` | Beat This! (`beat-this` crate, ONNX via pure-Rust `rten`, as in BeatDis): model download to `<data dir>/models` (SHA-checked, from the public `BeatDis-models` release), detection with sub-frame refine, the constant-tempo grid fit, and the per-song grid cache (`<data dir>/beatcache`). |
 | `src/director.rs` | Auto-pilot: phrase cuts, drop cuts, intensity, and the beats/breakdown modes. |
 | `src/render.rs` | wgpu. Ping-pong Rgba16Float feedback targets, per-scene pipelines, hot reload, and the `Uniforms` struct (**must match `U` in `shaders/common.wgsl`**). |
@@ -265,6 +265,17 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   residual outliers and refit, and let only accepted beats' downbeats vote.
   Check changes with `--beats` on several tracks: real tempos come out as
   round numbers (125.00, 130.01, 140.87).
+- **Live beat phase** (`audio.rs` `nn_vote`): the onset comb locks onto the
+  strongest onsets, which in a lot of house are the off-beat bass/hats —
+  measured with `--groove-test`, the live "one" was on the bar only 5-30%
+  of the time. The neural window measures where real downbeats sit on the
+  live grid (circular mean), shifts the phase and stores `nn_bias`, which
+  `correct_phase` adds to the comb target so it doesn't drag the phase
+  back. Then the downbeats vote the bar (decisive when >=4 agree at 85%).
+  `--groove-test` prints `bar N` (live "one" vs the file grid; 0 = right),
+  `TRIPPIN_NO_NN=1` compares without the check, `TRIPPIN_NN_DEBUG=1` logs
+  each window. `main` caps rten at 2 threads (`RTEN_NUM_THREADS`); it
+  barely scales past 4 and would otherwise take every core.
 - `song::load` uses the Beat This! grid when `beats::ready()` (downloaded and
   `Settings::beat_model` on); downbeat agreement < 50% keeps its tempo but
   picks the bar by bass vote. `ai::build_show` returns re-detected grids
