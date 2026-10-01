@@ -75,7 +75,7 @@ prompts once for screen/system-audio recording permission on first launch
 (macOS 13+; on older systems it falls back to the default input). If the DJ
 software sends audio straight to a controller's own interface (e.g. Serato
 → a Rane/Pioneer USB card) it never enters that mix — pick the controller's
-input under Show → "director & sync" → **Audio in** (saved; restarts live),
+input under Perform → "director & sync" → **Audio in** (saved; restarts live),
 or pass `--device "<name>"`. `--mic` forces the microphone, and
 `--list-devices` shows what's available.
 On macOS, presents are ungated from vsync and
@@ -89,6 +89,7 @@ second display); `--vsync` restores them if that ever causes trouble.
 ```
 cargo run --release                         # capture what you hear (loopback / system audio)
 cargo run --release -- --list-devices       # list capture devices
+cargo run --release -- --probe-audio "Rane" # capture ~6 s from a device, print signal + BPM
 cargo run --release -- --list-midi          # list MIDI inputs (pad/key controllers)
 cargo run --release -- --device "Serato"    # a specific input (or output-as-loopback)
 cargo run --release -- --mic                # force the default input instead of system audio
