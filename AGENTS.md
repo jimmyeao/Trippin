@@ -104,6 +104,7 @@ cargo run --release -- --snap x --snap-calm 1        # preview breakdown (no dru
 cargo run --release -- --nowplaying       # prints what each now-playing source sees
 cargo run --release -- --list-devices     # capture devices (names for --device / the Audio in picker)
 cargo run --release -- --probe-audio [name]   # capture ~6 s, print band peaks + BPM; exits nonzero on silence
+cargo run --release -- --beats track.flac     # onset grid vs Beat This! grid + timings (TRIPPIN_BEATS_DEBUG=1: per-30 s tempo)
 cargo run --release -- --spout-grab <name> out.png   # receive one Spout frame (Windows)
 cargo run --release -- --ndi-monitor [name]
 cargo run --release -- --list-midi          # MIDI input ports (pad/key controllers)
@@ -132,6 +133,7 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
 |---|---|
 | `src/main.rs` | The winit app and CLI flags. `render_loop` runs on **its own thread** (Windows' modal move loop would freeze it otherwise). The event thread runs input and the egui panel. They share `Shared` (a `Mutex<Settings>`, a `Mutex<Status>`, and atomics) and talk over `mpsc::Msg`. |
 | `src/audio.rs`, `src/sysaudio.rs` | Capture (CPAL devices; the macOS system-output tap lives in `sysaudio.rs`), FFT, onsets and kicks (level-independent: flux > mean×1.8), tempo PLL, groove, `calm` (breakdown), the four-band vocabulary, and the triggered waveform. |
+| `src/beats.rs` | Beat This! (`beat-this` crate, ONNX via pure-Rust `rten`, as in BeatDis): model download to `<data dir>/models` (SHA-checked, from the public `BeatDis-models` release), detection with sub-frame refine, the constant-tempo grid fit, and the per-song grid cache (`<data dir>/beatcache`). |
 | `src/director.rs` | Auto-pilot: phrase cuts, drop cuts, intensity, and the beats/breakdown modes. |
 | `src/render.rs` | wgpu. Ping-pong Rgba16Float feedback targets, per-scene pipelines, hot reload, and the `Uniforms` struct (**must match `U` in `shaders/common.wgsl`**). |
 | `src/gfx.rs`, `shaders/bloom.wgsl` | The baked 64³ noise volume and blue noise, and the bloom chain. |
@@ -253,6 +255,20 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   drops a connection whose port vanished, so replugging recovers. midir's
   macOS backend is CoreMIDI — the code isn't cfg-gated, but it hasn't been
   compiled for macOS yet.
+- **Beat This! grid fit** (`beats.rs::fit_grid`): the model sometimes emits
+  *confident* beats at ~1.5x tempo plus dozens of junk downbeats through a
+  breakdown. Counting those as beats skewed tempos by 2-3%, and a slightly
+  wrong tempo spreads the downbeat vote over all four phases. So: refine
+  beat times sub-frame (raw peaks are on a 20 ms grid), take the period
+  from steady runs that agree with the median, number each beat against
+  the previous accepted one and skip beats between grid lines, reject
+  residual outliers and refit, and let only accepted beats' downbeats vote.
+  Check changes with `--beats` on several tracks: real tempos come out as
+  round numbers (125.00, 130.01, 140.87).
+- `song::load` uses the Beat This! grid when `beats::ready()` (downloaded and
+  `Settings::beat_model` on); downbeat agreement < 50% keeps its tempo but
+  picks the bar by bass vote. `ai::build_show` returns re-detected grids
+  (`ShowBuild::grids`) and the editor applies them before adding cues.
 - **AI show builder** (`ai.rs::anthropic`): the default is
   `claude-sonnet-5-5`. Claude 5-family models reject a forced
   `tool_choice` (`tool`/`any`) with a 400, so `emit_plan` is offered with

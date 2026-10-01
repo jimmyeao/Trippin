@@ -344,6 +344,9 @@ pub struct Settings {
     /// Let the model look each track up online (Anthropic web search)
     /// before planning — genre, mood, hook words.
     pub ai_web_search: bool,
+    /// Neural beat/downbeat tracking (Beat This!) for song grids — the
+    /// model downloads on first use.
+    pub beat_model: bool,
     pub latency_ms: f32,
     /// Audio capture source: a device-name substring resolved like
     /// `--device`. "" = the platform default tap (ScreenCaptureKit output
@@ -443,6 +446,7 @@ impl Default for Settings {
             ai_model: String::new(),
             ai_key: String::new(),
             ai_web_search: true,
+            beat_model: true,
             latency_ms: 30.0,
             audio_in: String::new(),
             show_panel: true,

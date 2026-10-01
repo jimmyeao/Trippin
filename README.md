@@ -90,6 +90,7 @@ second display); `--vsync` restores them if that ever causes trouble.
 cargo run --release                         # capture what you hear (loopback / system audio)
 cargo run --release -- --list-devices       # list capture devices
 cargo run --release -- --probe-audio "Rane" # capture ~6 s from a device, print signal + BPM
+cargo run --release -- --beats track.flac   # old onset grid vs the Beat This! grid, with timings
 cargo run --release -- --list-midi          # list MIDI inputs (pad/key controllers)
 cargo run --release -- --device "Serato"    # a specific input (or output-as-loopback)
 cargo run --release -- --mic                # force the default input instead of system audio
@@ -124,9 +125,18 @@ post effect + strength — picks apply live to the output, so the panel
 doubles as a preview), **Stream** (OBS output, now playing, branding,
 ticker, clips — see below), **Timeline** (saved shows), **Keys** (MIDI
 input and rebindable hotkeys: click Rebind, then press a key) and
-**Settings** (audio input, latency, mark-downbeat, what the auto-pilot may
-do — breakdowns, drop cuts, random order — and the AI show builder's
-provider, model and API key). Everything is saved to `trippin.json`, and
+**Settings** (audio input, latency, mark-downbeat, neural beat tracking,
+what the auto-pilot may do — breakdowns, drop cuts, random order — and the
+AI show builder's provider, model and API key).
+
+**Neural beat tracking** (Settings, on by default) finds song tempos and
+the bar's "one" with the Beat This! model — the same one BeatDis uses —
+instead of guessing the bar from the bass. It fixes bars landing a beat or
+three off after drum-roll intros, and tempos that drifted most of a beat by
+the end of a long track. The ~80 MB model downloads once in the
+background; a song's first analysis takes a few seconds (about 30x faster
+than realtime), then it's cached. **Build cues** in the AI show builder
+re-detects the grid of clips added before the model arrived. Everything is saved to `trippin.json`, and
 the visuals keep animating while the panel is being moved — rendering runs
 on its own thread.
 

@@ -77,7 +77,7 @@ struct AiJob {
     busy: bool,
     status: String,
     /// Finished build: cues + a summary note, or the error message.
-    result: Option<Result<(Vec<Cue>, String), String>>,
+    result: Option<Result<crate::ai::ShowBuild, String>>,
 }
 
 /// What part of a cue block is being dragged.
@@ -503,8 +503,14 @@ impl Editor {
                 .take()
             {
                 match res {
-                    Ok((cues, note)) => {
+                    Ok(crate::ai::ShowBuild { cues, grids, note }) => {
                         if let Some(doc) = doc_opt.as_mut() {
+                            for (i, bpm, first_beat) in grids {
+                                if let Some(c) = doc.clips.get_mut(i) {
+                                    c.bpm = bpm;
+                                    c.first_beat = first_beat;
+                                }
+                            }
                             if *ai_replace {
                                 doc.cues.clear();
                             }
@@ -574,7 +580,7 @@ impl Editor {
                                     let mut j = job.lock().unwrap_or_else(|e| e.into_inner());
                                     j.busy = false;
                                     j.status = match &r {
-                                        Ok((_, n)) => n.clone(),
+                                        Ok(b) => b.note.clone(),
                                         Err(e) => e.clone(),
                                     };
                                     j.result = Some(r);

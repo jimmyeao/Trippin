@@ -3449,6 +3449,50 @@ fn settings_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<
             {
                 cmd.push(UiCommand::Do(Action::MarkDownbeat));
             }
+            // Neural beat tracking (Beat This!): song grids for timelines
+            // and the AI builder, plus the live downbeat check.
+            if ui
+                .checkbox(&mut s.beat_model, "Neural beat tracking")
+                .on_hover_text(
+                    "Finds the tempo and the bar's \"one\" with the Beat This! model \
+                     (as in BeatDis) instead of guessing from the bass — fixes bars \
+                     landing early or late after drum-roll intros. Downloads ~80 MB once.",
+                )
+                .changed()
+                && s.beat_model
+            {
+                crate::beats::ensure_models();
+            }
+            crate::beats::set_enabled(s.beat_model);
+            if s.beat_model {
+                use crate::beats::ModelState;
+                match crate::beats::state() {
+                    ModelState::Ready => {
+                        ui.small("Model ready.");
+                    }
+                    ModelState::Downloading { received, total, .. } => {
+                        ui.small(if total > 0 {
+                            format!("Downloading the model… {} of {} MB", received >> 20, total >> 20)
+                        } else {
+                            "Downloading the model…".to_string()
+                        });
+                    }
+                    ModelState::Failed(e) => {
+                        ui.horizontal(|ui| {
+                            ui.small(egui::RichText::new("Model download failed.").color(WARN))
+                                .on_hover_text(e);
+                            if ui.small_button("Retry").clicked() {
+                                crate::beats::ensure_models();
+                            }
+                        });
+                    }
+                    ModelState::Missing | ModelState::Unknown => {
+                        if ui.small_button("Download the model").clicked() {
+                            crate::beats::ensure_models();
+                        }
+                    }
+                }
+            }
         });
         ui.add_space(12.0);
         card().show(ui, |ui| {

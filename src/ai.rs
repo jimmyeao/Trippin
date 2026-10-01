@@ -534,15 +534,27 @@ pub fn build_show(
     scenes: &[String],
     routines: &[String],
     conf: &AiConf,
-) -> Result<(Vec<Cue>, String)> {
+) -> Result<ShowBuild> {
     if clips.is_empty() {
         return Err(anyhow!("no clips on the timeline"));
     }
     let mut notes = Vec::new();
     let mut analyses = Vec::new();
-    for (i, c) in clips.iter().enumerate() {
+    let mut grids = Vec::new();
+    let mut clips = clips.to_vec();
+    for (i, c) in clips.iter_mut().enumerate() {
         match crate::song::load(&c.song) {
-            Ok(song) => analyses.push(analyze_song(i, &song, c.bpm, c.first_beat)),
+            Ok(song) => {
+                // A fresher grid than the clip's (Beat This! arrived since it
+                // was added): adopt it, so blocks and cues sit on real bars.
+                if (song.bpm - c.bpm).abs() > 1e-3 || (song.first_beat - c.first_beat).abs() > 1e-3
+                {
+                    grids.push((i, song.bpm, song.first_beat));
+                    c.bpm = song.bpm;
+                    c.first_beat = song.first_beat;
+                }
+                analyses.push(analyze_song(i, &song, c.bpm, c.first_beat));
+            }
             Err(e) => {
                 analyses.push(analyze_cached(i, c));
                 notes.push(format!(
@@ -558,14 +570,27 @@ pub fn build_show(
     let text = request_json(conf, &system, &user)
         .with_context(|| format!("{} request failed", conf.provider.label()))?;
     let (cues, mut warnings) =
-        parse_response(&text, clips, &analyses, scenes, routines, &energies)?;
+        parse_response(&text, &clips, &analyses, scenes, routines, &energies)?;
+    if !grids.is_empty() {
+        notes.insert(0, format!("re-detected the beat grid of {} clip(s)", grids.len()));
+    }
     notes.append(&mut warnings);
     let note = if notes.is_empty() {
         format!("{} cues", cues.len())
     } else {
         format!("{} cues — {}", cues.len(), notes.join("; "))
     };
-    Ok((cues, note))
+    Ok(ShowBuild { cues, grids, note })
+}
+
+/// A finished AI build.
+pub struct ShowBuild {
+    pub cues: Vec<Cue>,
+    /// Clips whose beat grid was re-detected: (clip index, bpm, first beat).
+    /// Apply before adding `cues` — they're placed on the new grids.
+    pub grids: Vec<(usize, f64, f64)>,
+    /// Human-readable summary + warnings.
+    pub note: String,
 }
 
 fn system_prompt() -> String {

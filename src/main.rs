@@ -26,6 +26,7 @@
 
 mod ai;
 mod audio;
+mod beats;
 mod config;
 mod dancer;
 mod director;
@@ -2292,7 +2293,7 @@ fn ai_build(path: &std::path::Path) -> Result<()> {
         song.bpm,
         (song.duration - song.first_beat) * song.bpm / 60.0
     );
-    let (cues, note) = ai::build_show(&[clip], &scenes, &routines, &conf)?;
+    let ai::ShowBuild { cues, note, .. } = ai::build_show(&[clip], &scenes, &routines, &conf)?;
     println!("{note}");
     for cue in &cues {
         println!("  {:>6.1} bt  clip {}  {:?}", cue.beat, cue.clip, cue.kind);
@@ -2386,6 +2387,11 @@ fn main() -> Result<()> {
         println!("{}", ai::analyze_file(std::path::Path::new(&p))?);
         return Ok(());
     }
+    // `--beats track.mp3`: compare the autocorrelation grid with Beat This!
+    // (downloads the model on first use) and time the inference.
+    if let Some(p) = arg_value(&args, "--beats") {
+        return beats::beat_test(std::path::Path::new(&p));
+    }
     // `--ai-build track.mp3` runs the whole pipeline end-to-end (analysis,
     // provider call, cue expansion) and prints the cue list — a preview of
     // what "Build cues" in the editor would generate.
@@ -2404,6 +2410,11 @@ fn main() -> Result<()> {
     let env = audio::EnvLog::new();
 
     let mut settings = Settings::load();
+    // Neural beat tracking: fetch the model in the background on first run.
+    beats::set_enabled(settings.beat_model);
+    if settings.beat_model {
+        beats::ensure_models();
+    }
     // Audio source: --device/--mic win for this run; otherwise the saved
     // panel choice ("" = the platform default tap).
     let device: Option<String> = cli_device.map(str::to_string).or_else(|| {
