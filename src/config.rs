@@ -341,6 +341,9 @@ pub struct Settings {
     pub ai_endpoint: String,
     pub ai_model: String,
     pub ai_key: String,
+    /// Let the model look each track up online (Anthropic web search)
+    /// before planning — genre, mood, hook words.
+    pub ai_web_search: bool,
     pub latency_ms: f32,
     /// Audio capture source: a device-name substring resolved like
     /// `--device`. "" = the platform default tap (ScreenCaptureKit output
@@ -439,6 +442,7 @@ impl Default for Settings {
             ai_endpoint: String::new(),
             ai_model: String::new(),
             ai_key: String::new(),
+            ai_web_search: true,
             latency_ms: 30.0,
             audio_in: String::new(),
             show_panel: true,

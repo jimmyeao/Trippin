@@ -538,7 +538,7 @@ impl Editor {
                             conf.model.clone()
                         };
                         ui.label(format!("{} · {model}", conf.provider.label()));
-                        ui.small("Change the provider, model or API key in the control panel → Settings (F1).");
+                        ui.small("Change the provider, model or API key on the control panel's Settings tab (F1).");
                         if conf.key.is_empty() && conf.provider != crate::ai::AiProvider::Compatible {
                             ui.colored_label(t::WARN, "No API key set.");
                         }

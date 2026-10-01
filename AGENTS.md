@@ -120,6 +120,9 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   so don't clobber them**.
 - **Key injection:** `SendKeys` sometimes misses the winit window.
   `PostMessage` WM_KEYDOWN/UP to the hwnd is reliable.
+- The agent Bash tool's heredocs expand `\n` into real newlines, which
+  silently breaks Rust string literals edited through `python - <<EOF`.
+  Write edit scripts to a file (or use the Edit tool) instead.
 - The dev box has no ffmpeg on PATH. imageio-ffmpeg's binary (Python) works
   via the `ffmpeg_path` setting.
 
@@ -142,7 +145,7 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
 | `src/output.rs` | The output tap. It re-runs present at the output size, reads it back asynchronously, and feeds the sinks (NDI, Spout, recorder). |
 | `src/ndi.rs`, `src/spout.rs` | NDI (runtime loaded dynamically), and a native Spout2 sender (D3D11 shared texture plus the Spout shared-memory registry). |
 | `src/rec.rs` | Clip recording: the ffmpeg replay buffer and set recording. |
-| `src/timeline.rs`, `src/song.rs`, `src/editor.rs`, `src/ai.rs` | The timeline show editor (F2), song playback, and the AI show builder. |
+| `src/timeline.rs`, `src/song.rs`, `src/editor.rs`, `src/ai.rs` | The timeline show editor (F2), song playback, and the AI show builder (local analysis → prompt → plan → `expand_plan` rules → cues). |
 | `src/panel.rs` | The egui control panel. Tabs: Perform, Dancer & FX, Stream, Timeline, Keys, Settings. App-wide preferences (audio in, latency, director rules, AI provider/key) live on **Settings** (`settings_tab`), not in collapsibles on other pages or in the timeline editor. |
 | `src/config.rs` | `Settings` (serde, `#[serde(default)]`), actions and hotkeys, and `data_dir()`. |
 | `src/midi.rs` | MIDI input (midir): one port, note-ons become `Action`s. |
@@ -260,6 +263,16 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   and endpoint are user-editable), and the fallback only to
   api.anthropic.com. When bumping a default model, add the old id to the
   retired-id reset in `Settings::load`.
+  - With `Settings::ai_web_search` the request also offers the
+    `web_search` server tool (max 4 uses); a `pause_turn` stop is resumed
+    by re-sending with the paused content appended as the assistant turn.
+  - Show rules live in two places: the system prompt asks for them, and
+    `expand_plan` enforces them (routine pace by block kind via
+    `routine_energies`/`CALM_MAX`, neon look in sung calm blocks, drop
+    impact top-up, title card fallback, mid-song `void` ignored). Change
+    both together. Unknown routine names are replaced by pace, not dropped.
+  - Analysis runs on the *timeline clip's* grid (`analyze_song(…, c.bpm,
+    c.first_beat)`) so an editor-nudged grid still lines bars up with cues.
 - **macOS audio:** ScreenCaptureKit hears only the *system output mix*.
   DJ software routed straight to a controller's own interface (Serato → a
   Rane's USB card) never enters it — capture shows "no signal" while music

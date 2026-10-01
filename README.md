@@ -480,16 +480,26 @@ boundaries and cue transitions land on the "one", not just on beats.
 - **✦ AI show…** (editor toolbar) writes the cue list for you. Trippin
   analyses each clip locally — per-bar energy, onset density, a vocal
   likelihood, >5 kHz "air" — and segments the track into labelled ~4-bar
-  phrase blocks (intro / groove / build / drop / peak / breakdown / outro).
-  The model directs the show block by block (scene, dancer, routine, look,
-  fx, palette, text per phrase), and Trippin expands that plan into cue blocks —
-  enforcing variety itself (a scene can't run longer than ~12 bars, dancer
-  routines rotate, `void` only ever plays a song out). BYOAI: Anthropic,
+  phrase blocks (intro / groove / build / drop / peak / breakdown / outro),
+  restarting a block on every build and drop so the big moments land on a
+  block edge. The model sees each scene's one-line description and each
+  routine's pace (calm / medium / fast), directs the show block by block
+  (scene, dancer, routine, look, fx, palette, text per phrase), and Trippin
+  expands that plan into cue blocks — enforcing the show rules itself: a
+  scene can't run longer than ~12 bars, breakdowns and intros only get calm
+  routines (drops and peaks never do), a sung breakdown puts the dancer in
+  neon, every drop changes the scene plus at least one more thing (a
+  blackout dip or an fx burst gets added if not), a track with no text gets
+  its title on the first drop, and `void` only ever plays a song out. With
+  Anthropic, **Look up each track online first** (Settings, on by default)
+  lets the model web-search each track's genre, mood and hook words before
+  planning — up to 4 searches per build. BYOAI: Anthropic,
   OpenAI, Gemini, or any OpenAI-compatible endpoint (Groq, Mistral,
   Ollama…); pick the provider and paste the key under control panel →
   **Settings** (saved to `trippin.json`), or leave it blank to use the
-  provider's usual env var (`ANTHROPIC_API_KEY` etc.). Nothing but the feature summary leaves the
-  machine — no audio is uploaded. Preview the summary with
+  provider's usual env var (`ANTHROPIC_API_KEY` etc.). Nothing but the
+  feature summary and the track names leaves the machine — no audio is
+  uploaded. Preview the summary with
   `--analyze <file>`, or run the whole build without the editor with
   `--ai-build <file>` (prints every cue).
 

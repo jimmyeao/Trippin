@@ -108,6 +108,8 @@ pub struct AiConf {
     pub endpoint: String,
     pub model: String,
     pub key: String,
+    /// Offer the provider's web search (Anthropic only for now).
+    pub web_search: bool,
 }
 
 impl AiConf {
@@ -141,6 +143,7 @@ impl AiConf {
                 s.ai_model.trim().into()
             },
             key,
+            web_search: s.ai_web_search,
         }
     }
 }
@@ -177,15 +180,22 @@ pub struct ClipAnalysis {
     pub vocals: Vec<(usize, usize)>,
 }
 
-/// Full analysis from decoded audio (`Song::load` result).
-pub fn analyze_song(clip: usize, song: &crate::song::Song) -> ClipAnalysis {
+/// Full analysis from decoded audio (`Song::load` result), measured on the
+/// grid `bpm` / `first_beat` — pass the timeline clip's grid, not the
+/// song's, so a grid nudged in the editor still lines the bars up with the
+/// beats the cues are placed on.
+pub fn analyze_song(
+    clip: usize,
+    song: &crate::song::Song,
+    bpm: f64,
+    first_beat: f64,
+) -> ClipAnalysis {
     let (rms, mid_share, air_share, mid_flat) = band_frames(&song.mono, song.sr);
     let vocal = vocal_envelope(&rms, &mid_share, &mid_flat);
-    let hops_per_beat = song.sr as f64 / HOP as f64 / (song.bpm / 60.0);
-    let beats = ((song.duration - song.first_beat).max(0.0)) * song.bpm / 60.0;
+    let beats = ((song.duration - first_beat).max(0.0)) * bpm / 60.0;
     let bars = (beats / 4.0).ceil() as usize;
     let hop_at_beat =
-        |b: f64| ((song.first_beat + b * 60.0 / song.bpm) * song.sr as f64 / HOP as f64) as usize;
+        |b: f64| ((first_beat + b * 60.0 / bpm) * song.sr as f64 / HOP as f64) as usize;
 
     let mut energy = vec![0.0f32; bars];
     let mut onsets = vec![0.0f32; bars];
@@ -208,11 +218,10 @@ pub fn analyze_song(clip: usize, song: &crate::song::Song) -> ClipAnalysis {
         voc[bar] = mean(&vocal[h0.min(vocal.len() - 1)..h1.min(vocal.len())]);
         air[bar] = mean(&air_share[h0.min(air_share.len() - 1)..h1.min(air_share.len())]);
     }
-    let _ = hops_per_beat;
     norm_inplace(&mut energy);
     norm_inplace(&mut onsets);
     norm_inplace(&mut voc);
-    finish_analysis(clip, &song.name, song.bpm, beats, energy, onsets, voc, air)
+    finish_analysis(clip, &song.name, bpm, beats, energy, onsets, voc, air)
 }
 
 /// Analysis from a clip's cached strip data (used when the audio file is
@@ -405,27 +414,43 @@ fn finish_analysis(
         vocals.push((s, bars - 1));
     }
 
-    // Sections: 4-bar blocks — musical phrases are 8/16 beats anyway, and
+    // Sections: ~4-bar blocks — musical phrases are 8/16 beats anyway, and
     // block-grain keeps the labels clean (no 1-bar thrash between classes).
+    // Blocks restart on every drop and build start: counting 4s from bar 0
+    // lets one odd intro bar push every drop into the middle of a block, so
+    // the scene change lands bars late.
+    let mut anchors: Vec<usize> = drops
+        .iter()
+        .copied()
+        .chain(builds.iter().map(|&(s, _)| s))
+        .filter(|&b| b > 0 && b < bars)
+        .collect();
+    anchors.sort_unstable();
+    anchors.dedup();
     let mut sections: Vec<(String, usize, usize)> = Vec::new();
     let mut blocks: Vec<(String, usize, usize)> = Vec::new();
     let mut seen_loud = false;
     let mut b = 0usize;
     while b < bars {
-        let e = (b + 4).min(bars) - 1;
-        // A short tail merges into the previous block rather than becoming
-        // its own mislabelled sliver.
-        if e + 1 == bars && e - b + 1 < 4 && !sections.is_empty() {
+        let mut e = (b + 4).min(bars) - 1;
+        if let Some(&a) = anchors.iter().find(|&&a| a > b && a <= e) {
+            e = a - 1;
+        }
+        // A 1-bar sliver before an anchor, or a short tail, merges into the
+        // previous block rather than becoming its own mislabelled block.
+        let sliver = e - b + 1 < 2 || (e + 1 == bars && e - b + 1 < 4);
+        if sliver && !blocks.is_empty() {
+            let bk = blocks.last_mut().unwrap();
+            bk.2 = e;
             let prev = sections.last_mut().unwrap();
             prev.2 = e;
-            if let Some(bk) = blocks.last_mut() {
-                bk.2 = e;
-            }
             // A quiet tail reads as the outro, not another breakdown.
-            if prev.0 == "breakdown" {
+            if e + 1 == bars && prev.0 == "breakdown" {
                 prev.0 = "outro".into();
+                bk.0 = "outro".into();
             }
-            break;
+            b = e + 1;
+            continue;
         }
         let m = mean(&sm[b..=e]);
         let has_drop = drops.iter().any(|&d| (b..=e).contains(&d));
@@ -517,7 +542,7 @@ pub fn build_show(
     let mut analyses = Vec::new();
     for (i, c) in clips.iter().enumerate() {
         match crate::song::load(&c.song) {
-            Ok(song) => analyses.push(analyze_song(i, &song)),
+            Ok(song) => analyses.push(analyze_song(i, &song, c.bpm, c.first_beat)),
             Err(e) => {
                 analyses.push(analyze_cached(i, c));
                 notes.push(format!(
@@ -527,11 +552,13 @@ pub fn build_show(
             }
         }
     }
+    let energies = routine_energies(routines);
     let system = system_prompt();
-    let user = user_prompt(&analyses, scenes, routines);
+    let user = user_prompt(&analyses, scenes, routines, &energies);
     let text = request_json(conf, &system, &user)
         .with_context(|| format!("{} request failed", conf.provider.label()))?;
-    let (cues, mut warnings) = parse_response(&text, clips, &analyses, scenes, routines)?;
+    let (cues, mut warnings) =
+        parse_response(&text, clips, &analyses, scenes, routines, &energies)?;
     notes.append(&mut warnings);
     let note = if notes.is_empty() {
         format!("{} cues", cues.len())
@@ -571,38 +598,48 @@ block's scene plays the song out.\n\
 - Vary the scene with the music: a new scene whenever the block's kind or energy level \
 changes is the norm; 2-3 consecutive blocks on one scene is the MAXIMUM, and only inside \
 one long uniform section. Across a whole track expect 5-8 different scenes.\n\
-- Match mood to energy: sparse/dark scenes for intro/breakdown/outro; the most intense \
-scenes for drop/peak. Read the flow map — it tells you the song's shape.\n\
-- The final block may be scene \"void\" ONLY when it's the song's actual outro/fade — \
-never void mid-track, never as a transition.\n\
-- dancer: \"off\" for intro, breakdowns and outro; on for groove/build/drop/peak, \
-especially vocal spans. She should be off for roughly a third of a typical track — \
-never on start to finish. Name a ROUTINE (from the routine list) at least every other \
-time she comes back on so the movement varies — never one routine for the whole track.\n\
-- builds: brighten/accelerate — trails on, canon on, or a sharper scene.\n\
-- drop blocks: the scene change lands ON the drop; an optional \"blackout\":true on the \
-block just before reads well.\n\
-- vocal spans (v in the vocals map): dancer + \"look\":1 (neon) reads well.\n\
-- fx: DO use it — a show with no transforms looks flat. \"auto\" on a drop/peak block \
-(and \"off\" a few blocks later), a kaleido for a trippy breakdown stretch, or a mirror \
-for a section are all good. Typically 1-3 fx stretches per track, never the whole song.\n\
-- palette: recolours the WHOLE look — use a change to mark a big section shift \
-(drop, breakdown) rather than every block. 1-3 switches per track, tops.\n\
-- text: 0-2 cards for the whole track, meaningful words only (song/artist name, a \
-shout-out). NEVER literal labels like \"DROP\" or \"BUILD\". When in doubt, omit.\n\
-- Contrast beats chaos — don't stack dancer+trails+canon+fx on every block.\n\
+- Pick scenes by their \"about\" line: mellow, dark or slow scenes for intro, breakdown and \
+outro; the biggest, fastest, brightest scenes for drop and peak; something that \
+accelerates for a build.\n\
+- \"void\" is a fade to black: ONLY on the final block, and only when it's the song's \
+outro. Never anywhere else.\n\
+- Dancer pace — every routine is tagged calm, medium or fast:\n\
+  - intro, breakdown, outro: dancer \"off\", or a CALM routine. Never medium or fast.\n\
+  - groove: medium. build: medium, going fast at the drop. drop and peak: FAST.\n\
+  - Name a routine every time she comes back on, and switch routine every 2-3 blocks \
+while she's on — never one routine for a whole track. Off for roughly a third of a track.\n\
+- Vocals (a block's \"vocal\" share, and v in the vocals map): a sung breakdown is the \
+dancer's moment — calm routine with \"look\":1 (neon). An instrumental breakdown or intro: \
+dancer off. When vocals come back in a groove, bring her back on.\n\
+- Drops are the big moments. On EVERY drop block change the scene AND at least one more \
+thing: \"blackout\":true (dips the beat before), \"fx\":\"auto\" or a kaleido, a palette \
+change, a look change, or a text hit. Release the fx a block or two later (\"fx\":\"off\") \
+so the next drop can hit again.\n\
+- Contrast: a breakdown into a drop is the biggest change in the show — dark, calm and \
+still, then bright, fast and transformed. Quiet blocks should actually be quiet; don't stack \
+dancer+trails+canon+fx everywhere.\n\
+- builds: brighten and accelerate — trails on, canon on, or a sharper scene.\n\
+- text: 2-4 short impact cards per track. The clip's \"title\" on the first drop or the \
+first big vocal entry; one or two punchy words from the title on later drops. Never \
+generic labels like \"DROP\" or \"BUILD\". Vary style; anim \"zoom\" or \"drop\" for drops, \
+\"type\" or \"fade\" in quiet blocks. A card lasts its block.\n\
+- fx: a show with no transforms looks flat — 1-3 fx stretches per track, never the \
+whole song.\n\
+- palette: recolours the WHOLE look — mark big section shifts (drop, breakdown) with it, \
+not every block. 1-3 switches per track.\n\
 \n\
-Example excerpt (blocks 0-7 of a clip — note the per-block decisions, dancer toggling, \
-routines changing):\n\
+Example excerpt (blocks 0-7 of a clip: intro, groove, groove, build, drop, peak, sung \
+breakdown, instrumental breakdown — note the drop stacking changes, the pace following \
+the blocks, and the calm neon dancer in the sung breakdown):\n\
 {\"plan\":[\n\
- {\"block\":0,\"scene\":\"aurora\",\"dancer\":\"off\",\"text\":{\"text\":\"NORTHERN\",\"style\":\"neon\",\"pos\":\"top\"}},\n\
+ {\"block\":0,\"scene\":\"aurora\",\"dancer\":\"off\"},\n\
  {\"block\":1,\"scene\":\"levels\"},\n\
  {\"block\":2,\"scene\":\"pulse_grid\",\"dancer\":\"stock_disco\"},\n\
- {\"block\":3,\"scene\":\"pulse_grid\",\"trails\":true},\n\
- {\"block\":4,\"scene\":\"rave_hall\",\"dancer\":\"stock_heels\",\"look\":1,\"blackout\":true},\n\
- {\"block\":5,\"scene\":\"chrome_bloom\",\"canon\":\"on\"},\n\
- {\"block\":6,\"scene\":\"aurora\",\"dancer\":\"off\",\"fx\":\"kaleido6\"},\n\
- {\"block\":7,\"scene\":\"gyroid_drift\",\"fx\":\"off\"}\n\
+ {\"block\":3,\"scene\":\"pulse_grid\",\"trails\":true,\"canon\":\"on\"},\n\
+ {\"block\":4,\"scene\":\"rave_hall\",\"dancer\":\"stock_spin\",\"blackout\":true,\"fx\":\"auto\",\"text\":{\"text\":\"NORTHERN LIGHTS\",\"style\":\"chrome\",\"pos\":\"middle\",\"anim\":\"zoom\"}},\n\
+ {\"block\":5,\"scene\":\"chrome_bloom\",\"dancer\":\"stock_break\",\"fx\":\"off\"},\n\
+ {\"block\":6,\"scene\":\"bokeh_lights\",\"dancer\":\"stock_dress\",\"look\":1,\"trails\":false,\"canon\":\"off\",\"palette\":\"ocean\"},\n\
+ {\"block\":7,\"scene\":\"gyroid_drift\",\"dancer\":\"off\"}\n\
 ]}"
         .to_string()
 }
@@ -611,7 +648,7 @@ routines changing):\n\
 /// model would see — the prompt-tuning / sanity-check path.
 pub fn analyze_file(path: &std::path::Path) -> Result<String> {
     let song = crate::song::load(path)?;
-    let a = analyze_song(0, &song);
+    let a = analyze_song(0, &song, song.bpm, song.first_beat);
     let payload = serde_json::to_string_pretty(&json!({
         "name": a.name, "bpm": (a.bpm * 10.0).round() / 10.0,
         "bars": a.bars, "beats": a.beats.round() as i64,
@@ -659,12 +696,176 @@ fn vocal_map(vocal: &[f32]) -> String {
         .collect()
 }
 
-fn user_prompt(analyses: &[ClipAnalysis], scenes: &[String], routines: &[String]) -> String {
+/// Routine energies (0 graceful .. 1 driving) from each routine's
+/// `clip.json`, parallel to `routines`; 0.5 when a routine isn't on disk.
+pub fn routine_energies(routines: &[String]) -> Vec<f32> {
+    let known: Vec<(String, f32)> = crate::dancer::find_dancer_dir()
+        .map(|d| {
+            crate::dancer::list_clips(&d)
+                .into_iter()
+                .map(|c| (c.name, c.energy))
+                .collect()
+        })
+        .unwrap_or_default();
+    routines
+        .iter()
+        .map(|r| known.iter().find(|(n, _)| n == r).map_or(0.5, |k| k.1))
+        .collect()
+}
+
+/// Routines at or below this energy count as calm (breakdown-safe).
+const CALM_MAX: f32 = 0.4;
+/// Routines above this energy count as fast (drop material).
+const FAST_MIN: f32 = 0.6;
+
+fn pace_label(e: f32) -> &'static str {
+    if e <= CALM_MAX {
+        "calm"
+    } else if e > FAST_MIN {
+        "fast"
+    } else {
+        "medium"
+    }
+}
+
+/// The routine energy a block of this kind wants.
+fn block_target(kind: &str) -> f32 {
+    match kind {
+        "intro" | "breakdown" | "outro" | "silent" => 0.3,
+        "build" => 0.55,
+        "drop" | "peak" => 0.75,
+        _ => 0.5,
+    }
+}
+
+fn is_calm(kind: &str) -> bool {
+    matches!(kind, "intro" | "breakdown" | "outro" | "silent")
+}
+
+/// A one-line description of each scene, from the comment block at the top
+/// of its shader — so the model knows "bokeh_lights" is mellow and
+/// "laser_show" is a festival rig, not just two names.
+fn scene_catalogue(scenes: &[String]) -> Vec<Value> {
+    let dir = crate::render::find_shader_dir().ok().map(|d| d.join("scenes"));
+    scenes
+        .iter()
+        .map(|s| {
+            let about = dir
+                .as_ref()
+                .and_then(|d| std::fs::read_to_string(d.join(format!("{s}.wgsl"))).ok())
+                .map(|src| scene_blurb(&src))
+                .unwrap_or_default();
+            json!({"name": s, "about": about})
+        })
+        .collect()
+}
+
+/// First sentence of a shader's leading comment, header tags stripped,
+/// capped at ~100 chars on a word boundary.
+fn scene_blurb(src: &str) -> String {
+    let mut text = String::new();
+    for line in src.lines().take(8) {
+        let Some(c) = line.trim().strip_prefix("//") else { break };
+        for w in c.split_whitespace() {
+            // Header tags and their numeric arguments (`@bloom 0.9`).
+            if w.starts_with('@')
+                || w.parse::<f32>().is_ok()
+                || matches!(w, "—" | "-" | "agx" | "aces")
+            {
+                continue;
+            }
+            text.push_str(w);
+            text.push(' ');
+        }
+    }
+    // Sentences (and `;` clauses), skipping the perf notes `@heavy` headers
+    // open with ("raymarched; only in rotation when the GPU tier allows")
+    // and bare taglines ("Synesthesia-style abstract.").
+    let mut parts: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    for w in text.split_whitespace() {
+        cur.push_str(w);
+        if w.ends_with('.') || w.ends_with(';') {
+            parts.push(std::mem::take(&mut cur));
+        } else {
+            cur.push(' ');
+        }
+    }
+    if !cur.trim().is_empty() {
+        parts.push(cur.trim().to_string());
+    }
+    let parts: Vec<String> = parts
+        .into_iter()
+        .map(|p| {
+            let p = p.trim_end_matches(';').trim();
+            let p = p.strip_prefix("raymarched").unwrap_or(p).trim_start_matches([' ', ':', ',']);
+            let mut c = p.chars();
+            c.next().map_or(String::new(), |f| f.to_uppercase().chain(c).collect())
+        })
+        .filter(|p| !p.contains("GPU") && !p.contains("rotation") && !p.is_empty())
+        .collect();
+    let first = parts
+        .iter()
+        .find(|p| p.chars().count() >= 30)
+        .or(parts.first())
+        .cloned()
+        .unwrap_or_default();
+    let first = first.as_str();
+    if first.chars().count() <= 100 {
+        return first.to_string();
+    }
+    let mut out = String::new();
+    for w in first.split_whitespace() {
+        if out.chars().count() + w.chars().count() > 96 {
+            break;
+        }
+        out.push_str(w);
+        out.push(' ');
+    }
+    format!("{}…", out.trim_end())
+}
+
+/// The track title from an "Artist - Title (Mix)" file name, upper-cased
+/// for a text card: brackets and the artist dropped, at most 24 chars.
+fn title_of(name: &str) -> String {
+    let t = name.rsplit_once(" - ").map_or(name, |(_, t)| t);
+    let t = t.split(['(', '[']).next().unwrap_or(t);
+    // Leading track numbers ("03 Title", "03. Title").
+    let t = t.trim().trim_start_matches(|c: char| c.is_ascii_digit() || c == '.').trim();
+    let mut out = String::new();
+    for w in t.split_whitespace() {
+        if out.chars().count() + w.chars().count() > 24 {
+            break;
+        }
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(w);
+    }
+    out.to_uppercase()
+}
+
+/// Fraction of a block's bars that are sung.
+fn block_vocal(a: &ClipAnalysis, s: usize, e: usize) -> f32 {
+    let e = e.min(a.vocal.len().saturating_sub(1));
+    if a.vocal.is_empty() || s > e {
+        return 0.0;
+    }
+    a.vocal[s..=e].iter().filter(|&&v| v > 0.65).count() as f32 / (e - s + 1) as f32
+}
+
+fn user_prompt(
+    analyses: &[ClipAnalysis],
+    scenes: &[String],
+    routines: &[String],
+    energies: &[f32],
+) -> String {
     let clips: Vec<Value> = analyses
         .iter()
         .map(|a| {
             json!({
-                "clip": a.clip, "name": a.name, "bpm": (a.bpm * 10.0).round() / 10.0,
+                "clip": a.clip, "name": a.name, "title": title_of(&a.name),
+                "bpm": (a.bpm * 10.0).round() / 10.0,
                 "bars": a.bars,
                 "beats": a.beats.round() as i64,
                 "flow": flow_map(&a.energy),
@@ -673,6 +874,7 @@ fn user_prompt(analyses: &[ClipAnalysis], scenes: &[String], routines: &[String]
                     "i": i, "kind": k, "bars": [s, e],
                     "beats": [s * 4, (e + 1) * 4 - 1],
                     "energy": (mean(&a.energy[*s..=(*e).min(a.energy.len() - 1)]) * 100.0).round() / 100.0,
+                    "vocal": (block_vocal(a, *s, *e) * 10.0).round() / 10.0,
                 })).collect::<Vec<_>>(),
                 "drops": a.drops, "builds": a.builds.iter().map(|(s,e)| json!([s,e])).collect::<Vec<_>>(),
                 "vocal_spans": a.vocals.iter().map(|(s,e)| json!([s,e])).collect::<Vec<_>>(),
@@ -680,11 +882,15 @@ fn user_prompt(analyses: &[ClipAnalysis], scenes: &[String], routines: &[String]
         })
         .collect();
     serde_json::to_string(&json!({
-        "scenes": scenes,
-        "routines": routines,
+        "scenes": scene_catalogue(scenes),
+        "routines": routines.iter().enumerate().map(|(i, r)| json!({
+            "name": r,
+            "pace": pace_label(energies.get(i).copied().unwrap_or(0.5)),
+        })).collect::<Vec<_>>(),
         "palettes": crate::palettes::names().collect::<Vec<_>>(),
         "note": "flow/vocals are one char per bar: energy . - + * # and v for vocals. \
-                 blocks are the ~4-bar phrases you plan against — every block needs an entry.",
+                 blocks are the ~4-bar phrases you plan against — every block needs an \
+                 entry; a block's vocal is the share of its bars that are sung (0-1).",
         "clips": clips,
     }))
     .unwrap_or_default()
@@ -696,7 +902,8 @@ fn user_prompt(analyses: &[ClipAnalysis], scenes: &[String], routines: &[String]
 
 fn agent() -> ureq::Agent {
     ureq::Agent::config_builder()
-        .timeout_global(Some(Duration::from_secs(180)))
+        // Web-search builds run several turns server-side.
+        .timeout_global(Some(Duration::from_secs(300)))
         .http_status_as_error(false)
         .build()
         .into()
@@ -764,9 +971,17 @@ fn anthropic(conf: &AiConf, system: &str, user: &str) -> Result<String> {
             | "claude-fable-5-1"
             | "claude-fable-5"
     );
-    let system = format!("{system}
-
-Return the show by calling the emit_plan tool exactly once.");
+    let mut system = system.to_string();
+    if conf.web_search {
+        system.push_str(
+            "\n\nBefore planning, use web_search to look each track up by its artist and \
+title (at most 4 searches in total): its genre, mood, what the song is about, and its \
+chorus or hook. Let that steer the scene, palette and text choices. A text card may quote \
+at most four words of a lyric hook — never a full lyric line. If a search finds nothing \
+useful, plan from the analysis alone.",
+        );
+    }
+    system.push_str("\n\nReturn the show by calling the emit_plan tool exactly once.");
     let mut body = json!({
         "model": conf.model,
         "max_tokens": 16000,
@@ -789,6 +1004,17 @@ Return the show by calling the emit_plan tool exactly once.");
     if claude5 {
         body["output_config"] = json!({"effort": "medium"});
     }
+    if conf.web_search {
+        // The dynamic-filtering variant needs a 4.6+/5-family model.
+        let current = claude5 || m.contains("-4-6") || m.contains("-4-7") || m.contains("-4-8");
+        if let Some(tools) = body["tools"].as_array_mut() {
+            tools.push(json!({
+                "type": if current { "web_search_20260209" } else { "web_search_20250305" },
+                "name": "web_search",
+                "max_uses": 4,
+            }));
+        }
+    }
     // A safety-classifier decline is retried server-side on Anthropic's
     // recommended model — Claude API only, so not through a proxy.
     let fallback = conf.endpoint.starts_with("https://api.anthropic.com/")
@@ -804,7 +1030,18 @@ Return the show by calling the emit_plan tool exactly once.");
         body["fallbacks"] = json!("default");
         headers.push(("anthropic-beta", "server-side-fallback-2026-07-01"));
     }
-    let v = post(&conf.endpoint, &headers, &body)?;
+    let mut v = post(&conf.endpoint, &headers, &body)?;
+    // A long server-tool (web search) turn can pause; resume it by sending
+    // the paused content back as the assistant turn, unchanged.
+    for _ in 0..4 {
+        if v["stop_reason"].as_str() != Some("pause_turn") {
+            break;
+        }
+        if let Some(msgs) = body["messages"].as_array_mut() {
+            msgs.push(json!({"role": "assistant", "content": v["content"].clone()}));
+        }
+        v = post(&conf.endpoint, &headers, &body)?;
+    }
     match v["stop_reason"].as_str() {
         Some("refusal") => {
             let why = v["stop_details"]["category"].as_str().unwrap_or("unspecified");
@@ -911,6 +1148,7 @@ pub fn parse_response(
     analyses: &[ClipAnalysis],
     scenes: &[String],
     routines: &[String],
+    energies: &[f32],
 ) -> Result<(Vec<Cue>, Vec<String>)> {
     let v = extract_json(text)?;
     let mut cues = Vec::new();
@@ -919,7 +1157,7 @@ pub fn parse_response(
     let mut got_plan = false;
     if let Some(plan) = v["plan"].as_array() {
         got_plan = !plan.is_empty();
-        expand_plan(plan, analyses, scenes, routines, &mut cues, &mut warnings);
+        expand_plan(plan, analyses, scenes, routines, energies, &mut cues, &mut warnings);
     }
     if let Some(arr) = v["cues"].as_array() {
         for (i, item) in arr.iter().enumerate() {
@@ -999,9 +1237,19 @@ fn enforce_void(cues: &mut Vec<Cue>, clips: &[Clip], warnings: &mut Vec<String>)
             .collect();
         // Remove back-to-front so earlier indices stay valid.
         for pos in voids.into_iter().rev() {
+            // The final scene cue inside the last ~8 bars is the end fade:
+            // slide it into the last 2 bars rather than dropping it (block
+            // edges rarely line up with the exact song end).
+            if Some(pos) == last_scene && cues[pos].beat >= total - 32.0 {
+                let c = &mut cues[pos];
+                if c.beat < total - 8.0 {
+                    c.beat = (total - 8.0).max(0.0);
+                    c.beats = 8.0;
+                }
+                continue;
+            }
             let c = &cues[pos];
-            let legal = Some(pos) == last_scene && c.beat >= total - 8.0;
-            if !legal {
+            {
                 warnings.push(format!(
                     "dropped void at clip {ci} beat {:.0} — void only plays a song out",
                     c.beat
@@ -1020,13 +1268,40 @@ fn expand_plan(
     analyses: &[ClipAnalysis],
     scenes: &[String],
     routines: &[String],
+    energies: &[f32],
     cues: &mut Vec<Cue>,
     warnings: &mut Vec<String>,
 ) {
     /// Blocks of identical scene before a forced change (~12 bars).
     const MAX_SCENE_RUN: usize = 3;
-    /// Dancer-on blocks between routine rotations (~32 bars).
-    const ROUTINE_STALE: usize = 8;
+    /// Dancer-on blocks between routine rotations (~12 bars).
+    const ROUTINE_STALE: usize = 3;
+
+    let energy_of = |name: &str| {
+        routines
+            .iter()
+            .position(|r| r == name)
+            .and_then(|i| energies.get(i).copied())
+            .unwrap_or(0.5)
+    };
+    // The routine nearest `target` in energy — never the current one or its
+    // mirror, calm targets only from calm routines — rotating through the
+    // three nearest by `salt` so repeats vary.
+    let pick = |target: f32, avoid: &str, salt: usize| -> Option<String> {
+        let base = |n: &str| n.trim_end_matches("_mir").to_string();
+        let mut idx: Vec<usize> = (0..routines.len())
+            .filter(|&i| avoid.is_empty() || base(&routines[i]) != base(avoid))
+            .filter(|&i| target > CALM_MAX || energy_of(&routines[i]) <= CALM_MAX)
+            .collect();
+        idx.sort_by(|&x, &y| {
+            (energy_of(&routines[x]) - target)
+                .abs()
+                .total_cmp(&(energy_of(&routines[y]) - target).abs())
+        });
+        idx.truncate(3);
+        (!idx.is_empty()).then(|| routines[idx[salt % idx.len()]].clone())
+    };
+    let null = Value::Null;
 
     for a in analyses {
         // Index this clip's plan entries by block number.
@@ -1061,18 +1336,30 @@ fn expand_plan(
         let mut fx_auto = false;
         let mut used_fx = false;
         let mut pal = String::new(); // current palette — empty until first cue
+        let mut paced = 0usize; // routine picks corrected for the block's pace
+        let mut burst_until: Option<usize> = None; // auto-fx added on a drop
 
-        for (bi, (_, from_bar, to_bar)) in a.blocks.iter().enumerate() {
+        let last = a.blocks.len().saturating_sub(1);
+        for (bi, (kind, from_bar, to_bar)) in a.blocks.iter().enumerate() {
+            let kind = kind.as_str();
             let beat = (*from_bar * 4) as f64;
             let span = ((to_bar - from_bar + 1) * 4) as f64;
             let item = by_block[bi];
+            let n0 = cues.len();
+            let is_drop = kind == "drop";
 
             // --- scene: required per block; missing field = keep current
-            let want = item.and_then(|it| it["scene"].as_str()).map(|n| {
-                find_name(n, scenes).unwrap_or_else(|| {
+            let want = item.and_then(|it| it["scene"].as_str()).and_then(|n| {
+                if n.eq_ignore_ascii_case("void") && bi != last {
+                    warnings.push(format!(
+                        "plan: void ignored at block {bi} — only the final block fades out"
+                    ));
+                    return None;
+                }
+                Some(find_name(n, scenes).unwrap_or_else(|| {
                     warnings.push(format!("plan: unknown scene {n:?} at block {bi}"));
                     scene.clone()
-                })
+                }))
             });
             let effective = want.unwrap_or_else(|| scene.clone());
             if effective == scene {
@@ -1081,7 +1368,9 @@ fn expand_plan(
                 run = 1;
             }
             let mut emit = effective.clone();
-            if run > MAX_SCENE_RUN && !effective.is_empty() {
+            // A drop that keeps the old scene reads as nothing happening.
+            let flat_drop = is_drop && effective == scene && bi > 0;
+            if (run > MAX_SCENE_RUN || flat_drop) && !effective.is_empty() {
                 // Force a cut: prefer the model's least-recent other pick,
                 // else rotate the palette away from the current scene.
                 emit = chosen
@@ -1100,9 +1389,11 @@ fn expand_plan(
                         }
                         s
                     });
-                warnings.push(format!(
-                    "plan: '{effective}' ran {run} blocks — cut to '{emit}' at block {bi}"
-                ));
+                warnings.push(if flat_drop {
+                    format!("plan: drop at block {bi} kept '{effective}' — cut to '{emit}'")
+                } else {
+                    format!("plan: '{effective}' ran {run} blocks — cut to '{emit}' at block {bi}")
+                });
                 run = 1;
             }
             if !emit.is_empty() && emit != scene {
@@ -1125,9 +1416,22 @@ fn expand_plan(
                 }
             }
 
-            let Some(it) = item else { continue };
+            let it = item.unwrap_or(&null);
+            // A drop-time auto-fx burst ends after two blocks unless the
+            // plan takes the fx lane over itself.
+            if let Some(u) = burst_until {
+                if it.get("fx").is_some_and(|v| !v.is_null()) {
+                    burst_until = None;
+                } else if bi >= u {
+                    burst_until = None;
+                    fx_auto = false;
+                    cues.push(Cue { clip: a.clip, beat, beats: 4.0, kind: CueKind::FxAuto(false) });
+                    cues.push(Cue { clip: a.clip, beat, beats: 4.0, kind: CueKind::Fx(Fx::Off) });
+                }
+            }
 
             // --- dancer: "off" | "on" | routine name
+            let mut named: Option<String> = None;
             match it["dancer"].as_str() {
                 Some("off") => {
                     if dancer {
@@ -1161,22 +1465,15 @@ fn expand_plan(
                             kind: CueKind::Dancer(true),
                         });
                     }
-                    match find_name(name, routines) {
-                        Some(r) if r != routine => {
-                            routine = r.clone();
-                            routine_age = 0;
-                            cues.push(Cue {
-                                clip: a.clip,
-                                beat,
-                                beats: 4.0,
-                                kind: CueKind::Clip(r),
-                            });
-                        }
-                        Some(_) => {}
+                    named = match find_name(name, routines) {
+                        Some(r) => Some(r),
                         None => {
-                            warnings.push(format!("plan: unknown routine {name:?} at block {bi}"))
+                            warnings.push(format!(
+                                "plan: unknown routine {name:?} at block {bi} — picked by pace"
+                            ));
+                            pick(block_target(kind), &routine, bi)
                         }
-                    }
+                    };
                 }
                 None => {
                     if it["dancer"].as_bool() == Some(true) && !dancer {
@@ -1198,18 +1495,33 @@ fn expand_plan(
                     }
                 }
             }
-            if dancer {
-                routine_age += 1;
-                if routine_age > ROUTINE_STALE {
-                    routine_age = 0;
-                    routine.clear(); // unknown until the engine picks next
-                    cues.push(Cue {
-                        clip: a.clip,
-                        beat,
-                        beats: 4.0,
-                        kind: CueKind::NextClip,
-                    });
+            // --- routine pace: calm blocks never run a medium/fast routine,
+            // drops and peaks never sit on a calm one, and a routine that's
+            // been on for a while rotates — picked by energy, not left to
+            // the engine (which could swap in a fast one mid-breakdown).
+            if dancer && !routines.is_empty() {
+                let e = named.as_deref().or((!routine.is_empty()).then_some(routine.as_str()));
+                let wrong = e.map(energy_of).is_none_or(|e| {
+                    (is_calm(kind) && e > CALM_MAX)
+                        || (matches!(kind, "drop" | "peak") && e <= CALM_MAX)
+                });
+                let mut next = named.clone();
+                if wrong {
+                    if let Some(p) = pick(block_target(kind), &routine, bi) {
+                        if e.is_some() {
+                            paced += 1;
+                        }
+                        next = Some(p);
+                    }
+                } else if next.is_none() && routine_age >= ROUTINE_STALE {
+                    next = pick(block_target(kind), &routine, bi);
                 }
+                if let Some(n) = next.filter(|n| *n != routine) {
+                    routine = n.clone();
+                    routine_age = 0;
+                    cues.push(Cue { clip: a.clip, beat, beats: 4.0, kind: CueKind::Clip(n) });
+                }
+                routine_age += 1;
             } else {
                 routine_age = 0;
             }
@@ -1304,6 +1616,14 @@ fn expand_plan(
                 }
             }
 
+            // --- a sung quiet block is the dancer's moment: neon look
+            if dancer && is_calm(kind) && block_vocal(a, *from_bar, *to_bar) >= 0.5 {
+                if look != Some(Some(1)) {
+                    look = Some(Some(1));
+                    cues.push(Cue { clip: a.clip, beat, beats: 4.0, kind: CueKind::Look(Some(1)) });
+                }
+            }
+
             // --- palette: latches like scene — emit only on change
             if let Some(n) = it["palette"].as_str() {
                 match crate::palettes::names().find(|p| p.eq_ignore_ascii_case(n)) {
@@ -1330,7 +1650,7 @@ fn expand_plan(
                     kind: CueKind::Blackout(true),
                 });
             }
-            if let Some(t) = it.get("text") {
+            if let Some(t) = it.get("text").filter(|v| v.is_object()) {
                 let mut t = t.clone();
                 t["kind"] = json!("text");
                 t["beat"] = json!(beat);
@@ -1342,6 +1662,85 @@ fn expand_plan(
                     }
                     Err(e) => warnings.push(format!("plan: {e}")),
                 }
+            }
+
+            // --- drops must land: the scene change plus at least one more
+            // visible change, else add a blackout dip and an fx burst.
+            if is_drop {
+                let impact = |cues: &[Cue]| {
+                    cues[n0..]
+                        .iter()
+                        .filter(|c| {
+                            matches!(
+                                c.kind,
+                                CueKind::Scene(_)
+                                    | CueKind::Blackout(true)
+                                    | CueKind::Fx(_)
+                                    | CueKind::FxAuto(true)
+                                    | CueKind::Palette(_)
+                                    | CueKind::Text(_)
+                                    | CueKind::Look(_)
+                                    | CueKind::Clip(_)
+                            )
+                        })
+                        .count()
+                };
+                let mut added = Vec::new();
+                if impact(cues) < 2 && bi > 0 {
+                    cues.push(Cue {
+                        clip: a.clip,
+                        beat: (beat - 1.0).max(0.0),
+                        beats: 1.0,
+                        kind: CueKind::Blackout(true),
+                    });
+                    added.push("blackout");
+                }
+                if impact(cues) < 3 && !fx_auto && fx == Fx::Off {
+                    fx_auto = true;
+                    used_fx = true;
+                    burst_until = Some(bi + 2);
+                    cues.push(Cue { clip: a.clip, beat, beats: 4.0, kind: CueKind::FxAuto(true) });
+                    added.push("fx");
+                }
+                if !added.is_empty() {
+                    warnings.push(format!("drop at block {bi}: added {}", added.join(" + ")));
+                }
+            }
+        }
+        if paced > 0 {
+            warnings.push(format!(
+                "clip {}: {paced} routine pick(s) swapped to suit the block's pace",
+                a.clip
+            ));
+        }
+
+        // No text at all: put the title on the first drop (or the loudest
+        // block) — one impact card beats a show with no words.
+        let has_text = cues
+            .iter()
+            .any(|c| c.clip == a.clip && matches!(c.kind, CueKind::Text(_)));
+        let title = title_of(&a.name);
+        if !has_text && !title.is_empty() && a.blocks.len() >= 4 {
+            let at = a
+                .blocks
+                .iter()
+                .position(|(k, _, _)| k == "drop")
+                .or_else(|| a.blocks.iter().position(|(k, _, _)| k == "peak"));
+            if let Some(bi) = at {
+                let (_, s, e) = &a.blocks[bi];
+                cues.push(Cue {
+                    clip: a.clip,
+                    beat: (*s * 4) as f64,
+                    beats: (((e - s + 1) * 4) as f64).min(16.0),
+                    kind: CueKind::Text(crate::text::TextSpec {
+                        text: title,
+                        style: TextStyle::Chrome,
+                        pos: TextPos::Center,
+                        lane: 0,
+                        anim: crate::text::TextAnim::Zoom,
+                    }),
+                });
+                warnings.push(format!("clip {}: no text in plan — title card on the drop", a.clip));
             }
         }
 
@@ -1696,8 +2095,9 @@ mod tests {
           {"block":6,"scene":"levels","dancer":"off","fx":"off"},
           {"block":7,"scene":"void"}
         ]}"#;
-        let (cues, warnings) = parse_response(text, &[clip()], &[analysis()], &scenes, &routines)
-            .expect("should parse");
+        let (cues, warnings) =
+            parse_response(text, &[clip()], &[analysis()], &scenes, &routines, &[0.6, 0.33])
+                .expect("should parse");
 
         // Block 4 forced a cut: aurora ran 4 blocks > MAX_SCENE_RUN.
         let scene_names: Vec<&str> = cues
@@ -1708,9 +2108,9 @@ mod tests {
             })
             .collect();
         // aurora (block 0), forced cut to rave_hall at block 3 (the palette
-        // fallback happens to be the model's block-4 pick, so no extra cue),
-        // levels (5), void (7).
-        assert_eq!(scene_names, vec!["aurora", "rave_hall", "levels", "void"]);
+        // fallback), then the drop at block 4 would keep rave_hall — a flat
+        // drop — so it cuts back to aurora; levels (5), void (7).
+        assert_eq!(scene_names, vec!["aurora", "rave_hall", "aurora", "levels", "void"]);
         // Final void lands inside the last 8 beats (128 - 8 = 120).
         let void_cue = cues
             .iter()
@@ -1768,5 +2168,100 @@ mod tests {
             .collect();
         assert_eq!(voids, vec![122.0]);
         assert_eq!(warnings.len(), 2);
+    }
+
+    #[test]
+    fn plan_rules_pace_drops_text() {
+        let scenes = vec!["aurora".to_string(), "rave_hall".to_string(), "void".to_string()];
+        // calm, fast, medium
+        let routines = vec![
+            "stock_dress".to_string(),
+            "stock_break".to_string(),
+            "stock_pink".to_string(),
+        ];
+        let energies = [0.18, 0.8, 0.5];
+        let mut a = analysis();
+        a.name = "Some Artist - Northern Lights (Extended Mix)".into();
+        // Sung breakdown at block 6.
+        for b in 24..28 {
+            a.vocal[b] = 1.0;
+        }
+        // Fast routine requested in the intro and the sung breakdown, an
+        // invented routine on the groove, the drop keeps the scene and adds
+        // nothing, void mid-song, no text anywhere.
+        let text = r#"{"plan":[
+          {"block":0,"scene":"aurora","dancer":"stock_break"},
+          {"block":1,"scene":"rave_hall","dancer":"stock_house"},
+          {"block":2,"scene":"void"},
+          {"block":3,"scene":"aurora"},
+          {"block":4,"scene":"aurora"},
+          {"block":5,"scene":"rave_hall"},
+          {"block":6,"scene":"aurora","dancer":"stock_break"},
+          {"block":7,"scene":"void"}
+        ]}"#;
+        let (cues, warnings) =
+            parse_response(text, &[clip()], &[a], &scenes, &routines, &energies)
+                .expect("should parse");
+        let routine_at = |beat: f64| {
+            cues.iter()
+                .filter(|c| c.beat <= beat && matches!(c.kind, CueKind::Clip(_)))
+                .last()
+                .and_then(|c| match &c.kind {
+                    CueKind::Clip(n) => Some(n.clone()),
+                    _ => None,
+                })
+        };
+        // Intro and sung breakdown get the calm routine, never the fast one.
+        assert_eq!(routine_at(0.0).as_deref(), Some("stock_dress"));
+        assert_eq!(routine_at(24.0 * 4.0).as_deref(), Some("stock_dress"));
+        // The drop (block 4, beat 64) runs something that isn't calm.
+        assert_ne!(routine_at(64.0).as_deref(), Some("stock_dress"));
+        // The invented routine was replaced, not left dangling.
+        assert!(warnings.iter().any(|w| w.contains("stock_house") && w.contains("pace")));
+        // Neon look in the sung breakdown.
+        assert!(cues.iter().any(|c| c.beat == 96.0 && matches!(c.kind, CueKind::Look(Some(1)))));
+        // The flat drop was cut to a new scene, with a blackout before it.
+        assert!(cues.iter().any(|c| c.beat == 64.0 && matches!(c.kind, CueKind::Scene(_))));
+        // Scene + fast routine already land on it, so the top-up is an fx burst.
+        assert!(cues.iter().any(|c| c.beat == 64.0 && matches!(c.kind, CueKind::FxAuto(true))));
+        // Mid-song void ignored; the final one survives as the end fade.
+        let voids: Vec<f64> = cues
+            .iter()
+            .filter(|c| matches!(&c.kind, CueKind::Scene(n) if n == "void"))
+            .map(|c| c.beat)
+            .collect();
+        assert_eq!(voids, vec![120.0]);
+        // Title card on the drop.
+        assert!(cues.iter().any(|c| c.beat == 64.0
+            && matches!(&c.kind, CueKind::Text(s) if s.text == "NORTHERN LIGHTS")));
+    }
+
+    #[test]
+    fn blocks_restart_on_drops() {
+        // A 1-bar pickup before the music: the drop at bar 17 must start a
+        // block, not sit in the middle of one.
+        let mut energy = vec![0.2f32; 40];
+        for e in energy.iter_mut().skip(17) {
+            *e = 0.9;
+        }
+        let a = finish_analysis(0, "x", 120.0, 160.0, energy, vec![0.5; 40], vec![0.0; 40], vec![0.0; 40]);
+        assert!(a.drops.contains(&17), "drops {:?}", a.drops);
+        assert!(a.blocks.iter().any(|(_, s, _)| *s == 17), "blocks {:?}", a.blocks);
+        // No block shorter than 2 bars.
+        assert!(a.blocks.iter().all(|(_, s, e)| e - s + 1 >= 2));
+    }
+
+    #[test]
+    fn title_and_blurb() {
+        assert_eq!(title_of("Calvin Harris - Free (Extended Mix)"), "FREE");
+        assert_eq!(title_of("03. Take Me Away"), "TAKE ME AWAY");
+        let src = "// @heavy — raymarched. A gyroid sculpture turning in space: an endless\n// porous lattice. More.\n\nfn x() {}";
+        assert_eq!(scene_blurb(src), "A gyroid sculpture turning in space: an endless porous lattice.");
+        let src = "// @heavy — raymarched; only in rotation when the GPU tier allows.\n// Fly through a curving tunnel of boxes. Two looks.\n";
+        assert_eq!(scene_blurb(src), "Fly through a curving tunnel of boxes.");
+        let src = "// @heavy — Synesthesia-style abstract. @bloom 0.8 @tonemap agx\n// Looking up into volumetric aurora curtains: layered sheets of light.\n";
+        assert_eq!(scene_blurb(src), "Looking up into volumetric aurora curtains: layered sheets of light.");
+        let src = "// @heavy — raymarched neon city canyon: a street through an endless block\n// grid. More.\n";
+        assert_eq!(scene_blurb(src), "Neon city canyon: a street through an endless block grid.");
     }
 }

@@ -3538,6 +3538,14 @@ fn settings_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<
                 "A blank key tries {}. A saved key lives in trippin.json.",
                 s.ai_provider.env_keys().join(" / ")
             ));
+            ui.add_enabled_ui(s.ai_provider == crate::ai::AiProvider::Anthropic, |ui| {
+                ui.checkbox(&mut s.ai_web_search, "Look up each track online first")
+                    .on_hover_text(
+                        "The model searches the web for each track's genre, mood and \
+                         hook words before planning. Anthropic only; up to 4 searches \
+                         (about a cent each) per build.",
+                    );
+            });
         });
         ui.min_rect().height()
     };
