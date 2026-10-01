@@ -250,6 +250,16 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   drops a connection whose port vanished, so replugging recovers. midir's
   macOS backend is CoreMIDI — the code isn't cfg-gated, but it hasn't been
   compiled for macOS yet.
+- **AI show builder** (`ai.rs::anthropic`): the default is
+  `claude-sonnet-5-5`. Claude 5-family models reject a forced
+  `tool_choice` (`tool`/`any`) with a 400, so `emit_plan` is offered with
+  `auto` and the system prompt asks for the call. Thinking is always on
+  and counts toward `max_tokens` (keep it ≥16k). Check `stop_reason`
+  (`refusal`, `max_tokens`) before reading content. `output_config.effort`
+  and `fallbacks: "default"` are sent only for the 5-family ids (the model
+  and endpoint are user-editable), and the fallback only to
+  api.anthropic.com. When bumping a default model, add the old id to the
+  retired-id reset in `Settings::load`.
 - **macOS audio:** ScreenCaptureKit hears only the *system output mix*.
   DJ software routed straight to a controller's own interface (Serato → a
   Rane's USB card) never enters it — capture shows "no signal" while music
