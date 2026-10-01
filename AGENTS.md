@@ -279,7 +279,10 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
 - **Now playing** (`nowplaying.rs`):
   - **Sources:** the OS media session (Windows SMTC; on macOS, AppleScript
     for Spotify and Music, and only for apps that are running), Serato
-    session files, VirtualDJ `tracklist.txt`, rekordbox `master.db`
+    (4+: `Library/master.sqlite` `history_entry` where `played`=1, in
+    `Application Support/Serato` / `%APPDATA%\Serato`, WAL-mode — watch the
+    `-wal` mtime; ≤3.x: `_Serato_/History/Sessions/*.session` binary),
+    VirtualDJ `tracklist.txt`, rekordbox `master.db`
     (decrypted SQLCipher), the Mixxx set log, and a text-file watcher.
   - **Auto** picks the source whose track changed most recently. History
     files don't count as a change at startup; live sources do.
