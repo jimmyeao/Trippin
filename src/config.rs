@@ -549,7 +549,7 @@ impl Settings {
             );
         }
         // Retired model ids saved by older builds → back to the default.
-        if s.ai_model == "gemini-2.5-flash" {
+        if s.ai_model == "gemini-2.5-flash" || s.ai_model == "claude-sonnet-4-5" {
             s.ai_model.clear();
         }
         s

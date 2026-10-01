@@ -75,7 +75,7 @@ prompts once for screen/system-audio recording permission on first launch
 (macOS 13+; on older systems it falls back to the default input). If the DJ
 software sends audio straight to a controller's own interface (e.g. Serato
 → a Rane/Pioneer USB card) it never enters that mix — pick the controller's
-input under Perform → "director & sync" → **Audio in** (saved; restarts live),
+input under Settings → **Audio in** (saved; restarts live),
 or pass `--device "<name>"`. `--mic` forces the microphone, and
 `--list-devices` shows what's available.
 On macOS, presents are ungated from vsync and
@@ -116,13 +116,17 @@ works for GPU budgeting on any machine.
 
 Drag the visuals window to the projector / LED wall and press **F**. A
 **control panel** window opens alongside it (F1 shows/hides it), organised
-into tabs — **Show** (modes, scene stepping, length, blackout, fullscreen,
-latency/downbeat), **Scenes** (the playlist: tick to include, search filter,
-"show" to jump to one now), **Dancer** (on/off, look, canon, size, which
-routines), **Effects** (the post effect + strength — picks apply live to the
-output, so the panel doubles as a preview), **Stream** (OBS output, now
-playing, branding, ticker, clips — see below) and **Keys** (rebindable
-hotkeys: click Rebind, then press a key). Everything is saved to `trippin.json`, and
+into tabs — **Perform** (the scene library: tick to include, search filter,
+click to preview, plus the inspector with mode, phrase length, dancer, look,
+effect and palette; the Pads toggle swaps in big performance pads),
+**Dancer & FX** (dancer on/off, look, canon, size, which routines, and the
+post effect + strength — picks apply live to the output, so the panel
+doubles as a preview), **Stream** (OBS output, now playing, branding,
+ticker, clips — see below), **Timeline** (saved shows), **Keys** (MIDI
+input and rebindable hotkeys: click Rebind, then press a key) and
+**Settings** (audio input, latency, mark-downbeat, what the auto-pilot may
+do — breakdowns, drop cuts, random order — and the AI show builder's
+provider, model and API key). Everything is saved to `trippin.json`, and
 the visuals keep animating while the panel is being moved — rendering runs
 on its own thread.
 
@@ -482,8 +486,9 @@ boundaries and cue transitions land on the "one", not just on beats.
   enforcing variety itself (a scene can't run longer than ~12 bars, dancer
   routines rotate, `void` only ever plays a song out). BYOAI: Anthropic,
   OpenAI, Gemini, or any OpenAI-compatible endpoint (Groq, Mistral,
-  Ollama…); the key lives in `trippin.json` or the provider's usual env var
-  (`ANTHROPIC_API_KEY` etc.). Nothing but the feature summary leaves the
+  Ollama…); pick the provider and paste the key under control panel →
+  **Settings** (saved to `trippin.json`), or leave it blank to use the
+  provider's usual env var (`ANTHROPIC_API_KEY` etc.). Nothing but the feature summary leaves the
   machine — no audio is uploaded. Preview the summary with
   `--analyze <file>`, or run the whole build without the editor with
   `--ai-build <file>` (prints every cue).

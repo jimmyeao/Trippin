@@ -64,7 +64,7 @@ impl AiProvider {
 
     pub fn default_model(self) -> &'static str {
         match self {
-            Self::Anthropic => "claude-sonnet-4-5",
+            Self::Anthropic => "claude-sonnet-5-5",
             Self::OpenAi => "gpt-4o",
             Self::Gemini => "gemini-3.8-flash",
             Self::Compatible => "",
@@ -80,6 +80,24 @@ impl AiProvider {
             Self::Compatible => &["TRIPPIN_AI_KEY", "OPENAI_API_KEY"],
         }
     }
+}
+
+/// Switch provider, clearing endpoint/model fields that still hold another
+/// provider's defaults (a custom value is kept).
+pub fn set_provider(s: &mut crate::config::Settings, p: AiProvider) {
+    if AiProvider::ALL
+        .iter()
+        .any(|o| s.ai_endpoint == o.default_endpoint())
+    {
+        s.ai_endpoint.clear();
+    }
+    if AiProvider::ALL
+        .iter()
+        .any(|o| !o.default_model().is_empty() && s.ai_model == o.default_model())
+    {
+        s.ai_model.clear();
+    }
+    s.ai_provider = p;
 }
 
 /// A snapshot of the provider fields — taken on the UI thread, used by the
@@ -727,15 +745,31 @@ fn request_json(conf: &AiConf, system: &str, user: &str) -> Result<String> {
 fn anthropic(conf: &AiConf, system: &str, user: &str) -> Result<String> {
     if conf.key.is_empty() {
         return Err(anyhow!(
-            "no API key — set it in the dialog or ANTHROPIC_API_KEY"
+            "no API key — set it in Settings or ANTHROPIC_API_KEY"
         ));
     }
     if conf.model.is_empty() {
         return Err(anyhow!("no model set"));
     }
-    let body = json!({
+    // Claude 5-family models think by default (counted in max_tokens), take
+    // an effort level, and reject a forced tool_choice — so the tool is
+    // offered with `auto` and the system prompt asks for the call.
+    let m = conf.model.as_str();
+    let claude5 = matches!(
+        m,
+        "claude-sonnet-5-5"
+            | "claude-sonnet-5"
+            | "claude-opus-5-5"
+            | "claude-opus-5"
+            | "claude-fable-5-1"
+            | "claude-fable-5"
+    );
+    let system = format!("{system}
+
+Return the show by calling the emit_plan tool exactly once.");
+    let mut body = json!({
         "model": conf.model,
-        "max_tokens": 8192,
+        "max_tokens": 16000,
         "system": system,
         "messages": [{"role": "user", "content": [{"type": "text", "text": user}]}],
         "tools": [{
@@ -750,17 +784,38 @@ fn anthropic(conf: &AiConf, system: &str, user: &str) -> Result<String> {
                 "required": ["plan"]
             }
         }],
-        "tool_choice": {"type": "tool", "name": "emit_plan"}
+        "tool_choice": {"type": "auto"}
     });
-    let v = post(
-        &conf.endpoint,
-        &[
-            ("x-api-key", conf.key.as_str()),
-            ("anthropic-version", "2023-06-01"),
-        ],
-        &body,
-    )?;
-    // Preferred: the forced tool_use block; fallback: any text block.
+    if claude5 {
+        body["output_config"] = json!({"effort": "medium"});
+    }
+    // A safety-classifier decline is retried server-side on Anthropic's
+    // recommended model — Claude API only, so not through a proxy.
+    let fallback = conf.endpoint.starts_with("https://api.anthropic.com/")
+        && matches!(
+            m,
+            "claude-sonnet-5-5" | "claude-opus-5-5" | "claude-opus-5" | "claude-fable-5-1"
+        );
+    let mut headers = vec![
+        ("x-api-key", conf.key.as_str()),
+        ("anthropic-version", "2023-06-01"),
+    ];
+    if fallback {
+        body["fallbacks"] = json!("default");
+        headers.push(("anthropic-beta", "server-side-fallback-2026-07-01"));
+    }
+    let v = post(&conf.endpoint, &headers, &body)?;
+    match v["stop_reason"].as_str() {
+        Some("refusal") => {
+            let why = v["stop_details"]["category"].as_str().unwrap_or("unspecified");
+            return Err(anyhow!("the model declined the request ({why})"));
+        }
+        Some("max_tokens") => {
+            return Err(anyhow!("the response was cut off (max_tokens) — try again"));
+        }
+        _ => {}
+    }
+    // Preferred: the emit_plan tool_use block; fallback: any text block.
     for c in v["content"].as_array().cloned().unwrap_or_default() {
         if c["type"].as_str() == Some("tool_use") {
             return Ok(c["input"].to_string());
@@ -777,7 +832,7 @@ fn anthropic(conf: &AiConf, system: &str, user: &str) -> Result<String> {
 fn chat_completions(conf: &AiConf, system: &str, user: &str) -> Result<String> {
     if conf.provider == AiProvider::OpenAi && conf.key.is_empty() {
         return Err(anyhow!(
-            "no API key — set it in the dialog or OPENAI_API_KEY"
+            "no API key — set it in Settings or OPENAI_API_KEY"
         ));
     }
     if conf.model.is_empty() {
@@ -811,7 +866,7 @@ fn chat_completions(conf: &AiConf, system: &str, user: &str) -> Result<String> {
 fn gemini(conf: &AiConf, system: &str, user: &str) -> Result<String> {
     if conf.key.is_empty() {
         return Err(anyhow!(
-            "no API key — set it in the dialog or GEMINI_API_KEY"
+            "no API key — set it in Settings or GEMINI_API_KEY"
         ));
     }
     if conf.model.is_empty() {

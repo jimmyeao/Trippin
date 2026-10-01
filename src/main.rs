@@ -1794,7 +1794,6 @@ impl App {
                 &shared.clip_names,
                 &shared.timeline,
                 &shared.settings,
-                &shared.dirty,
                 &shared.thumbs,
             )
         };
