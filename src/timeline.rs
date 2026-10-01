@@ -122,6 +122,10 @@ pub enum CueKind {
     Trails(bool),
     Canon(Tristate),
     Blackout(bool),
+    /// Hard strobe for the block's length: the picture cuts on and off on
+    /// the eighth notes, beat-synced, with no fade (blackout eases over a
+    /// third of a second — far too slow for a strobe).
+    Strobe(bool),
     /// Apply a transform (also turns auto-pick off).
     Fx(Fx),
     FxAuto(bool),
@@ -148,6 +152,7 @@ impl CueKind {
             Self::Trails(_) => "Trails",
             Self::Canon(_) => "Canon",
             Self::Blackout(_) => "Blackout",
+            Self::Strobe(_) => "Strobe",
             Self::Fx(_) => "Transform",
             Self::FxAuto(_) => "Auto FX",
             Self::Palette(_) => "Palette",
@@ -169,7 +174,7 @@ impl CueKind {
             | Self::Trails(_)
             | Self::Canon(_) => 1,
             Self::Fx(_) | Self::FxAuto(_) => 2,
-            Self::Mode(_) | Self::Blackout(_) | Self::Palette(_) => 3,
+            Self::Mode(_) | Self::Blackout(_) | Self::Strobe(_) | Self::Palette(_) => 3,
             Self::Text(s) => 4 + (s.lane as usize % crate::text::TEXT_SLOTS),
             Self::TextOff(lane) => 4 + (*lane as usize % crate::text::TEXT_SLOTS),
         }
@@ -183,6 +188,7 @@ impl CueKind {
     pub fn end_kind(&self) -> Option<CueKind> {
         match self {
             Self::Blackout(true) => Some(Self::Blackout(false)),
+            Self::Strobe(true) => Some(Self::Strobe(false)),
             Self::Text(s) => Some(Self::TextOff(s.lane)),
             _ => None,
         }
@@ -198,6 +204,7 @@ impl CueKind {
             Self::Trails(on) => format!("trails {}", if *on { "on" } else { "off" }),
             Self::Dancer(on) => format!("dancer {}", if *on { "on" } else { "off" }),
             Self::Blackout(on) => format!("blackout {}", if *on { "on" } else { "off" }),
+            Self::Strobe(on) => format!("strobe {}", if *on { "on" } else { "off" }),
             Self::Fx(f) => f.label().to_string(),
             Self::FxAuto(on) => format!("auto FX {}", if *on { "on" } else { "off" }),
             Self::Look(l) => match l {
@@ -262,6 +269,7 @@ pub struct PlayheadState {
     pub trails: bool,
     pub canon: Tristate,
     pub blackout: bool,
+    pub strobe: bool,
     pub fx: Fx,
     pub fx_auto: bool,
     /// Last palette cue, if any — `None` leaves the user's pick alone.
@@ -284,6 +292,7 @@ impl Default for PlayheadState {
             trails: false,
             canon: Tristate::Auto,
             blackout: false,
+            strobe: false,
             fx: Fx::Off,
             fx_auto: false,
             palette: None,
@@ -475,6 +484,7 @@ impl Timeline {
                 CueKind::Trails(b) => st.trails = b,
                 CueKind::Canon(c) => st.canon = c,
                 CueKind::Blackout(b) => st.blackout = b,
+                CueKind::Strobe(b) => st.strobe = b,
                 CueKind::Fx(f) => {
                     st.fx = f;
                     st.fx_auto = false;

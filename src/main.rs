@@ -53,6 +53,12 @@ mod timeline;
 mod ui_theme;
 
 use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Strobe cue state (`CueKind::Strobe`) — set by timeline cues, read by the
+/// render loop's master gate. A flag rather than another `&mut` threaded
+/// through every cue path: it only lives inside a show, and
+/// `apply_playhead` resets it on play / seek / stop.
+static STROBE: AtomicBool = AtomicBool::new(false);
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
@@ -259,6 +265,7 @@ fn end_show(
             s.palette = b.palette.clone();
         }
         *blackout = b.blackout;
+        STROBE.store(false, Ordering::Relaxed);
         dancer.showing = b.dancer_showing;
         if dir.scene != b.scene {
             dir.cut_to(b.scene);
@@ -321,6 +328,7 @@ fn fire_cue(
         CueKind::Trails(b) => s.dancer_trails = *b,
         CueKind::Canon(t) => s.canon = *t,
         CueKind::Blackout(b) => *blackout = *b,
+        CueKind::Strobe(b) => STROBE.store(*b, Ordering::Relaxed),
         CueKind::Fx(f) => {
             s.fx_auto = false;
             s.fx = *f;
@@ -407,6 +415,7 @@ fn apply_playhead(
             s.palette = p.clone();
         }
         *blackout = st.blackout;
+        STROBE.store(st.strobe, Ordering::Relaxed);
     }
 
     // Scene: the last absolute cue wins; before any scene cue the baseline
@@ -1189,6 +1198,16 @@ fn render_loop(
         }
         let target = if blackout { 0.0 } else { 1.0 };
         master += (target - master) * (dt * 3.0).min(1.0);
+        // Strobe: black, with a hard cut to the picture on each drum hit the
+        // analyser hears (`onset` jumps on a hit and decays over ~0.12 s, so
+        // each flash lasts ~70 ms). It follows the actual fill — rolls that
+        // start mid-bar or cross the bar line — not a grid, and no easing
+        // (blackout's fade is far too slow for this).
+        let strobe_gate = if STROBE.load(Ordering::Relaxed) && f.onset < 0.45 {
+            0.0
+        } else {
+            1.0
+        };
 
         let (w, h) = r.size();
         let mut spectrum = [0.0; audio::SPECTRUM_BINS];
@@ -1222,7 +1241,7 @@ fn render_loop(
             seed: dir.seed,
             flash: dir.flash,
             flow: flow as f32,
-            master,
+            master: master * strobe_gate,
             fx: if s.fx_auto { fx_current } else { s.fx }.index(),
             fx_amt: s.fx_amt,
             spectrum,
@@ -1920,6 +1939,13 @@ impl ApplicationHandler<AppEvent> for App {
             }))
             .unwrap();
             self.send(Msg::FireCue(timeline::CueKind::Text(spec)));
+        }
+        // Dev aid: fire any cue at startup, e.g. TRIPPIN_CUE_TEST='{"Strobe":true}'.
+        if let Ok(v) = std::env::var("TRIPPIN_CUE_TEST") {
+            match serde_json::from_str::<timeline::CueKind>(&v) {
+                Ok(k) => self.send(Msg::FireCue(k)),
+                Err(e) => eprintln!("TRIPPIN_CUE_TEST: {e}"),
+            }
         }
         if let Some(p) = self.start_song.take() {
             if p.extension()

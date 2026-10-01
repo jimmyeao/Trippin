@@ -1210,6 +1210,14 @@ pub fn groove_test(path: &std::path::Path) -> anyhow::Result<()> {
     let mut rate_acc = 0.0f32;
     let mut rate_n = 0u32;
     a.nn_sync = true;
+    // TRIPPIN_GATE=from-to (seconds): print the strobe gate (onset >= 0.45)
+    // per hop over that span, with | at each live beat — checks flashes land
+    // on a fill's hits.
+    let gate: Option<(f32, f32)> = std::env::var("TRIPPIN_GATE")
+        .ok()
+        .and_then(|v| v.split_once('-').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?))));
+    let mut gate_line = String::new();
+    let mut gate_beat = 0u64;
     // TRIPPIN_NO_NN=1: bass vote only, for comparing against the neural check.
     if std::env::var("TRIPPIN_NO_NN").is_ok() {
         crate::beats::set_enabled(false);
@@ -1233,6 +1241,18 @@ pub fn groove_test(path: &std::path::Path) -> anyhow::Result<()> {
             rate_acc += 0.3 + 2.4 * clk.powf(1.6);
             rate_n += 1;
             let t = i as f32 / song.sr as f32;
+            if let Some((g0, g1)) = gate {
+                if t >= g0 && t < g1 {
+                    if a.beat_count != gate_beat {
+                        gate_beat = a.beat_count;
+                        gate_line.push('|');
+                    }
+                    gate_line.push(if a.f.onset >= 0.45 { '#' } else { '.' });
+                } else if t >= g1 && !gate_line.is_empty() {
+                    println!("gate {g0}-{g1}s: {gate_line}");
+                    gate_line.clear();
+                }
+            }
             if t >= next_print {
                 // Where the live "one" sits against the file's grid, in
                 // beats (0 = on the bar; needs a matching tempo to mean much).

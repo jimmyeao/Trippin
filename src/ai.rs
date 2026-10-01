@@ -180,6 +180,9 @@ pub struct ClipAnalysis {
     pub vocals: Vec<(usize, usize)>,
     /// Drum-fill bars (onset spikes) — phrase ends, strobe/stutter material.
     pub fills: Vec<usize>,
+    /// Onset density per beat, 0..1 — where a fill's hits actually are
+    /// (rolls start mid-bar and cross the bar line).
+    pub beat_onsets: Vec<f32>,
 }
 
 /// Full analysis from decoded audio (`Song::load` result), measured on the
@@ -225,7 +228,9 @@ pub fn analyze_song(
     norm_inplace(&mut energy);
     norm_inplace(&mut onsets);
     norm_inplace(&mut voc);
-    finish_analysis(clip, &song.name, bpm, beats, energy, onsets, voc, air, mids)
+    let mut a = finish_analysis(clip, &song.name, bpm, beats, energy, onsets, voc, air, mids);
+    a.beat_onsets = beat_density(&song.onsets, on_floor, song.sr as f64 / HOP as f64, first_beat, bpm, beats);
+    a
 }
 
 /// Analysis from a clip's cached strip data (used when the audio file is
@@ -352,6 +357,48 @@ fn onset_floor(env: &[f32]) -> f32 {
     v.sort_by(|a, b| a.total_cmp(b));
     let med = v[v.len() / 2];
     med + (v[(v.len() as f32 * 0.9) as usize] - med) * 0.3
+}
+
+/// Fraction of onset-envelope hops above `floor` in each beat.
+fn beat_density(env: &[f32], floor: f32, fps: f64, first_beat: f64, bpm: f64, beats: f64) -> Vec<f32> {
+    let n = beats.ceil().max(0.0) as usize;
+    (0..n)
+        .map(|b| {
+            let h0 = ((first_beat + b as f64 * 60.0 / bpm) * fps) as usize;
+            let h1 = (((first_beat + (b + 1) as f64 * 60.0 / bpm) * fps) as usize).min(env.len());
+            if h1 <= h0 {
+                return 0.0;
+            }
+            env[h0..h1].iter().filter(|&&v| v > floor).count() as f32 / (h1 - h0) as f32
+        })
+        .collect()
+}
+
+/// The beats a fill's hits actually cover, around fill bar `f`: the dense
+/// run (onset density well above the surrounding bars) that ends in or at
+/// the fill bar, reaching back into the bar before if the roll starts
+/// there. Falls back to the bar's last two beats.
+fn fill_span(a: &ClipAnalysis, f: usize) -> (f64, f64) {
+    let fb = f * 4;
+    let fallback = ((fb + 2) as f64, (fb + 4) as f64);
+    let d = &a.beat_onsets;
+    if d.len() < fb + 4 {
+        return fallback;
+    }
+    let ctx: Vec<f32> = (fb.saturating_sub(16)..fb.saturating_sub(4)).map(|b| d[b]).collect();
+    if ctx.len() < 4 {
+        return fallback;
+    }
+    let m = quantile(&ctx, 0.5);
+    let dense = |b: usize| d[b] >= (1.35 * m).max(0.15);
+    let Some(end) = (fb..fb + 4).rev().find(|&b| dense(b)) else {
+        return fallback;
+    };
+    let mut start = end;
+    while start > fb.saturating_sub(4) && dense(start - 1) && end - start < 7 {
+        start -= 1;
+    }
+    (start as f64, (end + 1) as f64)
 }
 
 /// Sections, fills and drop/build/vocal markers from the per-bar arrays.
@@ -504,6 +551,7 @@ fn finish_analysis(
         builds,
         vocals,
         fills,
+        beat_onsets: Vec::new(),
     }
 }
 
@@ -794,9 +842,10 @@ peaks, and for an accelerating run of quick cuts across a build (e.g. cuts at be
 - Match scene ENERGY (1 calm .. 5 intense, in the scene list) to the block: 1-2 for intro, \
 breakdown and outro; 3 for groove; 4-5 for drop and peak; rising through a build. Use the \
 \"about\" line for character (mellow, festival, tunnel…).\n\
-- Fills: a fill bar into a new section or a drop gets a \"fill\" hit — \"strobe\" (black \
-flicker on the eighths), \"stutter\" (flips to the next block's scene and back), or \
-\"flash\" (one dip on the last off-beat). Tunnel and flight scenes never strobe or flash — \
+- Fills: a fill bar into a new section or a drop gets a \"fill\" hit — \"strobe\" (the \
+picture goes black and flashes on each drum hit of the fill, wherever the roll actually \
+falls), \"stutter\" (flips to the next block's scene and back across the fill), or \
+\"flash\" (a strobe on just the last half beat). Tunnel and flight scenes never strobe or flash — \
 use stutter. Other fills: use them now and then, not every one.\n\
 - \"void\" is a fade to black: ONLY on the final block, and only when it's the song's \
 outro. Never anywhere else.\n\
@@ -862,6 +911,7 @@ pub fn analyze_file(path: &std::path::Path) -> Result<String> {
         "builds": a.builds.iter().map(|(s,e)| json!([s,e])).collect::<Vec<_>>(),
         "vocal_spans": a.vocals.iter().map(|(s,e)| json!([s,e])).collect::<Vec<_>>(),
         "fills": a.fills,
+        "fill_spans": a.fills.iter().map(|&f| { let (s, e) = fill_span(&a, f); json!([s, e]) }).collect::<Vec<_>>(),
         "energy": r2(&a.energy), "onsets": r2(&a.onsets),
         "vocal": r2(&a.vocal), "air": r2(&a.air),
     }))?;
@@ -1817,22 +1867,23 @@ fn expand_plan(
                     fx_kind = "stutter";
                 }
                 let fb = (f * 4) as f64;
+                let (s0, s1) = fill_span(a, f);
                 match fx_kind {
-                    "strobe" => {
-                        for k in 0..4 {
-                            cues.push(Cue {
-                                clip: a.clip,
-                                beat: fb + 2.0 + k as f64 * 0.5,
-                                beats: 0.25,
-                                kind: CueKind::Blackout(true),
-                            });
-                        }
-                    }
+                    // Strobe cues gate the picture on the eighths with no
+                    // fade (blackout eases far too slowly for this).
+                    // The strobe covers the fill's real hits; playback then
+                    // flashes the picture on each drum hit it hears.
+                    "strobe" => cues.push(Cue {
+                        clip: a.clip,
+                        beat: s0,
+                        beats: s1 - s0,
+                        kind: CueKind::Strobe(true),
+                    }),
                     "flash" => cues.push(Cue {
                         clip: a.clip,
                         beat: fb + 3.5,
                         beats: 0.5,
-                        kind: CueKind::Blackout(true),
+                        kind: CueKind::Strobe(true),
                     }),
                     _ => {
                         // Flip to the next block's scene and back on the
@@ -1850,11 +1901,12 @@ fn expand_plan(
                                 pick_scene(scenes, scene_target(kind).max(0.6), &avoid, bi)
                             });
                         if let Some(other) = next {
-                            for k in 0..4 {
+                            let flips = (((s1 - s0) * 2.0) as usize).clamp(2, 8);
+                            for k in 0..flips {
                                 let s = if k % 2 == 0 { &other } else { &scene };
                                 cues.push(Cue {
                                     clip: a.clip,
-                                    beat: fb + 2.0 + k as f64 * 0.5,
+                                    beat: s1 - (flips - k) as f64 * 0.5,
                                     beats: 0.5,
                                     kind: CueKind::Scene(s.clone()),
                                 });
@@ -2573,6 +2625,7 @@ mod tests {
             builds: vec![],
             vocals: vec![],
             fills: vec![],
+            beat_onsets: vec![],
         }
     }
 
@@ -2770,15 +2823,15 @@ mod tests {
             1
         );
         // The fill into the drop (bar 15) gets an automatic hit — on a
-        // non-flight scene, a strobe: four quarter-beat blackouts.
-        let strobe: Vec<f64> = cues
+        // non-flight scene, a strobe over the fill's last two beats.
+        let strobe: Vec<(f64, f64)> = cues
             .iter()
-            .filter(|c| matches!(c.kind, CueKind::Blackout(true)) && c.beats == 0.25)
-            .map(|c| c.beat)
+            .filter(|c| matches!(c.kind, CueKind::Strobe(true)))
+            .map(|c| (c.beat, c.beats))
             .collect();
-        assert_eq!(strobe, vec![62.0, 62.5, 63.0, 63.5]);
+        assert_eq!(strobe, vec![(62.0, 2.0)]);
         // The strobe asked for on the tunnel scene (bar 21) becomes a stutter.
-        assert!(!cues.iter().any(|c| matches!(c.kind, CueKind::Blackout(true)) && c.beat >= 84.0 && c.beat < 88.0));
+        assert!(!cues.iter().any(|c| matches!(c.kind, CueKind::Strobe(true)) && c.beat >= 84.0 && c.beat < 88.0));
         assert!(at(86.0).any(|c| matches!(c.kind, CueKind::Scene(_))));
         // A word per beat from the drop, the last word holding to block end.
         let words: Vec<(f64, f64, String)> = cues

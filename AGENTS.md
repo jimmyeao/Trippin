@@ -315,6 +315,17 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
     scenes, which never get strobe/flash fills (they stutter instead).
   - Plan dialect extras: `cuts` (in-block scene changes), `fill`
     (strobe/stutter/flash on fill bars), text `fx`/`size`/`at`/`seq`.
+  - **Strobe** is `CueKind::Strobe`, not blackout: blackout eases `master`
+    at ~3/s so sub-beat pulses never got dark. The strobe gate in the render
+    loop is hard (no easing) and opens only while the live analyser's
+    `onset` ≥ 0.45 (~70 ms per hit), so flashes follow the drums actually
+    playing, not the bar grid. The AI places it over `fill_span` — the
+    dense run of `ClipAnalysis::beat_onsets` around the fill bar, which can
+    start mid-bar or reach into the bar before. `STROBE` is a static flag
+    (reset in `apply_playhead` and `end_show`). Check with
+    `--groove-test` + `TRIPPIN_GATE=from-to` (prints the gate per hop, `|`
+    per beat) and `--analyze` (`fill_spans`). `TRIPPIN_CUE_TEST='{"Strobe":true}'`
+    fires any cue at startup.
   - Dancer routines re-anchor their loop to the bar they were requested in
     (`Slot::pending_anchor`), so a routine switched in on a phrase starts
     from its first frame there.

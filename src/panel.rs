@@ -3227,7 +3227,7 @@ pub(crate) fn cue_color(k: &CueKind) -> egui::Color32 {
         | CueKind::Look(_)
         | CueKind::Trails(_)
         | CueKind::Canon(_) => t::LANE_DANCER,
-        CueKind::Blackout(_) => t::DANGER,
+        CueKind::Blackout(_) | CueKind::Strobe(_) => t::DANGER,
         CueKind::Mode(_) | CueKind::Palette(_) => t::LANE_SHOW,
         CueKind::Text(_) | CueKind::TextOff(_) => t::LANE_TEXT,
     }
@@ -3267,7 +3267,7 @@ pub(crate) fn cue_param_ui(
                 | ui.selectable_value(m, Mode::Static, "static").changed()
                 | ui.selectable_value(m, Mode::Manual, "manual").changed()
         }
-        CueKind::Dancer(b) | CueKind::Blackout(b) | CueKind::FxAuto(b) => {
+        CueKind::Dancer(b) | CueKind::Blackout(b) | CueKind::Strobe(b) | CueKind::FxAuto(b) => {
             ui.checkbox(b, "on").changed()
         }
         CueKind::Look(l) => {

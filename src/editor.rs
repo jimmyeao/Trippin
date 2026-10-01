@@ -736,6 +736,7 @@ impl Editor {
                                     ("static mode", CueKind::Mode(crate::config::Mode::Static)),
                                     ("manual mode", CueKind::Mode(crate::config::Mode::Manual)),
                                     ("blackout", CueKind::Blackout(true)),
+                                    ("strobe", CueKind::Strobe(true)),
                                 ]
                                 .into_iter()
                                 .filter(|(l, _)| show(l))

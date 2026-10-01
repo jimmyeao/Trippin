@@ -490,6 +490,9 @@ boundaries and cue transitions land on the "one", not just on beats.
   audio onset envelope against the track's stored envelope, locks on when
   the same song is playing in the room and fires the cues at the matching
   position — a pre-programmed show that follows the DJ's deck.
+- **Strobe** (timeline cue, Cues library): while it runs the picture is
+  black and cuts in on each drum hit — hard cuts, no fade — so it follows
+  whatever the drums actually play.
 - **Text effects** (timeline text cues, or the AI): besides the style and
   entrance animation, a card can **punch** (pops on every beat), **shake**
   (jolts on kicks), **strobe** (eighth-note flicker), **bounce** (a wave
@@ -505,7 +508,9 @@ boundaries and cue transitions land on the "one", not just on beats.
   visual energy (1-5), each routine's pace (calm / medium / fast), the
   sections and fills, and directs the show block by block — with extra
   scene cuts inside a block (1-2 bar scenes, accelerating cuts through a
-  build), a strobe / stutter / flash hit on fill bars, and text as a
+  build), a strobe / stutter / flash hit on drum fills (the strobe
+  covers the fill's real hits — rolls that start mid-bar or cross the bar
+  line — and flashes the picture on each drum hit it hears), and text as a
   performance (a word per beat on the drop, hook words landed on their
   beat, beat-driven text effects). Trippin expands that plan into cue
   blocks, enforcing the show rules itself: a scene can't run longer than
