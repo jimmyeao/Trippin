@@ -4227,6 +4227,7 @@ dependencies = [
  "egui-wgpu",
  "egui-winit",
  "embed-resource",
+ "if-addrs",
  "image",
  "libloading 0.8.9",
  "mdns-sd",

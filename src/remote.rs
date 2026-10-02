@@ -343,12 +343,51 @@ fn advertise(port: u16) -> Option<mdns_sd::ServiceDaemon> {
     Some(daemon)
 }
 
-/// The LAN IPv4 most likely reachable — a UDP "connect" sends nothing, it
-/// just asks the OS which interface that route would take.
+/// The LAN address to advertise and show for pairing. Asking the routing
+/// table which interface reaches the mDNS multicast group isn't enough:
+/// on the owner's PC that answer was Tailscale's adapter with only a
+/// self-assigned 169.254.x address, so phones were told to connect to an
+/// unreachable IP. Instead, list the interfaces and prefer a private LAN
+/// address (192.168/16, then 10/8 and 172.16/12), skipping loopback,
+/// link-local and CGNAT (100.64/10, Tailscale); among equals, the one the
+/// default route uses.
 pub fn local_ip() -> Option<String> {
-    let sock = UdpSocket::bind("0.0.0.0:0").ok()?;
-    sock.connect("224.0.0.251:5353").ok()?;
-    Some(sock.local_addr().ok()?.ip().to_string())
+    use std::net::{IpAddr, Ipv4Addr};
+    fn rank(ip: Ipv4Addr) -> Option<u8> {
+        let o = ip.octets();
+        if ip.is_loopback() || ip.is_link_local() || ip.is_unspecified() || ip.is_multicast() {
+            return None;
+        }
+        Some(match o {
+            [192, 168, ..] => 0,
+            [10, ..] => 1,
+            [172, b, ..] if (16..=31).contains(&b) => 1,
+            [100, b, ..] if (64..=127).contains(&b) => 3,
+            _ => 2,
+        })
+    }
+    // The default route's source address: a UDP "connect" sends nothing.
+    let routed = UdpSocket::bind("0.0.0.0:0")
+        .and_then(|s| s.connect("8.8.8.8:80").map(|_| s))
+        .and_then(|s| s.local_addr())
+        .ok()
+        .and_then(|a| match a.ip() {
+            IpAddr::V4(v) => Some(v),
+            _ => None,
+        });
+    let mut best: Option<(u8, Ipv4Addr)> = None;
+    for i in if_addrs::get_if_addrs().unwrap_or_default() {
+        let IpAddr::V4(v) = i.ip() else { continue };
+        let Some(r) = rank(v) else { continue };
+        let better = match best {
+            None => true,
+            Some((b, _)) => r < b || (r == b && Some(v) == routed),
+        };
+        if better {
+            best = Some((r, v));
+        }
+    }
+    best.map(|(_, ip)| ip.to_string())
 }
 
 /// "<host>.local." for the mDNS SRV target — stable enough for Bonjour.
