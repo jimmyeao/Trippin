@@ -67,6 +67,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// `apply_playhead` resets it on play / seek / stop.
 static STROBE: AtomicBool = AtomicBool::new(false);
 
+/// Whether the visuals window is fullscreen. The event thread owns the
+/// window and publishes this every `about_to_wait`; the render thread copies
+/// it into `Status` so the remote's state frame (and anything else reading
+/// the shared status) sees it — the panel used to patch only its own copy.
+static FULLSCREEN: AtomicBool = AtomicBool::new(false);
+
 /// Frames are arriving from the external engine (Spout in) — the
 /// `unity_stage` scene is only in rotation while this holds.
 pub(crate) static EXT_LIVE: AtomicBool = AtomicBool::new(false);
@@ -1401,8 +1407,8 @@ fn render_loop(
                 },
                 clip: dancer.loaded_name(),
                 blackout,
-                // Filled in by the event thread — it owns the window state.
-                fullscreen: false,
+                // Published by the event thread — it owns the window state.
+                fullscreen: FULLSCREEN.load(Ordering::Relaxed),
                 fx: if s.fx_auto { fx_current } else { s.fx },
                 output: r.output_status(),
                 groove: f.groove,
@@ -2574,6 +2580,7 @@ impl ApplicationHandler<AppEvent> for App {
             .window
             .as_ref()
             .is_some_and(|w| w.fullscreen().is_some());
+        FULLSCREEN.store(fs, Ordering::Relaxed);
         if fs != self.cursor_hidden {
             self.cursor_hidden = fs;
             if let Some(w) = &self.window {
