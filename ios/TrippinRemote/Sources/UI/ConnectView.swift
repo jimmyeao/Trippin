@@ -90,7 +90,7 @@ struct ConnectView: View {
                     .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Theme.border))
                 }
                 .buttonStyle(.plain)
-                .accessibilityIdentifier("server")
+                .accessibilityIdentifier("server.\(s.name)")
             }
         }
     }

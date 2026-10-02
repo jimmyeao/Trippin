@@ -19,10 +19,15 @@ final class Discovery: ObservableObject {
         guard browser == nil else { return }
         let b = NWBrowser(for: .bonjour(type: "_trippin._tcp", domain: nil), using: .tcp)
         b.browseResultsChangedHandler = { [weak self] results, _ in
-            let found = results.compactMap { r -> FoundServer? in
-                guard case let .service(name, _, _, _) = r.endpoint else { return nil }
-                return FoundServer(name: name, endpoint: r.endpoint)
-            }.sorted { $0.name < $1.name }
+            // One result per interface the advert was seen on (Wi-Fi,
+            // Ethernet, a VPN adapter…): keep one row per service name —
+            // the endpoint is resolved by name on connect anyway.
+            var byName: [String: FoundServer] = [:]
+            for r in results {
+                guard case let .service(name, _, _, _) = r.endpoint, byName[name] == nil else { continue }
+                byName[name] = FoundServer(name: name, endpoint: r.endpoint)
+            }
+            let found = byName.values.sorted { $0.name < $1.name }
             Task { @MainActor in self?.servers = found }
         }
         b.stateUpdateHandler = { [weak self] state in

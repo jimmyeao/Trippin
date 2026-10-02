@@ -151,7 +151,11 @@ final class RemoteFlowTests: XCTestCase {
     func test3_Discovery() {
         app.launchArguments = ["-uitestReset"]
         app.launch()
-        let server = wait(app.buttons["server"], timeout: 20, "Bonjour server listed")
+        // TRIPPIN_SERVICE picks one when several Trippins advertise.
+        let wanted = ProcessInfo.processInfo.environment["TRIPPIN_SERVICE"]
+        let server = wanted.map { app.buttons["server.\($0)"] }
+            ?? app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'server.'")).firstMatch
+        wait(server, timeout: 20, "Bonjour server listed")
         shot("20 discovered")
         server.tap()
         let pinField = wait(app.textFields["pin"], "pin field")
