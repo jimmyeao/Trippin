@@ -104,6 +104,7 @@ cargo run --release -- --snap x --snap-calm 1        # preview breakdown (no dru
 cargo run --release -- --nowplaying       # prints what each now-playing source sees
 cargo run --release -- --list-devices     # capture devices (names for --device / the Audio in picker)
 cargo run --release -- --probe-audio [name]   # capture ~6 s, print band peaks + BPM; exits nonzero on silence
+cargo run --release -- --beats track.flac     # onset grid vs Beat This! grid + timings (TRIPPIN_BEATS_DEBUG=1: per-30 s tempo)
 cargo run --release -- --spout-grab <name> out.png   # receive one Spout frame (Windows)
 cargo run --release -- --ndi-monitor [name]
 cargo run --release -- --list-midi          # MIDI input ports (pad/key controllers)
@@ -120,6 +121,9 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   so don't clobber them**.
 - **Key injection:** `SendKeys` sometimes misses the winit window.
   `PostMessage` WM_KEYDOWN/UP to the hwnd is reliable.
+- The agent Bash tool's heredocs expand `\n` into real newlines, which
+  silently breaks Rust string literals edited through `python - <<EOF`.
+  Write edit scripts to a file (or use the Edit tool) instead.
 - The dev box has no ffmpeg on PATH. imageio-ffmpeg's binary (Python) works
   via the `ffmpeg_path` setting.
 
@@ -128,7 +132,8 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
 | Path | What |
 |---|---|
 | `src/main.rs` | The winit app and CLI flags. `render_loop` runs on **its own thread** (Windows' modal move loop would freeze it otherwise). The event thread runs input and the egui panel. They share `Shared` (a `Mutex<Settings>`, a `Mutex<Status>`, and atomics) and talk over `mpsc::Msg`. |
-| `src/audio.rs`, `src/sysaudio.rs` | Capture (CPAL devices; the macOS system-output tap lives in `sysaudio.rs`), FFT, onsets and kicks (level-independent: flux > mean×1.8), tempo PLL, groove, `calm` (breakdown), the four-band vocabulary, and the triggered waveform. |
+| `src/audio.rs`, `src/sysaudio.rs` | Capture (CPAL devices; the macOS system-output tap lives in `sysaudio.rs`), FFT, onsets and kicks (level-independent: flux > mean×1.8), tempo PLL, groove, `calm` (breakdown), the four-band vocabulary, the triggered waveform, and the neural downbeat check (`nn_*`: a 15 s window every 5 s to a `beat-nn` worker thread). |
+| `src/beats.rs` | Beat This! (`beat-this` crate, ONNX via pure-Rust `rten`, as in BeatDis): model download to `<data dir>/models` (SHA-checked, from the public `BeatDis-models` release), detection with sub-frame refine, the constant-tempo grid fit, and the per-song grid cache (`<data dir>/beatcache`). |
 | `src/director.rs` | Auto-pilot: phrase cuts, drop cuts, intensity, and the beats/breakdown modes. |
 | `src/render.rs` | wgpu. Ping-pong Rgba16Float feedback targets, per-scene pipelines, hot reload, and the `Uniforms` struct (**must match `U` in `shaders/common.wgsl`**). |
 | `src/gfx.rs`, `shaders/bloom.wgsl` | The baked 64³ noise volume and blue noise, and the bloom chain. |
@@ -142,11 +147,12 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
 | `src/output.rs` | The output tap. It re-runs present at the output size, reads it back asynchronously, and feeds the sinks (NDI, Spout, recorder). |
 | `src/ndi.rs`, `src/spout.rs` | NDI (runtime loaded dynamically), and a native Spout2 sender (D3D11 shared texture plus the Spout shared-memory registry). |
 | `src/rec.rs` | Clip recording: the ffmpeg replay buffer and set recording. |
-| `src/timeline.rs`, `src/song.rs`, `src/editor.rs`, `src/ai.rs` | The timeline show editor (F2), song playback, and the AI show builder. |
+| `src/timeline.rs`, `src/song.rs`, `src/editor.rs`, `src/ai.rs` | The timeline show editor (F2), song playback, and the AI show builder (local analysis → prompt → plan → `expand_plan` rules → cues). |
 | `src/panel.rs` | The egui control panel. Tabs: Perform, Dancer & FX, Stream, Timeline, Keys, Settings. App-wide preferences (audio in, latency, director rules, AI provider/key) live on **Settings** (`settings_tab`), not in collapsibles on other pages or in the timeline editor. |
 | `src/config.rs` | `Settings` (serde, `#[serde(default)]`), actions and hotkeys, and `data_dir()`. |
 | `src/midi.rs` | MIDI input (midir): one port, note-ons become `Action`s. |
 | `src/snap.rs` | Headless snapshot and benchmark rendering. |
+| `src/engine.rs`, `src/link.rs`, `unity/` | Unity engine (shows `unity_stage`, `unity_crystals`, `unity_flow`; any `unity_*` scene is gated on live frames and hidden from the AI builder). `engine.rs` launches the player headless and supervises it; frames come back through a memory-mapped file (seqlock, top row first) into `gfx::Statics::ext` (binding 8 `ext_tex`); `link.rs` sends the show state over UDP. Cross-platform, nothing to start by hand. See `unity/README.md`. |
 | `tools/*.py` | Offline pipelines: mocap and stock video to dancer clips, and so on. |
 
 ## 6. Writing a scene
@@ -235,6 +241,13 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   steps up `rate*dt` then eases back — a two-frame judder (this made the
   branding logo wobble horizontally whenever the DJ name was off). Guard
   the at-rest case (see `overlay.rs::ease_vis`).
+- The render thread is **not unwound on quit**: its locals' `Drop`s never
+  run (macOS Cmd-Q doesn't even return from `run_app`). Process-level
+  cleanup (killing the Unity player: `engine::shutdown`) goes in
+  `ApplicationHandler::exiting`, with state the event thread can reach.
+- Panel scene thumbnails are rendered once and disk-cached, except
+  `unity_*` tiles (`panel.rs::live_thumb`): they re-render about every
+  0.5 s from the engine's current frame and are never cached.
 - The pointer over the visuals is hidden while fullscreen (synced in
   `about_to_wait`); the panel/editor windows keep theirs.
 - **MIDI** (`midi.rs`): midir's callback thread posts `AppEvent::MidiNote`
@@ -250,6 +263,31 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   drops a connection whose port vanished, so replugging recovers. midir's
   macOS backend is CoreMIDI — the code isn't cfg-gated, but it hasn't been
   compiled for macOS yet.
+- **Beat This! grid fit** (`beats.rs::fit_grid`): the model sometimes emits
+  *confident* beats at ~1.5x tempo plus dozens of junk downbeats through a
+  breakdown. Counting those as beats skewed tempos by 2-3%, and a slightly
+  wrong tempo spreads the downbeat vote over all four phases. So: refine
+  beat times sub-frame (raw peaks are on a 20 ms grid), take the period
+  from steady runs that agree with the median, number each beat against
+  the previous accepted one and skip beats between grid lines, reject
+  residual outliers and refit, and let only accepted beats' downbeats vote.
+  Check changes with `--beats` on several tracks: real tempos come out as
+  round numbers (125.00, 130.01, 140.87).
+- **Live beat phase** (`audio.rs` `nn_vote`): the onset comb locks onto the
+  strongest onsets, which in a lot of house are the off-beat bass/hats —
+  measured with `--groove-test`, the live "one" was on the bar only 5-30%
+  of the time. The neural window measures where real downbeats sit on the
+  live grid (circular mean), shifts the phase and stores `nn_bias`, which
+  `correct_phase` adds to the comb target so it doesn't drag the phase
+  back. Then the downbeats vote the bar (decisive when >=4 agree at 85%).
+  `--groove-test` prints `bar N` (live "one" vs the file grid; 0 = right),
+  `TRIPPIN_NO_NN=1` compares without the check, `TRIPPIN_NN_DEBUG=1` logs
+  each window. `main` caps rten at 2 threads (`RTEN_NUM_THREADS`); it
+  barely scales past 4 and would otherwise take every core.
+- `song::load` uses the Beat This! grid when `beats::ready()` (downloaded and
+  `Settings::beat_model` on); downbeat agreement < 50% keeps its tempo but
+  picks the bar by bass vote. `ai::build_show` returns re-detected grids
+  (`ShowBuild::grids`) and the editor applies them before adding cues.
 - **AI show builder** (`ai.rs::anthropic`): the default is
   `claude-sonnet-5-5`. Claude 5-family models reject a forced
   `tool_choice` (`tool`/`any`) with a 400, so `emit_plan` is offered with
@@ -260,6 +298,50 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   and endpoint are user-editable), and the fallback only to
   api.anthropic.com. When bumping a default model, add the old id to the
   retired-id reset in `Settings::load`.
+  - With `Settings::ai_web_search` the request also offers the
+    `web_search` server tool (max 4 uses); a `pause_turn` stop is resumed
+    by re-sending with the paused content appended as the assistant turn.
+  - Show rules live in two places: the system prompt asks for them, and
+    `expand_plan` enforces them (routine pace by block kind via
+    `routine_energies`/`CALM_MAX`, neon look in sung calm blocks, drop
+    impact top-up, title card fallback, mid-song `void` ignored). Change
+    both together. Unknown routine names are replaced by pace, not dropped.
+  - Analysis runs on the *timeline clip's* grid (`analyze_song(…, c.bpm,
+    c.first_beat)`) so an editor-nudged grid still lines bars up with cues.
+  - Structure (`find_boundaries`): novelty over 3-bar-median-filtered,
+    z-scored features (energy, onsets, vocal, air, mid) + half the
+    bar-to-bar jump, isolated fills boost the next bar, phrase grid voted
+    with a bar-0 prior, snap only when the on-grid neighbour scores ≥60%,
+    min 4 bars apart, then fill-led splits of long flat stretches. Section
+    kinds are relative to the track's own median/p75. Check with
+    `--analyze` (`TRIPPIN_AI_DEBUG=1` prints the novelty curve) on a flat
+    house track (Krush – House Arrest) and an EDM one (D.O.D.).
+  - Scene energy comes from `shaders/scene_energy.json`, generated by
+    `--snap all --snap-energy` (motion ×2 + brightness + colour, ranked).
+    **Re-run it when you add scenes** (unknown scenes default to 0.5).
+    `scene_meta` lifts laser/festival rigs to ≥0.6 and flags tunnel/flight
+    scenes, which never get strobe/flash fills (they stutter instead).
+  - Plan dialect extras: `cuts` (in-block scene changes), `fill`
+    (strobe/stutter/flash on fill bars), text `fx`/`size`/`at`/`seq`.
+  - **Strobe** is `CueKind::Strobe`, not blackout: blackout eases `master`
+    at ~3/s so sub-beat pulses never got dark. The strobe gate in the render
+    loop is hard (no easing) and opens only while the live analyser's
+    `onset` ≥ 0.45 (~70 ms per hit), so flashes follow the drums actually
+    playing, not the bar grid. The AI places it over `fill_span` — the
+    dense run of `ClipAnalysis::beat_onsets` around the fill bar, which can
+    start mid-bar or reach into the bar before. `STROBE` is a static flag
+    (reset in `apply_playhead` and `end_show`). Check with
+    `--groove-test` + `TRIPPIN_GATE=from-to` (prints the gate per hop, `|`
+    per beat) and `--analyze` (`fill_spans`). `TRIPPIN_CUE_TEST='{"Strobe":true}'`
+    fires any cue at startup.
+  - Dancer routines re-anchor their loop to the bar they were requested in
+    (`Slot::pending_anchor`), so a routine switched in on a phrase starts
+    from its first frame there.
+- **Text effects** (`TextFx`, `text.wgsl`): punch/shake/strobe/bounce/
+  shatter use the slot's former padding float (`TextSlotU::fx`), so the
+  uniform layout didn't change. `TRIPPIN_TEXT_TEST="WORDS|fx"` fires one
+  text cue at startup — screenshot the visuals window to look at an effect
+  without playing audio.
 - **macOS audio:** ScreenCaptureKit hears only the *system output mix*.
   DJ software routed straight to a controller's own interface (Serato → a
   Rane's USB card) never enters it — capture shows "no signal" while music

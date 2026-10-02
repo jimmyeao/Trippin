@@ -272,6 +272,8 @@ pub struct Panel {
     /// Thumbnails we've asked the render thread for (Instant = last request,
     /// for re-requesting a thumb that never came back).
     want_thumbs: HashMap<String, Instant>,
+    /// Fingerprint of the last image taken per live (engine) tile.
+    live_fp: HashMap<String, u64>,
     /// Dancer mid-frame thumbs, keyed by clip name — decoded straight from
     /// the clip's frames on disk (no render thread involved).
     clip_thumbs: HashMap<String, Option<egui::TextureHandle>>,
@@ -312,6 +314,7 @@ impl Panel {
             chip: LibChip::All,
             thumbs: HashMap::new(),
             want_thumbs: HashMap::new(),
+            live_fp: HashMap::new(),
             clip_thumbs: HashMap::new(),
             keys_filter: String::new(),
             saved: SavedCache::default(),
@@ -351,12 +354,21 @@ impl Panel {
         {
             let store = thumb_store.lock().unwrap_or_else(|e| e.into_inner());
             for k in self.want_thumbs.keys() {
+                let Some((w, h, px)) = store.get(k) else { continue };
                 if self.thumbs.contains_key(k) {
-                    continue;
+                    // Live engine tiles re-render: take a new image when
+                    // its (sparsely sampled) pixels changed.
+                    if !live_thumb(k) {
+                        continue;
+                    }
+                    let fp = px.iter().step_by(61).fold(px.len() as u64, |a, &b| {
+                        a.wrapping_mul(31).wrapping_add(b as u64)
+                    });
+                    if self.live_fp.insert(k.clone(), fp) == Some(fp) {
+                        continue;
+                    }
                 }
-                if let Some((w, h, px)) = store.get(k) {
-                    got.push((k.clone(), *w, *h, px.clone()));
-                }
+                got.push((k.clone(), *w, *h, px.clone()));
             }
         }
 
@@ -377,13 +389,20 @@ impl Panel {
                     [*w as usize, *h as usize],
                     px,
                 );
-                let tex = ui.ctx().load_texture(
-                    format!("panel_thumb:{key}"),
-                    img,
-                    egui::TextureOptions::LINEAR,
-                );
-                thumbs.insert(key.clone(), tex);
-                cache_thumb_png(key, *w, *h, px);
+                if let Some(t) = thumbs.get_mut(key) {
+                    // A refresh (live engine tiles): update in place.
+                    t.set(img, egui::TextureOptions::LINEAR);
+                } else {
+                    let tex = ui.ctx().load_texture(
+                        format!("panel_thumb:{key}"),
+                        img,
+                        egui::TextureOptions::LINEAR,
+                    );
+                    thumbs.insert(key.clone(), tex);
+                }
+                if !live_thumb(key) {
+                    cache_thumb_png(key, *w, *h, px);
+                }
             }
             changed |= build_ui(
                 ui,
@@ -2085,10 +2104,19 @@ fn thumb_tex(
     key: &str,
     cmd: &mut Vec<UiCommand>,
 ) -> Option<egui::TextureId> {
+    let live = live_thumb(key);
     if let Some(t) = thumbs.get(key) {
-        return Some(t.id());
+        let id = t.id();
+        // Engine scenes are only a camera on the external frame — keep
+        // re-rendering so the tile follows it (and never sticks on the
+        // black it showed before frames arrived).
+        if live && want.get(key).is_none_or(|t| t.elapsed() > Duration::from_millis(500)) {
+            want.insert(key.to_string(), Instant::now());
+            cmd.push(UiCommand::Thumb(key.to_string()));
+        }
+        return Some(id);
     }
-    if !want.contains_key(key) {
+    if !live && !want.contains_key(key) {
         // First time we've seen this key this run — try the disk cache
         // before paying for a GPU render.
         if let Some(t) = cached_thumb(ui.ctx(), key) {
@@ -2115,6 +2143,12 @@ fn thumbs_dir() -> PathBuf {
 
 fn thumb_file(key: &str) -> PathBuf {
     thumbs_dir().join(format!("{}.png", key.replace(':', "_")))
+}
+
+/// Unity engine scenes show whatever the engine is sending right now, so
+/// their thumbnails refresh and never go to the disk cache.
+fn live_thumb(key: &str) -> bool {
+    key.starts_with("scene:unity_")
 }
 
 fn cached_thumb(ctx: &egui::Context, key: &str) -> Option<egui::TextureHandle> {
@@ -3227,7 +3261,7 @@ pub(crate) fn cue_color(k: &CueKind) -> egui::Color32 {
         | CueKind::Look(_)
         | CueKind::Trails(_)
         | CueKind::Canon(_) => t::LANE_DANCER,
-        CueKind::Blackout(_) => t::DANGER,
+        CueKind::Blackout(_) | CueKind::Strobe(_) => t::DANGER,
         CueKind::Mode(_) | CueKind::Palette(_) => t::LANE_SHOW,
         CueKind::Text(_) | CueKind::TextOff(_) => t::LANE_TEXT,
     }
@@ -3267,7 +3301,7 @@ pub(crate) fn cue_param_ui(
                 | ui.selectable_value(m, Mode::Static, "static").changed()
                 | ui.selectable_value(m, Mode::Manual, "manual").changed()
         }
-        CueKind::Dancer(b) | CueKind::Blackout(b) | CueKind::FxAuto(b) => {
+        CueKind::Dancer(b) | CueKind::Blackout(b) | CueKind::Strobe(b) | CueKind::FxAuto(b) => {
             ui.checkbox(b, "on").changed()
         }
         CueKind::Look(l) => {
@@ -3335,6 +3369,14 @@ pub(crate) fn cue_param_ui(
                 .show_ui(ui, |ui| {
                     for v in TextAnim::ALL {
                         changed |= ui.selectable_value(&mut spec.anim, v, v.label()).changed();
+                    }
+                });
+            egui::ComboBox::from_id_salt(id.with("tf"))
+                .width(70.0)
+                .selected_text(spec.fx.label())
+                .show_ui(ui, |ui| {
+                    for v in crate::text::TextFx::ALL {
+                        changed |= ui.selectable_value(&mut spec.fx, v, v.label()).changed();
                     }
                 });
             changed |= ui.selectable_value(&mut spec.lane, 0, "lane 1").changed();
@@ -3449,6 +3491,50 @@ fn settings_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<
             {
                 cmd.push(UiCommand::Do(Action::MarkDownbeat));
             }
+            // Neural beat tracking (Beat This!): song grids for timelines
+            // and the AI builder, plus the live downbeat check.
+            if ui
+                .checkbox(&mut s.beat_model, "Neural beat tracking")
+                .on_hover_text(
+                    "Finds the tempo and the bar's \"one\" with the Beat This! model \
+                     (as in BeatDis) instead of guessing from the bass — fixes bars \
+                     landing early or late after drum-roll intros. Downloads ~80 MB once.",
+                )
+                .changed()
+                && s.beat_model
+            {
+                crate::beats::ensure_models();
+            }
+            crate::beats::set_enabled(s.beat_model);
+            if s.beat_model {
+                use crate::beats::ModelState;
+                match crate::beats::state() {
+                    ModelState::Ready => {
+                        ui.small("Model ready.");
+                    }
+                    ModelState::Downloading { received, total, .. } => {
+                        ui.small(if total > 0 {
+                            format!("Downloading the model… {} of {} MB", received >> 20, total >> 20)
+                        } else {
+                            "Downloading the model…".to_string()
+                        });
+                    }
+                    ModelState::Failed(e) => {
+                        ui.horizontal(|ui| {
+                            ui.small(egui::RichText::new("Model download failed.").color(WARN))
+                                .on_hover_text(e);
+                            if ui.small_button("Retry").clicked() {
+                                crate::beats::ensure_models();
+                            }
+                        });
+                    }
+                    ModelState::Missing | ModelState::Unknown => {
+                        if ui.small_button("Download the model").clicked() {
+                            crate::beats::ensure_models();
+                        }
+                    }
+                }
+            }
         });
         ui.add_space(12.0);
         card().show(ui, |ui| {
@@ -3462,6 +3548,27 @@ fn settings_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<
                 .on_hover_text("A drop lands early — cut to the next scene with it");
             ui.checkbox(&mut s.random_order, "Random order")
                 .on_hover_text("Shuffle the rotation instead of playing it in order");
+            // External engine (the Unity shows in unity/): its unity_* scenes
+            // join the rotation while its frames are arriving.
+            ui.checkbox(&mut s.unity_link, "Unity engine link")
+                .on_hover_text(
+                    "Trippin runs the Unity engine in the background and adds its \
+                     festival scenes (unity_stage, unity_crystals, unity_flow) to the \
+                     rotation, driven by the music.",
+                );
+            if s.unity_link {
+                let st = crate::ENGINE_STATUS
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone();
+                ui.small(if crate::EXT_LIVE.load(std::sync::atomic::Ordering::Relaxed) {
+                    "Unity engine running.".to_string()
+                } else if st.is_empty() || st == "running" {
+                    "Starting the Unity engine…".to_string()
+                } else {
+                    format!("Unity engine: {st}")
+                });
+            }
         });
         ui.min_rect().height()
     };
@@ -3538,6 +3645,14 @@ fn settings_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<
                 "A blank key tries {}. A saved key lives in trippin.json.",
                 s.ai_provider.env_keys().join(" / ")
             ));
+            ui.add_enabled_ui(s.ai_provider == crate::ai::AiProvider::Anthropic, |ui| {
+                ui.checkbox(&mut s.ai_web_search, "Look up each track online first")
+                    .on_hover_text(
+                        "The model searches the web for each track's genre, mood and \
+                         hook words before planning. Anthropic only; up to 4 searches \
+                         (about a cent each) per build.",
+                    );
+            });
         });
         ui.min_rect().height()
     };

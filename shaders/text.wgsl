@@ -13,7 +13,7 @@ struct TS {
     life: f32,         // block length in seconds (0 = untimed)
     hue: f32,          // colour seed
     anim: f32,         // 0 fade · 1 rise · 2 drop · 3 slide · 4 zoom · 5 type
-    _p1: f32,
+    fx: f32,           // 0 none · 1 punch · 2 shake · 3 strobe · 4 bounce · 5 shatter
 };
 
 struct T {
@@ -64,6 +64,24 @@ fn shade(slot: i32, p: vec2<f32>) -> vec4<f32> {
             let sc = 0.3 + 0.7 * e;
             luv = (luv - 0.5) / sc + 0.5;
         }
+    }
+
+    // Beat-driven effects (TextFx) — uv warps here, strobe on the alpha below.
+    let fx = i32(s.fx + 0.5);
+    if fx == 1 { // punch: pops bigger on every beat
+        let sc = 1.0 + 0.22 * beat_pulse(9.0);
+        luv = (luv - 0.5) / sc + 0.5;
+    } else if fx == 2 { // shake: jolts on the kicks
+        let k = floor(u.time * 30.0);
+        let j = vec2<f32>(hash21(vec2(k, s.hue)), hash21(vec2(k + 7.3, s.hue))) - 0.5;
+        luv += j * (0.006 + 0.05 * u.kick);
+    } else if fx == 4 { // bounce: a wave runs through the letters each beat
+        luv.y += sin(luv.x * 11.0 - u.beat * 6.2831853) * (0.025 + 0.06 * beat_pulse(5.0));
+    } else if fx == 5 { // shatter: blocks jump apart on the kicks
+        let cell = floor(luv * vec2<f32>(14.0, 4.0));
+        let k = floor(u.beat * 2.0);
+        let d = vec2<f32>(hash21(cell + k), hash21(cell.yx + k * 1.7)) - 0.5;
+        luv += d * (0.02 + 0.16 * u.kick);
     }
 
     // uv warps first — they move the whole glyph, not the shading.
@@ -152,6 +170,12 @@ fn shade(slot: i32, p: vec2<f32>) -> vec4<f32> {
                   * step(0.5, fract(lt * 1.6));
         col = col * vis + palette(s.hue + 0.5) * caret * 1.6;
         a = max(a * vis, caret * 0.9);
+    }
+
+    if fx == 3 { // strobe: on/off on the eighth notes
+        let on = step(0.5, fract(u.beat * 2.0 + 0.25));
+        col *= on;
+        a *= on;
     }
 
     a *= s.opacity * u.master;

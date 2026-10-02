@@ -90,6 +90,7 @@ second display); `--vsync` restores them if that ever causes trouble.
 cargo run --release                         # capture what you hear (loopback / system audio)
 cargo run --release -- --list-devices       # list capture devices
 cargo run --release -- --probe-audio "Rane" # capture ~6 s from a device, print signal + BPM
+cargo run --release -- --beats track.flac   # old onset grid vs the Beat This! grid, with timings
 cargo run --release -- --list-midi          # list MIDI inputs (pad/key controllers)
 cargo run --release -- --device "Serato"    # a specific input (or output-as-loopback)
 cargo run --release -- --mic                # force the default input instead of system audio
@@ -124,9 +125,21 @@ post effect + strength — picks apply live to the output, so the panel
 doubles as a preview), **Stream** (OBS output, now playing, branding,
 ticker, clips — see below), **Timeline** (saved shows), **Keys** (MIDI
 input and rebindable hotkeys: click Rebind, then press a key) and
-**Settings** (audio input, latency, mark-downbeat, what the auto-pilot may
-do — breakdowns, drop cuts, random order — and the AI show builder's
-provider, model and API key). Everything is saved to `trippin.json`, and
+**Settings** (audio input, latency, mark-downbeat, neural beat tracking,
+what the auto-pilot may do — breakdowns, drop cuts, random order — and the
+AI show builder's provider, model and API key).
+
+**Neural beat tracking** (Settings, on by default) finds song tempos and
+the bar's "one" with the Beat This! model — the same one BeatDis uses —
+instead of guessing the bar from the bass. It fixes bars landing a beat or
+three off after drum-roll intros, and tempos that drifted most of a beat by
+the end of a long track. The ~80 MB model downloads once in the
+background; a song's first analysis takes a few seconds, then it's cached.
+**Build cues** in the AI show builder re-detects the grid of clips added
+before the model arrived. Live, it re-checks the last 15 s of audio every
+5 s on a background thread (two cores, ~0.5 s per check): it moves the beat
+onto the real beat when the tracker has locked onto off-beat bass or hats,
+and sets the bar's "one" — the hand-tap downbeat key stays as an override. Everything is saved to `trippin.json`, and
 the visuals keep animating while the panel is being moved — rendering runs
 on its own thread.
 
@@ -285,6 +298,25 @@ an RTX 5070 Ti.
 
 When writing a scene, use `u.flow` for camera travel. `u.beat` gets phase
 corrections from the beat tracker, so motion driven by it stutters.
+
+### Unity engine scenes (experimental)
+
+Settings → **Unity engine link** adds three festival-screen scenes rendered
+by a separate Unity engine:
+
+- `unity_stage`: a festival stage with lasers in haze, an LED rig, confetti and
+  phone lights;
+- `unity_crystals`: a flight through a chrome crystal tunnel. Each kick sends
+  a wave down it, and the speed follows the track's energy;
+- `unity_flow`: a particle cloud morphing between shapes, with kick
+  shockwaves.
+
+There's nothing to install or start: the first time you switch the link on,
+Trippin downloads the engine (about 40 MB, Windows and macOS). After that,
+Trippin runs it in the background and closes it when Trippin quits. The
+Settings tab shows its status. The auto-pilot only picks `unity_*` scenes
+while the engine is sending frames, and the AI show builder never uses them.
+Developer notes are in `unity/README.md`.
 
 ## Beats vs breakdowns
 
@@ -477,19 +509,47 @@ boundaries and cue transitions land on the "one", not just on beats.
   audio onset envelope against the track's stored envelope, locks on when
   the same song is playing in the room and fires the cues at the matching
   position — a pre-programmed show that follows the DJ's deck.
+- **Strobe** (timeline cue, Cues library): while it runs the picture is
+  black and cuts in on each drum hit — hard cuts, no fade — so it follows
+  whatever the drums actually play.
+- **Text effects** (timeline text cues, or the AI): besides the style and
+  entrance animation, a card can **punch** (pops on every beat), **shake**
+  (jolts on kicks), **strobe** (eighth-note flicker), **bounce** (a wave
+  through the letters) or **shatter** (blocks jump apart on kicks).
 - **✦ AI show…** (editor toolbar) writes the cue list for you. Trippin
   analyses each clip locally — per-bar energy, onset density, a vocal
   likelihood, >5 kHz "air" — and segments the track into labelled ~4-bar
   phrase blocks (intro / groove / build / drop / peak / breakdown / outro).
-  The model directs the show block by block (scene, dancer, routine, look,
-  fx, palette, text per phrase), and Trippin expands that plan into cue blocks —
-  enforcing variety itself (a scene can't run longer than ~12 bars, dancer
-  routines rotate, `void` only ever plays a song out). BYOAI: Anthropic,
+  Sections come from where the *sound* changes (onset density, vocals,
+  brightness, tonal balance), not just loudness, and drum fills — bars with
+  a roll or snare run — mark the phrase ends, so even a flat-energy house
+  track gets phrased. The model sees each scene's description and measured
+  visual energy (1-5), each routine's pace (calm / medium / fast), the
+  sections and fills, and directs the show block by block — with extra
+  scene cuts inside a block (1-2 bar scenes, accelerating cuts through a
+  build), a strobe / stutter / flash hit on drum fills (the strobe
+  covers the fill's real hits — rolls that start mid-bar or cross the bar
+  line — and flashes the picture on each drum hit it hears), and text as a
+  performance (a word per beat on the drop, hook words landed on their
+  beat, beat-driven text effects). Trippin expands that plan into cue
+  blocks, enforcing the show rules itself: a scene can't run longer than
+  ~12 bars, a frantic scene can't sit in a breakdown or a near-static one
+  on a drop, breakdowns and intros only get calm routines (drops and peaks
+  never do), routines rotate on section starts, a sung breakdown puts the
+  dancer in neon, every drop changes the scene plus at least one more thing,
+  a fill leading into a new section or drop always gets a hit (never a
+  strobe on tunnel/flight scenes — those stutter), a track with no text gets
+  its title hit word by word on the first drop, and `void` only ever plays a
+  song out. With
+  Anthropic, **Look up each track online first** (Settings, on by default)
+  lets the model web-search each track's genre, mood and hook words before
+  planning — up to 4 searches per build. BYOAI: Anthropic,
   OpenAI, Gemini, or any OpenAI-compatible endpoint (Groq, Mistral,
   Ollama…); pick the provider and paste the key under control panel →
   **Settings** (saved to `trippin.json`), or leave it blank to use the
-  provider's usual env var (`ANTHROPIC_API_KEY` etc.). Nothing but the feature summary leaves the
-  machine — no audio is uploaded. Preview the summary with
+  provider's usual env var (`ANTHROPIC_API_KEY` etc.). Nothing but the
+  feature summary and the track names leaves the machine — no audio is
+  uploaded. Preview the summary with
   `--analyze <file>`, or run the whole build without the editor with
   `--ai-build <file>` (prints every cue).
 

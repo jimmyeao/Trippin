@@ -21,7 +21,15 @@ pub struct Statics {
     _blue: wgpu::Texture,
     pub blue_view: wgpu::TextureView,
     pub repeat: wgpu::Sampler,
+    /// External frame (a Spout sender such as the Unity stage) — fixed
+    /// EXT_W x EXT_H so bind groups never need rebuilding; black until a
+    /// frame arrives. Sampled by `ext_tex` in common.wgsl.
+    pub ext: wgpu::Texture,
+    pub ext_view: wgpu::TextureView,
 }
+
+pub const EXT_W: u32 = 1920;
+pub const EXT_H: u32 = 1080;
 
 impl Statics {
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
@@ -104,12 +112,28 @@ impl Statics {
             ..Default::default()
         });
         println!("Noise volumes baked in {:.0} ms", t0.elapsed().as_secs_f64() * 1000.0);
+        let ext = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("external frame"),
+            size: wgpu::Extent3d {
+                width: EXT_W,
+                height: EXT_H,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
         Self {
             noise3_view: noise3.create_view(&Default::default()),
             _noise3: noise3,
             blue_view: blue.create_view(&Default::default()),
             _blue: blue,
             repeat,
+            ext_view: ext.create_view(&Default::default()),
+            ext,
         }
     }
 }

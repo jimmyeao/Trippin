@@ -26,6 +26,9 @@
 
 mod ai;
 mod audio;
+mod beats;
+mod engine;
+mod link;
 mod config;
 mod dancer;
 mod director;
@@ -52,6 +55,20 @@ mod timeline;
 mod ui_theme;
 
 use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Strobe cue state (`CueKind::Strobe`) — set by timeline cues, read by the
+/// render loop's master gate. A flag rather than another `&mut` threaded
+/// through every cue path: it only lives inside a show, and
+/// `apply_playhead` resets it on play / seek / stop.
+static STROBE: AtomicBool = AtomicBool::new(false);
+
+/// Frames are arriving from the external engine (Spout in) — the
+/// `unity_stage` scene is only in rotation while this holds.
+pub(crate) static EXT_LIVE: AtomicBool = AtomicBool::new(false);
+
+/// The Unity engine's state for the Settings tab ("running", "not
+/// installed", an error…).
+pub(crate) static ENGINE_STATUS: Mutex<String> = Mutex::new(String::new());
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
@@ -165,6 +182,7 @@ fn usable_scenes(r: &Renderer, s: &Settings) -> Vec<usize> {
         // `void` is the timeline's "scenes off" baseline — reachable only
         // via an explicit cue, never by autopilot or next/prev.
         .filter(|&i| names[i] != "void")
+        .filter(|&i| !names[i].starts_with("unity_") || EXT_LIVE.load(Ordering::Relaxed))
         .filter(|&i| !s.disabled_scenes.contains(&names[i]))
         .filter(|&i| heavy_on || !heavy[i])
         .filter(|&i| s.flat_scenes || heavy[i])
@@ -258,6 +276,7 @@ fn end_show(
             s.palette = b.palette.clone();
         }
         *blackout = b.blackout;
+        STROBE.store(false, Ordering::Relaxed);
         dancer.showing = b.dancer_showing;
         if dir.scene != b.scene {
             dir.cut_to(b.scene);
@@ -320,6 +339,7 @@ fn fire_cue(
         CueKind::Trails(b) => s.dancer_trails = *b,
         CueKind::Canon(t) => s.canon = *t,
         CueKind::Blackout(b) => *blackout = *b,
+        CueKind::Strobe(b) => STROBE.store(*b, Ordering::Relaxed),
         CueKind::Fx(f) => {
             s.fx_auto = false;
             s.fx = *f;
@@ -406,6 +426,7 @@ fn apply_playhead(
             s.palette = p.clone();
         }
         *blackout = st.blackout;
+        STROBE.store(st.strobe, Ordering::Relaxed);
     }
 
     // Scene: the last absolute cue wins; before any scene cue the baseline
@@ -478,6 +499,10 @@ fn render_loop(
     let mut last_status = Instant::now();
     let mut fps = 0.0f32;
     let mut flow = 0.0f64;
+    // External engine link (Settings > unity_link).
+    let mut link_out: Option<link::Link> = None;
+    let mut engine: Option<engine::Engine> = None;
+    let mut ext_seq = 0u64;
     let mut flow_bpm = 120.0f32;
     let groove_log = std::env::var_os("TRIPPIN_GROOVE_LOG").is_some();
     let mut last_groove_log = Instant::now();
@@ -1188,6 +1213,16 @@ fn render_loop(
         }
         let target = if blackout { 0.0 } else { 1.0 };
         master += (target - master) * (dt * 3.0).min(1.0);
+        // Strobe: black, with a hard cut to the picture on each drum hit the
+        // analyser hears (`onset` jumps on a hit and decays over ~0.12 s, so
+        // each flash lasts ~70 ms). It follows the actual fill — rolls that
+        // start mid-bar or cross the bar line — not a grid, and no easing
+        // (blackout's fade is far too slow for this).
+        let strobe_gate = if STROBE.load(Ordering::Relaxed) && f.onset < 0.45 {
+            0.0
+        } else {
+            1.0
+        };
 
         let (w, h) = r.size();
         let mut spectrum = [0.0; audio::SPECTRUM_BINS];
@@ -1221,7 +1256,7 @@ fn render_loop(
             seed: dir.seed,
             flash: dir.flash,
             flow: flow as f32,
-            master,
+            master: master * strobe_gate,
             fx: if s.fx_auto { fx_current } else { s.fx }.index(),
             fx_amt: s.fx_amt,
             spectrum,
@@ -1237,6 +1272,46 @@ fn render_loop(
             clock4: clock4.map(|c| c as f32),
             misc4: [0.0; 4],
         };
+        // External engine link: Trippin runs the Unity engine itself (see
+        // engine.rs) — show state out over UDP, frames back through shared
+        // memory. Cross-platform; nothing for the user to start.
+        if s.unity_link {
+            if link_out.is_none() {
+                link_out = link::Link::new(s.link_port).ok();
+            }
+            if let Some(l) = link_out.as_mut() {
+                l.send(&u, r.scene_name(dir.scene), &s.palette, f.calm < 0.5);
+            }
+            if engine.is_none() {
+                match engine::Engine::new(s.link_port) {
+                    Ok(e) => engine = Some(e),
+                    Err(e) => *lock(&ENGINE_STATUS) = format!("{e:#}"),
+                }
+            }
+            if let Some(e) = engine.as_mut() {
+                e.tick();
+                let latest = e.latest.lock().unwrap_or_else(|p| p.into_inner());
+                if let Some(fr) = latest.as_ref() {
+                    if fr.seq != ext_seq {
+                        ext_seq = fr.seq;
+                        r.upload_external(&fr.rgba);
+                    }
+                }
+                drop(latest);
+                let live = e.live();
+                EXT_LIVE.store(live, Ordering::Relaxed);
+                let st = if live { "running".to_string() } else { e.status.clone() };
+                let mut g = lock(&ENGINE_STATUS);
+                if *g != st {
+                    *g = st;
+                }
+            }
+        } else if link_out.is_some() || engine.is_some() {
+            link_out = None;
+            engine = None; // Drop kills the player
+            EXT_LIVE.store(false, Ordering::Relaxed);
+            lock(&ENGINE_STATUS).clear();
+        }
         // Text overlays: fade in over 0.35 s, out over 0.5 s; a faded-out
         // slot drops off (its texture stays bound but the shader skips it).
         let now_t = u.time;
@@ -1254,7 +1329,7 @@ fn render_loop(
             }
             // 11% of screen height; squeeze wider text to fit the screen.
             let screen_asp = w as f32 / h.max(1) as f32;
-            let mut half_h = 0.11f32;
+            let mut half_h = 0.11f32 * ts.spec.size.unwrap_or(1.0).clamp(0.4, 2.5);
             let mut half_w = half_h * ts.aspect;
             if half_w > screen_asp * 0.92 {
                 half_w = screen_asp * 0.92;
@@ -1269,7 +1344,7 @@ fn render_loop(
                 life: 0.0,
                 hue: (slot as f32) * 0.37 + ts.spec.style.index() * 0.11,
                 anim: ts.spec.anim.index(),
-                _pad: 0.0,
+                fx: ts.spec.fx.index(),
             };
             any_text = true;
         }
@@ -1821,6 +1896,12 @@ impl ApplicationHandler<AppEvent> for App {
         }
     }
 
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        // The render thread (which owns the Engine) isn't unwound on quit —
+        // macOS Cmd-Q never returns from run_app — so stop the player here.
+        engine::shutdown();
+    }
+
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.shared.is_some() {
             return;
@@ -1912,6 +1993,28 @@ impl ApplicationHandler<AppEvent> for App {
             .expect("spawn render thread");
 
         self.window = Some(window);
+        if let Ok(v) = std::env::var("TRIPPIN_TEXT_TEST") {
+            let (w, fx) = v.split_once('|').unwrap_or((v.as_str(), "none"));
+            let spec: text::TextSpec = serde_json::from_value(serde_json::json!({
+                "text": w, "style": "chrome", "anim": "zoom", "fx": fx, "size": 1.6
+            }))
+            .unwrap();
+            self.send(Msg::FireCue(timeline::CueKind::Text(spec)));
+        }
+        // Dev aid: fire any cue ~3 s after startup (once the render loop has
+        // settled), e.g. TRIPPIN_CUE_TEST='{"Strobe":true}'.
+        if let Ok(v) = std::env::var("TRIPPIN_CUE_TEST") {
+            match (serde_json::from_str::<timeline::CueKind>(&v), self.render_tx.clone()) {
+                (Ok(k), Some(tx)) => {
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_secs(3));
+                        let _ = tx.send(Msg::FireCue(k));
+                    });
+                }
+                (Err(e), _) => eprintln!("TRIPPIN_CUE_TEST: {e}"),
+                _ => {}
+            }
+        }
         if let Some(p) = self.start_song.take() {
             if p.extension()
                 .and_then(|e| e.to_str())
@@ -2292,7 +2395,7 @@ fn ai_build(path: &std::path::Path) -> Result<()> {
         song.bpm,
         (song.duration - song.first_beat) * song.bpm / 60.0
     );
-    let (cues, note) = ai::build_show(&[clip], &scenes, &routines, &conf)?;
+    let ai::ShowBuild { cues, note, .. } = ai::build_show(&[clip], &scenes, &routines, &conf)?;
     println!("{note}");
     for cue in &cues {
         println!("  {:>6.1} bt  clip {}  {:?}", cue.beat, cue.clip, cue.kind);
@@ -2309,6 +2412,13 @@ fn main() -> Result<()> {
         eprintln!("panic on thread {:?}: {info}", thread.name());
         hook(info);
     }));
+    // Beat This! inference (rten) defaults to every physical core; two keep
+    // the live downbeat check (~0.8 s per 5 s window) clear of the render
+    // and audio threads. Beyond 4 threads it barely speeds up anyway.
+    if std::env::var_os("RTEN_NUM_THREADS").is_none() {
+        // SAFETY: first thing in main, before any other thread exists.
+        unsafe { std::env::set_var("RTEN_NUM_THREADS", "2") };
+    }
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--list-devices") {
         return audio::list_devices();
@@ -2386,6 +2496,11 @@ fn main() -> Result<()> {
         println!("{}", ai::analyze_file(std::path::Path::new(&p))?);
         return Ok(());
     }
+    // `--beats track.mp3`: compare the autocorrelation grid with Beat This!
+    // (downloads the model on first use) and time the inference.
+    if let Some(p) = arg_value(&args, "--beats") {
+        return beats::beat_test(std::path::Path::new(&p));
+    }
     // `--ai-build track.mp3` runs the whole pipeline end-to-end (analysis,
     // provider call, cue expansion) and prints the cue list — a preview of
     // what "Build cues" in the editor would generate.
@@ -2404,6 +2519,11 @@ fn main() -> Result<()> {
     let env = audio::EnvLog::new();
 
     let mut settings = Settings::load();
+    // Neural beat tracking: fetch the model in the background on first run.
+    beats::set_enabled(settings.beat_model);
+    if settings.beat_model {
+        beats::ensure_models();
+    }
     // Audio source: --device/--mic win for this run; otherwise the saved
     // panel choice ("" = the platform default tap).
     let device: Option<String> = cli_device.map(str::to_string).or_else(|| {
@@ -2502,5 +2622,6 @@ fn main() -> Result<()> {
         midi_scan: Instant::now(),
     };
     event_loop.run_app(&mut app)?;
+    engine::shutdown();
     Ok(())
 }

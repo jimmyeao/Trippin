@@ -77,7 +77,7 @@ struct AiJob {
     busy: bool,
     status: String,
     /// Finished build: cues + a summary note, or the error message.
-    result: Option<Result<(Vec<Cue>, String), String>>,
+    result: Option<Result<crate::ai::ShowBuild, String>>,
 }
 
 /// What part of a cue block is being dragged.
@@ -503,8 +503,14 @@ impl Editor {
                 .take()
             {
                 match res {
-                    Ok((cues, note)) => {
+                    Ok(crate::ai::ShowBuild { cues, grids, note }) => {
                         if let Some(doc) = doc_opt.as_mut() {
+                            for (i, bpm, first_beat) in grids {
+                                if let Some(c) = doc.clips.get_mut(i) {
+                                    c.bpm = bpm;
+                                    c.first_beat = first_beat;
+                                }
+                            }
                             if *ai_replace {
                                 doc.cues.clear();
                             }
@@ -538,7 +544,7 @@ impl Editor {
                             conf.model.clone()
                         };
                         ui.label(format!("{} · {model}", conf.provider.label()));
-                        ui.small("Change the provider, model or API key in the control panel → Settings (F1).");
+                        ui.small("Change the provider, model or API key on the control panel's Settings tab (F1).");
                         if conf.key.is_empty() && conf.provider != crate::ai::AiProvider::Compatible {
                             ui.colored_label(t::WARN, "No API key set.");
                         }
@@ -574,7 +580,7 @@ impl Editor {
                                     let mut j = job.lock().unwrap_or_else(|e| e.into_inner());
                                     j.busy = false;
                                     j.status = match &r {
-                                        Ok((_, n)) => n.clone(),
+                                        Ok(b) => b.note.clone(),
                                         Err(e) => e.clone(),
                                     };
                                     j.result = Some(r);
@@ -730,6 +736,7 @@ impl Editor {
                                     ("static mode", CueKind::Mode(crate::config::Mode::Static)),
                                     ("manual mode", CueKind::Mode(crate::config::Mode::Manual)),
                                     ("blackout", CueKind::Blackout(true)),
+                                    ("strobe", CueKind::Strobe(true)),
                                 ]
                                 .into_iter()
                                 .filter(|(l, _)| show(l))
@@ -782,6 +789,18 @@ impl Editor {
                                                 for v in crate::text::TextAnim::ALL {
                                                     ui.selectable_value(
                                                         &mut text_draft.anim,
+                                                        v,
+                                                        v.label(),
+                                                    );
+                                                }
+                                            });
+                                        egui::ComboBox::from_id_salt("text_fx")
+                                            .width(74.0)
+                                            .selected_text(text_draft.fx.label())
+                                            .show_ui(ui, |ui| {
+                                                for v in crate::text::TextFx::ALL {
+                                                    ui.selectable_value(
+                                                        &mut text_draft.fx,
                                                         v,
                                                         v.label(),
                                                     );
