@@ -133,8 +133,17 @@ namespace TrippinStage.EditorTools
             if (fs.flow == null) throw new System.Exception("Flow.compute not found");
             fs.pointsMat = Mat("Trippin/Points", "Points");
 
-            mgr.shows = new[] { stage, crystals, flowGo };
-            mgr.names = new[] { "unity_stage", "unity_crystals", "unity_flow" };
+            var levGo = new GameObject("unity_leviathan");
+            levGo.transform.SetParent(engine.transform, false);
+            var lv = levGo.AddComponent<LeviathanShow>();
+            lv.cam = cam;
+            lv.sim = AssetDatabase.LoadAssetAtPath<ComputeShader>($"{Root}/Shaders/Leviathan.compute");
+            if (lv.sim == null) throw new System.Exception("Leviathan.compute not found");
+            lv.filamentMat = Mat("Trippin/Filament", "Filament");
+            lv.pointsMat = fs.pointsMat;
+
+            mgr.shows = new[] { stage, crystals, flowGo, levGo };
+            mgr.names = new[] { "unity_stage", "unity_crystals", "unity_flow", "unity_leviathan" };
 
             // Frames go to Trippin through the shared-memory file it passes
             // (FrameExporter) — no Spout/Syphon, the same on every platform.

@@ -1,0 +1,145 @@
+// Leviathan: a manta-like creature drawn entirely in light.
+//  - Body: a lattice of rib loops and lengthwise stringers around a spine
+//    the CPU steers (LeviathanShow). Wide undulating wings, a long tail.
+//  - Strands: ~2k filaments hanging from under the wings, simulated as
+//    follow-the-leader verlet chains so they trail and flow behind.
+// Spine (from the CPU, per segment, head first): _Spine.xyz position,
+// .w = kick pulse at that segment; _Right / _Up the cross-section frame.
+#pragma kernel Body
+#pragma kernel Strands
+
+#define SPINE 96
+#define RIB_PTS 33      // points per rib loop (closed: last = first)
+#define STRINGERS 16
+#define STRAND_PTS 24
+
+StructuredBuffer<float4> _Spine;
+StructuredBuffer<float4> _Right;
+StructuredBuffer<float4> _Up;
+RWStructuredBuffer<float4> _Body;      // ribs (SPINE x RIB_PTS) then stringers (STRINGERS x SPINE); w = glow
+RWStructuredBuffer<float4> _Strand;    // STRANDS x STRAND_PTS; w = glow
+RWStructuredBuffer<float4> _StrandPrev;
+uint _Strands;
+float _Dt, _T, _WingPhase, _WingAmp, _Breath, _Turb, _Flare, _Len, _Stream;
+float3 _Fwd; // swim direction: the water streams the other way
+
+uint pcg(uint v)
+{
+    uint s = v * 747796405u + 2891336453u;
+    uint w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u;
+    return (w >> 22u) ^ w;
+}
+float rnd(uint v) { return pcg(v) * (1.0 / 4294967296.0); }
+
+// Half-width and half-height of the cross-section at s (0 head .. 1 tail).
+float2 profile(float s)
+{
+    // A manta's diamond: the wing edge widens to its broadest a third of
+    // the way back, then sweeps in to the tail root.
+    float wings = smoothstep(0.0, 0.3, s) * (1.0 - smoothstep(0.3, 0.56, s));
+    float w = 10.0 * wings + 0.5 * (1.0 - s) + 0.08;
+    float h = 0.7 * smoothstep(0.0, 0.08, s) * (1.0 - smoothstep(0.25, 0.7, s)) + 0.18 * (1.0 - s) + 0.05;
+    return float2(w, h) * _Breath;
+}
+
+// A point on the body surface: spine segment (fractional), angle round it.
+// Returns the position; n = the outward direction (for flares).
+float3 surface(float seg, float th, out float3 n, out float pulse)
+{
+    uint i0 = (uint)clamp(floor(seg), 0, SPINE - 1);
+    uint i1 = min(i0 + 1, SPINE - 1);
+    float f = saturate(seg - i0);
+    float4 a = lerp(_Spine[i0], _Spine[i1], f);
+    float3 r = normalize(lerp(_Right[i0].xyz, _Right[i1].xyz, f));
+    float3 u = normalize(lerp(_Up[i0].xyz, _Up[i1].xyz, f));
+    float s = seg / (SPINE - 1);
+    pulse = a.w;
+    float2 pr = profile(s) * (1.0 + 0.28 * pulse);
+    float c = cos(th), sn = sin(th);
+    float x = c * pr.x;
+    float y = sn * pr.y;
+    // Wings: a travelling wave from the body out to the tips.
+    float tip = saturate(abs(x) / 10.0);
+    y += sin(_WingPhase - s * 6.0 - tip * 1.2) * _WingAmp * tip * tip * 2.2;
+    n = normalize(r * c + u * sn);
+    // Wings sweep back: the tips trail the body like a manta's.
+    float3 fwd = normalize(_Spine[i0 > 0 ? i0 - 1 : 0].xyz - _Spine[i1].xyz + 1e-5);
+    return a.xyz + r * x + u * y - fwd * tip * tip * 5.0;
+}
+
+[numthreads(64, 1, 1)]
+void Body(uint id : SV_DispatchThreadID)
+{
+    const uint ribs = SPINE * RIB_PTS;
+    const uint total = ribs + STRINGERS * SPINE;
+    if (id >= total) return;
+    float3 n; float pulse;
+    if (id < ribs)
+    {
+        uint seg = id / RIB_PTS, k = id % RIB_PTS;
+        float th = (k % (RIB_PTS - 1)) / (float)(RIB_PTS - 1) * 6.2831853;
+        float3 p = surface(seg, th, n, pulse);
+        float s = seg / (float)(SPINE - 1);
+        // Every rib dim, every fourth brighter: reads as structure. Ribs
+        // fade out down the tail (tiny loops there read as a coil).
+        float glow = (((seg % 4) == 0 ? 0.4 : 0.07) * (1.0 - 0.6 * s) + 1.2 * pulse) * (1.0 - smoothstep(0.5, 0.72, s));
+        _Body[id] = float4(p, glow);
+    }
+    else
+    {
+        uint j = id - ribs;
+        uint ln = j / SPINE, seg = j % SPINE;
+        float th = ln / (float)STRINGERS * 6.2831853;
+        float3 p = surface(seg, th, n, pulse);
+        float s = seg / (float)(SPINE - 1);
+        _Body[id] = float4(p, (0.35 + 1.2 * pulse) * (1.0 - 0.7 * s));
+    }
+}
+
+[numthreads(64, 1, 1)]
+void Strands(uint k : SV_DispatchThreadID)
+{
+    if (k >= _Strands) return;
+    // Root: under the wings, biased toward the wing edges.
+    float sr = 0.1 + 0.5 * rnd(k * 3u + 1u);
+    float u = rnd(k * 3u + 2u);
+    u = 0.5 + (u < 0.5 ? -0.5 : 0.5) * sqrt(abs(u * 2.0 - 1.0));
+    float th = 3.14159265 + 0.12 + u * (3.14159265 - 0.24);
+    float3 n; float pulse;
+    float3 root = surface(sr * (SPINE - 1), th, n, pulse);
+    float len = _Len * (0.45 + 0.9 * rnd(k * 3u + 3u));
+    float seg = len / (STRAND_PTS - 1);
+    uint base = k * STRAND_PTS;
+    float dt2 = _Dt * _Dt;
+    float3 prevP = root;
+    _Strand[base] = float4(root, 0.4 + 1.8 * pulse);
+    _StrandPrev[base] = float4(root, 0);
+    for (uint j = 1; j < STRAND_PTS; j++)
+    {
+        float t = j / (float)(STRAND_PTS - 1);
+        float3 p = _Strand[base + j].xyz;
+        float3 q = _StrandPrev[base + j].xyz;
+        // A fresh strand (all zeros) starts hanging below its root.
+        if (dot(p, p) == 0.0) { p = root - float3(0, seg * j, 0); q = p; }
+        float3 vel = (p - q) * 0.97;
+        // Smooth swirling current (never raw audio: _Turb is smoothed).
+        float3 w = p * 0.06 + float3(_T, _T * 1.3, _T * 0.7) + rnd(k) * 6.0;
+        float3 cur = float3(sin(w.y) + sin(w.z * 1.7), sin(w.z) + sin(w.x * 1.3), sin(w.x) + sin(w.y * 1.9));
+        // Swirl (smoothed mids), a slight sink, and the stream past the
+        // swimming body that makes the strands trail behind it.
+        float3 acc = cur * _Turb + float3(0, -0.4, 0) - _Fwd * _Stream;
+        // Drop: strands flare outward from the body, tips most.
+        acc += n * _Flare * 60.0 * t;
+        float3 pred = p + vel + acc * dt2;
+        // Follow the leader: keep each link its length.
+        float3 d = pred - prevP;
+        float dl = length(d);
+        float3 np = prevP + (dl > 1e-5 ? d / dl : float3(0, -1, 0)) * seg;
+        // Keep the length correction out of the velocity: fed back, it pumps
+        // energy down the chain and the strands thrash instead of trailing.
+        _StrandPrev[base + j] = float4(p + (np - pred), 0);
+        float glow = (1.0 - t) * (0.25 + 1.4 * pulse * (1.0 - t)) + 0.08;
+        _Strand[base + j] = float4(np, glow);
+        prevP = np;
+    }
+}
