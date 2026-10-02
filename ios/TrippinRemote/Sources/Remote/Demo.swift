@@ -31,6 +31,11 @@ final class DemoServer {
     private var cutOnDrops = true
     private var latencyMs = 40.0
     private var npSize = 1.0
+    private var randomOrder = false
+    private var fullscreen = true
+    private var canon = "Auto"
+    private var tlRecording = false
+    private var style: Int?
     private var brandOn = true
     private var brandLogoOn = true
     private var brandNameOn = false
@@ -135,14 +140,14 @@ final class DemoServer {
             "bar_in_scene": min(barsIn, phraseBars - 1), "bars_total": mode == "Auto" ? phraseBars : 0,
             "song": ["playing": songPlaying, "pos": songPos, "len": 372.0, "name": "Friday warm-up"],
             "strobe": strobe, "cut_on_drops": cutOnDrops,
-            "clip": dancer ? Self.clips[clip] : NSNull(), "blackout": blackout, "fullscreen": true,
+            "clip": dancer ? Self.clips[clip] : NSNull(), "blackout": blackout, "fullscreen": fullscreen,
             "fx": fx, "groove": 0.8, "calm": 0.0,
             "np": ["artist": track.0, "title": track.1], "rec_on": recOn,
-            "mode": mode, "dancer": dancer, "dancer_style": "Neon", "palette": palette,
-            "random_order": false, "phrase_bars": phraseBars, "fx_amt": fxAmt, "fx_auto": fxAuto,
+            "mode": mode, "dancer": dancer, "dancer_style": style.map { $0 as Any } ?? NSNull(), "palette": palette,
+            "random_order": randomOrder, "canon": canon, "timeline_recording": tlRecording, "phrase_bars": phraseBars, "fx_amt": fxAmt, "fx_auto": fxAuto,
             "dancer_size": dancerSize, "dancer_trails": dancerTrails, "latency_ms": latencyMs,
             "np_size": npSize, "brand_on": brandOn, "brand_opacity": brandOpacity,
-            "brand_logo_on": brandLogoOn, "brand_name_on": brandNameOn, "has_logo": true,
+            "brand_logo_on": brandLogoOn, "brand_name_on": brandNameOn, "has_logo": true, "has_name": true,
             "ticker_on": tickerOn, "ticker_speed": tickerSpeed, "ticker_text": tickerText,
         ])
     }
@@ -186,6 +191,11 @@ final class DemoServer {
         case "ModeManual": mode = "Manual"
         case "ModeStatic": mode = "Static"
         case "ToggleDancer": dancer.toggle()
+        case "ToggleRandom": randomOrder.toggle()
+        case "Fullscreen": fullscreen.toggle()
+        case "NextStyle": style = ((style ?? 0) + 1) % 3
+        case "CycleCanon": canon = ["Auto": "On", "On": "Off"][canon] ?? "Auto"
+        case "TimelineRecord": tlRecording.toggle()
         case "NextClip": clip = (clip + 1) % Self.clips.count
         case "Blackout": blackout.toggle()
         case "Strobe": strobe.toggle()

@@ -85,12 +85,20 @@ struct ShowState {
     /// The branding block's master switch. The Logo and DJ-name pads
     /// toggle the pieces inside it (and only ever turn this on), so it says
     /// nothing about whether the logo itself is showing.
+    var randomOrder = false
+    var fullscreen = false
+    /// `dancer::STYLES` index; nil = automatic.
+    var dancerStyle: Int?
+    /// Not sent yet (asked server-side): "Auto" / "On" / "Off".
+    var canon: String?
+    var timelineRecording: Bool?
     var brandOn = false
     /// The pieces, when the server reports them (nil from older servers).
     var brandLogoOn: Bool?
     var brandNameOn: Bool?
     /// Whether a logo image is configured at all (nil = unknown).
     var hasLogo: Bool?
+    var hasName: Bool?
     var brandOpacity = 1.0
     var tickerOn = false
     var tickerSpeed = 1.0
@@ -128,10 +136,16 @@ struct ShowState {
         dancerTrails = j["dancer_trails"].bool ?? false
         latencyMs = j["latency_ms"].double ?? 0
         npSize = j["np_size"].double ?? 1
+        randomOrder = j["random_order"].bool ?? false
+        fullscreen = j["fullscreen"].bool ?? false
+        dancerStyle = j["dancer_style"].int
+        canon = j["canon"].string
+        timelineRecording = j["timeline_recording"].bool
         brandOn = j["brand_on"].bool ?? false
         brandLogoOn = j["brand_logo_on"].bool
         brandNameOn = j["brand_name_on"].bool
         hasLogo = j["has_logo"].bool
+        hasName = j["has_name"].bool
         brandOpacity = j["brand_opacity"].double ?? 1
         tickerOn = j["ticker_on"].bool ?? false
         tickerSpeed = j["ticker_speed"].double ?? 1

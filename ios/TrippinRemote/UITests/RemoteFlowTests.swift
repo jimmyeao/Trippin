@@ -215,4 +215,33 @@ final class RemoteFlowTests: XCTestCase {
         XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 3), .completed, "saved row removed")
         shot("42 forgotten")
     }
+
+    /// Every toggle pad lights when its state goes on and goes dark when it
+    /// goes off again (demo server, which flips the same fields main.rs does).
+    func test6_TogglePadsLight() {
+        app.launchArguments = ["-uitestReset"]
+        app.launch()
+        app.buttons["demo"].tap()
+        wait(app.descendants(matching: .any)["link"], value: "Live", timeout: 5, "demo connected")
+        page("Perform")
+        let toggles = ["Strobe", "Blackout", "ToggleDancer", "ToggleRandom", "RecordSet",
+                       "ToggleLogo", "ToggleName", "ToggleTicker", "Fullscreen"]
+        for key in toggles {
+            let pad = app.buttons["pad.\(key)"]
+            if !pad.exists { app.swipeUp() }
+            wait(pad, timeout: 3, "\(key) pad")
+            let before = (pad.value as? String) ?? ""
+            let flipped = before == "on" ? "off" : "on"
+            pad.tap()
+            wait(pad, value: flipped, timeout: 2, "\(key) lit state flips to \(flipped)")
+            pad.tap()
+            wait(pad, value: before, timeout: 2, "\(key) lit state back to \(before)")
+        }
+        // Radio group: exactly the chosen mode lights.
+        app.swipeDown(); app.swipeDown()
+        app.buttons["pad.ModeManual"].tap()
+        wait(app.buttons["pad.ModeManual"], value: "on", timeout: 2, "Manual lit")
+        wait(app.buttons["pad.ModeAuto"], value: "off", timeout: 2, "Auto unlit")
+        shot("50 toggles")
+    }
 }
