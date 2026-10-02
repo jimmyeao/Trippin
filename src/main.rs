@@ -23,6 +23,9 @@
 // Installer builds (`--features gui`) are a windowed app with no console;
 // plain `cargo run` keeps the console for shader errors and logs.
 #![cfg_attr(all(feature = "gui", windows), windows_subsystem = "windows")]
+// The remote state frame is one big json! literal; its field count passed
+// the default macro recursion limit (128).
+#![recursion_limit = "256"]
 
 mod ai;
 mod audio;
@@ -1482,12 +1485,13 @@ fn apply_render(
         Action::ToggleLogo => {
             s.brand_logo_on = !s.brand_logo_on;
             // Showing a piece also enables the block, so the pad always has
-            // a visible effect; hiding leaves the master as it was.
-            s.brand_on |= s.brand_logo_on;
+            // a visible effect; hiding leaves the master as it was. With no
+            // logo set there's nothing to show, so the block stays as it is.
+            s.brand_on |= s.brand_logo_on && !s.brand_logo.trim().is_empty();
         }
         Action::ToggleName => {
             s.brand_name_on = !s.brand_name_on;
-            s.brand_on |= s.brand_name_on;
+            s.brand_on |= s.brand_name_on && !s.brand_name.trim().is_empty();
         }
         Action::ToggleTicker => s.ticker_on = !s.ticker_on,
         Action::LatencyDown => s.latency_ms -= 5.0,
@@ -1902,6 +1906,13 @@ impl App {
                     "latency_ms": s.latency_ms,
                     "np_size": s.np_size,
                     "brand_on": s.brand_on,
+                    // The pieces and whether there's anything to show: the
+                    // remote lit Logo from brand_on alone, which only ever
+                    // goes on, so the pad stuck lit.
+                    "brand_logo_on": s.brand_logo_on,
+                    "brand_name_on": s.brand_name_on,
+                    "has_logo": !s.brand_logo.trim().is_empty(),
+                    "has_name": !s.brand_name.trim().is_empty(),
                     "brand_opacity": s.brand_opacity,
                     "ticker_on": s.ticker_on,
                     "ticker_speed": s.ticker_speed,
