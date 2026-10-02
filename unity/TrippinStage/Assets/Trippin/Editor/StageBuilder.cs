@@ -142,8 +142,14 @@ namespace TrippinStage.EditorTools
             lv.filamentMat = Mat("Trippin/Filament", "Filament");
             lv.pointsMat = fs.pointsMat;
 
-            mgr.shows = new[] { stage, crystals, flowGo, levGo };
-            mgr.names = new[] { "unity_stage", "unity_crystals", "unity_flow", "unity_leviathan" };
+            var sculptGo = new GameObject("unity_sculpture");
+            sculptGo.transform.SetParent(engine.transform, false);
+            var sc = sculptGo.AddComponent<SculptureShow>();
+            sc.cam = cam;
+            sc.sculptMat = Mat("Trippin/Sculpture", "Sculpture");
+
+            mgr.shows = new[] { stage, crystals, flowGo, levGo, sculptGo };
+            mgr.names = new[] { "unity_stage", "unity_crystals", "unity_flow", "unity_leviathan", "unity_sculpture" };
 
             // Frames go to Trippin through the shared-memory file it passes
             // (FrameExporter) — no Spout/Syphon, the same on every platform.
