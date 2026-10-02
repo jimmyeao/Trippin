@@ -243,8 +243,13 @@ impl Engine {
         // player resolves a relative -logFile beside its .app, not our cwd.
         let log = crate::config::data_dir().join("unity-engine.log");
         let log = std::path::absolute(&log).unwrap_or(log);
-        Command::new(&exe)
-            .arg("-batchmode")
+        let mut cmd = Command::new(&exe);
+        // TRIPPIN_ENGINE_READBACK=blit|direct|sync picks FrameExporter's
+        // readback path (blit by default) — for chasing GPU-specific faults.
+        if let Some(m) = std::env::var_os("TRIPPIN_ENGINE_READBACK") {
+            cmd.arg("-trippinReadback").arg(m);
+        }
+        cmd.arg("-batchmode")
             .arg("-trippinFrame")
             .arg(&self.path)
             .arg("-trippinPort")
