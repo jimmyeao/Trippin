@@ -70,11 +70,10 @@ struct DancerView: View {
         ScrollView {
             VStack(spacing: 14) {
                 HStack(spacing: 10) {
-                    Pad(title: "Dancer", subtitle: s.dancer ? "on" : "off", on: s.dancer, tint: Theme.dancer, height: 64) {
-                        conn.act("ToggleDancer")
-                    }
-                    Pad(title: "Next clip", height: 64) { conn.act("NextClip") }
-                    Pad(title: "Next style", height: 64) { conn.act("NextStyle") }
+                    ActionPad(key: "ToggleDancer")
+                    ActionPad(key: "NextClip")
+                    ActionPad(key: "NextStyle")
+                    ActionPad(key: "CycleCanon")
                 }
                 Card {
                     RemoteSlider(title: "Size", key: "dancer_size", value: s.dancerSize, range: 0.4...1.0)
@@ -241,18 +240,14 @@ struct TransportView: View {
                 }
                 SectionHeader(title: "Timeline")
                 HStack(spacing: 10) {
-                    if conn.info.action("TimelinePlay") != nil {
-                        Pad(title: "Timeline play", height: 64) { conn.act("TimelinePlay") }
-                    }
-                    if conn.info.action("TimelineRecord") != nil {
-                        Pad(title: "Arm record", tint: Theme.danger, height: 64) { conn.act("TimelineRecord") }
-                    }
+                    ActionPad(key: "TimelinePlay")
+                    ActionPad(key: "TimelineRecord")
                 }
                 SectionHeader(title: "Sync")
                 HStack(spacing: 10) {
-                    Pad(title: "Mark downbeat", height: 64) { conn.act("MarkDownbeat") }
-                    Pad(title: "Latency −", subtitle: "\(Int(conn.state.latencyMs)) ms", height: 64) { conn.act("LatencyDown") }
-                    Pad(title: "Latency +", height: 64) { conn.act("LatencyUp") }
+                    ActionPad(key: "MarkDownbeat")
+                    ActionPad(key: "LatencyDown")
+                    ActionPad(key: "LatencyUp")
                 }
             }
             .padding(16)
