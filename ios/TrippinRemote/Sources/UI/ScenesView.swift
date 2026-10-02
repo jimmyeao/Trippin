@@ -93,20 +93,32 @@ struct SceneTile: View {
                 .strokeBorder(current ? Theme.accent : (queued ? Theme.next : Theme.border), lineWidth: current || queued ? 2 : 1)
         )
         .contentShape(Rectangle())
-        .onTapGesture {
-            Haptics.press()
-            conn.goTo(name)
-        }
-        .onLongPressGesture(minimumDuration: 0.35) {
-            Haptics.strong()
-            conn.queueNext(name)
-        }
+        // Hold wins over tap: a finger held 0.35 s queues and never also cuts.
+        .gesture(
+            LongPressGesture(minimumDuration: 0.35)
+                .exclusively(before: TapGesture())
+                .onEnded { g in
+                    switch g {
+                    case .first:
+                        Haptics.strong()
+                        conn.queueNext(name)
+                    case .second:
+                        Haptics.press()
+                        conn.goTo(name)
+                    }
+                }
+        )
         // Ask for the thumbnail when the tile shows — and again after a
         // reconnect, since requests in flight die with the socket.
         .task(id: conn.isConnected) {
             if conn.isConnected { thumbs.want(name) }
         }
-        .accessibilityLabel("\(name)\(current ? ", live" : "")\(queued ? ", next" : "")")
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("scene.\(name)")
+        .accessibilityLabel(name)
+        .accessibilityValue([current ? "live" : nil, queued ? "next" : nil, thumbs.image(name) != nil ? "thumb" : nil]
+            .compactMap { $0 }.joined(separator: ","))
         .accessibilityAction(named: "Queue next") { conn.queueNext(name) }
     }
 

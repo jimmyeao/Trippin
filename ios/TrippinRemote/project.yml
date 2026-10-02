@@ -51,3 +51,24 @@ targets:
         # Plain ws:// to a LAN host: allow local networking without TLS.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+  TrippinRemoteUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: UITests
+    dependencies:
+      - target: TrippinRemote
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jimmyeao.trippin.remote.uitests
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  TrippinRemote:
+    build:
+      targets:
+        TrippinRemote: all
+        TrippinRemoteUITests: [test]
+    test:
+      targets:
+        - TrippinRemoteUITests

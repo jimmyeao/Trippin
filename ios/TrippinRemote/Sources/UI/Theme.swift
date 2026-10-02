@@ -97,6 +97,7 @@ struct Pad: View {
             }
         }
         .buttonStyle(PadStyle(on: on, tint: tint, height: height))
+        .accessibilityValue(on ? "on" : "off")
     }
 }
 

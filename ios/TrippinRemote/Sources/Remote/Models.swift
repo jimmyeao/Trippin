@@ -33,6 +33,22 @@ struct ServerInfo {
     func action(_ key: String) -> RemoteAction? { actions.first { $0.key == key } }
 }
 
+/// The loaded timeline song, if any (`state.song`).
+struct SongState: Equatable {
+    var playing = false
+    var pos = 0.0
+    var len: Double?
+    var name: String?
+
+    init?(_ j: JSON) {
+        guard case .object = j else { return nil }
+        playing = j["playing"].bool ?? false
+        pos = j["pos"].double ?? 0
+        len = j["len"].double
+        name = j["name"].string
+    }
+}
+
 /// A `state` frame (~10 Hz). Missing fields keep sane defaults.
 struct ShowState {
     var bpm = 0.0
@@ -48,6 +64,10 @@ struct ShowState {
     var barsTotal = 0
     var clip: String?
     var blackout = false
+    var strobe = false
+    /// nil from a server that doesn't echo it.
+    var cutOnDrops: Bool?
+    var song: SongState?
     var fx = "Off"
     var calm = 0.0
     var nowPlaying: String?
@@ -83,6 +103,9 @@ struct ShowState {
         barsTotal = j["bars_total"].int ?? 0
         clip = j["clip"].string
         blackout = j["blackout"].bool ?? false
+        strobe = j["strobe"].bool ?? false
+        cutOnDrops = j["cut_on_drops"].bool
+        song = SongState(j["song"])
         fx = j["fx"].string ?? "Off"
         calm = j["calm"].double ?? 0
         nowPlaying = ShowState.track(j["np"])

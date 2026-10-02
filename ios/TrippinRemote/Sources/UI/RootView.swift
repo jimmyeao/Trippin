@@ -3,6 +3,17 @@ import SwiftUI
 @main
 struct TrippinRemoteApp: App {
     @StateObject private var conn = Connection()
+
+    init() {
+        // UI tests launch with -uitestReset: no saved PINs or addresses.
+        if ProcessInfo.processInfo.arguments.contains("-uitestReset") {
+            PinStore.removeAll()
+            if let id = Bundle.main.bundleIdentifier {
+                UserDefaults.standard.removePersistentDomain(forName: id)
+            }
+        }
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()
@@ -209,6 +220,9 @@ struct StatusBar: View {
             Text(label).font(.system(size: 10, weight: .bold)).foregroundStyle(c)
         }
         .frame(width: 34)
+        .accessibilityElement(children: .ignore)
+        .accessibilityIdentifier("link")
+        .accessibilityValue(label)
     }
 }
 

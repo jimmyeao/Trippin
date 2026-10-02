@@ -35,6 +35,14 @@ enum PinStore {
         }
     }
 
+    /// Forget every server (UI tests start from a clean slate).
+    static func removeAll() {
+        SecItemDelete([
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+        ] as CFDictionary)
+    }
+
     static func remove(_ server: String) {
         let key: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,

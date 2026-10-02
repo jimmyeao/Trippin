@@ -16,6 +16,7 @@ struct ConnectView: View {
                 header
                 if case .badPin = conn.status {
                     banner("Wrong PIN — check Trippin's Settings → Remote card.", Theme.danger, Theme.dangerBg)
+                        .accessibilityIdentifier("badPin")
                 } else if case .lost(let reason, _) = conn.status, conn.target != nil {
                     banner("Can't reach \(conn.target!.key): \(reason). Retrying…", Theme.warn, Theme.warnBg)
                 }
@@ -89,6 +90,7 @@ struct ConnectView: View {
                     .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Theme.border))
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("server")
             }
         }
     }
@@ -99,8 +101,10 @@ struct ConnectView: View {
             Card {
                 HStack(spacing: 10) {
                     field("192.168.1.20", text: $manualHost, keyboard: .numbersAndPunctuation)
+                        .accessibilityIdentifier("host")
                     field("9138", text: $manualPort, keyboard: .numberPad)
                         .frame(width: 90)
+                        .accessibilityIdentifier("port")
                 }
                 Button {
                     let host = manualHost.trimmingCharacters(in: .whitespaces)
@@ -111,6 +115,7 @@ struct ConnectView: View {
                 }
                 .buttonStyle(PadStyle(height: 48))
                 .disabled(manualHost.trimmingCharacters(in: .whitespaces).isEmpty)
+                .accessibilityIdentifier("connect")
             }
         }
     }
@@ -120,6 +125,7 @@ struct ConnectView: View {
             Text("PIN for \(t.key)").font(.headline).foregroundStyle(Theme.text)
             field("PIN", text: $pin, keyboard: .numberPad)
                 .focused($pinFocused)
+                .accessibilityIdentifier("pin")
                 .font(.system(size: 28, weight: .bold, design: .monospaced))
                 .onSubmit { go(t) }
             HStack {
@@ -128,6 +134,7 @@ struct ConnectView: View {
                 Button("Connect") { go(t) }
                     .buttonStyle(PadStyle(on: !pin.isEmpty, height: 48))
                     .disabled(pin.isEmpty)
+                    .accessibilityIdentifier("pinConnect")
             }
         }
     }
@@ -152,10 +159,19 @@ struct ConnectView: View {
             .background(RoundedRectangle(cornerRadius: 10).fill(bg))
     }
 
+    /// Drop text focus before this screen can be replaced by the control
+    /// UI: tearing down a still-focused field trips a UIKit focus-system
+    /// assertion on iPad (crash seen with a remembered PIN).
+    private func endEditing() {
+        pinFocused = false
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+
     /// A remembered PIN connects straight away; otherwise ask for one.
     private func choose(_ t: Target) {
         Haptics.press()
         if let saved = PinStore.get(t.key) {
+            endEditing()
             pending = nil
             conn.connect(t, pin: saved)
         } else {
@@ -168,7 +184,7 @@ struct ConnectView: View {
     private func go(_ t: Target) {
         let p = pin.trimmingCharacters(in: .whitespaces)
         guard !p.isEmpty else { return }
-        pinFocused = false
+        endEditing()
         pending = nil
         conn.connect(t, pin: p)
     }

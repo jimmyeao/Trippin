@@ -103,6 +103,7 @@ struct DancerView: View {
 struct LookView: View {
     @EnvironmentObject var conn: Connection
     @State private var ticker = ""
+    /// Fallback for a server that doesn't echo cut_on_drops.
     @State private var cutOnDrops = true
 
     var body: some View {
@@ -113,6 +114,8 @@ struct LookView: View {
                 FlowLayout(spacing: 8) {
                     ForEach(conn.info.palettes, id: \.self) { p in
                         Chip(title: p, selected: s.palette == p) { conn.set("palette", p) }
+                            .accessibilityIdentifier("palette.\(p)")
+                            .accessibilityValue(s.palette == p ? "selected" : "")
                     }
                 }
                 SectionHeader(title: "Effect")
@@ -133,9 +136,9 @@ struct LookView: View {
                             Chip(title: "\(n) bars", selected: s.phraseBars == n) { conn.set("phrase_bars", n) }
                         }
                     }
-                    // Not echoed in state frames: this toggle remembers what
-                    // it last sent.
-                    Toggle("Cut on drops", isOn: Binding(get: { cutOnDrops }, set: { v in
+                    // Older servers don't echo it: then this toggle
+                    // remembers what it last sent.
+                    Toggle("Cut on drops", isOn: Binding(get: { s.cutOnDrops ?? cutOnDrops }, set: { v in
                         cutOnDrops = v
                         Haptics.press()
                         conn.set("cut_on_drops", v)
@@ -174,34 +177,67 @@ struct LookView: View {
 
 // MARK: - Timeline
 
-/// Song/timeline transport. State frames don't carry the song position
-/// yet, so seek is absolute (minutes:seconds) rather than a scrubber.
+/// Song/timeline transport. With `state.song` (newer servers) there's a
+/// scrubber and a lit play button; otherwise seek is absolute m:ss.
 struct TransportView: View {
     @EnvironmentObject var conn: Connection
     @State private var minutes = 0
     @State private var seconds = 0
+    /// Scrub position while the finger is on the slider.
+    @State private var scrub: Double?
 
     var body: some View {
+        let song = conn.state.song
         ScrollView {
             VStack(spacing: 14) {
-                HStack(spacing: 10) {
-                    Pad(title: "Play / Pause", height: 96) { conn.transport("toggle") }
-                    Pad(title: "Stop", height: 96) { conn.transport("stop") }
-                }
-                SectionHeader(title: "Seek")
-                Card {
-                    HStack {
-                        Stepper("\(minutes) min", value: $minutes, in: 0...180).foregroundStyle(Theme.text)
-                    }
-                    HStack {
-                        Stepper("\(seconds) s", value: $seconds, in: 0...59).foregroundStyle(Theme.text)
-                    }
-                    HStack(spacing: 10) {
-                        Pad(title: "To start", height: 48) { conn.transport("seek", pos: 0) }
-                        Pad(title: String(format: "Go to %d:%02d", minutes, seconds), height: 48) {
-                            conn.transport("seek", pos: Double(minutes * 60 + seconds))
+                if let song {
+                    Card {
+                        Text(song.name ?? "Song")
+                            .font(.headline)
+                            .foregroundStyle(Theme.text)
+                            .lineLimit(1)
+                        if let len = song.len, len > 0 {
+                            Slider(value: Binding(get: { scrub ?? min(song.pos, len) }, set: { scrub = $0 }),
+                                   in: 0...len) { editing in
+                                if !editing, let p = scrub {
+                                    conn.transport("seek", pos: p)
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { scrub = nil }
+                                }
+                            }
+                            HStack {
+                                Text(clock(scrub ?? song.pos))
+                                Spacer()
+                                Text("-" + clock(max(0, len - (scrub ?? song.pos))))
+                            }
+                            .font(.system(size: 13, weight: .medium, design: .monospaced))
+                            .foregroundStyle(Theme.muted)
+                        } else {
+                            Text(clock(song.pos)).font(.system(.body, design: .monospaced)).foregroundStyle(Theme.muted)
                         }
                     }
+                } else if conn.info.version.isEmpty == false {
+                    Text("No song loaded in Trippin's timeline.").foregroundStyle(Theme.muted)
+                }
+                HStack(spacing: 10) {
+                    Pad(title: song?.playing == true ? "Pause" : "Play", on: song?.playing == true, height: 96) {
+                        conn.transport("toggle")
+                    }
+                    Pad(title: "Stop", height: 96) { conn.transport("stop") }
+                }
+                if song?.len == nil {
+                    SectionHeader(title: "Seek")
+                    Card {
+                        Stepper("\(minutes) min", value: $minutes, in: 0...180).foregroundStyle(Theme.text)
+                        Stepper("\(seconds) s", value: $seconds, in: 0...59).foregroundStyle(Theme.text)
+                        HStack(spacing: 10) {
+                            Pad(title: "To start", height: 48) { conn.transport("seek", pos: 0) }
+                            Pad(title: String(format: "Go to %d:%02d", minutes, seconds), height: 48) {
+                                conn.transport("seek", pos: Double(minutes * 60 + seconds))
+                            }
+                        }
+                    }
+                } else {
+                    Pad(title: "Back to start", height: 52) { conn.transport("seek", pos: 0) }
                 }
                 SectionHeader(title: "Timeline")
                 HStack(spacing: 10) {
@@ -221,6 +257,11 @@ struct TransportView: View {
             }
             .padding(16)
         }
+    }
+
+    private func clock(_ t: Double) -> String {
+        let s = Int(t.rounded(.down))
+        return String(format: "%d:%02d", s / 60, s % 60)
     }
 }
 

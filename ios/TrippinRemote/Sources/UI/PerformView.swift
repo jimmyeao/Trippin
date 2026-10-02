@@ -7,13 +7,24 @@ struct PerformView: View {
 
     /// Pads laid out up top, by `Action` id. Ids the server doesn't list
     /// (an older Trippin) are skipped.
-    private static let main = ["PrevScene", "NextScene", "Blackout"]
+    private static let main = ["PrevScene", "NextScene", "Strobe", "Blackout"]
     private static let modes = ["ModeAuto", "ModeManual", "ModeStatic"]
     private static let show = ["ToggleDancer", "NextClip", "CycleFx", "MarkDownbeat",
                                "MarkPhrase", "ShowNowPlaying", "ToggleRandom", "NextStyle"]
     private static let stream = ["SaveClip", "RecordSet", "ToggleLogo", "ToggleName", "ToggleTicker"]
     /// Desktop-window chores that mean nothing from a phone.
     private static let hidden: Set<String> = ["TogglePanel", "ToggleEditor", "LeaveFullscreen", "ReloadShaders"]
+    /// Pad-sized titles for actions whose server label is a hotkey
+    /// description ("Mark this beat as the downbeat"). Unknown ids keep the
+    /// server's label.
+    static let short: [String: String] = [
+        "NextClip": "Next clip", "NextStyle": "Dancer look", "CycleCanon": "Canon",
+        "MarkDownbeat": "Downbeat", "MarkPhrase": "Phrase start", "ShowNowPlaying": "Now playing",
+        "ToggleRandom": "Random order", "SaveClip": "Save clip", "RecordSet": "Record set",
+        "ToggleLogo": "Logo", "ToggleName": "DJ name", "ToggleTicker": "Ticker",
+        "Fullscreen": "Fullscreen", "TimelinePlay": "Timeline play", "TimelineRecord": "Arm record",
+    ]
+
     /// Shown on the Timeline page instead.
     private static let elsewhere: Set<String> = ["TimelinePlay", "TimelineRecord", "LatencyDown", "LatencyUp"]
 
@@ -21,10 +32,11 @@ struct PerformView: View {
         let s = conn.state
         ScrollView {
             VStack(spacing: 14) {
-                grid(Self.main, columns: 3, height: 96) { key in
+                grid(Self.main, columns: 4, height: 96) { key in
                     switch key {
                     case "PrevScene": return ("◀︎ Prev", nil, false, Theme.accent)
                     case "NextScene": return ("Next ▶︎", s.nextSceneName, false, Theme.accent)
+                    case "Strobe": return ("Strobe", s.strobe ? "on the hits" : nil, s.strobe, Color.white)
                     case "Blackout": return ("Blackout", nil, s.blackout, Theme.danger)
                     default: return nil
                     }
@@ -62,7 +74,7 @@ struct PerformView: View {
                     SectionHeader(title: "More")
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 10) {
                         ForEach(rest) { a in
-                            Pad(title: a.label, height: 60) { conn.act(a) }
+                            Pad(title: Self.short[a.key] ?? a.label, height: 60) { conn.act(a) }
                         }
                     }
                 }
@@ -79,10 +91,11 @@ struct PerformView: View {
         return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: min(columns, max(actions.count, 1))), spacing: 10) {
             ForEach(actions) { a in
                 let l = look(a.key)
-                Pad(title: l?.0 ?? a.label, subtitle: l?.1, on: l?.2 ?? false, tint: l?.3 ?? Theme.accent, height: height) {
+                Pad(title: l?.0 ?? Self.short[a.key] ?? a.label, subtitle: l?.1, on: l?.2 ?? false, tint: l?.3 ?? Theme.accent, height: height) {
                     if a.key == "Blackout" { Haptics.strong() }
                     conn.act(a)
                 }
+                .accessibilityIdentifier("pad.\(a.key)")
             }
         }
     }
