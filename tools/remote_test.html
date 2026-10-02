@@ -49,10 +49,10 @@
 <div id="pads" class="bar"></div>
 
 <h3>scenes <small style="color:#555">click = go · shift-click = queue next</small>
-  <button id="thumbs" disabled>load thumbnails</button></h3>
+  <button id="thumbs">reload thumbs</button></h3>
 <div id="scenes" class="grid"></div>
 
-<h3>clips</h3>
+<h3>dancers</h3>
 <div id="clips" class="bar"></div>
 
 <div id="log"></div>
@@ -109,8 +109,7 @@ function hello(m) {
       send(ev.shiftKey ? {cmd:"queue_next", scene:name} : {cmd:"goto_scene", scene:name});
     $("scenes").appendChild(b);
   });
-  $("thumbs").disabled = false;
-  // Clip buttons.
+  // Dancer-clip buttons.
   $("clips").innerHTML = "";
   for (const c of m.clips || []) {
     const b = document.createElement("button");
@@ -119,16 +118,17 @@ function hello(m) {
     $("clips").appendChild(b);
   }
   log(`hello ok — ${sceneNames.length} scenes`);
+  loadThumbs();
 }
 
-$("thumbs").onclick = () => {
+function loadThumbs() {
   // Stagger so the render thread isn't asked for 130 thumbs in one tick.
   sceneNames.forEach((n, i) =>
     setTimeout(() => send({cmd:"thumb", scene:n}), i * 40));
-};
+}
+$("thumbs").onclick = loadThumbs;
 
 function thumb(m) {
-  const t = document.querySelector(`.tile span`);
   for (const el of document.querySelectorAll(".tile")) {
     if (sceneNames[+el.dataset.i] === m.scene)
       el.querySelector("img").src = "data:image/png;base64," + m.png_b64;
