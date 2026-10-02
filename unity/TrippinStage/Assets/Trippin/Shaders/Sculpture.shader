@@ -144,13 +144,6 @@ Shader "Trippin/Sculpture"
                 float ripple = exp(-(i.d.y - _WaveFront) * (i.d.y - _WaveFront) * 9.0) * _WaveAmp;
                 col += TPalette(0.4 + i.op.y * 0.15) * ripple * _LineGain * 0.45 * (0.4 + 0.6 * pow(1.0 - nv, 1.5)) * (1.0 - 0.5 * _TCalm);
                 // Hat glints: sparse surface cells catch the hits.
-                // Small round sparkles in sparse surface cells (squares read
-                // as confetti stuck to it).
-                float3 q = i.op * 40.0;
-                float3 cell = floor(q);
-                float g = frac(sin(dot(cell, float3(12.9898, 78.233, 37.719))) * 43758.5453);
-                float spark = smoothstep(0.32, 0.0, length(frac(q) - 0.5));
-                col += step(0.993, g) * spark * _THits.w * 1.5 * TPalette(0.8);
                 // The floor reflection copy fades into the dark below the floor.
                 if (_Mirror > 0.5)
                 {
