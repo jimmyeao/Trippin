@@ -455,6 +455,8 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   release (the MIDI note-off lesson); `/set/*` and `/scene/goto|queue`
   read their arg verbatim.
 - First enable pops the Windows firewall prompt once — expected.
+- `tools/remote_test.html` is a file:// browser harness for the same
+  protocol — pads, scene grid, thumbs — for testing without the iOS app.
 
 ## 9. Docs
 
