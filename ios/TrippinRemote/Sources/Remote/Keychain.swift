@@ -35,6 +35,20 @@ enum PinStore {
         }
     }
 
+    /// Every server with a saved PIN.
+    static func accounts() -> [String] {
+        let q: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitAll,
+        ]
+        var out: CFTypeRef?
+        guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess,
+              let items = out as? [[String: Any]] else { return [] }
+        return items.compactMap { $0[kSecAttrAccount as String] as? String }
+    }
+
     /// Forget every server (UI tests start from a clean slate).
     static func removeAll() {
         SecItemDelete([

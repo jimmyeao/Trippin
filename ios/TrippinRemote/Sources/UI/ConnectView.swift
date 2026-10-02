@@ -1,3 +1,4 @@
+import Network
 import SwiftUI
 
 /// Pick a Trippin (Bonjour or typed address), enter its PIN, connect.
@@ -9,6 +10,9 @@ struct ConnectView: View {
     @State private var pending: Target?
     @State private var pin = ""
     @FocusState private var pinFocused: Bool
+    @State private var saved: [SavedServer] = []
+    /// The server a Forget confirmation is up for.
+    @State private var forgetting: String?
 
     var body: some View {
         ScrollView {
@@ -22,7 +26,9 @@ struct ConnectView: View {
                 }
                 if let t = pending { pinCard(t) }
                 found
+                savedList
                 manual
+                demo
                 Text("Turn the remote on in Trippin: Settings → Remote. The card there shows this Mac/PC's address and the pairing PIN.")
                     .font(.footnote)
                     .foregroundStyle(Theme.faint)
@@ -32,7 +38,22 @@ struct ConnectView: View {
             .frame(maxWidth: .infinity)
         }
         .background(Theme.bg.ignoresSafeArea())
-        .onAppear { discovery.start() }
+        .onAppear {
+            discovery.start()
+            saved = Saved.all()
+        }
+        .confirmationDialog(
+            "Forget \(forgetting ?? "this server")?",
+            isPresented: Binding(get: { forgetting != nil }, set: { if !$0 { forgetting = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Forget", role: .destructive) {
+                if let key = forgetting { forget(key) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Its saved PIN is deleted. You'll need the PIN from Trippin's Settings → Remote card to connect again.")
+        }
         .onDisappear { discovery.stop() }
         .onChange(of: conn.status) { _, s in
             if s == .badPin {
@@ -70,29 +91,65 @@ struct ConnectView: View {
                 }
             }
             ForEach(discovery.servers) { s in
-                Button {
+                let paired = saved.contains { $0.key == s.name }
+                ServerRow(id: "server.\(s.name)", title: s.name, subtitle: paired ? "Paired" : "Needs PIN", icon: "display",
+                          onForget: paired ? { forgetting = s.name } : nil) {
                     choose(.bonjour(name: s.name, endpoint: s.endpoint))
-                } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: "display")
-                            .font(.title3)
-                            .foregroundStyle(Theme.accent)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(s.name).font(.headline).foregroundStyle(Theme.text)
-                            Text(PinStore.get(s.name) != nil ? "Paired" : "Needs PIN")
-                                .font(.caption).foregroundStyle(Theme.muted)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right").foregroundStyle(Theme.faint)
-                    }
-                    .padding(14)
-                    .background(RoundedRectangle(cornerRadius: 14).fill(Theme.card))
-                    .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Theme.border))
                 }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("server.\(s.name)")
             }
         }
+    }
+
+    /// Servers connected to before that aren't on the network list right
+    /// now — a saved Bonjour name still resolves if it comes back.
+    @ViewBuilder private var savedList: some View {
+        let visible = Set(discovery.servers.map(\.name))
+        let rows = saved.filter { !visible.contains($0.key) }
+        if !rows.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                SectionHeader(title: "Saved")
+                ForEach(rows) { s in
+                    ServerRow(id: "saved.\(s.key)", title: s.key,
+                              subtitle: s.kind == .manual ? "Typed address · paired" : "Not seen on this network right now",
+                              icon: s.kind == .manual ? "network" : "display",
+                              onForget: { forgetting = s.key }) {
+                        choose(target(for: s))
+                    }
+                }
+            }
+        }
+    }
+
+    private var demo: some View {
+        Button {
+            Haptics.press()
+            endEditing()
+            conn.connect(.demo, pin: "")
+        } label: {
+            Label("No Trippin handy? Try the demo", systemImage: "sparkles")
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(Theme.accent)
+                .frame(maxWidth: .infinity, minHeight: 44)
+        }
+        .accessibilityIdentifier("demo")
+    }
+
+    private func target(for s: SavedServer) -> Target {
+        switch s.kind {
+        case .manual:
+            return .manual(host: s.host ?? "", port: s.port ?? 9138)
+        case .bonjour:
+            return .bonjour(name: s.key, endpoint: .service(name: s.key, type: "_trippin._tcp", domain: "local.", interface: nil))
+        }
+    }
+
+    private func forget(_ key: String) {
+        Haptics.success()
+        Saved.forget(key)
+        if pending?.key == key { pending = nil }
+        // A forgotten typed address shouldn't linger in the field either.
+        if key == "\(manualHost):\(manualPort)" { manualHost = "" }
+        saved = Saved.all()
     }
 
     private var manual: some View {
@@ -187,5 +244,65 @@ struct ConnectView: View {
         endEditing()
         pending = nil
         conn.connect(t, pin: p)
+    }
+}
+
+/// A connect-screen row: tap connects; the trailing menu forgets a saved
+/// server (rows sit in a ScrollView, so there are no swipe actions).
+struct ServerRow: View {
+    let id: String
+    let title: String
+    let subtitle: String
+    let icon: String
+    var onForget: (() -> Void)?
+    let action: () -> Void
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Button(action: action) {
+                HStack(spacing: 12) {
+                    Image(systemName: icon)
+                        .font(.title3)
+                        .foregroundStyle(Theme.accent)
+                        .frame(width: 28)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title).font(.headline).foregroundStyle(Theme.text).lineLimit(1)
+                        Text(subtitle).font(.caption).foregroundStyle(Theme.muted).lineLimit(1)
+                    }
+                    Spacer(minLength: 8)
+                    if onForget == nil {
+                        Image(systemName: "chevron.right").foregroundStyle(Theme.faint)
+                    }
+                }
+                .padding(.vertical, 14)
+                .padding(.leading, 14)
+                .padding(.trailing, onForget == nil ? 14 : 4)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier(id)
+            if let onForget {
+                Menu {
+                    Button(role: .destructive, action: onForget) {
+                        Label("Forget", systemImage: "trash")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(Theme.muted)
+                        .frame(width: 48, height: 48)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel("Options for \(title)")
+                .accessibilityIdentifier("options.\(title)")
+            }
+        }
+        .background(RoundedRectangle(cornerRadius: 14).fill(Theme.card))
+        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Theme.border))
+        .contextMenu {
+            if let onForget {
+                Button(role: .destructive, action: onForget) { Label("Forget", systemImage: "trash") }
+            }
+        }
     }
 }

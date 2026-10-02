@@ -165,4 +165,54 @@ final class RemoteFlowTests: XCTestCase {
         wait(app.descendants(matching: .any)["link"], value: "Live", timeout: 10, "connected via Bonjour")
         shot("21 live via bonjour")
     }
+
+    // MARK: no server needed
+
+    /// Every page in the built-in demo, portrait then landscape — the
+    /// layout check, no Trippin required.
+    func test4_DemoTour() {
+        app.launchArguments = ["-uitestReset"]
+        app.launch()
+        app.buttons["demo"].tap()
+        let link = app.descendants(matching: .any)["link"]
+        wait(link, value: "Live", timeout: 5, "demo connected")
+        for (orientation, tag) in [(UIDeviceOrientation.portrait, "portrait"), (.landscapeLeft, "landscape")] {
+            XCUIDevice.shared.orientation = orientation
+            sleep(1)
+            for name in ["Perform", "Scenes", "Dancer", "Look", "Timeline"] {
+                if !isPhone && name == "Scenes" { continue } // always on screen on iPad
+                page(name)
+                if name == "Scenes" || (!isPhone && name == "Perform") {
+                    // Let the thumbnails land.
+                    let first = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'scene.'")).firstMatch
+                    wait(first, value: "thumb", timeout: 10, "demo thumbnail")
+                }
+                sleep(1)
+                shot("30 \(tag) \(name.lowercased())")
+            }
+        }
+        XCUIDevice.shared.orientation = .portrait
+        // Demo commands work like the real server's.
+        page("Perform")
+        let strobe = app.buttons["pad.Strobe"]
+        strobe.tap()
+        wait(strobe, value: "on", timeout: 2, "demo strobe on")
+    }
+
+    /// A saved server can be forgotten from the connect screen.
+    func test5_ForgetSaved() {
+        app.launchArguments = ["-uitestReset", "-uitestSeedSaved"]
+        app.launch()
+        let row = wait(app.buttons["saved.192.168.0.50:9138"], timeout: 10, "saved row")
+        shot("40 saved")
+        app.buttons["options.192.168.0.50:9138"].tap()
+        wait(app.buttons["Forget"], "forget menu item").tap()
+        shot("41 confirm forget")
+        // The confirmation dialog's destructive button.
+        let confirm = app.sheets.buttons["Forget"].exists ? app.sheets.buttons["Forget"] : app.buttons["Forget"].firstMatch
+        confirm.tap()
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: row)
+        XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 3), .completed, "saved row removed")
+        shot("42 forgotten")
+    }
 }

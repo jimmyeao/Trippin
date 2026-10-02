@@ -4,6 +4,9 @@ import SwiftUI
 /// other action the server advertises.
 struct PerformView: View {
     @EnvironmentObject var conn: Connection
+    @Environment(\.verticalSizeClass) private var vsc
+    /// Shorter pads when the phone is on its side.
+    private func h(_ base: CGFloat) -> CGFloat { vsc == .compact ? (base * 0.7).rounded() : base }
 
     /// Pads laid out up top, by `Action` id. Ids the server doesn't list
     /// (an older Trippin) are skipped.
@@ -32,7 +35,7 @@ struct PerformView: View {
         let s = conn.state
         ScrollView {
             VStack(spacing: 14) {
-                grid(Self.main, columns: 4, height: 96) { key in
+                grid(Self.main, columns: 4, height: h(96)) { key in
                     switch key {
                     case "PrevScene": return ("◀︎ Prev", nil, false, Theme.accent)
                     case "NextScene": return ("Next ▶︎", s.nextSceneName, false, Theme.accent)
@@ -42,7 +45,7 @@ struct PerformView: View {
                     }
                 }
                 SectionHeader(title: "Director")
-                grid(Self.modes, columns: 3, height: 60) { key in
+                grid(Self.modes, columns: 3, height: h(60)) { key in
                     let m = s.mode.lowercased()
                     switch key {
                     case "ModeAuto": return ("Auto", nil, m == "auto", Theme.accent)
@@ -52,7 +55,7 @@ struct PerformView: View {
                     }
                 }
                 SectionHeader(title: "Show")
-                grid(Self.show, columns: 4, height: 72) { key in
+                grid(Self.show, columns: 4, height: h(72)) { key in
                     switch key {
                     case "ToggleDancer": return ("Dancer", s.dancer ? "on" : "off", s.dancer, Theme.dancer)
                     case "CycleFx": return ("FX", s.fx == "Off" ? "off" : s.fx, s.fx != "Off", Theme.accent)
@@ -60,7 +63,7 @@ struct PerformView: View {
                     }
                 }
                 SectionHeader(title: "Stream")
-                grid(Self.stream, columns: 4, height: 64) { key in
+                grid(Self.stream, columns: 4, height: h(64)) { key in
                     switch key {
                     case "RecordSet": return ("Record set", s.recOn ? "recording" : nil, s.recOn, Theme.danger)
                     case "ToggleLogo": return ("Logo", nil, s.brandOn, Theme.accent)
@@ -74,7 +77,7 @@ struct PerformView: View {
                     SectionHeader(title: "More")
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 10) {
                         ForEach(rest) { a in
-                            Pad(title: Self.short[a.key] ?? a.label, height: 60) { conn.act(a) }
+                            Pad(title: Self.short[a.key] ?? a.label, height: h(60)) { conn.act(a) }
                         }
                     }
                 }

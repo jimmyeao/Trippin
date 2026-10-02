@@ -6,12 +6,15 @@ import UIKit
 enum Target: Hashable {
     case bonjour(name: String, endpoint: NWEndpoint)
     case manual(host: String, port: UInt16)
+    /// The in-app stand-in server (`DemoServer`).
+    case demo
 
     /// Keychain account + display name.
     var key: String {
         switch self {
         case .bonjour(let name, _): return name
         case .manual(let host, let port): return "\(host):\(port)"
+        case .demo: return "Demo"
         }
     }
 }
@@ -51,6 +54,7 @@ final class Connection: ObservableObject {
     private var lastFrame = Date.distantPast
     private var retry: Task<Void, Never>?
     private var watchdog: Timer?
+    private var demo: DemoServer?
 
     var isConnected: Bool { status == .connected }
 
@@ -70,13 +74,20 @@ final class Connection: ObservableObject {
         target = t
         self.pin = pin
         attempt = 0
-        open()
+        if t == .demo {
+            let d = DemoServer { [weak self] text in self?.handle(text) }
+            demo = d
+            d.start()
+        } else {
+            open()
+        }
     }
 
     /// User-initiated: stop and forget the target.
     func disconnect() {
         retry?.cancel(); retry = nil
         watchdog?.invalidate(); watchdog = nil
+        demo?.stop(); demo = nil
         gen += 1
         task?.cancel(with: .goingAway, reason: nil)
         task = nil
@@ -87,7 +98,7 @@ final class Connection: ObservableObject {
     }
 
     private func wake() {
-        guard target != nil else { return }
+        guard target != nil, demo == nil else { return }
         if case .lost = status {
             retry?.cancel()
             attempt = 0
@@ -108,6 +119,7 @@ final class Connection: ObservableObject {
             do {
                 switch t {
                 case .manual(let h, let p): hostPort = (h, p)
+                case .demo: return
                 case .bonjour(_, let ep): hostPort = try await resolve(ep)
                 }
             } catch {
@@ -209,7 +221,10 @@ final class Connection: ObservableObject {
             attempt = 0
             status = .connected
             lastError = nil
-            if let t = target { PinStore.set(pin, for: t.key) }
+            if let t = target, t != .demo {
+                PinStore.set(pin, for: t.key)
+                Saved.remember(t)
+            }
             thumbs.reset(for: info.version + "|" + info.scenes.joined(separator: ","))
         case "state":
             state = ShowState(j)
@@ -239,6 +254,7 @@ final class Connection: ObservableObject {
     // MARK: commands
 
     func send(_ obj: [String: Any]) {
+        if let demo { return demo.receive(obj) }
         guard let task, let data = try? JSONSerialization.data(withJSONObject: obj) else { return }
         task.send(.string(String(decoding: data, as: UTF8.self))) { _ in }
     }

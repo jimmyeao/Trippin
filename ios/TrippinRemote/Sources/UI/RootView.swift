@@ -12,6 +12,12 @@ struct TrippinRemoteApp: App {
                 UserDefaults.standard.removePersistentDomain(forName: id)
             }
         }
+        // -uitestSeedSaved: one remembered typed address, for the Forget test.
+        if ProcessInfo.processInfo.arguments.contains("-uitestSeedSaved") {
+            let t = Target.manual(host: "192.168.0.50", port: 9138)
+            PinStore.set("1111", for: t.key)
+            Saved.remember(t)
+        }
     }
 
     var body: some Scene {
@@ -132,11 +138,13 @@ struct MainView: View {
 /// phrase progress, now playing.
 struct StatusBar: View {
     @EnvironmentObject var conn: Connection
-    @State private var confirmLeave = false
+    /// Compact height (iPhone landscape): one row, so the pads get the room.
+    @Environment(\.verticalSizeClass) private var vsc
 
     var body: some View {
         let s = conn.state
-        VStack(spacing: 8) {
+        let oneRow = vsc == .compact
+        VStack(spacing: oneRow ? 6 : 8) {
             HStack(alignment: .center, spacing: 12) {
                 link
                 VStack(alignment: .leading, spacing: 2) {
@@ -155,6 +163,13 @@ struct StatusBar: View {
                     .font(.system(size: 13, weight: .medium))
                     .lineLimit(1)
                 }
+                if oneRow {
+                    VStack(alignment: .leading, spacing: 4) {
+                        if s.barsTotal > 0 { PhraseBar(bar: s.barInScene, total: s.barsTotal) }
+                        if let np = s.nowPlaying { nowPlaying(np) }
+                    }
+                    .frame(maxWidth: 320)
+                }
                 Spacer(minLength: 8)
                 VStack(alignment: .trailing, spacing: 4) {
                     Text(s.bpm > 0 ? String(format: "%.1f", s.bpm) : "—")
@@ -163,25 +178,20 @@ struct StatusBar: View {
                     BeatStrip(beat: s.beatInBar, calm: s.calm > 0.5, silent: s.silent)
                 }
                 Menu {
-                    Text("\(conn.target?.key ?? "") · Trippin \(conn.info.version)")
+                    Text(conn.target == .demo ? "Demo — no Trippin connected" : "\(conn.target?.key ?? "") · Trippin \(conn.info.version)")
                     Button(role: .destructive) { conn.disconnect() } label: {
-                        Label("Disconnect", systemImage: "xmark.circle")
+                        Label(conn.target == .demo ? "Leave demo" : "Disconnect", systemImage: "xmark.circle")
                     }
                 } label: {
                     Image(systemName: "ellipsis.circle").font(.title2).foregroundStyle(Theme.muted)
                         .frame(width: 44, height: 44)
                 }
             }
-            if s.barsTotal > 0 {
-                PhraseBar(bar: s.barInScene, total: s.barsTotal)
-            }
-            if let np = s.nowPlaying {
-                HStack(spacing: 6) {
-                    Image(systemName: "music.note").foregroundStyle(Theme.accent)
-                    Text(np).foregroundStyle(Theme.muted).lineLimit(1)
-                    Spacer()
+            if !oneRow {
+                if s.barsTotal > 0 {
+                    PhraseBar(bar: s.barInScene, total: s.barsTotal)
                 }
-                .font(.system(size: 13, weight: .medium))
+                if let np = s.nowPlaying { nowPlaying(np) }
             }
             if case .lost(let reason, _) = conn.status {
                 Text("Reconnecting — \(reason)")
@@ -199,9 +209,18 @@ struct StatusBar: View {
             }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.vertical, oneRow ? 6 : 10)
         .background(Theme.panel)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
+    }
+
+    private func nowPlaying(_ np: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "music.note").foregroundStyle(Theme.accent)
+            Text(np).foregroundStyle(Theme.muted).lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .font(.system(size: 13, weight: .medium))
     }
 
     private var link: some View {
