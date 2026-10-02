@@ -399,6 +399,11 @@ fn client(
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
     // So a client that stops reading can't wedge this thread in send().
     let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+    // A plain browser GET (no WS upgrade) gets the test-remote page —
+    // browsing to http://<ip>:<port> is the no-app way to drive the rig.
+    if serve_page(&stream) {
+        return;
+    }
     let mut ws = match tungstenite::accept(stream) {
         Ok(ws) => ws,
         Err(e) => {
@@ -466,6 +471,62 @@ fn client(
         }
     }
     let _ = ws.close(None);
+}
+
+/// Peek at the request: if it's an HTTP GET that isn't a WebSocket
+/// upgrade, answer with the single-file remote and report handled.
+/// Anything else is left for `tungstenite::accept` (we never consumed
+/// bytes — `peek` only looks).
+fn serve_page(stream: &TcpStream) -> bool {
+    use std::io::Write;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut buf = [0u8; 4096];
+    loop {
+        let n = match stream.peek(&mut buf) {
+            Ok(0) => return false,
+            Ok(n) => n,
+            // Timeout / WouldBlock: nothing arrived yet — a slow client
+            // gets the WS path anyway, where the same deadline applies.
+            Err(_) if Instant::now() < deadline => {
+                thread::sleep(Duration::from_millis(10));
+                continue;
+            }
+            Err(_) => return false,
+        };
+        let head = &buf[..n];
+        if !head.starts_with(b"GET") {
+            return false;
+        }
+        // Wait for the whole header block before judging upgrade-ness.
+        if !head.windows(4).any(|w| w == b"\r\n\r\n") && n < buf.len() {
+            if Instant::now() > deadline {
+                return false;
+            }
+            thread::sleep(Duration::from_millis(10));
+            continue;
+        }
+        let text = String::from_utf8_lossy(head).to_lowercase();
+        if text.contains("sec-websocket-key") {
+            return false;
+        }
+        // Drain the request — `peek` never consumed it, and closing with
+        // unread inbound data RSTs the socket (the page could be lost).
+        use std::io::Read;
+        let mut r = stream;
+        let _ = r.read_exact(&mut vec![0u8; n]);
+        let page = include_str!("../tools/remote_test.html");
+        let resp = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/html; charset=utf-8\r\n\
+             content-length: {}\r\nconnection: close\r\n\r\n{}",
+            page.len(),
+            page
+        );
+        let mut w = stream;
+        let _ = w.write_all(resp.as_bytes());
+        let _ = w.flush();
+        let _ = stream.shutdown(std::net::Shutdown::Both);
+        return true;
+    }
 }
 
 /// Blocking read of one text frame, parsed as `In`. Returns None on
@@ -688,6 +749,19 @@ mod tests {
         ws.send(Message::Text(r#"{"cmd":"action","action":"NextScene"}"#.into()))
             .unwrap();
         assert!(rx.recv_timeout(Duration::from_millis(500)).is_err());
+    }
+
+    #[test]
+    fn browser_get_gets_the_page() {
+        let (tx, _rx) = mpsc::channel();
+        let server = Server::start_on("127.0.0.1", 0, "1234", hooks(tx)).unwrap();
+        let mut s = TcpStream::connect(("127.0.0.1", server.port)).unwrap();
+        use std::io::{Read, Write};
+        s.write_all(b"GET / HTTP/1.1\r\nHost: x\r\n\r\n").unwrap();
+        let mut body = String::new();
+        s.read_to_string(&mut body).unwrap();
+        assert!(body.starts_with("HTTP/1.1 200"));
+        assert!(body.contains("Trippin remote"));
     }
 
     #[test]

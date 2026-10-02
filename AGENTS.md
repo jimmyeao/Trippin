@@ -455,8 +455,13 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   release (the MIDI note-off lesson); `/set/*` and `/scene/goto|queue`
   read their arg verbatim.
 - First enable pops the Windows firewall prompt once — expected.
-- `tools/remote_test.html` is a file:// browser harness for the same
-  protocol — pads, scene grid, thumbs — for testing without the iOS app.
+- `tools/remote_test.html` is a browser harness for the same protocol —
+  pads, scene grid, thumbs — for testing without the iOS app. The server
+  serves it on a plain HTTP GET (no WS upgrade headers), so browsing to
+  `http://<ip>:9138` is the no-install remote. `serve_page` peeks at the
+  request without consuming it; when it answers, it must **drain the
+  request bytes first** — closing a socket with unread inbound data RSTs
+  it and the response can be lost.
 
 ## 9. Docs
 

@@ -37,8 +37,8 @@
 </head>
 <body>
 <div class="bar">
-  <input id="host" value="127.0.0.1" size="12"> :
-  <input id="port" value="9138" size="5" style="width:60px">
+  <input id="host" size="12"> :
+  <input id="port" size="5" style="width:60px">
   PIN <input id="pin" size="5" maxlength="6" style="width:64px">
   <button id="connect">connect</button>
   <span class="dot" id="dot"></span><span id="conn">offline</span>
@@ -60,6 +60,10 @@
 <script>
 const $ = id => document.getElementById(id);
 let ws, sceneNames = [], cur = -1, next = -1;
+// Served by trippin itself at http://<ip>:9138 — point the WS at the
+// same host; from file:// fall back to localhost.
+$("host").value = location.hostname || "127.0.0.1";
+$("port").value = location.port || "9138";
 
 function log(m) {
   const el = $("log");
