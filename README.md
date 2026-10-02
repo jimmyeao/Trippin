@@ -299,6 +299,25 @@ an RTX 5070 Ti.
 When writing a scene, use `u.flow` for camera travel. `u.beat` gets phase
 corrections from the beat tracker, so motion driven by it stutters.
 
+### Unity engine scenes (experimental)
+
+Settings → **Unity engine link** adds three festival-screen scenes rendered
+by a separate Unity engine:
+
+- `unity_stage`: a festival stage with lasers in haze, an LED rig, confetti and
+  phone lights;
+- `unity_crystals`: a flight through a chrome crystal tunnel. Each kick sends
+  a wave down it, and the speed follows the track's energy;
+- `unity_flow`: a particle cloud morphing between shapes, with kick
+  shockwaves.
+
+There's nothing to install or start: the first time you switch the link on,
+Trippin downloads the engine (about 40 MB, Windows and macOS). After that,
+Trippin runs it in the background and closes it when Trippin quits. The
+Settings tab shows its status. The auto-pilot only picks `unity_*` scenes
+while the engine is sending frames, and the AI show builder never uses them.
+Developer notes are in `unity/README.md`.
+
 ## Beats vs breakdowns
 
 The audio analyser counts kick hits over the last 2.5 s against the beats
