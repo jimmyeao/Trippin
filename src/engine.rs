@@ -27,6 +27,19 @@ use memmap2::MmapMut;
 use crate::gfx::{EXT_H, EXT_W};
 
 const MAGIC: u32 = 0x4654_5254; // "TRTF"
+
+/// Prebuilt players, downloaded on first use (like the Beat This! model) so
+/// installers stay small and CI needs no Unity licence. Rebuild + upload a
+/// new `unity-engine-vN` release when the Unity project changes, and bump
+/// these. An empty checksum means no build for this platform yet.
+const RELEASE_BASE: &str = "https://github.com/jimmyeao/Trippin/releases/download/unity-engine-v1";
+#[cfg(target_os = "macos")]
+const ASSET: (&str, &str) = ("TrippinEngine-macos-v1.zip", "");
+#[cfg(not(target_os = "macos"))]
+const ASSET: (&str, &str) = (
+    "TrippinEngine-windows-x64-v1.zip",
+    "d53645e782119c10b4ca169b8882162a5f75285b92419e270abb7e29afdfb1b6",
+);
 const HEADER: usize = 64;
 
 /// The latest frame from the engine, RGBA8 at `EXT_W` x `EXT_H`.
@@ -55,6 +68,10 @@ pub fn player_path() -> Option<PathBuf> {
         c.push(repo.join("Build").join("TrippinStage.exe"));
         c.push(repo.join("Build2").join("TrippinStage.exe"));
     }
+    // TRIPPIN_ENGINE_FRESH=1: only the downloaded copy — tests the download.
+    if std::env::var_os("TRIPPIN_ENGINE_FRESH").is_some() {
+        c.retain(|p| p.starts_with(&data));
+    }
     c.into_iter().find(|p| p.is_file())
 }
 
@@ -69,6 +86,8 @@ pub struct Engine {
     stop: Arc<AtomicBool>,
     /// Why the engine isn't running, for the Settings tab.
     pub status: String,
+    /// Download progress / result while the player is being fetched.
+    download: Option<Arc<Mutex<Result<String, String>>>>,
 }
 
 impl Engine {
@@ -106,6 +125,7 @@ impl Engine {
             latest,
             stop,
             status: "starting".into(),
+            download: None,
         })
     }
 
@@ -125,6 +145,37 @@ impl Engine {
                     self.child = None;
                 }
             }
+        }
+        // No player yet: fetch it once (background thread), then spawn.
+        if player_path().is_none() {
+            let d = self
+                .download
+                .get_or_insert_with(|| {
+                    let st = Arc::new(Mutex::new(Ok("downloading…".to_string())));
+                    let s2 = st.clone();
+                    std::thread::spawn(move || {
+                        let r = std::panic::catch_unwind(|| download(&s2))
+                            .unwrap_or_else(|_| Err(anyhow!("download crashed")));
+                        if let Err(e) = r {
+                            *s2.lock().unwrap_or_else(|p| p.into_inner()) = Err(format!("{e:#}"));
+                        }
+                    });
+                    st
+                })
+                .clone();
+            let st = d.lock().unwrap_or_else(|p| p.into_inner()).clone();
+            match st {
+                Ok(s) => self.status = s,
+                Err(e) => {
+                    // Failed: retry after the backoff.
+                    self.status = format!("download failed: {e}");
+                    if self.started.elapsed() > Duration::from_secs(60) {
+                        self.download = None;
+                        self.started = Instant::now();
+                    }
+                }
+            }
+            return;
         }
         let backoff = Duration::from_secs((2u64 << self.restarts.min(5)).min(60));
         if self.restarts > 0 && self.started.elapsed() < backoff {
@@ -191,6 +242,86 @@ impl Drop for Engine {
             }
         });
     }
+}
+
+/// Download this platform's player zip, verify it, unpack into
+/// `<data dir>/unity/`. Progress goes into `st`.
+fn download(st: &Mutex<Result<String, String>>) -> Result<()> {
+    use sha2::{Digest, Sha256};
+    use std::io::{Read, Write};
+    let (name, sha) = ASSET;
+    if sha.is_empty() {
+        return Err(anyhow!("no Unity engine build for this platform yet"));
+    }
+    let set = |s: String| *st.lock().unwrap_or_else(|p| p.into_inner()) = Ok(s);
+    // Unpack beside the final folder and rename it into place at the end:
+    // player_path() sees the exe the moment it exists, and launching a
+    // half-unpacked player fails (sharing violation).
+    let final_dir = crate::config::data_dir().join("unity");
+    let dir = crate::config::data_dir().join("unity.part");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir)?;
+    let zip_path = crate::config::data_dir().join(format!("{name}.part"));
+    let agent = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(1800)))
+        .build()
+        .new_agent();
+    let resp = agent
+        .get(&format!("{RELEASE_BASE}/{name}"))
+        .call()
+        .with_context(|| format!("downloading {name}"))?;
+    let total: u64 = resp
+        .headers()
+        .get("content-length")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    let mut reader = resp.into_body().into_reader();
+    let mut file = std::fs::File::create(&zip_path)?;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 1 << 16];
+    let mut got = 0u64;
+    loop {
+        let n = reader.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        file.write_all(&buf[..n])?;
+        hasher.update(&buf[..n]);
+        got += n as u64;
+        set(format!("downloading the Unity engine… {} / {} MB", got >> 20, total >> 20));
+    }
+    drop(file);
+    if format!("{:x}", hasher.finalize()) != sha {
+        let _ = std::fs::remove_file(&zip_path);
+        return Err(anyhow!("{name}: checksum mismatch"));
+    }
+    set("unpacking the Unity engine…".into());
+    let mut zip = zip::ZipArchive::new(std::fs::File::open(&zip_path)?)?;
+    for i in 0..zip.len() {
+        let mut e = zip.by_index(i)?;
+        let Some(rel) = e.enclosed_name() else { continue };
+        let out = dir.join(rel);
+        if e.is_dir() {
+            std::fs::create_dir_all(&out)?;
+            continue;
+        }
+        if let Some(p) = out.parent() {
+            std::fs::create_dir_all(p)?;
+        }
+        let mut f = std::fs::File::create(&out)?;
+        std::io::copy(&mut e, &mut f)?;
+        #[cfg(unix)]
+        if let Some(mode) = e.unix_mode() {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&out, std::fs::Permissions::from_mode(mode))?;
+        }
+    }
+    let _ = std::fs::remove_file(&zip_path);
+    let _ = std::fs::remove_dir_all(&final_dir);
+    std::fs::rename(&dir, &final_dir).context("installing the Unity engine")?;
+    set("starting".into());
+    Ok(())
 }
 
 /// Poll the frame file; copy out each new, complete frame.
