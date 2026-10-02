@@ -521,6 +521,17 @@ fn path() -> PathBuf {
 }
 
 /// The folder `trippin.json` lives in — `nowplaying.txt` goes here too.
+/// TLS for every HTTP client: trust what the OS trusts (macOS keychain,
+/// Windows cert store). ureq's default is a bundled Mozilla root list,
+/// which fails with `UnknownIssuer` on networks that inspect HTTPS with
+/// their own root (antivirus web shields, VPNs, company proxies) even
+/// though browsers there work. Downloads stay SHA-pinned regardless.
+pub fn tls() -> ureq::tls::TlsConfig {
+    ureq::tls::TlsConfig::builder()
+        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+        .build()
+}
+
 pub fn data_dir() -> PathBuf {
     match path().parent() {
         Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),

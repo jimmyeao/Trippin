@@ -241,6 +241,11 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   steps up `rate*dt` then eases back — a two-frame judder (this made the
   branding logo wobble horizontally whenever the DJ name was off). Guard
   the at-rest case (see `overlay.rs::ease_vis`).
+- **HTTP clients use the OS trust store** (`config::tls()`, ureq's
+  `platform-verifier` feature). ureq's default bundled roots failed with
+  `invalid certificate: UnknownIssuer` on the owner's M2, whose network
+  inspects HTTPS. Every new `ureq::Agent` must set
+  `.tls_config(crate::config::tls())`.
 - The render thread is **not unwound on quit**: its locals' `Drop`s never
   run (macOS Cmd-Q doesn't even return from `run_app`). Process-level
   cleanup (killing the Unity player: `engine::shutdown`) goes in

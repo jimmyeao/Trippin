@@ -1260,6 +1260,7 @@ fn agent() -> ureq::Agent {
     ureq::Agent::config_builder()
         // Web-search builds run several turns server-side.
         .timeout_global(Some(Duration::from_secs(300)))
+        .tls_config(crate::config::tls())
         .http_status_as_error(false)
         .build()
         .into()

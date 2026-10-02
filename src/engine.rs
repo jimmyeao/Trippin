@@ -306,6 +306,7 @@ fn download(st: &Mutex<Result<String, String>>) -> Result<()> {
     let zip_path = crate::config::data_dir().join(format!("{name}.part"));
     let agent = ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(1800)))
+        .tls_config(crate::config::tls())
         .build()
         .new_agent();
     let resp = agent
