@@ -143,4 +143,22 @@ final class RemoteFlowTests: XCTestCase {
         sleep(1)
         shot("12 live after restart")
     }
+
+    /// Bonjour: "Trippin on <host>" shows up on the connect screen and
+    /// connects with the PIN. Needs a Trippin whose mDNS advert reaches the
+    /// host's mDNSResponder (macOS Local Network permission for whatever
+    /// launched it).
+    func test3_Discovery() {
+        app.launchArguments = ["-uitestReset"]
+        app.launch()
+        let server = wait(app.buttons["server"], timeout: 20, "Bonjour server listed")
+        shot("20 discovered")
+        server.tap()
+        let pinField = wait(app.textFields["pin"], "pin field")
+        pinField.tap()
+        pinField.typeText(pin)
+        app.buttons["pinConnect"].tap()
+        wait(app.descendants(matching: .any)["link"], value: "Live", timeout: 10, "connected via Bonjour")
+        shot("21 live via bonjour")
+    }
 }
