@@ -6,8 +6,9 @@
 //    swings with the phrase.
 //  - Motion: rotation speed integrates the smoothed energy and reverses
 //    on phrase-length sines; the camera orbits slowly round it.
-//  - Light: studio reflections slide over the surface as it turns; contour
-//    lines sweep up it on the flow clock, brightest at the kick ripple.
+//  - Light: studio reflections slide over the surface as it turns; an
+//    iridescent sheen drifts on the flow clock; a soft glow rides the
+//    kick ripple.
 
 using System.Collections.Generic;
 using UnityEngine;

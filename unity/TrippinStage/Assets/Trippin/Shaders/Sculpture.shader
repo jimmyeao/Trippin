@@ -4,8 +4,8 @@
 // differences of the same form, so it shades as a true solid.
 // Look: dark glossy chrome/ceramic with studio softbox reflections (the
 // environment stays fixed while the object turns, so highlights slide),
-// palette-tinted key lights, and glowing contour lines that sweep up the
-// surface like projection mapping, brightest at the kick ripple.
+// palette-tinted key lights; colour drifts over the
+// surface as an iridescent sheen, and a soft glow rides the kick ripple.
 Shader "Trippin/Sculpture"
 {
     Properties
@@ -45,8 +45,12 @@ Shader "Trippin/Sculpture"
                 }
                 if (f == 1) // urchin: twelve rounded spikes (icosahedron vertices, both signs)
                 {
-                    float m = 0.0;
-                    [unroll] for (int k = 0; k < 6; k++) m = max(m, abs(dot(d, ICO[k])));
+                    // Smooth max over the spike axes: a hard max() leaves a
+                    // crease between neighbouring spikes that aliases into a
+                    // jagged seam.
+                    float acc = 0.0;
+                    [unroll] for (int k = 0; k < 6; k++) acc += exp(18.0 * (abs(dot(d, ICO[k])) - 1.0));
+                    float m = 1.0 + log(acc) / 18.0;
                     float sp = saturate((m - 0.8) / 0.2);
                     return d * (0.82 + 0.7 * sp * sp * sp);
                 }
@@ -133,12 +137,12 @@ Shader "Trippin/Sculpture"
                 float3 l1 = normalize(float3(0.6, 0.7, -0.4)), l2 = normalize(float3(-0.8, -0.2, 0.5));
                 float3 base = float3(0.02, 0.02, 0.025);
                 col += base * (saturate(dot(n, l1)) * TPalette(0.1) * 3.0 + saturate(dot(n, l2)) * TPalette(0.6) * 2.0);
-                // Contour lines sweeping up the surface; brighter at the ripple.
-                float h = i.op.y;
-                float f = abs(frac(h * 7.0 - _LineT) - 0.5);
-                float lines = smoothstep(0.02, 0.0, 0.5 - f);
-                float ripple = exp(-(i.d.y - _WaveFront) * (i.d.y - _WaveFront) * 25.0) * _WaveAmp;
-                col += TPalette(0.4 + h * 0.15) * lines * _LineGain * (0.3 + 1.8 * ripple) * (1.0 - 0.5 * _TCalm);
+                // Iridescent sheen at grazing angles, its hue drifting on the
+                // flow clock (no stripes: lines read as dividers).
+                col += pow(1.0 - nv, 2.0) * TPalette(0.2 + 0.6 * (1.0 - nv) + _LineT * 0.05) * 0.35;
+                // The kick ripple: a soft wide glow travelling down the form.
+                float ripple = exp(-(i.d.y - _WaveFront) * (i.d.y - _WaveFront) * 9.0) * _WaveAmp;
+                col += TPalette(0.4 + i.op.y * 0.15) * ripple * _LineGain * 0.45 * (0.4 + 0.6 * pow(1.0 - nv, 1.5)) * (1.0 - 0.5 * _TCalm);
                 // Hat glints: sparse surface cells catch the hits.
                 // Small round sparkles in sparse surface cells (squares read
                 // as confetti stuck to it).
