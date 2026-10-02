@@ -45,3 +45,11 @@ Build from the CLI (Unity 6000.3.25f1):
     unity run . -- -executeMethod TrippinStage.EditorTools.StageBuilder.BuildPlayer [-stageOut Build2] [-stageMac]
 
 Run `Build/TrippinStage.exe`. `-record <dir> -recordSeconds 64` writes a fixed-30-fps JPEG sequence and quits (encode with ffmpeg).
+
+## Crowd meshes
+
+The stage crowd uses generated people from Alice (the owner's generation server; external agent API `POST /api/agent/crowd {"count": N}` at alice.deviousweb.com, key in the untracked `alice.env`; Cloudflare rejects Python's default User-Agent, so send a curl-like one). Prepare a batch zip with:
+
+    python tools/crowd_meshes.py crowd.zip --prefix a2
+
+It rejects failed reconstructions, bakes textures into vertex colours, decimates to about 2.5k triangles and writes `Assets/Trippin/Resources/Crowd/*.bytes`. StageDirector picks them up on the next build. Hunyuan3D's people face +z (the stage). `-stageShot 0` pins the wide shot to check them in a recording.

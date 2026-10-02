@@ -58,16 +58,16 @@ fn kill_child() {
 /// installers stay small and CI needs no Unity licence. Rebuild + upload a
 /// new `unity-engine-vN` release when the Unity project changes, and bump
 /// these. An empty checksum means no build for this platform yet.
-const RELEASE_BASE: &str = "https://github.com/jimmyeao/Trippin/releases/download/unity-engine-v2";
+const RELEASE_BASE: &str = "https://github.com/jimmyeao/Trippin/releases/download/unity-engine-v3";
 #[cfg(target_os = "macos")]
 const ASSET: (&str, &str) = (
-    "TrippinEngine-macos-v2.zip",
-    "3bcd269755768ac52522f4cfb8dacd0b78cf8ef5a787cdc09a491368c0af9a8a",
+    "TrippinEngine-macos-v3.zip",
+    "ccfc29b0eb21e5652a27b0a6a8326144f509a3f930a584891f5dfc578c059171",
 );
 #[cfg(not(target_os = "macos"))]
 const ASSET: (&str, &str) = (
-    "TrippinEngine-windows-x64-v2.zip",
-    "3d3c1a4bda0827ce998120b0647ec005488dc71c10955f9b4e312d7bc84bbbdb",
+    "TrippinEngine-windows-x64-v3.zip",
+    "0baa82b1d1d8235d6d53dbf423d29d0e254f4910ff1c0439450724077a7e0106",
 );
 /// Written into the unpacked folder; a download whose stamp isn't the
 /// current `ASSET` is stale and gets replaced.
@@ -243,8 +243,13 @@ impl Engine {
         // player resolves a relative -logFile beside its .app, not our cwd.
         let log = crate::config::data_dir().join("unity-engine.log");
         let log = std::path::absolute(&log).unwrap_or(log);
-        Command::new(&exe)
-            .arg("-batchmode")
+        let mut cmd = Command::new(&exe);
+        // TRIPPIN_ENGINE_READBACK=blit|direct|sync picks FrameExporter's
+        // readback path (blit by default) — for chasing GPU-specific faults.
+        if let Some(m) = std::env::var_os("TRIPPIN_ENGINE_READBACK") {
+            cmd.arg("-trippinReadback").arg(m);
+        }
+        cmd.arg("-batchmode")
             .arg("-trippinFrame")
             .arg(&self.path)
             .arg("-trippinPort")
@@ -376,6 +381,12 @@ fn read_loop(map: MmapMut, latest: Arc<Mutex<Option<InFrame>>>, stop: Arc<Atomic
         unsafe { std::ptr::read_volatile(m.as_ptr().add(16) as *const u64) }
     };
     let mut last = 0u64;
+    // TRIPPIN_ENGINE_DUMP=<dir>: save a few frames exactly as read from the
+    // file (engine-0.png…) and log accept/torn counts — tells a transport
+    // fault from a render fault.
+    let dump = std::env::var_os("TRIPPIN_ENGINE_DUMP").map(PathBuf::from);
+    let (mut ok, mut torn, mut dumped) = (0u64, 0u64, 0u32);
+    let mut stat_at = Instant::now();
     while !stop.load(Ordering::Relaxed) {
         let s1 = seq_at(&map);
         if s1 == last || s1 % 2 == 1 {
@@ -386,9 +397,26 @@ fn read_loop(map: MmapMut, latest: Arc<Mutex<Option<InFrame>>>, stop: Arc<Atomic
         let px = map[HEADER..HEADER + len].to_vec();
         std::sync::atomic::fence(Ordering::Acquire);
         if seq_at(&map) != s1 {
+            torn += 1;
             continue; // torn: Unity wrote while we copied
         }
         last = s1;
+        ok += 1;
+        if let Some(d) = &dump {
+            if ok % 60 == 30 && dumped < 5 {
+                let _ = std::fs::create_dir_all(d);
+                let f = d.join(format!("engine-{dumped}.png"));
+                match image::save_buffer(&f, &px, EXT_W, EXT_H, image::ColorType::Rgba8) {
+                    Ok(()) => eprintln!("engine dump: {} (seq {s1})", f.display()),
+                    Err(e) => eprintln!("engine dump: {e}"),
+                }
+                dumped += 1;
+            }
+            if stat_at.elapsed() > Duration::from_secs(5) {
+                eprintln!("engine frames: {ok} ok, {torn} torn retries");
+                stat_at = Instant::now();
+            }
+        }
         *latest.lock().unwrap_or_else(|e| e.into_inner()) = Some(InFrame {
             seq: s1,
             rgba: Arc::new(px),

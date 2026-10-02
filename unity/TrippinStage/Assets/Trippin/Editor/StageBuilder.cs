@@ -114,6 +114,8 @@ namespace TrippinStage.EditorTools
             dir.phoneMat = Mat("Trippin/Phones", "Phones");
             dir.phoneMat.enableInstancing = true;
             dir.sunMat = Mat("Trippin/Sun", "Sun");
+            dir.crowdMeshMat = Mat("Trippin/CrowdMesh", "CrowdMesh");
+            dir.crowdMeshMat.enableInstancing = true;
 
             var crystals = new GameObject("unity_crystals");
             crystals.transform.SetParent(engine.transform, false);
