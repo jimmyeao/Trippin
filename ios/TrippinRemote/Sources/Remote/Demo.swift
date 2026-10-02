@@ -32,6 +32,8 @@ final class DemoServer {
     private var latencyMs = 40.0
     private var npSize = 1.0
     private var brandOn = true
+    private var brandLogoOn = true
+    private var brandNameOn = false
     private var brandOpacity = 0.9
     private var tickerOn = false
     private var tickerSpeed = 1.0
@@ -140,6 +142,7 @@ final class DemoServer {
             "random_order": false, "phrase_bars": phraseBars, "fx_amt": fxAmt, "fx_auto": fxAuto,
             "dancer_size": dancerSize, "dancer_trails": dancerTrails, "latency_ms": latencyMs,
             "np_size": npSize, "brand_on": brandOn, "brand_opacity": brandOpacity,
+            "brand_logo_on": brandLogoOn, "brand_name_on": brandNameOn, "has_logo": true,
             "ticker_on": tickerOn, "ticker_speed": tickerSpeed, "ticker_text": tickerText,
         ])
     }
@@ -191,7 +194,9 @@ final class DemoServer {
         case "LatencyUp": latencyMs = min(200, latencyMs + 5)
         case "TimelinePlay": songPlaying.toggle()
         case "RecordSet": recOn.toggle()
-        case "ToggleLogo": brandOn.toggle()
+        // As main.rs: showing a piece also enables the block.
+        case "ToggleLogo": brandLogoOn.toggle(); brandOn = brandOn || brandLogoOn
+        case "ToggleName": brandNameOn.toggle(); brandOn = brandOn || brandNameOn
         case "ToggleTicker": tickerOn.toggle()
         case "MarkDownbeat", "MarkPhrase": barStart = Date()
         default: break
