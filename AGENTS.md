@@ -241,6 +241,13 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   steps up `rate*dt` then eases back — a two-frame judder (this made the
   branding logo wobble horizontally whenever the DJ name was off). Guard
   the at-rest case (see `overlay.rs::ease_vis`).
+- The render thread is **not unwound on quit**: its locals' `Drop`s never
+  run (macOS Cmd-Q doesn't even return from `run_app`). Process-level
+  cleanup (killing the Unity player: `engine::shutdown`) goes in
+  `ApplicationHandler::exiting`, with state the event thread can reach.
+- Panel scene thumbnails are rendered once and disk-cached, except
+  `unity_*` tiles (`panel.rs::live_thumb`): they re-render about every
+  0.5 s from the engine's current frame and are never cached.
 - The pointer over the visuals is hidden while fullscreen (synced in
   `about_to_wait`); the panel/editor windows keep theirs.
 - **MIDI** (`midi.rs`): midir's callback thread posts `AppEvent::MidiNote`

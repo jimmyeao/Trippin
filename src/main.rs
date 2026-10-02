@@ -1896,6 +1896,12 @@ impl ApplicationHandler<AppEvent> for App {
         }
     }
 
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        // The render thread (which owns the Engine) isn't unwound on quit —
+        // macOS Cmd-Q never returns from run_app — so stop the player here.
+        engine::shutdown();
+    }
+
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.shared.is_some() {
             return;
@@ -2616,5 +2622,6 @@ fn main() -> Result<()> {
         midi_scan: Instant::now(),
     };
     event_loop.run_app(&mut app)?;
+    engine::shutdown();
     Ok(())
 }

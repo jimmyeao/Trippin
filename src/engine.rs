@@ -28,6 +28,32 @@ use crate::gfx::{EXT_H, EXT_W};
 
 const MAGIC: u32 = 0x4654_5254; // "TRTF"
 
+/// The running player. Global rather than in `Engine` because `Engine`
+/// lives on the render thread, which isn't unwound on quit (macOS Cmd-Q
+/// never returns from the event loop) — `shutdown` kills it from there.
+static CHILD: Mutex<Option<Child>> = Mutex::new(None);
+static QUITTING: AtomicBool = AtomicBool::new(false);
+
+fn child() -> std::sync::MutexGuard<'static, Option<Child>> {
+    CHILD.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// Kill the player now. Called when the app exits; harmless if it isn't
+/// running.
+pub fn shutdown() {
+    // Latched first, so the render thread's tick can't respawn it while the
+    // app is going down.
+    QUITTING.store(true, Ordering::Relaxed);
+    kill_child();
+}
+
+fn kill_child() {
+    if let Some(mut c) = child().take() {
+        let _ = c.kill();
+        let _ = c.wait();
+    }
+}
+
 /// Prebuilt players, downloaded on first use (like the Beat This! model) so
 /// installers stay small and CI needs no Unity licence. Rebuild + upload a
 /// new `unity-engine-vN` release when the Unity project changes, and bump
@@ -89,7 +115,6 @@ pub fn player_path() -> Option<PathBuf> {
 
 /// Supervises the engine process and owns the frame file + reader thread.
 pub struct Engine {
-    child: Option<Child>,
     started: Instant,
     restarts: u32,
     path: PathBuf,
@@ -129,7 +154,6 @@ impl Engine {
             read_loop(map, l, s);
         });
         Ok(Engine {
-            child: None,
             started: Instant::now(),
             restarts: 0,
             path,
@@ -144,17 +168,23 @@ impl Engine {
     /// Keep the player running: spawn it, notice when it exits, restart it
     /// (backing off so a player that crashes on launch doesn't spin).
     pub fn tick(&mut self) {
-        if let Some(c) = self.child.as_mut() {
-            match c.try_wait() {
-                Ok(None) => return,
-                Ok(Some(st)) => {
-                    eprintln!("unity engine exited ({st}); restarting");
-                    self.child = None;
-                    self.restarts += 1;
-                }
-                Err(e) => {
-                    self.status = format!("{e}");
-                    self.child = None;
+        if QUITTING.load(Ordering::Relaxed) {
+            return;
+        }
+        {
+            let mut g = child();
+            if let Some(c) = g.as_mut() {
+                match c.try_wait() {
+                    Ok(None) => return,
+                    Ok(Some(st)) => {
+                        eprintln!("unity engine exited ({st}); restarting");
+                        *g = None;
+                        self.restarts += 1;
+                    }
+                    Err(e) => {
+                        self.status = format!("{e}");
+                        *g = None;
+                    }
                 }
             }
         }
@@ -195,7 +225,7 @@ impl Engine {
         }
         match self.spawn() {
             Ok(c) => {
-                self.child = Some(c);
+                *child() = Some(c);
                 self.started = Instant::now();
                 self.status = "running".into();
             }
@@ -241,10 +271,7 @@ impl Engine {
 impl Drop for Engine {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
-        if let Some(mut c) = self.child.take() {
-            let _ = c.kill();
-            let _ = c.wait();
-        }
+        kill_child(); // link switched off (not a quit: it may come back on)
         // The reader thread holds the mapping; the file goes once it's
         // unmapped (Windows refuses to delete a mapped file — retry later).
         let p = self.path.clone();
