@@ -38,7 +38,9 @@ mod egui_win;
 mod midi;
 mod ndi;
 mod nowplaying;
+mod osc;
 mod overlay;
+mod remote;
 mod rec;
 #[cfg(windows)]
 mod spout;
@@ -124,13 +126,17 @@ struct Shared {
     /// MIDI connection state for the panel's status dot: (connected, label).
     /// Written by the event thread where the connection lives.
     midi_status: Mutex<(bool, String)>,
+    /// Remote-server state for the Settings card: (listening, status line).
+    remote_status: Mutex<(bool, String)>,
 }
 
 /// A pad press on the MIDI keyboard, posted to the event loop from midir's
 /// callback thread. The raw note (not the mapped action) travels so the
-/// Keys page can capture it for MIDI-learn.
+/// Keys page can capture it for MIDI-learn. Remote commands (the iOS app's
+/// WebSocket clients, OSC controllers) arrive the same way.
 enum AppEvent {
     MidiNote(u8),
+    Remote(remote::RemoteCmd),
 }
 
 /// Work the event thread hands to the render thread.
@@ -1555,6 +1561,14 @@ struct App {
     /// scan that notices an unplugged device (WinMM has no disconnect event).
     midi_retry: Instant,
     midi_scan: Instant,
+    /// The LAN remote (WebSocket server for the iOS app) and the OSC
+    /// listener — respawned when their settings change, like `midi`.
+    remote: Option<remote::Server>,
+    osc: Option<osc::Osc>,
+    /// Throttle for bind-failure retries (port already in use).
+    remote_retry: Instant,
+    /// Last client count shown in the remote status line.
+    remote_clients: usize,
 }
 
 impl App {
@@ -1728,6 +1742,165 @@ impl App {
         }
     }
 
+    /// A command from the LAN remote (iOS app) or an OSC controller — same
+    /// dispatch as a hotkey, so presses record into an armed timeline too.
+    fn remote_cmd(&mut self, event_loop: &ActiveEventLoop, cmd: remote::RemoteCmd) {
+        use remote::{RemoteCmd as R, SetKey};
+        let Some(sh) = self.shared.clone() else { return };
+        match cmd {
+            R::Act(a) => self.apply(a, event_loop),
+            R::GoToScene(sel) => {
+                if let Some(i) = sel.resolve(&sh.scene_names) {
+                    self.record_cue(CueKind::Scene(sh.scene_names[i].clone()));
+                    self.send(Msg::GoToScene(i));
+                }
+            }
+            R::QueueNext(sel) => {
+                if let Some(i) = sel.resolve(&sh.scene_names) {
+                    self.send(Msg::QueueNext(i));
+                }
+            }
+            R::ShowClip(name) => {
+                let i = sh
+                    .clip_names
+                    .iter()
+                    .position(|c| *c == name)
+                    .or_else(|| {
+                        sh.clip_names
+                            .iter()
+                            .position(|c| c.eq_ignore_ascii_case(&name))
+                    });
+                if let Some(i) = i {
+                    self.record_cue(CueKind::Clip(sh.clip_names[i].clone()));
+                    self.send(Msg::ShowClip(i));
+                }
+            }
+            R::Transport(ctl) => self.send(Msg::Transport(ctl)),
+            // The remote's pusher thread ships the PNG once the render
+            // thread produces it ("scene:<name>" in shared.thumbs).
+            R::Thumb(name) => self.send(Msg::Thumb(format!("scene:{name}"))),
+            R::Set(k) => {
+                {
+                    let mut s = self.settings_mut();
+                    match k {
+                        // Unknown palettes fall back inside palettes::lut;
+                        // validate anyway so a typo can't save a dead name.
+                        SetKey::Palette(p) if palettes::names().any(|n| n == p) => {
+                            s.palette = p;
+                        }
+                        SetKey::Palette(_) => return,
+                        SetKey::Fx(fx) => {
+                            s.fx_auto = false;
+                            s.fx = fx;
+                        }
+                        SetKey::FxAmt(v) => s.fx_amt = v,
+                        SetKey::FxAuto(b) => s.fx_auto = b,
+                        SetKey::DancerSize(v) => s.dancer_size = v,
+                        SetKey::DancerTrails(b) => s.dancer_trails = b,
+                        SetKey::PhraseBars(n) => s.phrase_bars = n,
+                        SetKey::CutOnDrops(b) => s.cut_on_drops = b,
+                        SetKey::LatencyMs(v) => s.latency_ms = v,
+                        SetKey::NpSize(v) => s.np_size = v,
+                        SetKey::BrandOpacity(v) => s.brand_opacity = v,
+                        SetKey::TickerSpeed(v) => s.ticker_speed = v,
+                        SetKey::TickerText(t) => s.ticker_text = t,
+                    }
+                }
+                self.mark_dirty();
+            }
+        }
+    }
+
+    /// The closures the remote server drives: commands go to the event
+    /// loop via the proxy, state/meta/thumbs read the shared state.
+    fn remote_hooks(&self) -> Option<remote::Hooks> {
+        let sh = self.shared.clone()?;
+        let proxy = self.midi_proxy.clone();
+        let (meta_sh, state_sh, thumb_sh) = (sh.clone(), sh.clone(), sh);
+        Some(remote::Hooks {
+            cmd: Box::new(move |c| {
+                let _ = proxy.send_event(AppEvent::Remote(c));
+            }),
+            meta: Box::new(move || {
+                serde_json::json!({
+                    "type": "hello",
+                    "ok": true,
+                    "version": env!("CARGO_PKG_VERSION"),
+                    "scenes": meta_sh.scene_names,
+                    "heavy": meta_sh.scene_heavy,
+                    "clips": meta_sh.clip_names,
+                    "palettes": palettes::names().collect::<Vec<_>>(),
+                    "actions": Action::ALL
+                        .iter()
+                        .map(|a| serde_json::json!({
+                            "id": serde_json::to_value(a).unwrap_or_default(),
+                            "label": a.label(),
+                        }))
+                        .collect::<Vec<_>>(),
+                    "addr": remote::local_ip(),
+                })
+            }),
+            state: Box::new(move || {
+                // Status copy first, settings second — never nested, same
+                // order the panel uses.
+                let st = lock(&state_sh.status).clone();
+                let s = lock(&state_sh.settings);
+                serde_json::json!({
+                    "type": "state",
+                    "bpm": st.bpm,
+                    "conf": st.confidence,
+                    "beat_in_bar": st.beat_in_bar,
+                    "fps": st.fps,
+                    "silent": st.silent,
+                    "device": st.device,
+                    "scene": st.scene,
+                    "scene_name": state_sh.scene_names.get(st.scene),
+                    "next_scene": st.next_scene,
+                    "next_scene_name": st.next_scene.and_then(|i| state_sh.scene_names.get(i)),
+                    "bar_in_scene": st.bar_in_scene,
+                    "bars_total": st.bars_total,
+                    "clip": st.clip,
+                    "blackout": st.blackout,
+                    "fullscreen": st.fullscreen,
+                    "fx": st.fx,
+                    "groove": st.groove,
+                    "calm": st.calm,
+                    "np": st.np_track,
+                    "rec_on": st.rec.is_some(),
+                    "mode": s.mode,
+                    "dancer": s.dancer_enabled,
+                    "dancer_style": s.dancer_style,
+                    "palette": s.palette,
+                    "random_order": s.random_order,
+                    "phrase_bars": s.phrase_bars,
+                    "fx_amt": s.fx_amt,
+                    "fx_auto": s.fx_auto,
+                    "dancer_size": s.dancer_size,
+                    "dancer_trails": s.dancer_trails,
+                    "latency_ms": s.latency_ms,
+                    "np_size": s.np_size,
+                    "brand_on": s.brand_on,
+                    "brand_opacity": s.brand_opacity,
+                    "ticker_on": s.ticker_on,
+                    "ticker_speed": s.ticker_speed,
+                    "ticker_text": s.ticker_text,
+                })
+            }),
+            thumb: Box::new(move |name| {
+                let got = lock(&thumb_sh.thumbs)
+                    .get(&format!("scene:{name}"))
+                    .cloned();
+                let (w, h, px) = got?;
+                use image::ImageEncoder;
+                let mut out = Vec::new();
+                image::codecs::png::PngEncoder::new(&mut out)
+                    .write_image(&px, w, h, image::ExtendedColorType::Rgba8)
+                    .ok()?;
+                Some(out)
+            }),
+        })
+    }
+
     /// Dispatch a key through the binding map. Returns false when no action
     /// is bound, letting callers offer the key a fallback meaning (the
     /// editor's unbound-Space transport toggle).
@@ -1776,6 +1949,7 @@ impl App {
             status.fullscreen = w.fullscreen().is_some();
         }
         let midi_status = lock(&shared.midi_status).clone();
+        let remote_status = lock(&shared.remote_status).clone();
         // The UI runs under the settings lock; the GPU acquire/present must
         // not — a blocked surface acquire would freeze the render thread
         // through the lock.
@@ -1795,6 +1969,7 @@ impl App {
                 &shared.timeline,
                 &shared.thumbs,
                 &midi_status,
+                &remote_status,
             )
         };
         if let Some(p) = self.panel.as_mut() {
@@ -1889,10 +2064,22 @@ fn toggle_fullscreen(w: &Window) {
     }
 }
 
+/// The Settings card status line: "192.168.1.20:9138 · 2 clients".
+fn remote_line(srv: &remote::Server) -> String {
+    let ip = remote::local_ip().unwrap_or_else(|| "?".into());
+    let n = srv.client_count();
+    format!(
+        "{ip}:{} · {n} client{}",
+        srv.port,
+        if n == 1 { "" } else { "s" }
+    )
+}
+
 impl ApplicationHandler<AppEvent> for App {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
         match event {
             AppEvent::MidiNote(note) => self.midi_note(event_loop, note),
+            AppEvent::Remote(cmd) => self.remote_cmd(event_loop, cmd),
         }
     }
 
@@ -1967,6 +2154,7 @@ impl ApplicationHandler<AppEvent> for App {
                 .unwrap_or_default(),
             thumbs: Mutex::new(std::collections::HashMap::new()),
             midi_status: Mutex::new((false, "off".into())),
+            remote_status: Mutex::new((false, "off".into())),
         });
         self.shared = Some(shared.clone());
         let (tx, rx) = mpsc::channel();
@@ -2273,6 +2461,69 @@ impl ApplicationHandler<AppEvent> for App {
                     }
                 };
                 *lock(&sh.midi_status) = status;
+            }
+        }
+        // LAN remote + OSC: (re)start when the toggles/ports/PIN change —
+        // same lifecycle shape as MIDI above, retries throttled on a busy
+        // port.
+        if let Some(sh) = &self.shared {
+            let (want_on, want_port, want_pin, want_osc, want_osc_port) = {
+                let s = lock(&sh.settings);
+                (
+                    s.remote_on,
+                    s.remote_port,
+                    s.remote_pin.clone(),
+                    s.osc_on,
+                    s.osc_port,
+                )
+            };
+            let want = want_on.then_some((want_port, want_pin));
+            let have = self.remote.as_ref().map(|r| (r.port, r.pin.clone()));
+            if want != have
+                && (want.is_none() || self.remote_retry.elapsed() > Duration::from_secs(2))
+            {
+                self.remote_retry = Instant::now();
+                self.remote = None;
+                let status = match want.and_then(|(port, pin)| {
+                    self.remote_hooks()
+                        .map(|h| (port, remote::Server::start(port, &pin, h)))
+                }) {
+                    Some((_, Ok(srv))) => {
+                        let line = remote_line(&srv);
+                        self.remote = Some(srv);
+                        self.remote_clients = 0;
+                        (true, line)
+                    }
+                    Some((port, Err(e))) => (false, format!("port {port}: {e:#}")),
+                    None => (false, "off".into()),
+                };
+                *lock(&sh.remote_status) = status;
+            }
+            // Refresh the status line when the client count moves.
+            if let Some(srv) = &self.remote {
+                let n = srv.client_count();
+                if n != self.remote_clients {
+                    self.remote_clients = n;
+                    *lock(&sh.remote_status) = (true, remote_line(srv));
+                }
+            }
+            // OSC: keyed on (on, port). Shares the remote command path —
+            // OSC presses act exactly like remote-app presses.
+            let want_osc_p = want_osc.then_some(want_osc_port);
+            let have_osc = self.osc.as_ref().map(|o| o.port);
+            if want_osc_p != have_osc
+                && (want_osc_p.is_none()
+                    || self.remote_retry.elapsed() > Duration::from_secs(2))
+            {
+                self.osc = None;
+                if let Some(port) = want_osc_p {
+                    let proxy = self.midi_proxy.clone();
+                    self.osc = osc::Osc::start(port, move |c| {
+                        let _ = proxy.send_event(AppEvent::Remote(c));
+                    })
+                    .map_err(|e| eprintln!("OSC listener: {e:#}"))
+                    .ok();
+                }
             }
         }
         // Settings changed on the render thread also need flushing to disk.
@@ -2620,6 +2871,14 @@ fn main() -> Result<()> {
             .checked_sub(Duration::from_secs(4))
             .unwrap_or_else(Instant::now),
         midi_scan: Instant::now(),
+        remote: None,
+        osc: None,
+        // Backdated like midi_retry so a saved `remote_on` starts the
+        // server immediately at launch.
+        remote_retry: Instant::now()
+            .checked_sub(Duration::from_secs(4))
+            .unwrap_or_else(Instant::now),
+        remote_clients: 0,
     };
     event_loop.run_app(&mut app)?;
     engine::shutdown();

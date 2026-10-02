@@ -347,6 +347,7 @@ impl Panel {
         tl_shared: &crate::timeline::Shared,
         thumb_store: &Mutex<HashMap<String, (u32, u32, Vec<u8>)>>,
         midi_status: &(bool, String),
+        remote_status: &(bool, String),
     ) -> (Vec<UiCommand>, bool, PanelFrame) {
         let mut commands = Vec::new();
         let mut changed = false;
@@ -441,6 +442,7 @@ impl Panel {
                 rebinding,
                 midi_learn,
                 midi_status,
+                remote_status,
                 tab,
                 scene_filter,
                 chip,
@@ -475,6 +477,7 @@ fn build_ui(
     rebinding: &mut Option<Action>,
     midi_learn: &mut Option<Action>,
     midi_status: &(bool, String),
+    remote_status: &(bool, String),
     tab: &mut Tab,
     scene_filter: &mut String,
     chip: &mut LibChip,
@@ -554,7 +557,7 @@ fn build_ui(
                         Tab::Stream => stream_tab(ui, s, st, cmd),
                         Tab::Timeline => timeline_tab(ui, tl_shared, saved, cmd),
                         Tab::Keys => keys_tab(ui, s, rebinding, midi_learn, midi_status, keys_filter),
-                        Tab::Settings => settings_tab(ui, s, st, cmd),
+                        Tab::Settings => settings_tab(ui, s, st, remote_status, cmd),
                         Tab::Perform => unreachable!(),
                     });
             }
@@ -3433,7 +3436,13 @@ pub(crate) fn cue_param_ui(
 /// Settings page: app-wide preferences that aren't part of performing —
 /// audio source & sync, what the auto-pilot may do, and the AI show
 /// builder's provider. Two bounded columns, like the Stream page (A1).
-fn settings_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<UiCommand>) {
+fn settings_tab(
+    ui: &mut egui::Ui,
+    s: &mut Settings,
+    st: &Status,
+    remote_status: &(bool, String),
+    cmd: &mut Vec<UiCommand>,
+) {
     use crate::ui_theme::*;
     ui.spacing_mut().item_spacing = egui::vec2(12.0, 12.0);
     let row_w = ui.available_width();
@@ -3696,6 +3705,46 @@ fn settings_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<
                          (about a cent each) per build.",
                     );
             });
+        });
+        ui.add_space(12.0);
+        card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.spacing_mut().item_spacing.y = 6.0;
+            section_label(ui, "remote control");
+            ui.small(
+                "Drive the show from the iPad/iPhone app or a TouchOSC-style \
+                 controller on the same network.",
+            );
+            if ui
+                .checkbox(&mut s.remote_on, "iOS app remote (WebSocket)")
+                .changed()
+                && s.remote_on
+                && s.remote_pin.is_empty()
+            {
+                s.remote_pin = crate::remote::new_pin();
+            }
+            if s.remote_on {
+                status_dot(ui, remote_status.0, &remote_status.1);
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(format!("PIN {}", s.remote_pin)).monospace());
+                    if ui
+                        .small_button("new")
+                        .on_hover_text("Regenerate — paired apps need the new PIN")
+                        .clicked()
+                    {
+                        s.remote_pin = crate::remote::new_pin();
+                    }
+                });
+                ui.small(
+                    "Finds the rig over Bonjour (_trippin._tcp) — or type the \
+                     address above into the app.",
+                );
+            }
+            ui.checkbox(&mut s.osc_on, "OSC input (TouchOSC / Lemur)")
+                .on_hover_text("UDP port 9139 — address map in AGENTS.md");
+            if s.osc_on {
+                ui.small(format!("listening on UDP :{}", s.osc_port));
+            }
         });
         ui.min_rect().height()
     };
