@@ -26,7 +26,7 @@ scenes on phrase boundaries and drops.
 
 Download `Trippin-Setup-<version>.exe` from the GitHub **Releases** page (or
 from the artifacts of the latest *Build installer* workflow run) and run it.
-Settings are saved to `%APPDATA%\Trippin	rippin.json`.
+Settings are saved to `%APPDATA%\Trippin\trippin.json`.
 
 To release a new version: **Actions → Build installer → Run workflow**, enter
 the version (e.g. `0.2.0`) — it bumps `Cargo.toml`, commits, tags `v<version>`,
@@ -38,18 +38,24 @@ Build the installer locally (needs Inno Setup 6):
 
 ```
 cargo build --release --features gui
-"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=0.1.0 installer	rippin.iss
+"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=0.1.0 installer\trippin.iss
 ```
 
 ### macOS
 
-CI also builds `Trippin.app` as a universal binary (Intel + Apple Silicon) —
-grab `Trippin-macOS-<version>.zip` from releases or workflow artifacts, unzip,
-and drag to Applications. CI artifacts are signed and notarized when the
-signing secrets below are configured, so they open like any other app;
-unsigned builds still hit Gatekeeper — `xattr -dr com.apple.quarantine
-Trippin.app`, or attempt to open then **System Settings → Privacy &
-Security → Open Anyway**.
+CI also builds `Trippin.app` as a universal binary (Intel + Apple Silicon).
+Install it with **`Trippin-macOS-<version>.pkg`** from releases or workflow
+artifacts: it installs to `/Applications`, and running a newer package
+upgrades in place. It quits a running Trippin, then replaces the old app.
+Settings, timelines and the downloaded Unity engine in `~/Library/Application
+Support/Trippin` are kept. `Trippin-macOS-<version>.zip` (the bare app, drag
+to Applications) is still published.
+
+The app is signed and notarized when the signing secrets below are
+configured. The package is signed and notarized when the installer
+certificate secrets are also set. An unsigned package or app hits Gatekeeper:
+try to open it, then **System Settings → Privacy & Security → Open
+Anyway**.
 
 #### Signing secrets (repo → Settings → Secrets and variables → Actions)
 
@@ -64,6 +70,14 @@ Security → Open Anyway**.
 - `APPLE_PASSWORD` — an **app-specific password** for that account
   (appleid.apple.com → Sign-In and Security → App-Specific Passwords).
 - `APPLE_TEAM_ID` — the 10-char team ID (developer.apple.com → Membership).
+- `APPLE_INSTALLER_CERTIFICATE` — base64 of a **Developer ID Installer**
+  cert + private key `.p12`. It's a separate certificate from the
+  Application one: developer.apple.com → Certificates → + → Developer ID
+  Installer. Signs the `.pkg`.
+- `APPLE_INSTALLER_CERTIFICATE_PASSWORD` — that `.p12`'s export password.
+- `APPLE_INSTALLER_SIGNING_IDENTITY` — e.g.
+  `Developer ID Installer: Name (TEAMID)`; `security find-identity -v`
+  prints it.
 
 Settings live in `~/Library/Application Support/Trippin/trippin.json`. Shaders
 and dancers resolve from the bundle's `Contents/Resources/`; running from a
