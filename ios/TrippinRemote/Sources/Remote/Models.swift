@@ -82,7 +82,15 @@ struct ShowState {
     var dancerTrails = false
     var latencyMs = 0.0
     var npSize = 1.0
+    /// The branding block's master switch. The Logo and DJ-name pads
+    /// toggle the pieces inside it (and only ever turn this on), so it says
+    /// nothing about whether the logo itself is showing.
     var brandOn = false
+    /// The pieces, when the server reports them (nil from older servers).
+    var brandLogoOn: Bool?
+    var brandNameOn: Bool?
+    /// Whether a logo image is configured at all (nil = unknown).
+    var hasLogo: Bool?
     var brandOpacity = 1.0
     var tickerOn = false
     var tickerSpeed = 1.0
@@ -121,6 +129,9 @@ struct ShowState {
         latencyMs = j["latency_ms"].double ?? 0
         npSize = j["np_size"].double ?? 1
         brandOn = j["brand_on"].bool ?? false
+        brandLogoOn = j["brand_logo_on"].bool
+        brandNameOn = j["brand_name_on"].bool
+        hasLogo = j["has_logo"].bool
         brandOpacity = j["brand_opacity"].double ?? 1
         tickerOn = j["ticker_on"].bool ?? false
         tickerSpeed = j["ticker_speed"].double ?? 1

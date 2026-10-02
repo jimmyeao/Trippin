@@ -66,7 +66,13 @@ struct PerformView: View {
                 grid(Self.stream, columns: 4, height: h(64)) { key in
                     switch key {
                     case "RecordSet": return ("Record set", s.recOn ? "recording" : nil, s.recOn, Theme.danger)
-                    case "ToggleLogo": return ("Logo", nil, s.brandOn, Theme.accent)
+                    // Lit only when the server says the logo itself shows —
+                    // brand_on is the block's master switch, not the logo.
+                    case "ToggleLogo":
+                        return ("Logo", s.hasLogo == false ? "none set" : nil,
+                                s.brandOn && s.brandLogoOn == true && s.hasLogo != false, Theme.accent)
+                    case "ToggleName":
+                        return ("DJ name", nil, s.brandOn && s.brandNameOn == true, Theme.accent)
                     case "ToggleTicker": return ("Ticker", nil, s.tickerOn, Theme.accent)
                     default: return nil
                     }
