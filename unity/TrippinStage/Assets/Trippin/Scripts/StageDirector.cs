@@ -21,7 +21,7 @@ namespace TrippinStage
         public Camera cam;
         public RenderTexture output;
         public Material beamMat, ledMat, structMat, crowdMat, hazeMat, addMat;
-        public Material confettiMat, phoneMat, sunMat;
+        public Material confettiMat, phoneMat, sunMat, crowdMeshMat;
 
         const int LaserCount = 20;
         const int ShaftCount = 8;
@@ -39,6 +39,11 @@ namespace TrippinStage
         Mesh _beamMesh, _personMesh;
         Matrix4x4[] _crowd;
         RenderParams _crowdRp;
+        // Mesh crowd (Resources/Crowd/*.bytes, see tools/crowd_meshes.py):
+        // one instance list per person mesh. Empty = the procedural quads.
+        Mesh[] _crowdMeshes = new Mesh[0];
+        Matrix4x4[][] _crowdBy;
+        RenderParams _crowdMeshRp;
 
         int _formation = -1, _prevFormation;
         float _ftSum, _ftLast;
@@ -297,6 +302,75 @@ namespace TrippinStage
             _crowd = list.ToArray();
             crowdMat.enableInstancing = true;
             _crowdRp = new RenderParams(crowdMat) { shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off };
+            BuildMeshCrowd(rnd);
+        }
+
+        // Real people where generated meshes are available: the same spots
+        // as the quads (phones still use those), each a random member, its
+        // own height and a slight turn, all facing the stage.
+        void BuildMeshCrowd(System.Random rnd)
+        {
+            var meshes = new List<Mesh>();
+            foreach (var t in Resources.LoadAll<TextAsset>("Crowd"))
+            {
+                var m = LoadCrowdMesh(t);
+                if (m != null) meshes.Add(m);
+            }
+            if (meshes.Count == 0 || crowdMeshMat == null) return;
+            _crowdMeshes = meshes.ToArray();
+            var by = new List<Matrix4x4>[meshes.Count];
+            for (int k = 0; k < by.Length; k++) by[k] = new List<Matrix4x4>();
+            for (int i = 0; i < _crowd.Length; i++)
+            {
+                var c = _crowd[i];
+                float h = c.m11;
+                float yaw = ((float)rnd.NextDouble() * 2f - 1f) * 28f;
+                by[rnd.Next(meshes.Count)].Add(Matrix4x4.TRS(new Vector3(c.m03, 0, c.m23), Quaternion.Euler(0, yaw, 0), Vector3.one * h));
+            }
+            _crowdBy = new Matrix4x4[by.Length][];
+            for (int k = 0; k < by.Length; k++) _crowdBy[k] = by[k].ToArray();
+            crowdMeshMat.enableInstancing = true;
+            _crowdMeshRp = new RenderParams(crowdMeshMat)
+            {
+                shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off,
+                worldBounds = new Bounds(new Vector3(0, 1, -18), new Vector3(80, 4, 24)),
+            };
+            Debug.Log($"[Stage] mesh crowd: {meshes.Count} people x {_crowd.Length} spots");
+        }
+
+        // tools/crowd_meshes.py format: "TCRW", u32 verts, u32 indices, then
+        // per vertex float3 pos, float3 normal, rgba8; then u16 indices. It's
+        // glTF's right-handed space: mirror x (and the winding) for Unity.
+        static Mesh LoadCrowdMesh(TextAsset t)
+        {
+            var b = t.bytes;
+            if (b.Length < 12 || b[0] != 'T' || b[1] != 'C' || b[2] != 'R' || b[3] != 'W') return null;
+            int nv = System.BitConverter.ToInt32(b, 4), ni = System.BitConverter.ToInt32(b, 8);
+            if (b.Length < 12 + nv * 28 + ni * 2 || ni % 3 != 0) return null;
+            var pos = new Vector3[nv];
+            var nrm = new Vector3[nv];
+            var col = new Color32[nv];
+            int o = 12;
+            for (int i = 0; i < nv; i++, o += 28)
+            {
+                pos[i] = new Vector3(-System.BitConverter.ToSingle(b, o), System.BitConverter.ToSingle(b, o + 4), System.BitConverter.ToSingle(b, o + 8));
+                nrm[i] = new Vector3(-System.BitConverter.ToSingle(b, o + 12), System.BitConverter.ToSingle(b, o + 16), System.BitConverter.ToSingle(b, o + 20));
+                col[i] = new Color32(b[o + 24], b[o + 25], b[o + 26], b[o + 27]);
+            }
+            var idx = new int[ni];
+            for (int i = 0; i < ni; i += 3, o += 6)
+            {
+                idx[i] = System.BitConverter.ToUInt16(b, o);
+                idx[i + 1] = System.BitConverter.ToUInt16(b, o + 4);
+                idx[i + 2] = System.BitConverter.ToUInt16(b, o + 2);
+            }
+            var m = new Mesh { name = t.name };
+            m.SetVertices(pos);
+            m.SetNormals(nrm);
+            m.SetColors(col);
+            m.SetTriangles(idx, 0);
+            m.RecalculateBounds();
+            return m;
         }
 
         ParticleSystem Jet(Vector3 pos, Vector3 euler, bool co2)
@@ -662,7 +736,14 @@ namespace TrippinStage
                 _mpb.SetFloat("_Gain", (0.6f + 1.4f * hh) * (1f - 0.6f * s.calm));
                 _heads[i].SetPropertyBlock(_mpb);
             }
-            Graphics.RenderMeshInstanced(_crowdRp, _personMesh, 0, _crowd);
+            if (_crowdMeshes.Length > 0)
+                for (int k = 0; k < _crowdMeshes.Length; k++)
+                {
+                    if (_crowdBy[k].Length > 0)
+                        Graphics.RenderMeshInstanced(_crowdMeshRp, _crowdMeshes[k], 0, _crowdBy[k]);
+                }
+            else
+                Graphics.RenderMeshInstanced(_crowdRp, _personMesh, 0, _crowd);
         }
 
         void Drop()
@@ -808,11 +889,24 @@ namespace TrippinStage
             new Vector3(-2, 12, 12),
         };
 
+        // `-stageShot <i>` pins the camera to one shot (for checking a part
+        // of the set, e.g. 0/1 for the crowd); -1 = the director picks.
+        int _pinShot = PinShotArg();
+
+        static int PinShotArg()
+        {
+            var a = System.Environment.GetCommandLineArgs();
+            for (int i = 0; i + 1 < a.Length; i++)
+                if (a[i] == "-stageShot" && int.TryParse(a[i + 1], out var n)) return n;
+            return -1;
+        }
+
         void UpdateCamera(ShowState s, float beat, float dt)
         {
             float phrase = beat / 64f * Mathf.PI * 2f;
             int bar8 = Mathf.FloorToInt(beat / 32f);
             int shot = s.calm > 0.5f ? (bar8 % 2 == 0 ? 0 : 3) : (int)((bar8 * 3 + 1) % ShotPos.Length);
+            if (_pinShot >= 0) shot = _pinShot % ShotPos.Length;
             var want = ShotPos[shot] + new Vector3(Mathf.Sin(phrase) * 4f, Mathf.Sin(phrase * 0.5f) * 1.2f, 3f * s.intensity);
             var look = ShotLook[shot] + new Vector3(Mathf.Sin(phrase + 0.6f) * 2f, Mathf.Sin(phrase * 0.7f) * 1f, 0);
             float k = 1f - Mathf.Exp(-dt * 0.9f);
