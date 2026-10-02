@@ -177,7 +177,7 @@ fn usable_scenes(r: &Renderer, s: &Settings) -> Vec<usize> {
         // `void` is the timeline's "scenes off" baseline — reachable only
         // via an explicit cue, never by autopilot or next/prev.
         .filter(|&i| names[i] != "void")
-        .filter(|&i| names[i] != "unity_stage" || EXT_LIVE.load(Ordering::Relaxed))
+        .filter(|&i| !names[i].starts_with("unity_") || EXT_LIVE.load(Ordering::Relaxed))
         .filter(|&i| !s.disabled_scenes.contains(&names[i]))
         .filter(|&i| heavy_on || !heavy[i])
         .filter(|&i| s.flat_scenes || heavy[i])

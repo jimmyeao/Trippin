@@ -92,8 +92,16 @@ namespace TrippinStage.EditorTools
             vol.isGlobal = true;
             vol.sharedProfile = prof;
 
-            var stage = new GameObject("Stage");
-            stage.AddComponent<TrippinLink>();
+            // Engine: the link, the show switcher and the Spout sender. Each
+            // show is a child named after its Trippin scene.
+            var engine = new GameObject("Engine");
+            engine.AddComponent<TrippinLink>();
+            var mgr = engine.AddComponent<ShowManager>();
+            mgr.cam = cam;
+            mgr.output = rt;
+
+            var stage = new GameObject("unity_stage");
+            stage.transform.SetParent(engine.transform, false);
             var dir = stage.AddComponent<StageDirector>();
             dir.cam = cam;
             dir.output = rt;
@@ -109,7 +117,26 @@ namespace TrippinStage.EditorTools
             dir.phoneMat.enableInstancing = true;
             dir.sunMat = Mat("Trippin/Sun", "Sun");
 
-            var sender = stage.AddComponent<SpoutSender>();
+            var crystals = new GameObject("unity_crystals");
+            crystals.transform.SetParent(engine.transform, false);
+            var cs = crystals.AddComponent<CrystalShow>();
+            cs.cam = cam;
+            cs.chromeMat = Mat("Trippin/Chrome", "Chrome");
+            cs.chromeMat.enableInstancing = true;
+            cs.sunMat = dir.sunMat;
+
+            var flowGo = new GameObject("unity_flow");
+            flowGo.transform.SetParent(engine.transform, false);
+            var fs = flowGo.AddComponent<FlowShow>();
+            fs.cam = cam;
+            fs.flow = AssetDatabase.LoadAssetAtPath<ComputeShader>($"{Root}/Shaders/Flow.compute");
+            if (fs.flow == null) throw new System.Exception("Flow.compute not found");
+            fs.pointsMat = Mat("Trippin/Points", "Points");
+
+            mgr.shows = new[] { stage, crystals, flowGo };
+            mgr.names = new[] { "unity_stage", "unity_crystals", "unity_flow" };
+
+            var sender = engine.AddComponent<SpoutSender>();
             sender.spoutName = SenderName;
             sender.captureMethod = CaptureMethod.Texture;
             sender.sourceTexture = rt;

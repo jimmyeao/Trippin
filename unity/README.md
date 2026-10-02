@@ -1,6 +1,13 @@
 # Trippin Stage (Unity prototype)
 
-A live festival main stage rendered in Unity, driven by Trippin and shown in Trippin as the `unity_stage` scene.
+A Unity engine of festival-grade shows, driven live by Trippin and shown in Trippin as `unity_*` scenes. Each show is a child of the Engine object named after its Trippin scene. `ShowManager` switches to whichever one Trippin's feed names; with no feed it cycles them every 16 bars. `-show <name>` pins one.
+
+| Show / Trippin scene | What |
+|---|---|
+| `unity_stage` | The festival main stage (below). |
+| `unity_crystals` | Screen content: a flight through a spiralling tunnel of faceted chrome crystals with a light at the end (`CrystalShow.cs`, `Chrome.shader`). Bass swells the crystals, the spiral swings with phrases, drops bloom it outward. |
+| `unity_flow` | Screen content: 262k GPU particles forming shapes (sphere, torus, helix, galaxy, gyroscope) that morph every 4 bars (`FlowShow.cs`, `Flow.compute`, `Points.shader`). Turbulence wobbles target slots (not a force field — fields with sinks clump particles into threads); drops scatter and re-form. |
+
 
 - **Trippin → Unity:** `src/link.rs` sends one JSON datagram per frame to 127.0.0.1:9137, with the audio vocabulary, beat/bar, palette and cut flag. `TrippinLink.cs` receives it and pushes shader globals (`_TBeat`, `_TLvl`, `_TPal`…). With no feed it runs a synthetic 126 BPM show.
 - **Unity → Trippin:** KlakSpout sends the 1920x1080 output as Spout "Trippin Stage". `spout::Receiver` puts it into `ext_tex`, and `unity_stage.wgsl` undoes present's ACES so it passes through unchanged. Turn it on with Settings `unity_link` (Windows only; macOS would need NDI/Syphon).

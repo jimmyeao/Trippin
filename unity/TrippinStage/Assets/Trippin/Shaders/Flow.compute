@@ -1,0 +1,89 @@
+// GPU particle flow: each particle springs toward its slot in a target shape
+// (morphing between two shapes), stirred by a turbulent pseudo-curl field
+// and an outward push. Positions keep speed in .w for the renderer.
+#pragma kernel Step
+
+RWStructuredBuffer<float4> _Pos;
+RWStructuredBuffer<float4> _Vel;
+uint _Count;
+float _Dt, _T, _Morph, _ShapeA, _ShapeB, _Turb, _Stiff, _Push, _Scale;
+
+// Per-particle uniform randoms from an integer hash (PCG). A float
+// sequence like frac(i * 0.819) loses its fractional bits at i ~ 260k and
+// collapses the cloud onto a few threads.
+uint pcg(uint v)
+{
+    uint s = v * 747796405u + 2891336453u;
+    uint w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u;
+    return (w >> 22u) ^ w;
+}
+
+float3 seq(uint i)
+{
+    uint a = pcg(i), b = pcg(a), c = pcg(b);
+    return float3(a, b, c) * (1.0 / 4294967296.0);
+}
+
+float3 shape(uint i, float sh)
+{
+    float3 u = seq(i);
+    float TAU = 6.2831853;
+    int s = (int)sh;
+    float3 p;
+    if (s == 0) {
+        // Sphere shell (thin, slightly fuzzy).
+        float y = u.x * 2 - 1, r = sqrt(1 - y * y), a = u.y * TAU;
+        p = float3(cos(a) * r, y, sin(a) * r) * (11.0 + u.z * 0.6);
+    } else if (s == 1) {
+        // Torus.
+        float a = u.x * TAU, b = u.y * TAU, R = 10.0, r = 3.2 * (0.85 + 0.15 * u.z);
+        p = float3((R + r * cos(b)) * cos(a), r * sin(b), (R + r * cos(b)) * sin(a));
+    } else if (s == 2) {
+        // Double helix.
+        float y = (u.x * 2 - 1) * 14.0;
+        float a = y * 0.55 + (i % 2) * 3.14159;
+        float rr = 4.5 + (u.z - 0.5) * 0.8;
+        p = float3(cos(a) * rr, y, sin(a) * rr) + (u.y - 0.5) * 0.4;
+    } else if (s == 3) {
+        // Spiral galaxy disc, three arms.
+        float r = sqrt(u.x) * 15.0;
+        float a = r * 0.42 + (i % 3) * (TAU / 3.0) + (u.y - 0.5) * 0.6;
+        p = float3(cos(a) * r, (u.z - 0.5) * 1.2 * exp(-r * 0.12), sin(a) * r);
+    } else {
+        // Gyroscope: three interlocking rings.
+        uint k = i % 3;
+        float a = u.x * TAU, rr = 12.0 + (u.y - 0.5) * 0.7;
+        float3 c = float3(cos(a) * rr, sin(a) * rr, (u.z - 0.5) * 0.5);
+        p = k == 0 ? c : (k == 1 ? c.zxy : c.yzx);
+    }
+    return p * _Scale;
+}
+
+float3 curl(float3 p, float t)
+{
+    return float3(
+        sin(p.y * 1.3 + t) + cos(p.z * 1.7 - t * 0.6),
+        sin(p.z * 1.1 + t * 1.3) + cos(p.x * 1.5 + t * 0.4),
+        sin(p.x * 1.7 - t * 0.7) + cos(p.y * 1.2 + t * 0.9));
+}
+
+[numthreads(256, 1, 1)]
+void Step(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if (i >= _Count) return;
+    float3 p = _Pos[i].xyz;
+    float3 v = _Vel[i].xyz;
+    // Turbulence wobbles each particle's *target slot* (its own phase, a
+    // smooth field over the shape) rather than pushing particles through a
+    // field: a force field with sinks gathers the cloud into threads.
+    float3 target = lerp(shape(i, _ShapeA), shape(i, _ShapeB), _Morph);
+    float3 ph = seq(i ^ 0x9e3779b9u) * 6.2831853;
+    target += curl(target * 0.25 + ph * 0.15, _T) * _Turb * 0.45;
+    float3 f = (target - p) * _Stiff
+             + normalize(p + 1e-4) * _Push;
+    v = v * exp(-_Dt * 2.4) + f * _Dt;
+    p += v * _Dt;
+    _Pos[i] = float4(p, length(v));
+    _Vel[i] = float4(v, 0);
+}

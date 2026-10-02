@@ -74,7 +74,6 @@ namespace TrippinStage
             BuildKinetic();
             BuildConfetti();
             BuildPhones();
-            StageRecorder.TryStart(gameObject, output);
             _camPos = new Vector3(0, 4.5f, -34);
             _camLook = new Vector3(0, 10, 12);
         }
@@ -823,10 +822,5 @@ namespace TrippinStage
             cam.transform.LookAt(_camLook);
         }
 
-        void OnGUI()
-        {
-            if (output != null && Event.current.type == EventType.Repaint)
-                GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), output, ScaleMode.ScaleToFit, false);
-        }
     }
 }
