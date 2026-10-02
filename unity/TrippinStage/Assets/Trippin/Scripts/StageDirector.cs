@@ -341,7 +341,7 @@ namespace TrippinStage
         // tools/crowd_meshes.py format: "TCRW", u32 verts, u32 indices, then
         // per vertex float3 pos, float3 normal, rgba8; then u16 indices. It's
         // glTF's right-handed space: mirror x (and the winding) for Unity.
-        static Mesh LoadCrowdMesh(TextAsset t)
+        internal static Mesh LoadCrowdMesh(TextAsset t)
         {
             var b = t.bytes;
             if (b.Length < 12 || b[0] != 'T' || b[1] != 'C' || b[2] != 'R' || b[3] != 'W') return null;

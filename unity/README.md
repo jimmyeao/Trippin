@@ -53,3 +53,7 @@ The stage crowd uses generated people from Alice (the owner's generation server;
     python tools/crowd_meshes.py crowd.zip --prefix a2
 
 It rejects failed reconstructions, bakes textures into vertex colours, decimates to about 2.5k triangles and writes `Assets/Trippin/Resources/Crowd/*.bytes`. StageDirector picks them up on the next build. Hunyuan3D's people face +z (the stage). `-stageShot 0` pins the wide shot to check them in a recording.
+
+## Colossus (giant android)
+
+`unity_colossus` is one of Alice's crowd people, re-skinned as an android. `python tools/android_mesh.py crowd.zip member_05` welds and smooths it, turns the head into a helmet, and writes `Resources/Android/android.bytes`. To use a different person, pick one with a strong pose from a crowd batch. A purpose-designed android needs an image-to-3D endpoint on Alice; the crowd endpoint takes no prompt.
