@@ -492,8 +492,8 @@ namespace TrippinStage
                 m.startLifetime = new ParticleSystem.MinMaxCurve(5f, 8f);
                 m.startSpeed = new ParticleSystem.MinMaxCurve(18f, 28f);
                 m.startSize3D = true;
-                m.startSizeX = new ParticleSystem.MinMaxCurve(0.18f, 0.28f);
-                m.startSizeY = new ParticleSystem.MinMaxCurve(0.1f, 0.16f);
+                m.startSizeX = new ParticleSystem.MinMaxCurve(0.45f, 0.65f);
+                m.startSizeY = new ParticleSystem.MinMaxCurve(0.25f, 0.38f);
                 m.startSizeZ = 1f;
                 m.startRotation3D = true;
                 m.gravityModifier = 0.18f;
@@ -521,6 +521,23 @@ namespace TrippinStage
                 r.alignment = ParticleSystemRenderSpace.World;
                 _confetti.Add(ps);
             }
+            // Overhead release: a wide sheet dropped from the truss line in
+            // front of the stage — reads in every camera shot.
+            var drop = Instantiate(_confetti[0].gameObject, transform);
+            drop.name = "confetti drop";
+            drop.transform.localPosition = new Vector3(0, 23f, -4f);
+            drop.transform.localEulerAngles = new Vector3(90, 0, 0);
+            var dp = drop.GetComponent<ParticleSystem>();
+            var dm = dp.main;
+            dm.startSpeed = new ParticleSystem.MinMaxCurve(0.5f, 2f);
+            dm.startLifetime = new ParticleSystem.MinMaxCurve(7f, 10f);
+            dm.gravityModifier = 0.08f;
+            dm.maxParticles = 4000;
+            var dsh = dp.shape;
+            dsh.shapeType = ParticleSystemShapeType.Box;
+            dsh.scale = new Vector3(56f, 14f, 0.5f);
+            var dn = dp.noise; dn.strength = 1.4f;
+            _confetti.Add(dp);
         }
 
         // Fixed festive colours — the palette isn't known yet at build time.
@@ -559,7 +576,7 @@ namespace TrippinStage
             {
                 var c = _crowd[i];
                 var p = new Vector3(c.m03, c.m13 + c.m11 * 1.18f, c.m23);
-                list.Add(Matrix4x4.TRS(p, Quaternion.identity, Vector3.one * 0.35f));
+                list.Add(Matrix4x4.TRS(p, Quaternion.identity, Vector3.one * 0.2f));
             }
             _phones = list.ToArray();
             phoneMat.enableInstancing = true;
@@ -652,7 +669,7 @@ namespace TrippinStage
         void Drop()
         {
             _sunGlow = 1f;
-            foreach (var c in _confetti) c.Emit(450);
+            for (int i = 0; i < _confetti.Count; i++) _confetti[i].Emit(i == _confetti.Count - 1 ? 2500 : 450);
             foreach (var p in _pyro) Fire(p, 110);
             foreach (var c in _co2) Fire(c, 260);
             foreach (var f in _fireworks) f.Emit(1);

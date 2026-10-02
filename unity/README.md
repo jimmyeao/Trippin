@@ -10,7 +10,8 @@ A live festival main stage rendered in Unity, driven by Trippin and shown in Tri
   - 20 lasers with a new formation every 4 bars, morphing in over a beat (`Beam.shader`);
   - light shafts, haze and an instanced crowd (`Crowd.shader`);
   - pyro, CO2 and fireworks on drops;
-  - camera shots that change every 8 bars.
+  - camera shots that change every 8 bars;
+  - set pieces: a sun disc and ring behind the set (`Sun.shader`) that blooms on drops; god-ray sweeps strongest in breakdowns; a kinetic 6x8 LED tile rig rippling over the deck; instanced phone lights over the crowd in breakdowns (`Phones.shader`); confetti cannons plus an overhead confetti release on drops (`Confetti.shader`).
 
 Build from the CLI (Unity 6000.3.25f1):
 
