@@ -3514,6 +3514,19 @@ fn settings_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<
                 .on_hover_text("A drop lands early — cut to the next scene with it");
             ui.checkbox(&mut s.random_order, "Random order")
                 .on_hover_text("Shuffle the rotation instead of playing it in order");
+            // External engine (the Unity shows in unity/): its unity_* scenes
+            // join the rotation while its frames are arriving.
+            ui.checkbox(&mut s.unity_link, "Unity engine link")
+                .on_hover_text(
+                    "Send the show state to the Unity engine (UDP 127.0.0.1:9137) and show                      its Spout output as the unity_* scenes. Start unity/TrippinStage first;                      Windows only for now.",
+                );
+            if s.unity_link {
+                ui.small(if crate::EXT_LIVE.load(std::sync::atomic::Ordering::Relaxed) {
+                    "Unity frames arriving."
+                } else {
+                    "Waiting for the Unity engine's Spout sender…"
+                });
+            }
         });
         ui.min_rect().height()
     };

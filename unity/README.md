@@ -20,6 +20,14 @@ A Unity engine of festival-grade shows, driven live by Trippin and shown in Trip
   - camera shots that change every 8 bars;
   - set pieces: a sun disc and ring behind the set (`Sun.shader`) that blooms on drops; god-ray sweeps strongest in breakdowns; a kinetic 6x8 LED tile rig rippling over the deck; instanced phone lights over the crowd in breakdowns (`Phones.shader`); confetti cannons plus an overhead confetti release on drops (`Confetti.shader`).
 
+## Following the music
+
+1. Start `Build/TrippinStage.exe` (or `Build2`). It listens on UDP 127.0.0.1:9137 and sends Spout "Trippin Stage".
+2. In Trippin, tick **Settings → Director → Unity engine link**. Trippin sends its show state (bands, kicks, beat/bar, palette, current scene) to Unity every frame, and shows Unity's frames as the `unity_*` scenes.
+3. Those scenes join the auto-pilot rotation while frames arrive. When Trippin cuts to `unity_flow`, Unity switches to that show. To run only the Unity shows, disable the other scenes in the library.
+
+Music comes from Trippin's normal audio capture (system output, or the Audio in device on the Settings tab). With no feed, Unity plays a synthetic 126 BPM demo cycling its shows.
+
 Build from the CLI (Unity 6000.3.25f1):
 
     unity run . -- -executeMethod TrippinStage.EditorTools.StageBuilder.BuildPlayer [-stageOut Build2]

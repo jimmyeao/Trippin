@@ -63,7 +63,7 @@ static STROBE: AtomicBool = AtomicBool::new(false);
 
 /// Frames are arriving from the external engine (Spout in) — the
 /// `unity_stage` scene is only in rotation while this holds.
-static EXT_LIVE: AtomicBool = AtomicBool::new(false);
+pub(crate) static EXT_LIVE: AtomicBool = AtomicBool::new(false);
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
