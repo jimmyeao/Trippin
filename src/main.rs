@@ -1853,16 +1853,17 @@ impl App {
             state: Box::new(move || {
                 // Timeline first and released before settings is taken (the
                 // lock-order rule), then status, then settings.
-                let song = {
+                let (song, tl_recording) = {
                     let tl = lock(&state_sh.timeline);
-                    tl.doc.as_ref().map(|d| {
+                    let song = tl.doc.as_ref().map(|d| {
                         serde_json::json!({
                             "playing": tl.mode == PlayMode::Playing,
                             "pos": tl.pos_s,
                             "len": d.end_s(),
                             "name": d.name,
                         })
-                    })
+                    });
+                    (song, tl.recording)
                 };
                 // Status copy first, settings second — never nested, same
                 // order the panel uses.
@@ -1882,6 +1883,7 @@ impl App {
                     "next_scene_name": st.next_scene.and_then(|i| state_sh.scene_names.get(i)),
                     "bar_in_scene": st.bar_in_scene,
                     "song": song,
+                    "timeline_recording": tl_recording,
                     "strobe": STROBE.load(Ordering::Relaxed),
                     "cut_on_drops": s.cut_on_drops,
                     "bars_total": st.bars_total,
@@ -1905,6 +1907,7 @@ impl App {
                     "dancer_trails": s.dancer_trails,
                     "latency_ms": s.latency_ms,
                     "np_size": s.np_size,
+                    "canon": s.canon,
                     "brand_on": s.brand_on,
                     // The pieces and whether there's anything to show: the
                     // remote lit Logo from brand_on alone, which only ever
