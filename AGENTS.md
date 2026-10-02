@@ -455,6 +455,12 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   release (the MIDI note-off lesson); `/set/*` and `/scene/goto|queue`
   read their arg verbatim.
 - First enable pops the Windows firewall prompt once — expected.
+- **The advertised address** (`remote::local_ip`, used for Bonjour and the
+  Settings card) comes from the interface list, preferring 192.168/16,
+  then 10/8 and 172.16/12, and skipping link-local 169.254 and Tailscale's
+  100.64/10. Routing towards the mDNS multicast group picked Tailscale's
+  self-assigned 169.254 adapter on the owner's PC, so phones were sent an
+  unreachable IP.
 - `tools/remote_test.html` is a browser harness for the same protocol —
   pads, scene grid, thumbs — for testing without the iOS app. The server
   serves it on a plain HTTP GET (no WS upgrade headers), so browsing to

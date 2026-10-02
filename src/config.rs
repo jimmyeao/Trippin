@@ -21,6 +21,7 @@ pub enum Action {
     NextStyle,
     CycleCanon,
     Blackout,
+    Strobe,
     Fullscreen,
     MarkDownbeat,
     LatencyDown,
@@ -42,7 +43,7 @@ pub enum Action {
 }
 
 impl Action {
-    pub const ALL: [Action; 29] = [
+    pub const ALL: [Action; 30] = [
         Action::NextScene,
         Action::PrevScene,
         Action::ModeAuto,
@@ -54,6 +55,7 @@ impl Action {
         Action::NextStyle,
         Action::CycleCanon,
         Action::Blackout,
+        Action::Strobe,
         Action::Fullscreen,
         Action::MarkDownbeat,
         Action::LatencyDown,
@@ -87,6 +89,7 @@ impl Action {
             Action::NextStyle => "Next dancer look",
             Action::CycleCanon => "Canon: auto / on / off",
             Action::Blackout => "Blackout (fade to black)",
+            Action::Strobe => "Strobe on / off (flashes on the drum hits)",
             Action::Fullscreen => "Fullscreen on / off",
             Action::MarkDownbeat => "Mark this beat as the downbeat",
             Action::LatencyDown => "Latency -5 ms (visuals later)",
@@ -121,6 +124,7 @@ impl Action {
             Action::NextStyle => "S",
             Action::CycleCanon => "V",
             Action::Blackout => "B",
+            Action::Strobe => "Z",
             Action::Fullscreen => "F",
             Action::MarkDownbeat => "Space",
             Action::LatencyDown => "[",
