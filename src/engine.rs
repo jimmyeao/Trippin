@@ -376,6 +376,12 @@ fn read_loop(map: MmapMut, latest: Arc<Mutex<Option<InFrame>>>, stop: Arc<Atomic
         unsafe { std::ptr::read_volatile(m.as_ptr().add(16) as *const u64) }
     };
     let mut last = 0u64;
+    // TRIPPIN_ENGINE_DUMP=<dir>: save a few frames exactly as read from the
+    // file (engine-0.png…) and log accept/torn counts — tells a transport
+    // fault from a render fault.
+    let dump = std::env::var_os("TRIPPIN_ENGINE_DUMP").map(PathBuf::from);
+    let (mut ok, mut torn, mut dumped) = (0u64, 0u64, 0u32);
+    let mut stat_at = Instant::now();
     while !stop.load(Ordering::Relaxed) {
         let s1 = seq_at(&map);
         if s1 == last || s1 % 2 == 1 {
@@ -386,9 +392,26 @@ fn read_loop(map: MmapMut, latest: Arc<Mutex<Option<InFrame>>>, stop: Arc<Atomic
         let px = map[HEADER..HEADER + len].to_vec();
         std::sync::atomic::fence(Ordering::Acquire);
         if seq_at(&map) != s1 {
+            torn += 1;
             continue; // torn: Unity wrote while we copied
         }
         last = s1;
+        ok += 1;
+        if let Some(d) = &dump {
+            if ok % 60 == 30 && dumped < 5 {
+                let _ = std::fs::create_dir_all(d);
+                let f = d.join(format!("engine-{dumped}.png"));
+                match image::save_buffer(&f, &px, EXT_W, EXT_H, image::ColorType::Rgba8) {
+                    Ok(()) => eprintln!("engine dump: {} (seq {s1})", f.display()),
+                    Err(e) => eprintln!("engine dump: {e}"),
+                }
+                dumped += 1;
+            }
+            if stat_at.elapsed() > Duration::from_secs(5) {
+                eprintln!("engine frames: {ok} ok, {torn} torn retries");
+                stat_at = Instant::now();
+            }
+        }
         *latest.lock().unwrap_or_else(|e| e.into_inner()) = Some(InFrame {
             seq: s1,
             rgba: Arc::new(px),
