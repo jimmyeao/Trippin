@@ -151,6 +151,8 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
 | `src/panel.rs` | The egui control panel. Tabs: Perform, Dancer & FX, Stream, Timeline, Keys, Settings. App-wide preferences (audio in, latency, director rules, AI provider/key) live on **Settings** (`settings_tab`), not in collapsibles on other pages or in the timeline editor. |
 | `src/config.rs` | `Settings` (serde, `#[serde(default)]`), actions and hotkeys, and `data_dir()`. |
 | `src/midi.rs` | MIDI input (midir): one port, note-ons become `Action`s. |
+| `src/remote.rs` | LAN remote for the iOS companion app: a WebSocket JSON server (TCP 9138, Bonjour `_trippin._tcp`, PIN-gated) — protocol at the top of the file, details in §8. |
+| `src/osc.rs` | OSC UDP input (9139) for TouchOSC/Lemur — maps addresses onto the same `RemoteCmd`s as the app. |
 | `src/snap.rs` | Headless snapshot and benchmark rendering. |
 | `src/engine.rs`, `src/link.rs`, `unity/` | Unity engine (shows `unity_stage`, `unity_crystals`, `unity_flow`; any `unity_*` scene is gated on live frames and hidden from the AI builder). `engine.rs` launches the player headless and supervises it; frames come back through a memory-mapped file (seqlock, top row first) into `gfx::Statics::ext` (binding 8 `ext_tex`); `link.rs` sends the show state over UDP. Cross-platform, nothing to start by hand. See `unity/README.md`. |
 | `tools/*.py` | Offline pipelines: mocap and stock video to dancer clips, and so on. |
@@ -236,6 +238,16 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   pass `/SUBSYSTEM:WINDOWS` via `RUSTFLAGS`.
 - Worker threads must always reply to their channel, even when they panic
   (use `catch_unwind`). A dropped reply wedged the editor.
+- **Windows `accept` inherits non-blocking** (unlike Unix): a stream from
+  a `set_nonblocking(true)` `TcpListener` arrives non-blocking, and
+  `set_read_timeout` is a dead letter on it — `read` returns `WouldBlock`
+  instantly. Call `set_nonblocking(false)` on every accepted stream (see
+  `remote.rs::client`). The symptom is random `WouldBlock`/reset reads —
+  easy to misread as a firewall.
+- **Network tests bind `127.0.0.1`** (`Server::start_on`, `Osc::start_on`):
+  binding `0.0.0.0` in a test pops the Windows firewall prompt and stalls
+  the socket I/O until it's acknowledged. Same reason mDNS adverts are
+  skipped on loopback binds.
 - `f32::signum(+0.0)` is **1.0**, not 0.0. An ease like
   `v += rate*dt*(target - v).signum()` never rests: at `v == target` it
   steps up `rate*dt` then eases back — a two-frame judder (this made the
@@ -417,6 +429,32 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
     48 kHz stereo, and chunked on the same 2 s grid.
   - A save concatenates the segments (`-c copy` for 16:9, re-encoded for
     9:16 crop and fit). The concat lists need **absolute** paths.
+
+## 8.5 LAN remote (iOS app + OSC)
+
+- **WebSocket server** (`remote.rs`, `Settings::remote_*`, default off):
+  TCP **9138** on all interfaces, Bonjour `_trippin._tcp` as "Trippin on
+  <host>"; the Settings card shows `IP:port` as the manual fallback and
+  the pairing PIN. `remote_on` with a blank PIN gets a fresh one on load —
+  auth can't silently disable.
+- **Protocol** (documented at the top of `remote.rs`): JSON text frames;
+  the first must be `{"cmd":"hello","pin":…}` — a wrong PIN earns an `err`
+  frame, a 500 ms penalty, and a close. `hello` replies with scene/clip/
+  palette/action lists. Commands (`action`, `goto_scene`, `queue_next`,
+  `show_clip`, `set`, `transport`, `thumb`) become `RemoteCmd`s posted to
+  `AppEvent::Remote` → `App::remote_cmd`, which runs `Action`s through
+  `apply()` so remote presses record into an armed timeline like hotkeys.
+- **State pushes** run ~10 Hz from a pusher thread that serialises once
+  and hands each client a copy over a bounded channel — a client whose
+  queue stays full is dropped. `thumb` requests queue until
+  `shared.thumbs` has `"scene:<name>"` (requested via `Msg::Thumb`), then
+  ship as base64 PNG. No lock is held across socket I/O.
+- **OSC** (`osc.rs`, `Settings::osc_*`, default off): UDP **9139**, the
+  `/trippin/…` address table at the top of `osc.rs`, mapped onto the same
+  `RemoteCmd`s. Buttons fire on press only — a falsy first arg is the
+  release (the MIDI note-off lesson); `/set/*` and `/scene/goto|queue`
+  read their arg verbatim.
+- First enable pops the Windows firewall prompt once — expected.
 
 ## 9. Docs
 

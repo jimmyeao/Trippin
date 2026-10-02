@@ -415,6 +415,19 @@ pub struct Settings {
     pub ticker_on: bool,
     pub ticker_text: String,
     pub ticker_speed: f32,
+    /// LAN remote for the companion iOS app: a WebSocket JSON server on
+    /// `remote_port`, advertised over mDNS as `_trippin._tcp`. Clients must
+    /// `hello` with `remote_pin`. Off by default — no silent open ports.
+    pub remote_on: bool,
+    pub remote_port: u16,
+    /// 4-digit pairing PIN shown on the Settings tab. Blank while
+    /// `remote_on` is regenerated on load so a blanked field can't silently
+    /// disable auth.
+    pub remote_pin: String,
+    /// OSC input (UDP) for TouchOSC/Lemur-style controllers — see the
+    /// address table in `osc.rs`.
+    pub osc_on: bool,
+    pub osc_port: u16,
 }
 
 impl Default for Settings {
@@ -488,6 +501,11 @@ impl Default for Settings {
             ticker_on: false,
             ticker_text: String::new(),
             ticker_speed: 1.0,
+            remote_on: false,
+            remote_port: 9138,
+            remote_pin: String::new(),
+            osc_on: false,
+            osc_port: 9139,
         }
     }
 }
@@ -578,6 +596,10 @@ impl Settings {
         // Retired model ids saved by older builds → back to the default.
         if s.ai_model == "gemini-2.5-flash" || s.ai_model == "claude-sonnet-4-5" {
             s.ai_model.clear();
+        }
+        // A blanked PIN must not silently open the remote to anyone.
+        if s.remote_on && s.remote_pin.is_empty() {
+            s.remote_pin = crate::remote::new_pin();
         }
         s
     }
