@@ -104,6 +104,10 @@ namespace TrippinStage.EditorTools
             dir.crowdMat.enableInstancing = true;
             dir.hazeMat = Mat("Trippin/Haze", "Haze");
             dir.addMat = Mat("Trippin/Additive", "Additive");
+            dir.confettiMat = Mat("Trippin/Confetti", "Confetti");
+            dir.phoneMat = Mat("Trippin/Phones", "Phones");
+            dir.phoneMat.enableInstancing = true;
+            dir.sunMat = Mat("Trippin/Sun", "Sun");
 
             var sender = stage.AddComponent<SpoutSender>();
             sender.spoutName = SenderName;

@@ -21,6 +21,7 @@ namespace TrippinStage
         public Camera cam;
         public RenderTexture output;
         public Material beamMat, ledMat, structMat, crowdMat, hazeMat, addMat;
+        public Material confettiMat, phoneMat, sunMat;
 
         const int LaserCount = 20;
         const int ShaftCount = 8;
@@ -68,6 +69,11 @@ namespace TrippinStage
             BuildPyro();
             BuildFireworks();
             BuildScale();
+            BuildSun();
+            BuildGodRays();
+            BuildKinetic();
+            BuildConfetti();
+            BuildPhones();
             StageRecorder.TryStart(gameObject, output);
             _camPos = new Vector3(0, 4.5f, -34);
             _camLook = new Vector3(0, 10, 12);
@@ -396,7 +402,7 @@ namespace TrippinStage
                 var bsh = burst.shape; bsh.shapeType = ParticleSystemShapeType.Sphere; bsh.radius = 0.2f;
                 var bcol = burst.colorOverLifetime; bcol.enabled = true;
                 var gr = new Gradient();
-                Color hue = TrippinLink.Palette(i / 5f);
+                Color hue = FestiveColors[i % FestiveColors.Length];
                 gr.SetKeys(new[] { new GradientColorKey(Color.white, 0), new GradientColorKey(hue, 0.15f), new GradientColorKey(hue * 0.6f, 1) },
                            new[] { new GradientAlphaKey(1, 0), new GradientAlphaKey(0.8f, 0.6f), new GradientAlphaKey(0, 1) });
                 bcol.color = gr;
@@ -421,6 +427,177 @@ namespace TrippinStage
                 float x = Mathf.Lerp(-17, 17, i / 5f);
                 _co2.Add(Jet(new Vector3(x, 2.3f, 0.2f), new Vector3(-75, x * 0.6f, 0), true));
             }
+        }
+
+        // ------------------------------------------------------ set pieces
+
+        Material _sun;
+        float _sunGlow;
+        readonly List<Transform> _rays = new List<Transform>();
+        readonly List<Renderer> _rayR = new List<Renderer>();
+        readonly List<Transform> _tiles = new List<Transform>();
+        readonly List<Vector3> _tileHome = new List<Vector3>();
+        readonly List<ParticleSystem> _confetti = new List<ParticleSystem>();
+        Matrix4x4[] _phones;
+        RenderParams _phoneRp;
+        Mesh _dotMesh;
+
+        // A huge sun disc + ring behind the set that blooms on drops.
+        void BuildSun()
+        {
+            _sun = new Material(sunMat);
+            Prim(PrimitiveType.Quad, new Vector3(0, 19, 30), new Vector3(70, 70, 1), _sun, default, "sun");
+        }
+
+        // Wide backlight beams from behind the wall, sweeping through the
+        // haze toward the crowd — strongest in breakdowns.
+        void BuildGodRays()
+        {
+            for (int i = 0; i < 6; i++)
+            {
+                var pos = new Vector3(Mathf.Lerp(-16, 16, i / 5f), 20f, 22f);
+                _rays.Add(Beam(pos, 1.2f, 0.12f, 6f, 0.8f, 0.3f, 0f, "god ray " + i, _rayR));
+            }
+        }
+
+        // Kinetic rig: 6x8 LED tiles hanging over the deck, rippling up and
+        // down in smooth waves on the energy clock (lights, not architecture).
+        void BuildKinetic()
+        {
+            for (int r = 0; r < 6; r++)
+                for (int c = 0; c < 8; c++)
+                {
+                    var home = new Vector3(Mathf.Lerp(-11, 11, c / 7f), 18.5f - r * 0.2f, Mathf.Lerp(1.5f, 10f, r / 5f));
+                    Wall(home, new Vector3(2.2f, 0.9f, 1), new Vector3(-70, 0, 0), 12, 5, 0.4f + r * 0.04f, "kinetic");
+                    _tiles.Add(transform.GetChild(transform.childCount - 1));
+                    _tileHome.Add(home);
+                }
+        }
+
+        // Confetti cannons on the deck front, palette-coloured flakes that
+        // tumble down over the crowd.
+        void BuildConfetti()
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                var g = new GameObject("confetti " + i);
+                g.transform.SetParent(transform, false);
+                float x = Mathf.Lerp(-15, 15, i / 3f);
+                g.transform.localPosition = new Vector3(x, 2.4f, -1f);
+                g.transform.localEulerAngles = new Vector3(-60, x * 1.2f, 0);
+                var ps = g.AddComponent<ParticleSystem>();
+                ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+                var m = ps.main;
+                m.playOnAwake = false; m.loop = false;
+                m.startLifetime = new ParticleSystem.MinMaxCurve(5f, 8f);
+                m.startSpeed = new ParticleSystem.MinMaxCurve(18f, 28f);
+                m.startSize3D = true;
+                m.startSizeX = new ParticleSystem.MinMaxCurve(0.18f, 0.28f);
+                m.startSizeY = new ParticleSystem.MinMaxCurve(0.1f, 0.16f);
+                m.startSizeZ = 1f;
+                m.startRotation3D = true;
+                m.gravityModifier = 0.18f;
+                m.maxParticles = 2500;
+                m.simulationSpace = ParticleSystemSimulationSpace.World;
+                m.startColor = new ParticleSystem.MinMaxGradient(Festive()) { mode = ParticleSystemGradientMode.RandomColor };
+                var em = ps.emission; em.rateOverTime = 0;
+                var sh = ps.shape; sh.shapeType = ParticleSystemShapeType.Cone; sh.angle = 22; sh.radius = 0.3f;
+                var col = ps.colorOverLifetime; col.enabled = true;
+                var gr = new Gradient();
+                gr.SetKeys(new[] { new GradientColorKey(Color.white, 0), new GradientColorKey(Color.white, 1) },
+                           new[] { new GradientAlphaKey(1, 0), new GradientAlphaKey(1, 0.85f), new GradientAlphaKey(0, 1) });
+                col.color = gr;
+                // Air drag: a fast burst that slows and flutters down.
+                var lim = ps.limitVelocityOverLifetime; lim.enabled = true; lim.drag = 1.6f;
+                var rot = ps.rotationOverLifetime; rot.enabled = true; rot.separateAxes = true;
+                rot.x = new ParticleSystem.MinMaxCurve(-6f, 6f);
+                rot.y = new ParticleSystem.MinMaxCurve(-6f, 6f);
+                rot.z = new ParticleSystem.MinMaxCurve(-4f, 4f);
+                var noise = ps.noise; noise.enabled = true; noise.strength = 0.8f; noise.frequency = 0.3f;
+                var r = g.GetComponent<ParticleSystemRenderer>();
+                r.sharedMaterial = confettiMat;
+                r.renderMode = ParticleSystemRenderMode.Mesh;
+                r.mesh = MakeFlake();
+                r.alignment = ParticleSystemRenderSpace.World;
+                _confetti.Add(ps);
+            }
+        }
+
+        // Fixed festive colours — the palette isn't known yet at build time.
+        static readonly Color[] FestiveColors =
+        {
+            new Color(1f, 0.8f, 0.2f), new Color(1f, 0.2f, 0.6f), new Color(0.2f, 0.9f, 1f),
+            new Color(1f, 1f, 1f), new Color(1f, 0.45f, 0.1f), new Color(0.6f, 0.3f, 1f),
+        };
+
+        static Gradient Festive()
+        {
+            var g = new Gradient();
+            var keys = new GradientColorKey[FestiveColors.Length];
+            for (int i = 0; i < keys.Length; i++) keys[i] = new GradientColorKey(FestiveColors[i], i / (keys.Length - 1f));
+            g.SetKeys(keys, new[] { new GradientAlphaKey(1, 0), new GradientAlphaKey(1, 1) });
+            g.mode = GradientMode.Fixed;
+            return g;
+        }
+
+        static Mesh MakeFlake()
+        {
+            var m = new Mesh { name = "flake" };
+            m.vertices = new[] { new Vector3(-0.5f, -0.5f, 0), new Vector3(0.5f, -0.5f, 0), new Vector3(-0.5f, 0.5f, 0), new Vector3(0.5f, 0.5f, 0) };
+            m.uv = new[] { new Vector2(0, 0), new Vector2(1, 0), new Vector2(0, 1), new Vector2(1, 1) };
+            m.triangles = new[] { 0, 2, 1, 1, 2, 3 };
+            m.RecalculateNormals();
+            return m;
+        }
+
+        // Phone lights held up over the crowd (visible in breakdowns).
+        void BuildPhones()
+        {
+            _dotMesh = MakePersonMesh(); // a unit quad works for a dot
+            var list = new List<Matrix4x4>();
+            for (int i = 0; i < _crowd.Length; i++)
+            {
+                var c = _crowd[i];
+                var p = new Vector3(c.m03, c.m13 + c.m11 * 1.18f, c.m23);
+                list.Add(Matrix4x4.TRS(p, Quaternion.identity, Vector3.one * 0.35f));
+            }
+            _phones = list.ToArray();
+            phoneMat.enableInstancing = true;
+            _phoneRp = new RenderParams(phoneMat) { shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off };
+        }
+
+        void UpdateSetPieces(ShowState s, float beat, float dt)
+        {
+            // Sun: blooms on a drop, settles over ~8 bars, faint otherwise.
+            float barsPerSec = s.bpm / 60f / 4f;
+            _sunGlow = Mathf.Max(0f, _sunGlow - dt * barsPerSec / 8f);
+            _sun.SetFloat("_Glow", Mathf.SmoothStep(0, 1, _sunGlow) * (1f - 0.5f * s.calm) + 0.15f * s.intensity);
+
+            // God rays: slow sweeps, up in breakdowns, down when lasers rule.
+            float phrase = beat / 64f * Mathf.PI * 2f;
+            for (int i = 0; i < _rays.Count; i++)
+            {
+                float u = i / (_rays.Count - 1f);
+                var d = Quaternion.Euler(-8f + Mathf.Sin(phrase + u * 2f) * 6f, (u - 0.5f) * 40f + Mathf.Sin(phrase * 0.5f + u * 3f) * 18f, 0) * Vector3.back;
+                _rays[i].localRotation = Quaternion.FromToRotation(Vector3.up, d.normalized);
+                _rays[i].localScale = new Vector3(1, 70, 1);
+                _mpb.Clear();
+                _mpb.SetColor("_Color", TrippinLink.Palette(0.6f + u * 0.15f));
+                _mpb.SetFloat("_Intensity", 0.025f + 0.07f * s.calm);
+                _rayR[i].SetPropertyBlock(_mpb);
+            }
+
+            // Kinetic tiles: a travelling wave (energy clock), bigger when loud.
+            float amp = Mathf.Lerp(1.6f, 0.6f, s.calm);
+            float clk = s.clock4 != null && s.clock4.Length > 1 ? s.clock4[1] : beat;
+            for (int i = 0; i < _tiles.Count && i < _tileHome.Count; i++)
+            {
+                var h = _tileHome[i];
+                float w = Mathf.Sin(clk * 0.35f + h.x * 0.25f + h.z * 0.4f);
+                _tiles[i].localPosition = h + new Vector3(0, w * amp, 0);
+            }
+
+            Graphics.RenderMeshInstanced(_phoneRp, _dotMesh, 0, _phones);
         }
 
         // ---------------------------------------------------------------- run
@@ -450,6 +627,7 @@ namespace TrippinStage
             }
 
             UpdateLasers(s, beat, bar);
+            UpdateSetPieces(s, beat, dt);
             UpdateShafts(s, beat);
             UpdateWalls(s, beat, bar);
             UpdateCamera(s, beat, dt);
@@ -473,6 +651,8 @@ namespace TrippinStage
 
         void Drop()
         {
+            _sunGlow = 1f;
+            foreach (var c in _confetti) c.Emit(450);
             foreach (var p in _pyro) Fire(p, 110);
             foreach (var c in _co2) Fire(c, 260);
             foreach (var f in _fireworks) f.Emit(1);
