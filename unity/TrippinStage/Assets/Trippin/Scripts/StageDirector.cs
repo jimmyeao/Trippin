@@ -7,8 +7,8 @@
 //  - swinging light shafts, haze layers, an instanced crowd bouncing on kicks;
 //  - pyro flames and CO2 jets on drops (drums returning after a breakdown);
 //  - a camera that drifts on phrase-length swings, smoothed (no jerks).
-// Everything renders to a 1920x1080 RenderTexture that KlakSpout sends to
-// Trippin as "Trippin Stage"; the window shows a preview of it.
+// Everything renders to a 1920x1080 RenderTexture that FrameExporter sends to
+// Trippin through shared memory.
 
 using System.Collections.Generic;
 using UnityEngine;

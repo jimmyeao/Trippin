@@ -9,6 +9,7 @@ using UnityEngine;
 
 namespace TrippinStage
 {
+    [DefaultExecutionOrder(-50)]
     public class ShowManager : MonoBehaviour
     {
         public Camera cam;
@@ -24,6 +25,7 @@ namespace TrippinStage
             QualitySettings.vSyncCount = 0;
             Application.runInBackground = true;
             StageRecorder.TryStart(gameObject, output);
+            FrameExporter.TryStart(gameObject, output);
             // Optional fixed show: -show unity_flow
             var a = System.Environment.GetCommandLineArgs();
             for (int i = 0; i + 1 < a.Length; i++)
@@ -50,9 +52,17 @@ namespace TrippinStage
             }
         }
 
+        // Headless (-batchmode, how Trippin launches us) the player loop
+        // doesn't render cameras by itself — render explicitly, before
+        // FrameExporter reads the output back.
+        void LateUpdate()
+        {
+            if (Application.isBatchMode && cam != null) cam.Render();
+        }
+
         void OnGUI()
         {
-            if (output != null && Event.current.type == EventType.Repaint)
+            if (output != null && !Application.isBatchMode && Event.current.type == EventType.Repaint)
                 GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), output, ScaleMode.ScaleToFit, false);
         }
     }

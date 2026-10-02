@@ -4,7 +4,6 @@
 // (or the "Trippin" menu in the Editor).
 
 using System.IO;
-using Klak.Spout;
 using UnityEditor;
 using UnityEditor.Build.Reporting;
 using UnityEditor.SceneManagement;
@@ -18,7 +17,6 @@ namespace TrippinStage.EditorTools
     {
         const string Root = "Assets/Trippin";
         const string ScenePath = "Assets/Scenes/Stage.unity";
-        public const string SenderName = "Trippin Stage";
 
         static Material Mat(string shader, string name)
         {
@@ -43,7 +41,7 @@ namespace TrippinStage.EditorTools
             Directory.CreateDirectory($"{Root}/Generated");
             var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
-            // Output texture Spout sends (Trippin's external frame is 1920x1080).
+            // Output texture sent to Trippin (its external frame is 1920x1080).
             var rtPath = $"{Root}/Generated/StageOutput.renderTexture";
             AssetDatabase.DeleteAsset(rtPath);
             var rt = new RenderTexture(1920, 1080, 24, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB)
@@ -92,7 +90,7 @@ namespace TrippinStage.EditorTools
             vol.isGlobal = true;
             vol.sharedProfile = prof;
 
-            // Engine: the link, the show switcher and the Spout sender. Each
+            // Engine: the link, the show switcher and the frame exporter. Each
             // show is a child named after its Trippin scene.
             var engine = new GameObject("Engine");
             engine.AddComponent<TrippinLink>();
@@ -136,14 +134,8 @@ namespace TrippinStage.EditorTools
             mgr.shows = new[] { stage, crystals, flowGo };
             mgr.names = new[] { "unity_stage", "unity_crystals", "unity_flow" };
 
-            var sender = engine.AddComponent<SpoutSender>();
-            sender.spoutName = SenderName;
-            sender.captureMethod = CaptureMethod.Texture;
-            sender.sourceTexture = rt;
-            sender.keepAlpha = false;
-            var res = AssetDatabase.LoadAssetAtPath<SpoutResources>("Packages/jp.keijiro.klak.spout/Editor/SpoutResources.asset");
-            if (res == null) throw new System.Exception("KlakSpout resources not found");
-            sender.SetResources(res);
+            // Frames go to Trippin through the shared-memory file it passes
+            // (FrameExporter) — no Spout/Syphon, the same on every platform.
 
             EditorSceneManager.SaveScene(scene, ScenePath);
             EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene(ScenePath, true) };
@@ -151,13 +143,14 @@ namespace TrippinStage.EditorTools
             Debug.Log("[StageBuilder] scene built: " + ScenePath);
         }
 
-        // `-stageOut <dir>` builds elsewhere (so a running player isn't locked).
-        static string OutPath()
+        // `-stageOut <dir>` builds elsewhere (so a running player isn't
+        // locked); `-stageMac` builds the macOS .app (needs Mac build support).
+        static string OutDir(string def)
         {
             var a = System.Environment.GetCommandLineArgs();
             for (int i = 0; i + 1 < a.Length; i++)
-                if (a[i] == "-stageOut") return a[i + 1] + "/TrippinStage.exe";
-            return "Build/TrippinStage.exe";
+                if (a[i] == "-stageOut") return a[i + 1];
+            return def;
         }
 
         [MenuItem("Trippin/Build Player (Windows)")]
@@ -176,15 +169,13 @@ namespace TrippinStage.EditorTools
                 PlayerSettings.defaultScreenHeight = 540;
                 PlayerSettings.resizableWindow = true;
                 PlayerSettings.SplashScreen.show = false;
-                // Spout shares D3D11 textures.
-                PlayerSettings.SetUseDefaultGraphicsAPIs(BuildTarget.StandaloneWindows64, false);
-                PlayerSettings.SetGraphicsAPIs(BuildTarget.StandaloneWindows64,
-                    new[] { UnityEngine.Rendering.GraphicsDeviceType.Direct3D11 });
+                PlayerSettings.allowUnsafeCode = true; // FrameExporter's memcpy
+                var mac = System.Array.IndexOf(System.Environment.GetCommandLineArgs(), "-stageMac") >= 0;
                 var report = BuildPipeline.BuildPlayer(new BuildPlayerOptions
                 {
                     scenes = new[] { ScenePath },
-                    locationPathName = OutPath(),
-                    target = BuildTarget.StandaloneWindows64,
+                    locationPathName = mac ? OutDir("BuildMac") + "/TrippinStage.app" : OutDir("Build") + "/TrippinStage.exe",
+                    target = mac ? BuildTarget.StandaloneOSX : BuildTarget.StandaloneWindows64,
                     options = BuildOptions.None,
                 });
                 Debug.Log($"[StageBuilder] build {report.summary.result}: {report.summary.totalSize / 1048576} MB, {report.summary.totalErrors} errors");

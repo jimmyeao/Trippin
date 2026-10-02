@@ -3518,13 +3518,21 @@ fn settings_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<
             // join the rotation while its frames are arriving.
             ui.checkbox(&mut s.unity_link, "Unity engine link")
                 .on_hover_text(
-                    "Send the show state to the Unity engine (UDP 127.0.0.1:9137) and show                      its Spout output as the unity_* scenes. Start unity/TrippinStage first;                      Windows only for now.",
+                    "Trippin runs the Unity engine in the background and adds its \
+                     festival scenes (unity_stage, unity_crystals, unity_flow) to the \
+                     rotation, driven by the music.",
                 );
             if s.unity_link {
+                let st = crate::ENGINE_STATUS
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone();
                 ui.small(if crate::EXT_LIVE.load(std::sync::atomic::Ordering::Relaxed) {
-                    "Unity frames arriving."
+                    "Unity engine running.".to_string()
+                } else if st.is_empty() || st == "running" {
+                    "Starting the Unity engine…".to_string()
                 } else {
-                    "Waiting for the Unity engine's Spout sender…"
+                    format!("Unity engine: {st}")
                 });
             }
         });

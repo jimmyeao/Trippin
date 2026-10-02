@@ -22,14 +22,18 @@ A Unity engine of festival-grade shows, driven live by Trippin and shown in Trip
 
 ## Following the music
 
-1. Start `Build/TrippinStage.exe` (or `Build2`). It listens on UDP 127.0.0.1:9137 and sends Spout "Trippin Stage".
-2. In Trippin, tick **Settings → Director → Unity engine link**. Trippin sends its show state (bands, kicks, beat/bar, palette, current scene) to Unity every frame, and shows Unity's frames as the `unity_*` scenes.
-3. Those scenes join the auto-pilot rotation while frames arrive. When Trippin cuts to `unity_flow`, Unity switches to that show. To run only the Unity shows, disable the other scenes in the library.
+Tick **Settings → Director → Unity engine link** in Trippin. That's all — Trippin (`src/engine.rs`) launches the player headless (`-batchmode`; `ShowManager` renders the camera explicitly since batch mode doesn't), restarts it if it dies, and kills it when the link goes off or Trippin quits; the player also quits if Trippin's feed stops for 15 s.
+
+- **Feed:** show state (bands, kicks, beat/bar, palette, current scene) over UDP to the port passed as `-trippinPort`.
+- **Frames:** back through a memory-mapped file passed as `-trippinFrame` (`FrameExporter.cs`: async GPU readback, rows flipped to top-first, written under a seqlock). Works the same on Windows and macOS — no Spout/Syphon.
+- **Scenes:** the `unity_*` scenes join the auto-pilot rotation while frames arrive; when Trippin cuts to `unity_flow`, Unity switches to that show.
+
+Trippin looks for the player next to itself (`unity/TrippinStage.exe`, or `Contents/Resources/unity/TrippinStage.app` on macOS), then in `<data dir>/unity/`, then this folder's `Build/` (`BuildMac/` on macOS).
 
 Music comes from Trippin's normal audio capture (system output, or the Audio in device on the Settings tab). With no feed, Unity plays a synthetic 126 BPM demo cycling its shows.
 
 Build from the CLI (Unity 6000.3.25f1):
 
-    unity run . -- -executeMethod TrippinStage.EditorTools.StageBuilder.BuildPlayer [-stageOut Build2]
+    unity run . -- -executeMethod TrippinStage.EditorTools.StageBuilder.BuildPlayer [-stageOut Build2] [-stageMac]
 
 Run `Build/TrippinStage.exe`. `-record <dir> -recordSeconds 64` writes a fixed-30-fps JPEG sequence and quits (encode with ffmpeg).

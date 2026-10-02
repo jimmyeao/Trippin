@@ -30,6 +30,7 @@ pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
 sha2 = "0.10"
 midir = "0.11.0"
 beat-this = "1.0.0"
+memmap2 = "0.9.11"
 
 [build-dependencies]
 # Embeds logo.ico as the exe's icon resource on Windows.

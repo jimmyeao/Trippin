@@ -62,8 +62,20 @@ namespace TrippinStage
         readonly Vector4[] _pal = new Vector4[8];
         readonly Vector4[] _spec = new Vector4[8];
 
+        // Launched by Trippin (src/engine.rs): it passes the feed port and the
+        // frame file, and we quit if its feed goes quiet — no orphans.
+        bool _managed;
+        float _heard;
+
         void OnEnable()
         {
+            var a = System.Environment.GetCommandLineArgs();
+            for (int i = 0; i + 1 < a.Length; i++)
+            {
+                if (a[i] == "-trippinPort" && int.TryParse(a[i + 1], out var p)) port = p;
+                if (a[i] == "-trippinFrame") _managed = true;
+            }
+            _heard = Time.realtimeSinceStartup;
             try
             {
                 _udp = new UdpClient(new IPEndPoint(IPAddress.Loopback, port));
@@ -118,6 +130,12 @@ namespace TrippinStage
                 catch (Exception) { }
             }
             Live = Time.unscaledTime - _lastPacket < 1f;
+            if (Live) _heard = Time.realtimeSinceStartup;
+            if (_managed && Time.realtimeSinceStartup - _heard > 15f)
+            {
+                Debug.Log("[TrippinLink] Trippin's feed stopped — quitting");
+                Application.Quit();
+            }
             if (!Live) Synthesize();
             PushGlobals(State);
         }

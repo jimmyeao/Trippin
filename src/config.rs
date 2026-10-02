@@ -351,8 +351,6 @@ pub struct Settings {
     /// over UDP and take frames back from a Spout sender as the
     /// `unity_stage` scene.
     pub unity_link: bool,
-    /// Spout sender name the stage publishes.
-    pub unity_sender: String,
     /// UDP port the show-state feed goes to (127.0.0.1).
     pub link_port: u16,
     pub latency_ms: f32,
@@ -456,7 +454,6 @@ impl Default for Settings {
             ai_web_search: true,
             beat_model: true,
             unity_link: false,
-            unity_sender: "Trippin Stage".into(),
             link_port: 9137,
             latency_ms: 30.0,
             audio_in: String::new(),
