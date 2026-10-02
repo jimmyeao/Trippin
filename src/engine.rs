@@ -209,7 +209,10 @@ impl Engine {
 
     fn spawn(&self) -> Result<Child> {
         let exe = player_path().ok_or_else(|| anyhow!("Unity engine not installed"))?;
+        // Absolute: data_dir() is "." for a local trippin.json, and the macOS
+        // player resolves a relative -logFile beside its .app, not our cwd.
         let log = crate::config::data_dir().join("unity-engine.log");
+        let log = std::path::absolute(&log).unwrap_or(log);
         Command::new(&exe)
             .arg("-batchmode")
             .arg("-trippinFrame")
