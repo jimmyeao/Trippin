@@ -34,7 +34,7 @@ Users never install it: if no player is found, Trippin downloads this platform's
 1. Build Windows (and `-stageMac`).
 2. Zip each build's contents, without `*_DoNotShip`. On the Mac zip, mark `Contents/MacOS/*` executable.
 3. `gh release create unity-engine-vN … --latest=false`.
-4. Bump `RELEASE_BASE` and the `ASSET` names and checksums.
+4. Bump `RELEASE_BASE` and the `ASSET` names and checksums. Existing installs update themselves: the download writes `ENGINE_VERSION` (the asset name) into `<data dir>/unity/`, and a folder whose stamp doesn't match `ASSET` is downloaded again.
 
 Trippin looks for the player next to itself (`unity/TrippinStage.exe`, or `Contents/Resources/unity/TrippinStage.app` on macOS), then in `<data dir>/unity/`, then this folder's `Build/` (`BuildMac/` on macOS).
 

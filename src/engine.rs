@@ -32,14 +32,20 @@ const MAGIC: u32 = 0x4654_5254; // "TRTF"
 /// installers stay small and CI needs no Unity licence. Rebuild + upload a
 /// new `unity-engine-vN` release when the Unity project changes, and bump
 /// these. An empty checksum means no build for this platform yet.
-const RELEASE_BASE: &str = "https://github.com/jimmyeao/Trippin/releases/download/unity-engine-v1";
+const RELEASE_BASE: &str = "https://github.com/jimmyeao/Trippin/releases/download/unity-engine-v2";
 #[cfg(target_os = "macos")]
-const ASSET: (&str, &str) = ("TrippinEngine-macos-v1.zip", "");
+const ASSET: (&str, &str) = (
+    "TrippinEngine-macos-v2.zip",
+    "3bcd269755768ac52522f4cfb8dacd0b78cf8ef5a787cdc09a491368c0af9a8a",
+);
 #[cfg(not(target_os = "macos"))]
 const ASSET: (&str, &str) = (
-    "TrippinEngine-windows-x64-v1.zip",
-    "d53645e782119c10b4ca169b8882162a5f75285b92419e270abb7e29afdfb1b6",
+    "TrippinEngine-windows-x64-v2.zip",
+    "3d3c1a4bda0827ce998120b0647ec005488dc71c10955f9b4e312d7bc84bbbdb",
 );
+/// Written into the unpacked folder; a download whose stamp isn't the
+/// current `ASSET` is stale and gets replaced.
+const STAMP: &str = "ENGINE_VERSION";
 const HEADER: usize = 64;
 
 /// The latest frame from the engine, RGBA8 at `EXT_W` x `EXT_H`.
@@ -71,6 +77,12 @@ pub fn player_path() -> Option<PathBuf> {
     // TRIPPIN_ENGINE_FRESH=1: only the downloaded copy — tests the download.
     if std::env::var_os("TRIPPIN_ENGINE_FRESH").is_some() {
         c.retain(|p| p.starts_with(&data));
+    }
+    // An older download (or one without a stamp) counts as missing, so
+    // tick() fetches the current release over it.
+    let current = std::fs::read_to_string(data.join(STAMP)).is_ok_and(|s| s.trim() == ASSET.0);
+    if !current {
+        c.retain(|p| !p.starts_with(&data));
     }
     c.into_iter().find(|p| p.is_file())
 }
@@ -318,6 +330,7 @@ fn download(st: &Mutex<Result<String, String>>) -> Result<()> {
         }
     }
     let _ = std::fs::remove_file(&zip_path);
+    std::fs::write(dir.join(STAMP), name)?;
     let _ = std::fs::remove_dir_all(&final_dir);
     std::fs::rename(&dir, &final_dir).context("installing the Unity engine")?;
     set("starting".into());
