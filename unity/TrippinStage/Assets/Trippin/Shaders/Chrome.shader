@@ -50,8 +50,8 @@ Shader "Trippin/Chrome"
                          * smoothstep(-0.3, 0.2, r.y) * smoothstep(0.95, 0.4, r.y);
                 float s2 = pow(saturate(1.0 - abs(frac(az * 9.0 - _TClock.y * 0.03 + 0.25) - 0.5) * 12.0), 2.0)
                          * smoothstep(-0.8, -0.3, r.y) * smoothstep(0.1, -0.2, r.y);
-                c += TPalette(az + _TFlow * 0.01) * s1 * (4.0 + 3.0 * _TLvl.y);
-                c += TPalette(az + 0.5 - _TFlow * 0.01) * s2 * (2.5 + 2.0 * _TLvl.z);
+                c += TPalette(az + _TFlow * 0.01) * s1 * (3.0 + 3.0 * _TLvl.y + 5.0 * _THits.w);
+                c += TPalette(az + 0.5 - _TFlow * 0.01) * s2 * (2.0 + 2.0 * _TLvl.z + 4.0 * _THits.z);
                 // Hot key light overhead, and a palette floor bounce.
                 c += float3(1.0, 0.97, 0.92) * pow(saturate(r.y), 8.0) * 5.0;
                 c += TPalette(0.15) * pow(saturate(-r.y), 2.0) * 0.6;

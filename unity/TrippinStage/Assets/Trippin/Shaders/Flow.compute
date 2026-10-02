@@ -7,6 +7,8 @@ RWStructuredBuffer<float4> _Pos;
 RWStructuredBuffer<float4> _Vel;
 uint _Count;
 float _Dt, _T, _Morph, _ShapeA, _ShapeB, _Turb, _Stiff, _Push, _Scale;
+float _Rot;            // shape rotation about Y (radians)
+float _Wave, _WaveR;   // kick shockwave strength and front radius
 
 // Per-particle uniform randoms from an integer hash (PCG). A float
 // sequence like frac(i * 0.819) loses its fractional bits at i ~ 260k and
@@ -78,10 +80,15 @@ void Step(uint3 id : SV_DispatchThreadID)
     // smooth field over the shape) rather than pushing particles through a
     // field: a force field with sinks gathers the cloud into threads.
     float3 target = lerp(shape(i, _ShapeA), shape(i, _ShapeB), _Morph);
+    float cr = cos(_Rot), sr = sin(_Rot);
+    target = float3(target.x * cr - target.z * sr, target.y, target.x * sr + target.z * cr);
     float3 ph = seq(i ^ 0x9e3779b9u) * 6.2831853;
     target += curl(target * 0.25 + ph * 0.15, _T) * _Turb * 0.45;
+    // Kick shockwave: a ring of outward force expanding from the centre.
+    float r = length(p);
+    float front = exp(-pow((r - _WaveR) * 0.45, 2.0));
     float3 f = (target - p) * _Stiff
-             + normalize(p + 1e-4) * _Push;
+             + normalize(p + 1e-4) * (_Push + _Wave * front);
     v = v * exp(-_Dt * 2.4) + f * _Dt;
     p += v * _Dt;
     _Pos[i] = float4(p, length(v));

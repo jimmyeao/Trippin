@@ -24,6 +24,7 @@ namespace TrippinStage
         int _kernel;
         int _shapeA, _shapeB = 1, _lastBar4 = -1;
         float _morphStart, _bass, _turb, _scatter, _calmLong, _orbit;
+        float _kick, _rot, _waveR = 99f, _waveAmp, _lastKick = -1f, _energy;
         bool _drumsWas = true;
 
         void Awake()
@@ -68,7 +69,23 @@ namespace TrippinStage
             float lb = s.lvl4 != null && s.lvl4.Length > 3 ? s.lvl4[0] : 0f;
             float lm = s.lvl4 != null && s.lvl4.Length > 3 ? 0.5f * (s.lvl4[1] + s.lvl4[2]) : 0f;
             _bass += (lb - _bass) * k;
-            _turb += ((0.6f + 3.2f * lm) * (1f - 0.6f * s.calm) - _turb) * k;
+            _turb += ((0.8f + 7f * lm) * (1f - 0.6f * s.calm) - _turb) * k;
+            _energy += (s.energy - _energy) * (1f - Mathf.Exp(-dt / 0.6f));
+            // Kick onsets launch a shockwave from the centre.
+            float kt = Mathf.Max(s.kick, s.hits4 != null && s.hits4.Length > 0 ? s.hits4[0] : 0f) * (1f - s.calm);
+            if (kt > 0.45f && kt > _kick + 0.25f && Time.time - _lastKick > 0.15f)
+            {
+                _waveR = 0f;
+                _waveAmp = Mathf.Clamp01(kt);
+                _lastKick = Time.time;
+            }
+            _kick = kt;
+            _waveR += dt * 48f;
+            _waveAmp *= Mathf.Exp(-dt / 0.35f);
+            // Rotation speed integrates the smoothed energy, direction swings
+            // with the phrase (passes through zero smoothly).
+            float ph = s.beat / 64f * Mathf.PI * 2f;
+            _rot += dt * (0.08f + 0.9f * _energy) * Mathf.Sin(ph * 0.5f + 0.4f);
             if (!s.drums) _calmLong += dt;
             if (s.drums && !_drumsWas && _calmLong > 4f) _scatter = 1f;
             if (s.drums) _calmLong = 0f;
@@ -85,8 +102,11 @@ namespace TrippinStage
             flow.SetFloat("_ShapeB", _shapeB);
             flow.SetFloat("_Turb", _turb * (1f + 6f * _scatter));
             flow.SetFloat("_Stiff", 5f * (1f - 0.85f * _scatter));
-            flow.SetFloat("_Push", 3f * _bass * (1f - s.calm) + 25f * _scatter);
-            flow.SetFloat("_Scale", 1f + 0.12f * _bass);
+            flow.SetFloat("_Push", 6f * _bass * (1f - s.calm) + 25f * _scatter);
+            flow.SetFloat("_Scale", 1f + 0.35f * _bass * (1f - 0.5f * s.calm));
+            flow.SetFloat("_Rot", _rot);
+            flow.SetFloat("_Wave", 160f * _waveAmp);
+            flow.SetFloat("_WaveR", _waveR);
             flow.Dispatch(_kernel, Count / 256, 1, 1);
 
             _mat.SetFloat("_Gain", 0.45f + 0.25f * s.intensity);

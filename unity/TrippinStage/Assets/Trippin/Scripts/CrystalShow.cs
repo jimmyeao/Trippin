@@ -1,8 +1,11 @@
 // Screen-content show: a slow flight through a spiralling tunnel of faceted
 // chrome crystals with a light at the far end.
-//  - travel rides the smooth flow clock (no beat-synced jumps — flight);
-//  - the spiral twists and swings direction on phrase-length sines;
-//  - bass swells crystal scale through a smoothed envelope (shape);
+//  - kicks punch the crystals through an attack/decay envelope, delayed
+//    by distance so each kick is a wave running away down the tunnel;
+//  - travel speed integrates the smoothed energy (surges with the track,
+//    slows in breakdowns); the radius breathes with the mids;
+//  - spin speed follows the smoothed highs; the spiral swings direction
+//    on phrase-length sines;
 //  - a drop blooms the tunnel radius outward, easing back over ~4 bars.
 
 using UnityEngine;
@@ -23,6 +26,9 @@ namespace TrippinStage
         RenderParams _rp;
         Material _sun;
         float _bass, _bloom, _calmLong;
+        float _kick, _mid, _high, _energy, _travel, _spinPhase;
+        readonly float[] _kickHist = new float[96];
+        int _kh;
         bool _drumsWas = true;
 
         void Awake()
@@ -78,6 +84,21 @@ namespace TrippinStage
             float dt = Time.deltaTime;
             float lvl = s.lvl4 != null && s.lvl4.Length > 0 ? s.lvl4[0] : 0f;
             _bass += (lvl - _bass) * (1f - Mathf.Exp(-dt / 0.18f));
+            // Kick envelope: fast attack (40 ms), 220 ms release — a punch,
+            // never a one-frame jump.
+            float kt = Mathf.Max(s.kick, s.hits4 != null && s.hits4.Length > 0 ? s.hits4[0] : 0f) * (1f - s.calm);
+            _kick = kt > _kick ? Mathf.Lerp(_kick, kt, 1f - Mathf.Exp(-dt / 0.04f)) : _kick * Mathf.Exp(-dt / 0.22f);
+            _kh = (_kh + 1) % _kickHist.Length;
+            _kickHist[_kh] = _kick;
+            float lm = s.lvl4 != null && s.lvl4.Length > 1 ? s.lvl4[1] : 0f;
+            float hh = s.hits4 != null && s.hits4.Length > 3 ? Mathf.Max(s.hits4[2], s.hits4[3]) : 0f;
+            _mid += (lm - _mid) * (1f - Mathf.Exp(-dt / 0.25f));
+            _high += (hh - _high) * (1f - Mathf.Exp(-dt / 0.3f));
+            _energy += (s.energy - _energy) * (1f - Mathf.Exp(-dt / 0.6f));
+            // Speed and spin integrate smoothed values (no raw audio in the
+            // integrator — motion stays smooth).
+            _travel += dt * s.bpm / 60f * (1.2f + 7f * _energy * (1f - 0.6f * s.calm));
+            _spinPhase += dt * (0.3f + 3.5f * _high);
             if (!s.drums) _calmLong += dt;
             if (s.drums && !_drumsWas && _calmLong > 4f) _bloom = 1f;
             if (s.drums) _calmLong = 0f;
@@ -85,22 +106,26 @@ namespace TrippinStage
             _bloom = Mathf.Max(0f, _bloom - dt * s.bpm / 60f / 16f);
             float burst = 1f + 0.9f * Mathf.SmoothStep(0, 1, _bloom);
 
-            float travel = s.flow * 3.2f;
+            float travel = _travel;
             float phrase = s.beat / 64f * Mathf.PI * 2f;
             float twist = 0.012f + 0.01f * Mathf.Sin(phrase * 0.5f);
             float swing = Mathf.Sin(phrase) * 1.4f + s.flow * 0.04f;
-            float swell = 1f + 0.45f * _bass * (1f - s.calm);
+            float swell = 1f + 0.3f * _bass * (1f - s.calm);
+            float breathe = 1f + 0.35f * (_mid - 0.35f);
             for (int i = 0; i < Count; i++)
             {
                 float z0 = _h[i] * Length;
                 float z = Mathf.Repeat(z0 - travel, Length) - 6f;
                 float a = i * 2.39996f + z * twist + swing;
-                float r = _rad[i] * burst;
+                float r = _rad[i] * burst * breathe;
+                // The kick wave: nearer crystals get it first.
+                int delay = (int)(Mathf.Clamp01(z / 140f) * 70f);
+                float punch = _kickHist[(_kh - delay + _kickHist.Length) % _kickHist.Length];
                 var p = new Vector3(Mathf.Cos(a) * r, Mathf.Sin(a) * r, z);
-                var rot = Quaternion.Euler(s.flow * 25f * _spin[i], a * Mathf.Rad2Deg, s.flow * 15f * _spin[i] + 90f);
+                var rot = Quaternion.Euler(_spinPhase * 60f * _spin[i], a * Mathf.Rad2Deg, _spinPhase * 35f * _spin[i] + 90f);
                 // Grow in from the far fog so recycled crystals don't pop.
                 float fade = Mathf.SmoothStep(0, 1, Mathf.InverseLerp(Length - 6f, Length - 40f, z));
-                _m[i] = Matrix4x4.TRS(p, rot, Vector3.one * (_sz[i] * swell * fade));
+                _m[i] = Matrix4x4.TRS(p, rot, Vector3.one * (_sz[i] * swell * (1f + 0.6f * punch) * fade));
             }
             Graphics.RenderMeshInstanced(_rp, _mesh, 0, _m);
 

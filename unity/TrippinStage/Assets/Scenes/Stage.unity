@@ -119,7 +119,7 @@ NavMeshSettings:
     debug:
       m_Flags: 0
   m_NavMeshData: {fileID: 0}
---- !u!1 &372341578
+--- !u!1 &261141364
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -127,9 +127,9 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 372341581}
-  - component: {fileID: 372341579}
-  - component: {fileID: 372341580}
+  - component: {fileID: 261141367}
+  - component: {fileID: 261141365}
+  - component: {fileID: 261141366}
   m_Layer: 0
   m_Name: Stage Camera
   m_TagString: Untagged
@@ -137,13 +137,13 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!20 &372341579
+--- !u!20 &261141365
 Camera:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 372341578}
+  m_GameObject: {fileID: 261141364}
   m_Enabled: 1
   serializedVersion: 2
   m_ClearFlags: 2
@@ -188,13 +188,13 @@ Camera:
   m_OcclusionCulling: 1
   m_StereoConvergence: 10
   m_StereoSeparation: 0.022
---- !u!114 &372341580
+--- !u!114 &261141366
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 372341578}
+  m_GameObject: {fileID: 261141364}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: a79441f348de89743a2939f4d699eac1, type: 3}
@@ -232,13 +232,13 @@ MonoBehaviour:
     m_VarianceClampScale: 0.9
     m_ContrastAdaptiveSharpening: 0
   m_Version: 2
---- !u!4 &372341581
+--- !u!4 &261141367
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 372341578}
+  m_GameObject: {fileID: 261141364}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
@@ -247,7 +247,7 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &430653103
+--- !u!1 &513918626
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -255,48 +255,46 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 430653105}
-  - component: {fileID: 430653104}
+  - component: {fileID: 513918628}
+  - component: {fileID: 513918627}
   m_Layer: 0
-  m_Name: Post
+  m_Name: unity_flow
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &430653104
+--- !u!114 &513918627
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 430653103}
+  m_GameObject: {fileID: 513918626}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 172515602e62fb746b5d573b38a5fe58, type: 3}
+  m_Script: {fileID: 11500000, guid: e6fd509dc36f347429e70f0d476ae273, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Unity.RenderPipelines.Core.Runtime::UnityEngine.Rendering.Volume
-  m_IsGlobal: 1
-  priority: 0
-  blendDistance: 0
-  weight: 1
-  sharedProfile: {fileID: 11400000, guid: 108de603e76ee9546a575161f02013be, type: 2}
---- !u!4 &430653105
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.FlowShow
+  cam: {fileID: 261141365}
+  flow: {fileID: 7200000, guid: 75b7d91d0c12d4c4ba9c4840dcbb8502, type: 3}
+  pointsMat: {fileID: 2100000, guid: 4383535c54737134bb9b6dc1251e50bb, type: 2}
+--- !u!4 &513918628
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 430653103}
+  m_GameObject: {fileID: 513918626}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
-  m_Father: {fileID: 0}
+  m_Father: {fileID: 1452243692}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &716859516
+--- !u!1 &1126206576
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -304,54 +302,46 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 716859518}
-  - component: {fileID: 716859517}
+  - component: {fileID: 1126206578}
+  - component: {fileID: 1126206577}
   m_Layer: 0
-  m_Name: unity_stage
+  m_Name: unity_crystals
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &716859517
+--- !u!114 &1126206577
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 716859516}
+  m_GameObject: {fileID: 1126206576}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 6df1551d0e2884846bccda59a1ea5f2c, type: 3}
+  m_Script: {fileID: 11500000, guid: 3839aea14f4900742b6526312739e2db, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.StageDirector
-  cam: {fileID: 372341579}
-  output: {fileID: 8400000, guid: 61632b5a12ed5114f9b66b62b6c72d0f, type: 2}
-  beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
-  ledMat: {fileID: 2100000, guid: 2189ea29a554775419584fb03e3da79b, type: 2}
-  structMat: {fileID: 2100000, guid: 35cd406b2714c9a4aae393ce416d16d5, type: 2}
-  crowdMat: {fileID: 2100000, guid: 1e5647265a308944ab56c2bfa89d1769, type: 2}
-  hazeMat: {fileID: 2100000, guid: c1fc308b1272eee408c68fe96ade1f7f, type: 2}
-  addMat: {fileID: 2100000, guid: 798aa149d26293a4da10c1aba0eb8f7b, type: 2}
-  confettiMat: {fileID: 2100000, guid: 435a0b6f7e5be424dbb54909f4632be9, type: 2}
-  phoneMat: {fileID: 2100000, guid: 5f94801e4adbae545ad2d606d1e31883, type: 2}
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.CrystalShow
+  cam: {fileID: 261141365}
+  chromeMat: {fileID: 2100000, guid: e039a798edaeed842850fb12d899a109, type: 2}
   sunMat: {fileID: 2100000, guid: 7ea4bc34eb0062144a1ecf6b87640e88, type: 2}
---- !u!4 &716859518
+--- !u!4 &1126206578
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 716859516}
+  m_GameObject: {fileID: 1126206576}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
-  m_Father: {fileID: 1575868920}
+  m_Father: {fileID: 1452243692}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &1297515502
+--- !u!1 &1209328906
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -359,8 +349,8 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 1297515504}
-  - component: {fileID: 1297515503}
+  - component: {fileID: 1209328908}
+  - component: {fileID: 1209328907}
   m_Layer: 0
   m_Name: Display Camera
   m_TagString: Untagged
@@ -368,13 +358,13 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!20 &1297515503
+--- !u!20 &1209328907
 Camera:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1297515502}
+  m_GameObject: {fileID: 1209328906}
   m_Enabled: 1
   serializedVersion: 2
   m_ClearFlags: 2
@@ -419,13 +409,13 @@ Camera:
   m_OcclusionCulling: 1
   m_StereoConvergence: 10
   m_StereoSeparation: 0.022
---- !u!4 &1297515504
+--- !u!4 &1209328908
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1297515502}
+  m_GameObject: {fileID: 1209328906}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
@@ -434,7 +424,7 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &1575868917
+--- !u!1 &1452243689
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -442,9 +432,9 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 1575868920}
-  - component: {fileID: 1575868919}
-  - component: {fileID: 1575868918}
+  - component: {fileID: 1452243692}
+  - component: {fileID: 1452243691}
+  - component: {fileID: 1452243690}
   m_Layer: 0
   m_Name: Engine
   m_TagString: Untagged
@@ -452,60 +442,60 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &1575868918
+--- !u!114 &1452243690
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1575868917}
+  m_GameObject: {fileID: 1452243689}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 52d8f3a5904284545ba493365671515a, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.ShowManager
-  cam: {fileID: 372341579}
+  cam: {fileID: 261141365}
   output: {fileID: 8400000, guid: 61632b5a12ed5114f9b66b62b6c72d0f, type: 2}
   shows:
-  - {fileID: 716859516}
-  - {fileID: 1838597459}
-  - {fileID: 1616285667}
+  - {fileID: 1977997339}
+  - {fileID: 1126206576}
+  - {fileID: 513918626}
   names:
   - unity_stage
   - unity_crystals
   - unity_flow
---- !u!114 &1575868919
+--- !u!114 &1452243691
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1575868917}
+  m_GameObject: {fileID: 1452243689}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: c28bbc898c837b844960790cbcd20a64, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.TrippinLink
   port: 9137
---- !u!4 &1575868920
+--- !u!4 &1452243692
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1575868917}
+  m_GameObject: {fileID: 1452243689}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
-  - {fileID: 716859518}
-  - {fileID: 1838597461}
-  - {fileID: 1616285669}
+  - {fileID: 1977997341}
+  - {fileID: 1126206578}
+  - {fileID: 513918628}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &1616285667
+--- !u!1 &1477487740
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -513,46 +503,48 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 1616285669}
-  - component: {fileID: 1616285668}
+  - component: {fileID: 1477487742}
+  - component: {fileID: 1477487741}
   m_Layer: 0
-  m_Name: unity_flow
+  m_Name: Post
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &1616285668
+--- !u!114 &1477487741
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1616285667}
+  m_GameObject: {fileID: 1477487740}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: e6fd509dc36f347429e70f0d476ae273, type: 3}
+  m_Script: {fileID: 11500000, guid: 172515602e62fb746b5d573b38a5fe58, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.FlowShow
-  cam: {fileID: 372341579}
-  flow: {fileID: 7200000, guid: 75b7d91d0c12d4c4ba9c4840dcbb8502, type: 3}
-  pointsMat: {fileID: 2100000, guid: 4383535c54737134bb9b6dc1251e50bb, type: 2}
---- !u!4 &1616285669
+  m_EditorClassIdentifier: Unity.RenderPipelines.Core.Runtime::UnityEngine.Rendering.Volume
+  m_IsGlobal: 1
+  priority: 0
+  blendDistance: 0
+  weight: 1
+  sharedProfile: {fileID: 11400000, guid: 108de603e76ee9546a575161f02013be, type: 2}
+--- !u!4 &1477487742
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1616285667}
+  m_GameObject: {fileID: 1477487740}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
-  m_Father: {fileID: 1575868920}
+  m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &1838597459
+--- !u!1 &1977997339
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -560,50 +552,58 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 1838597461}
-  - component: {fileID: 1838597460}
+  - component: {fileID: 1977997341}
+  - component: {fileID: 1977997340}
   m_Layer: 0
-  m_Name: unity_crystals
+  m_Name: unity_stage
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &1838597460
+--- !u!114 &1977997340
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1838597459}
+  m_GameObject: {fileID: 1977997339}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 3839aea14f4900742b6526312739e2db, type: 3}
+  m_Script: {fileID: 11500000, guid: 6df1551d0e2884846bccda59a1ea5f2c, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.CrystalShow
-  cam: {fileID: 372341579}
-  chromeMat: {fileID: 2100000, guid: e039a798edaeed842850fb12d899a109, type: 2}
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.StageDirector
+  cam: {fileID: 261141365}
+  output: {fileID: 8400000, guid: 61632b5a12ed5114f9b66b62b6c72d0f, type: 2}
+  beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
+  ledMat: {fileID: 2100000, guid: 2189ea29a554775419584fb03e3da79b, type: 2}
+  structMat: {fileID: 2100000, guid: 35cd406b2714c9a4aae393ce416d16d5, type: 2}
+  crowdMat: {fileID: 2100000, guid: 1e5647265a308944ab56c2bfa89d1769, type: 2}
+  hazeMat: {fileID: 2100000, guid: c1fc308b1272eee408c68fe96ade1f7f, type: 2}
+  addMat: {fileID: 2100000, guid: 798aa149d26293a4da10c1aba0eb8f7b, type: 2}
+  confettiMat: {fileID: 2100000, guid: 435a0b6f7e5be424dbb54909f4632be9, type: 2}
+  phoneMat: {fileID: 2100000, guid: 5f94801e4adbae545ad2d606d1e31883, type: 2}
   sunMat: {fileID: 2100000, guid: 7ea4bc34eb0062144a1ecf6b87640e88, type: 2}
---- !u!4 &1838597461
+--- !u!4 &1977997341
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1838597459}
+  m_GameObject: {fileID: 1977997339}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
-  m_Father: {fileID: 1575868920}
+  m_Father: {fileID: 1452243692}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
   m_Roots:
-  - {fileID: 372341581}
-  - {fileID: 1297515504}
-  - {fileID: 430653105}
-  - {fileID: 1575868920}
+  - {fileID: 261141367}
+  - {fileID: 1209328908}
+  - {fileID: 1477487742}
+  - {fileID: 1452243692}
