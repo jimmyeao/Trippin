@@ -79,6 +79,13 @@ overlays.
   latest; another agent may have pushed since you last looked.
 - **Don't** force-push shared branches, rewrite pushed history, or delete
   someone else's branch.
+- **One agent per checkout.** Switching branches in a folder another agent
+  is using swaps the files under it. A Unity build that was running then
+  silently compiles the other branch's code (the v4 Mac engine almost
+  shipped without its new shows this way). Give each agent its own
+  `git worktree add ../Trippin-<topic> <branch>`, and build releases from a
+  worktree. The first Unity build in a new worktree re-imports the project
+  (several minutes).
 - **Small commits.** Each commit gets a descriptive message that says what
   changed and why. Push when a piece works, so the other agent can see it.
 - **Merging to master:** `git merge --no-ff` with a `Merge feat/<x>: …`
