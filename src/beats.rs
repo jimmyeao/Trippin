@@ -131,6 +131,7 @@ fn download() -> Result<()> {
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
     let agent = ureq::Agent::config_builder()
         .timeout_global(Some(std::time::Duration::from_secs(600)))
+        .tls_config(crate::config::tls())
         .build()
         .new_agent();
     for (name, sha) in MODEL_FILES {
