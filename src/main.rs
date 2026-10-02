@@ -1464,6 +1464,12 @@ fn apply_render(
             }
         }
         Action::Blackout => *blackout = !*blackout,
+        // The same gate as the timeline's strobe cue: flashes ride the
+        // live drum onsets while it's on.
+        Action::Strobe => {
+            let on = !STROBE.load(Ordering::Relaxed);
+            STROBE.store(on, Ordering::Relaxed);
+        }
         Action::MarkDownbeat => {
             let _ = audio.commands.send(Command::MarkDownbeat);
         }
@@ -1841,6 +1847,19 @@ impl App {
                 })
             }),
             state: Box::new(move || {
+                // Timeline first and released before settings is taken (the
+                // lock-order rule), then status, then settings.
+                let song = {
+                    let tl = lock(&state_sh.timeline);
+                    tl.doc.as_ref().map(|d| {
+                        serde_json::json!({
+                            "playing": tl.mode == PlayMode::Playing,
+                            "pos": tl.pos_s,
+                            "len": d.end_s(),
+                            "name": d.name,
+                        })
+                    })
+                };
                 // Status copy first, settings second — never nested, same
                 // order the panel uses.
                 let st = lock(&state_sh.status).clone();
@@ -1858,6 +1877,9 @@ impl App {
                     "next_scene": st.next_scene,
                     "next_scene_name": st.next_scene.and_then(|i| state_sh.scene_names.get(i)),
                     "bar_in_scene": st.bar_in_scene,
+                    "song": song,
+                    "strobe": STROBE.load(Ordering::Relaxed),
+                    "cut_on_drops": s.cut_on_drops,
                     "bars_total": st.bars_total,
                     "clip": st.clip,
                     "blackout": st.blackout,

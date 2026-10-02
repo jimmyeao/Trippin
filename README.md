@@ -171,6 +171,7 @@ Default keys (all rebindable in the panel):
 | D | dancer on / off |
 | C / S / V | next routine / next look / canon auto→on→off |
 | B | blackout (fade to black and back) |
+| Z | strobe on / off (flashes on the live drum hits) |
 | F | fullscreen on / off |
 | Space | mark this beat as the downbeat |
 | [ / ] | latency −/+ 5 ms |
