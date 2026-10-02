@@ -244,6 +244,12 @@ jobs:
             -P "$APPLE_INSTALLER_CERTIFICATE_PASSWORD" -T /usr/bin/productbuild -T /usr/bin/productsign
           security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain
           rm installer.p12
+          # G2 Developer ID certs only validate with Apple's G2 intermediate
+          # in the chain; runners don't reliably carry it (nor did the
+          # owner's Mac: CSSMERR_TP_NOT_TRUSTED until it was added).
+          curl -fsSL -o DeveloperIDG2CA.cer https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer
+          security import DeveloperIDG2CA.cer -k build.keychain || true
+          rm DeveloperIDG2CA.cer
           security find-identity -v build.keychain
 
       # The installer: always to /Applications (not relocatable, so it never
