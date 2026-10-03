@@ -87,7 +87,7 @@ Build from the CLI (Unity 6000.3.25f1):
 
     unity run . -- -executeMethod TrippinStage.EditorTools.StageBuilder.BuildPlayer [-stageOut Build2] [-stageMac]
 
-Run `Build/TrippinStage.exe`. `-record <dir> -recordSeconds 64` writes a fixed-30-fps JPEG sequence and quits (encode with ffmpeg).
+Run `Build/TrippinStage.exe`. With no Trippin feed it cycles every 16 bars; `-cycleBars N` changes that and `-tourShows a,b,c` cycles only the named shows, for a quick recorded tour (e.g. `-tourShows unity_helix,unity_warp -cycleBars 4 -record tour -recordSeconds 30`). `-uncapped` removes the 60 fps cap so the `[Stage] ms/frame` log shows the real cost. `-record <dir> -recordSeconds 64` writes a fixed-30-fps JPEG sequence and quits (encode with ffmpeg).
 
 ## Crowd meshes
 

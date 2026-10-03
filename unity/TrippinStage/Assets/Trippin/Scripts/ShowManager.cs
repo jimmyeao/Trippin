@@ -18,6 +18,10 @@ namespace TrippinStage
         public string[] names;
 
         int _cur = -1;
+        // Demo cycle (no feed): `-cycleBars N` bars per show (default 16), and
+        // `-tourShows a,b,c` to cycle only those shows — for quick recorded tours.
+        int _cycleBars = 16;
+        string[] _tour;
 
         /// `-uncapped`: no 60 fps cap, so the frame-time log shows the real
         /// cost (profiling only — Trippin never passes it).
@@ -36,7 +40,11 @@ namespace TrippinStage
             // Optional fixed show: -show unity_flow
             var a = System.Environment.GetCommandLineArgs();
             for (int i = 0; i + 1 < a.Length; i++)
+            {
                 if (a[i] == "-show") _forced = a[i + 1];
+                if (a[i] == "-cycleBars" && int.TryParse(a[i + 1], out var cb) && cb > 0) _cycleBars = cb;
+                if (a[i] == "-tourShows") _tour = a[i + 1].Split(',');
+            }
             for (int i = 0; i < shows.Length; i++) shows[i].SetActive(false);
         }
 
@@ -49,7 +57,11 @@ namespace TrippinStage
             string want;
             if (_forced != null) want = _forced;
             else if (TrippinLink.Live) want = s.scene;
-            else want = names[(Mathf.FloorToInt(s.beat / 4f) / 16) % names.Length];
+            else
+            {
+                string[] list = _tour != null && _tour.Length > 0 ? _tour : names;
+                want = list[(Mathf.FloorToInt(s.beat / 4f) / _cycleBars) % list.Length];
+            }
             int idx = System.Array.IndexOf(names, want);
             if (idx < 0) idx = _cur < 0 ? 0 : _cur;
             if (idx != _cur)
