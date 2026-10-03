@@ -141,6 +141,7 @@ namespace TrippinStage.EditorTools
             if (lv.sim == null) throw new System.Exception("Leviathan.compute not found");
             lv.filamentMat = Mat("Trippin/Filament", "Filament");
             lv.pointsMat = fs.pointsMat;
+            lv.skinMat = Mat("Trippin/LevSkin", "LevSkin");
 
             var sculptGo = new GameObject("unity_sculpture");
             sculptGo.transform.SetParent(engine.transform, false);
@@ -153,6 +154,14 @@ namespace TrippinStage.EditorTools
             var co = colGo.AddComponent<ColossusShow>();
             co.cam = cam;
             co.androidMat = Mat("Trippin/Android", "Android");
+            co.headMat = Mat("Trippin/AndroidHead", "AndroidHead");
+            co.cityMat = Mat("Trippin/City", "City");
+            // On the asset, at build time: otherwise the build strips the
+            // shader's instancing variant and instanced draws show nothing.
+            co.cityMat.enableInstancing = true;
+            co.skyMat = Mat("Trippin/Sky", "Sky");
+            co.groundMat = Mat("Trippin/Ground", "Ground");
+            co.beamMat = dir.beamMat;
             co.glowMat = Mat("Trippin/Backglow", "Backglow");
 
             mgr.shows = new[] { stage, crystals, flowGo, levGo, sculptGo, colGo };

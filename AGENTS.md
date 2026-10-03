@@ -79,6 +79,11 @@ overlays.
   latest; another agent may have pushed since you last looked.
 - **Don't** force-push shared branches, rewrite pushed history, or delete
   someone else's branch.
+- **Unity instanced draws need instancing on the material asset at build
+  time** (`StageBuilder`: `mat.enableInstancing = true`). Enabling it only
+  on a runtime copy lets the build strip the shader's instancing variant
+  ("after built-in stripping: 1" in Editor.log), and
+  `Graphics.RenderMeshInstanced` then draws nothing, without any error.
 - **One agent per checkout.** Switching branches in a folder another agent
   is using swaps the files under it. A Unity build that was running then
   silently compiles the other branch's code (the v4 Mac engine almost

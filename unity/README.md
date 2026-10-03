@@ -56,4 +56,12 @@ It rejects failed reconstructions, bakes textures into vertex colours, decimates
 
 ## Colossus (giant android)
 
-`unity_colossus` is one of Alice's crowd people, re-skinned as an android. `python tools/android_mesh.py crowd.zip member_05` welds and smooths it, turns the head into a helmet, and writes `Resources/Android/android.bytes`. To use a different person, pick one with a strong pose from a crowd batch. A purpose-designed android needs an image-to-3D endpoint on Alice; the crowd endpoint takes no prompt.
+`unity_colossus` is an original armoured robot made with Alice. A Flux.2 reference image (full body, fists raised, plain white background) went through `POST /agent/mesh` with that image to make a textured Hunyuan3D GLB. The API is documented in `aliceapi.md` and the key lives in the untracked `alice.env`.
+
+To prepare it:
+
+    python tools/android_mesh.py android.glb --smooth 6
+
+This bakes the texture into vertex colours. It also estimates an 11-bone skeleton and skin weights, and cuts the head away, because Unity puts the sculpted face (`AndroidHead.shader`) on the neck bone. The skeleton heuristics expect a standing pose with the arms raised.
+
+To check the weights before building, pose the mesh offline: lower the arms and bend the knees, then render it. ColossusShow poses the skeleton every frame from the music.

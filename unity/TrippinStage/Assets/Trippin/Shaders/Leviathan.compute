@@ -39,7 +39,9 @@ float2 profile(float s)
     float wings = smoothstep(0.0, 0.3, s) * (1.0 - smoothstep(0.3, 0.56, s));
     float w = 10.0 * wings + 0.5 * (1.0 - s) + 0.08;
     float h = 0.7 * smoothstep(0.0, 0.08, s) * (1.0 - smoothstep(0.25, 0.7, s)) + 0.18 * (1.0 - s) + 0.05;
-    return float2(w, h) * _Breath;
+    // Round the nose shut, so the skin has no open ring at the front.
+    float nose = sqrt(smoothstep(0.0, 0.05, s));
+    return float2(w, h) * nose * _Breath;
 }
 
 // A point on the body surface: spine segment (fractional), angle round it.
