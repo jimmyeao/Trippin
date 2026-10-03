@@ -12,3 +12,4 @@ __pycache__/
 HANDOFF-ADD-SITE.md
 /models/
 /beatcache/
+Website/sshkey/theiaweb_key.pem
