@@ -32,6 +32,7 @@ namespace TrippinStage
         readonly float[] _hazeBase = { 0.07f, 0.05f };
         MaterialPropertyBlock _mpb;
         float _bassSlow, _calmSlow, _impS, _dropAge = 99f, _farWas;
+        float _bassFast, _kick, _midEase; // eased fast vocabulary: shape reacts within ~70 ms, never steps
         Vector3 _camPos, _camLook;
         bool _camSet;
 
@@ -118,6 +119,9 @@ namespace TrippinStage
             float pres0 = s.pres4 != null && s.pres4.Length > 0 ? s.pres4[0] : 0.4f;
             float k1 = 1f - Mathf.Exp(-dt * 1.0f);
             _bassSlow += (pres0 - _bassSlow) * k1;
+            _bassFast = Eased.Follow(_bassFast, Eased.Lvl(s, 0), 14f, 3f, dt);
+            _kick = Eased.Follow(_kick, Eased.Hit(s, 0), 20f, 4f, dt);
+            _midEase = Eased.Follow(_midEase, Eased.Lvl(s, 1), 4f, 4f, dt);
             _calmSlow += (s.calm - _calmSlow) * k1;
 
             float tn = Mathf.SmoothStep(0f, 1f, DropDirector.Tension);
@@ -129,7 +133,7 @@ namespace TrippinStage
             float phrase = beat / 64f * Mathf.PI * 2f;
 
             float level = Mathf.Lerp(0.75f, 1f, _calmSlow) * (1f - 0.4f * tn) * (1f + 0.7f * _impS);
-            float waveDepth = 3f + 11f * Mathf.Clamp01(_bassSlow);
+            float waveDepth = 3f + 11f * Mathf.Clamp01(_bassSlow) + 7f * _bassFast;
             float p1 = clk * 0.09f + 1.6f * Mathf.Sin(phrase);       // radial wave, breathes in and out
             float p2 = clk * 0.06f - 1.2f * Mathf.Sin(phrase * 0.5f); // cross wave, opposite swing
             float sink = 1f - 0.75f * tn;                             // a build sinks the field to a carpet
@@ -141,7 +145,7 @@ namespace TrippinStage
                 float d = p.magnitude;
                 float radial = 0.5f + 0.5f * Mathf.Sin(d * 0.34f - p1 * 2f);
                 float cross = 0.5f + 0.5f * Mathf.Sin(p.x * 0.19f + p.y * 0.13f + p2 * 2f);
-                float h = 1.5f + waveDepth * (0.65f * radial + 0.35f * cross);
+                float h = 1.5f + waveDepth * (0.65f * radial + (0.35f + 0.3f * _midEase) * cross) + 4f * _kick * radial; // the field breathes up on kicks
                 h *= sink;
                 float fd = (d - front) / 4f;
                 h += 16f * Mathf.Exp(-fd * fd) * Mathf.Clamp01(1f - _dropAge / 3f); // drop front: travels, then fades out

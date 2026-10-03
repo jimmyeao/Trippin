@@ -38,6 +38,7 @@ namespace TrippinStage
         float _lastKick = -10f;
 
         float _bassSlow, _calmSlow, _impS, _farWas;
+        float _bassFast, _kick; // eased fast vocabulary: shape reacts within ~70 ms, never steps
         Vector3 _camPos, _camLook;
         bool _camSet;
 
@@ -184,6 +185,8 @@ namespace TrippinStage
             float hit0 = s.hits4 != null && s.hits4.Length > 0 ? s.hits4[0] : 0f;
             float k1 = 1f - Mathf.Exp(-dt * 1.2f);
             _bassSlow += (pres0 - _bassSlow) * k1;
+            _bassFast = Eased.Follow(_bassFast, Eased.Lvl(s, 0), 14f, 3f, dt);
+            _kick = Eased.Follow(_kick, hit0, 20f, 4f, dt);
             _calmSlow += (s.calm - _calmSlow) * k1;
 
             float tn = Mathf.SmoothStep(0f, 1f, DropDirector.Tension);
@@ -221,7 +224,7 @@ namespace TrippinStage
             }
 
             float level = Mathf.Lerp(0.8f, 1f, _calmSlow) * (1f - 0.35f * tn) * (1f + 0.8f * _impS);
-            float amp = (0.5f + 1.9f * Mathf.Clamp01(_bassSlow)) * (1f - 0.4f * tn);
+            float amp = (0.5f + 1.9f * Mathf.Clamp01(_bassSlow) + 1.2f * _bassFast) * (1f - 0.4f * tn);
             float phase = clk * 0.12f + 1.5f * Mathf.Sin(phrase); // direction reverses with the phrase
             float hue = 0.02f + 0.05f * Mathf.Sin(phrase * 0.5f);
             _mpb.Clear();
@@ -234,7 +237,7 @@ namespace TrippinStage
             {
                 float a = i / (float)Shafts * Mathf.PI * 2f;
                 float wave = 0.6f + 0.4f * Mathf.Sin(a * 3f - clk * 0.1f);
-                float h = 6f + (22f * Mathf.Clamp01(_bassSlow) + 14f * tn + 18f * _impS) * wave;
+                float h = 6f + (22f * Mathf.Clamp01(_bassSlow) + 10f * _kick + 14f * tn + 18f * _impS) * wave;
                 _shaft[i].localScale = new Vector3(1f, h, 1f);
                 Color c = TrippinLink.Palette(hue + 0.1f + i / (float)Shafts * 0.4f);
                 float mx = Mathf.Max(c.r, Mathf.Max(c.g, c.b), 1e-3f);
