@@ -51,7 +51,8 @@ namespace TrippinStage
             }
             mesh.bounds = new Bounds(new Vector3(0, 0.5f, 0), new Vector3(2f, 2f, 2f));
             _mat = new Material(androidMat);
-            _mirMat = new Material(androidMat);
+            _mat.SetFloat("_Textured", mesh.colors32.Length > 0 ? 1f : 0f);
+            _mirMat = new Material(_mat);
             _mirMat.SetFloat("_Mirror", 1f);
             _body = Part("android", mesh, _mat, new Vector3(Height, Height, Height));
             // Reflection: mirrored below the floor at y=0.
@@ -90,16 +91,21 @@ namespace TrippinStage
         static Mesh LoadSkinned(TextAsset t)
         {
             var b = t.bytes;
-            if (b.Length < 12 || b[0] != 'T' || b[1] != 'C' || b[2] != 'R' || b[3] != 'S') return null;
+            // "TCRS": 32 bytes a vertex; "TCRC" adds an RGBA colour (36).
+            if (b.Length < 12 || b[0] != 'T' || b[1] != 'C' || b[2] != 'R' || (b[3] != 'S' && b[3] != 'C')) return null;
+            bool hasCol = b[3] == 'C';
+            int stride = hasCol ? 36 : 32;
             int nv = System.BitConverter.ToInt32(b, 4), ni = System.BitConverter.ToInt32(b, 8);
-            if (b.Length < 12 + nv * 32 + ni * 2 || ni % 3 != 0) return null;
+            if (b.Length < 12 + nv * stride + ni * 2 || ni % 3 != 0) return null;
+            var col = hasCol ? new Color32[nv] : null;
             var pos = new Vector3[nv];
             var nrm = new Vector3[nv];
             var bi = new List<Vector4>(nv);
             var bw = new List<Vector4>(nv);
             int o = 12;
-            for (int i = 0; i < nv; i++, o += 32)
+            for (int i = 0; i < nv; i++, o += stride)
             {
+                if (hasCol) col[i] = new Color32(b[o + 32], b[o + 33], b[o + 34], b[o + 35]);
                 pos[i] = new Vector3(-System.BitConverter.ToSingle(b, o), System.BitConverter.ToSingle(b, o + 4), System.BitConverter.ToSingle(b, o + 8));
                 nrm[i] = new Vector3(-System.BitConverter.ToSingle(b, o + 12), System.BitConverter.ToSingle(b, o + 16), System.BitConverter.ToSingle(b, o + 20));
                 bi.Add(new Vector4(b[o + 24], b[o + 25], b[o + 26], b[o + 27]));
@@ -117,6 +123,7 @@ namespace TrippinStage
             m.SetNormals(nrm);
             m.SetUVs(1, bi);
             m.SetUVs(2, bw);
+            if (hasCol) m.SetColors(col);
             m.SetTriangles(idx, 0);
             return m;
         }

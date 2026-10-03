@@ -15,10 +15,11 @@ with glowing seams, poses it with a skeleton, and gives it a sculpted face
   elbows, fists, hips, knees, ankles;
 - weights each vertex to its two nearest bones, restricted by region (arm
   bones only reach the arms, leg bones only the legs);
-- writes Resources/Android/android.bytes ("TCRS": the crowd mesh format plus
-  four bone indices and weights per vertex) and android_rig.json (joints
-  and the head ellipsoid).
+- writes Resources/Android/android.bytes ("TCRC": per vertex position,
+  normal, four bone indices and weights, and the texture baked to an RGBA
+  colour) and android_rig.json (joints and the head ellipsoid).
 
+    python tools/android_mesh.py android.glb --smooth 6       (an /agent/mesh robot)
     python tools/android_mesh.py crowd.zip member_05 [--smooth 80]
 """
 
@@ -42,6 +43,8 @@ BONES = ["pelvis", "chest", "neck", "upper_l", "fore_l", "upper_r", "fore_r",
 
 def load(src, name):
     p = Path(src)
+    if p.suffix.lower() == ".glb":
+        return trimesh.load(p, force="mesh")
     if p.is_dir():
         data = (p / f"{name}.glb").read_bytes()
     else:
@@ -85,10 +88,17 @@ def skeleton(v, head_c):
         path = [(y, c) for y, c in path if c is not None]
         sh = path[2][1].copy()
         sh[0] = sg * max(abs(sh[0]), 0.095)
-        # Elbow: the slice reaching furthest out.
-        el = max(path, key=lambda yc: abs(yc[1][0]))[1].copy()
         fist = path[-1][1].copy()
         fist[1] = v[arm, 1].max()
+        # Elbow: the point on the arm's path furthest from the straight line
+        # shoulder -> fist (a bent arm's corner). "Furthest out to the side"
+        # landed near the wrist on a robot whose forearms rise at full width.
+        line = fist - sh
+        line = line / np.linalg.norm(line)
+        def bend(c):
+            r = c - sh
+            return np.linalg.norm(r - (r @ line) * line)
+        el = max(path, key=lambda yc: bend(yc[1]))[1].copy()
         j["shoulder_" + side] = sh
         j["elbow_" + side] = el
         j["fist_" + side] = fist
@@ -129,6 +139,14 @@ def weights(v, j):
         "shin_r": (j["knee_r"], floor(j["ankle_r"])),
     }
     d = np.stack([seg_dist(v, *segs[b]) for b in BONES], axis=1)
+    # The torso is a thick capsule, not a line: measured from the centre,
+    # a broad robot's collar and chest plates sit nearer the shoulder
+    # joints and got dragged along by the arms (a twisted band across the
+    # chest). Distances inside the torso radius count as zero.
+    torso_r = 0.85 * abs(j["shoulder_l"][0])
+    for i, b in enumerate(BONES):
+        if b in ("pelvis", "chest"):
+            d[:, i] = np.maximum(0.0, d[:, i] - torso_r)
     x, y = v[:, 0], v[:, 1]
     inf = 1e9
     # Regions: arms only where the arms are, legs only below the hips.
@@ -148,7 +166,8 @@ def weights(v, j):
             d[(y < j["neck"][1] - 0.04) | (y > head_top) | (np.abs(x) > 0.07), i] = inf
     order = np.argsort(d, axis=1)[:, :2]
     d2 = np.take_along_axis(d, order, axis=1)
-    w = 1.0 / (d2 ** 4 + 1e-10)
+    # A soft falloff: broad shoulder armour blends between chest and arm.
+    w = 1.0 / (d2 ** 2 + 1e-8)
     w[d2 >= inf] = 0
     w = w / np.maximum(w.sum(1, keepdims=True), 1e-12)
     return order, w
@@ -156,14 +175,21 @@ def weights(v, j):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("source", help="crowd zip from Alice, or an unpacked dir")
-    ap.add_argument("member", help="e.g. member_05")
-    ap.add_argument("--smooth", type=int, default=80, help="Taubin iterations")
+    ap.add_argument("source", help="an Alice /agent/mesh .glb, a crowd zip, or an unpacked crowd dir")
+    ap.add_argument("member", nargs="?", default="", help="crowd member, e.g. member_05 (not for a .glb)")
+    ap.add_argument("--smooth", type=int, default=80,
+                    help="Taubin iterations: ~80 melts a person's clothes, ~6 keeps a robot's armour crisp")
     a = ap.parse_args()
     m = load(a.source, a.member)
+    # Bake the texture into vertex colours before welding (the robot's own
+    # white plates and dark joints become the albedo in Unity).
+    try:
+        col = np.asarray(m.visual.to_color().vertex_colors, dtype=np.uint8)
+    except Exception:
+        col = np.full((len(m.vertices), 4), 255, np.uint8)
     # Textured GLBs split vertices along UV seams: weld by position first,
     # or the body falls apart into hundreds of pieces.
-    m = trimesh.Trimesh(m.vertices, m.faces, process=True)
+    m = trimesh.Trimesh(m.vertices, m.faces, vertex_colors=col, process=True)
     m.merge_vertices(merge_tex=True, merge_norm=True)
     parts = m.split(only_watertight=False)
     m = max(parts, key=lambda p: len(p.faces))
@@ -194,17 +220,18 @@ def main():
     bw = np.zeros((len(v), 4), np.uint8)
     bi[:, :2] = bones
     bw[:, :2] = np.round(w * 255).astype(np.uint8)
-    rec = np.zeros(len(v), dtype=[("p", "<f4", 3), ("n", "<f4", 3), ("i", "u1", 4), ("w", "u1", 4)])
-    rec["p"], rec["n"], rec["i"], rec["w"] = v, n, bi, bw
+    c = np.asarray(m.visual.vertex_colors, dtype=np.uint8)[:, :4]
+    rec = np.zeros(len(v), dtype=[("p", "<f4", 3), ("n", "<f4", 3), ("i", "u1", 4), ("w", "u1", 4), ("c", "u1", 4)])
+    rec["p"], rec["n"], rec["i"], rec["w"], rec["c"] = v, n, bi, bw, c
     idx = m.faces.astype("<u2").ravel()
     with open(OUT / "android.bytes", "wb") as fh:
-        fh.write(b"TCRS" + struct.pack("<II", len(v), len(idx)))
+        fh.write(b"TCRC" + struct.pack("<II", len(v), len(idx)))
         fh.write(rec.tobytes())
         fh.write(idx.tobytes())
     rig = {"bones": BONES, "joints": {k: np.round(p, 5).tolist() for k, p in j.items()},
            "head_radii": head_r.tolist()}
     (OUT / "android_rig.json").write_text(json.dumps(rig, indent=1))
-    print(f"{a.member}: kept {len(m.faces)} tris, {len(v)} verts")
+    print(f"{a.member or Path(a.source).name}: kept {len(m.faces)} tris, {len(v)} verts")
     for k in ("shoulder_l", "elbow_l", "fist_l", "hip_l", "knee_l", "ankle_l", "neck", "head"):
         print(f"  {k:10s} {np.round(j[k], 3).tolist()}")
     return 0
