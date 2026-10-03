@@ -493,6 +493,55 @@ fn apply_playhead(
     }
 }
 
+/// Refit the director's queued next scene to the music's mood. Cuts can
+/// land anywhere now, so the pick made at scene start may be stale by the
+/// time an event fires: in a breakdown the queue should hold a calm scene,
+/// in a hot section a hot one. Random order only — an ordered playlist is
+/// a curated sequence, and a queued "play next" is the operator's call.
+fn repick_for_mood(dir: &mut Director, r: &Renderer, usable: &[usize], f: &audio::Features, s: &Settings) {
+    if s.mode != Mode::Auto || !s.random_order || usable.len() < 2 || dir.next_queued {
+        return;
+    }
+    // Mid-moods get no opinion — any pick is honest.
+    let target = if f.calm > 0.55 {
+        0.25
+    } else if f.calm < 0.3 && f.energy > 0.6 {
+        0.75
+    } else {
+        return;
+    };
+    let close = |e: f32| (e - target).abs() <= 0.22;
+    if dir
+        .next
+        .is_some_and(|n| close(ai::scene_meta(r.scene_name(n)).energy))
+    {
+        return;
+    }
+    // Candidates near the target energy — take the best cluster so the
+    // pick stays varied rather than always landing the same scene.
+    let mut cands: Vec<(f32, usize)> = usable
+        .iter()
+        .copied()
+        .filter(|&n| n != dir.scene)
+        .map(|n| {
+            (
+                (ai::scene_meta(r.scene_name(n)).energy - target).abs(),
+                n,
+            )
+        })
+        .collect();
+    cands.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    let best = cands.first().map(|c| c.0).unwrap_or(0.0);
+    let top: Vec<usize> = cands
+        .iter()
+        .take_while(|c| c.0 <= best + 0.1)
+        .map(|c| c.1)
+        .collect();
+    if let Some(&pick) = top.get((dir.rand() * top.len() as f32) as usize % top.len().max(1)) {
+        dir.next = Some(pick);
+    }
+}
+
 /// The whole show, free-running on its own thread at vsync pace.
 fn render_loop(
     mut r: Renderer,
@@ -1179,6 +1228,9 @@ fn render_loop(
             s.palette.as_str()
         };
         r.set_palette(pal);
+        // Free cuts land on musical events — the queued pick should fit
+        // the mood too: calm sections want calm scenes, hot ones want hot.
+        repick_for_mood(&mut dir, &r, &usable, &f, &s);
 
         // Dancer follows the settings; auto-pilot changes it on cuts and phrases.
         dancer.enabled = s.dancer_enabled;

@@ -24,7 +24,16 @@ and strobes detected drum fills — a burst of onsets well above the section's
 per-beat onset-density baseline, capped at a bar. When the fill collapses the
 new section lands, so Auto can cut there even mid-bar (`director.rs`'s
 `update_fill`; cuts ride `cut_on_drops` and a 2-bar minimum scene length,
-fills never strobe on tunnel/flight scenes or in Manual mode).
+fills never strobe on tunnel/flight scenes or in Manual mode). The bar grid
+is a backstop, not the score: Auto also cuts off-grid on section events —
+the breakdown detector committing (covers vocal breaks too), a sustained
+energy surge (chorus/second-drop with no breakdown; fast vs slow energy EMA
+in `update_events`), and the vocal-break proxy (bass thin, mids hot, 5
+beats). Event cuts share a gap (1 bar in-scene + 4 beats since the last
+cut), ride `cut_on_drops`, and stay off in Static and Manual. The queued
+next scene is refit to the mood every frame (`repick_for_mood` in main.rs:
+calm picks low-energy scenes, hot picks high-energy; random order only, and
+never an operator's "play next").
 Over the scenes it draws a beat-locked silhouette dancer, text, and stream
 overlays.
 
@@ -155,7 +164,7 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
 | `src/main.rs` | The winit app and CLI flags. `render_loop` runs on **its own thread** (Windows' modal move loop would freeze it otherwise). The event thread runs input and the egui panel. They share `Shared` (a `Mutex<Settings>`, a `Mutex<Status>`, and atomics) and talk over `mpsc::Msg`. |
 | `src/audio.rs`, `src/sysaudio.rs` | Capture (CPAL devices; the macOS system-output tap lives in `sysaudio.rs`), FFT, onsets and kicks (level-independent: flux > mean×1.8), tempo PLL, groove, `calm` (breakdown), the four-band vocabulary, the triggered waveform, and the neural downbeat check (`nn_*`: a 15 s window every 5 s to a `beat-nn` worker thread). |
 | `src/beats.rs` | Beat This! (`beat-this` crate, ONNX via pure-Rust `rten`, as in BeatDis): model download to `<data dir>/models` (SHA-checked, from the public `BeatDis-models` release), detection with sub-frame refine, the constant-tempo grid fit, and the per-song grid cache (`<data dir>/beatcache`). |
-| `src/director.rs` | Auto-pilot: phrase cuts, drop cuts, drum-fill strobes + sub-bar cuts, intensity, and the beats/breakdown modes. |
+| `src/director.rs` | Auto-pilot: phrase cuts (backstop), drop cuts, off-grid section-event cuts (breakdown entry, energy surge, vocal break), drum-fill strobes + sub-bar cuts, intensity, and the beats/breakdown modes. |
 | `src/render.rs` | wgpu. Ping-pong Rgba16Float feedback targets, per-scene pipelines, hot reload, and the `Uniforms` struct (**must match `U` in `shaders/common.wgsl`**). |
 | `src/gfx.rs`, `shaders/bloom.wgsl` | The baked 64³ noise volume and blue noise, and the bloom chain. |
 | `shaders/common.wgsl` | Uniforms and helpers, prepended to every shader. |
