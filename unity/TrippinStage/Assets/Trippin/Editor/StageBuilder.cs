@@ -189,8 +189,19 @@ namespace TrippinStage.EditorTools
             tidal.hazeMat = Mat("Trippin/TidalMist", "TidalMist");
             tidal.beamMat = dir.beamMat;
 
-            mgr.shows = new[] { stage, crystals, flowGo, levGo, sculptGo, colGo, tidalGo };
-            mgr.names = new[] { "unity_stage", "unity_crystals", "unity_flow", "unity_leviathan", "unity_sculpture", "unity_colossus", "unity_tidal_cathedral" };
+            var orbitGo = new GameObject("unity_orbit_foundry");
+            orbitGo.transform.SetParent(engine.transform, false);
+            var orbit = orbitGo.AddComponent<OrbitFoundryShow>();
+            orbit.cam = cam;
+            orbit.coreMat = Mat("Trippin/OrbitCore", "OrbitCore");
+            orbit.ringMat = Mat("Trippin/OrbitRing", "OrbitRing");
+            orbit.floorMat = Mat("Trippin/OrbitFloor", "OrbitFloor");
+            orbit.skyMat = Mat("Trippin/TidalSky", "TidalSky");
+            orbit.beamMat = dir.beamMat;
+            orbit.pointsMat = Mat("Trippin/Points", "Points");
+
+            mgr.shows = new[] { stage, crystals, flowGo, levGo, sculptGo, colGo, tidalGo, orbitGo };
+            mgr.names = new[] { "unity_stage", "unity_crystals", "unity_flow", "unity_leviathan", "unity_sculpture", "unity_colossus", "unity_tidal_cathedral", "unity_orbit_foundry" };
 
             // Frames go to Trippin through the shared-memory file it passes
             // (FrameExporter) — no Spout/Syphon, the same on every platform.

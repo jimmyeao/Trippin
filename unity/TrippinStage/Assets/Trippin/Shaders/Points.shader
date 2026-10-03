@@ -7,6 +7,7 @@ Shader "Trippin/Points"
     {
         _Size ("Size", Float) = 0.07
         _Gain ("Gain", Float) = 0.5
+        _Spark ("Hit Flare", Float) = 1.0
     }
     SubShader
     {
@@ -24,7 +25,7 @@ Shader "Trippin/Points"
             #include "TrippinCommon.hlsl"
 
             StructuredBuffer<float4> _Pos;
-            float _Size, _Gain;
+            float _Size, _Gain, _Spark;
 
             struct V { float4 pos : SV_POSITION; float2 q : TEXCOORD0; float3 col : TEXCOORD1; };
 
@@ -43,7 +44,7 @@ Shader "Trippin/Points"
                 float3 right = UNITY_MATRIX_V[0].xyz;
                 float3 up = UNITY_MATRIX_V[1].xyz;
                 // Hats: a scattered subset of particles flares on each hit.
-                float spark = step(0.82, frac(h * 7.0 + floor(_TBeat * 2.0) * 0.37)) * _THits.w;
+                float spark = step(0.82, frac(h * 7.0 + floor(_TBeat * 2.0) * 0.37)) * _THits.w * _Spark;
                 float size = _Size * (0.6 + 0.8 * h) * (1.0 + 2.0 * spark);
                 float3 w = pd.xyz + (right * q.x + up * q.y) * size;
                 o.pos = TransformWorldToHClip(w);
