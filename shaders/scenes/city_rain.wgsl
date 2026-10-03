@@ -1,7 +1,7 @@
-// Rainy neon city street at night: a corridor of buildings with glowing signs
-// and lit windows, mirrored in the wet asphalt, rain streaking through the
-// haze. The camera drifts down the street on the tempo clock; the neon
-// breathes with the music and a few signs flicker on the beat.
+// Neon city street at night: a corridor of buildings with glowing signs
+// and lit windows, mirrored in the wet asphalt. The camera drifts down
+// the street on the tempo clock; the neon breathes with the music and a
+// few signs flicker on the beat.
 
 // Wall facade at a point on a wall plane (z down the street, y up from the
 // road, side = -1 left / +1 right). Returns the emissive + lit colour.
@@ -73,15 +73,12 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         refl *= 0.5 + 0.2 * rip;
         let wet = 0.55 + 0.45 * smoothstep(0.0, 8.0, hit.z - ro.z);
         col = vec3<f32>(0.012, 0.013, 0.02) + refl * wet * 0.55;
-        // Raindrop splashes: sparse specks twinkling on the surface.
-        let sp = hash21(floor(vec2<f32>(hit.x * 14.0, hit.z * 14.0 - u.time * 14.0)));
-        col += vec3<f32>(0.5, 0.55, 0.6) * step(0.985, sp) * 0.25 * wet;
     } else if t_wall2 < 1e4 {
         dist = t_wall2;
         let hit = ro + rd * t_wall2;
         col = wall_light(hit.z, hit.y, sign(rd.x));
     } else {
-        // Up: city glow fading into a rainy sky.
+        // Up: city glow fading into a dark sky.
         col = mix(vec3<f32>(0.05, 0.03, 0.08), vec3<f32>(0.005, 0.005, 0.012), clamp(rd.y * 2.0, 0.0, 1.0));
     }
 
@@ -89,23 +86,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let end_glow = exp(-abs(p.x) * 3.5) * smoothstep(0.5, -0.1, p.y) * (0.3 + 0.25 * u.intensity);
     col += vec3<f32>(0.5, 0.35, 0.5) * end_glow * 0.4;
 
-    // Rain haze with distance.
+    // Haze with distance — the far end softens into the city glow.
     col = mix(col, vec3<f32>(0.04, 0.035, 0.06), smoothstep(10.0, 45.0, dist) * 0.85);
-
-    // Rain streaks: slanted dashes in two parallax layers, denser and faster
-    // when the track drives.
-    let speed = (8.0 + 6.0 * u.energy);
-    for (var i = 0; i < 2; i++) {
-        let fi = f32(i) + 1.0;
-        let cells = 90.0 * fi;
-        // Direction: the wind (rain slant) swings side to side. The fall
-        // rides the smooth high clock (raw energy here made it lurch).
-        let cx = floor((p.x + p.y * 0.2 * sin(u.clock4.x * 0.02)) * cells);
-        // p.y grows DOWN the screen: subtract time so the streaks fall.
-        let ry = fract(p.y * 2.2 * fi - u.clock4.w * 5.0 / fi + hash21(vec2<f32>(cx, fi * 4.0)));
-        let dash = step(0.5, hash21(vec2<f32>(cx, fi))) * smoothstep(0.12, 0.0, abs(ry - 0.5)) * 0.12 / fi;
-        col += vec3<f32>(0.5, 0.6, 0.7) * dash * (0.4 + 0.6 * u.intensity);
-    }
 
     col = pow(col, vec3<f32>(1.25)) * 0.95;
     return vec4<f32>(col, 1.0);
