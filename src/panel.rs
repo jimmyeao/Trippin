@@ -188,6 +188,8 @@ pub struct Status {
     pub bars_total: u32,
     pub clip: Option<String>,
     pub blackout: bool,
+    /// Live strobe gate (the Z key / timeline cue share it).
+    pub strobe: bool,
     pub fullscreen: bool,
     /// The post effect actually on screen (the auto-pilot's pick in auto mode).
     pub fx: Fx,
@@ -1433,7 +1435,7 @@ fn inspector_body(
         segmented_wide(
             ui,
             &mut s.phrase_bars,
-            &[(4u32, "4"), (8, "8"), (16, "16"), (32, "32")],
+            &[(2u32, "2"), (4, "4"), (8, "8"), (16, "16"), (32, "32")],
         );
         ctl_row(ui, "Dancer", |ui| {
             // Button first via right-to-left so a long clip name can't push
@@ -1723,7 +1725,8 @@ fn pads_view(
         && s.brand_name_on
         && !(s.brand_name.trim().is_empty() && s.brand_handles.trim().is_empty());
     let ticker_live = s.ticker_on && !s.ticker_text.trim().is_empty();
-    let pads: [(Action, &str, String, PadKind, bool); 12] = [
+    let manual = s.mode == Mode::Manual;
+    let pads: [(Action, &str, String, PadKind, bool); 16] = [
         (
             Action::NextScene,
             "next scene",
@@ -1837,17 +1840,61 @@ fn pads_view(
             PadKind::Neutral,
             ticker_live,
         ),
+        (
+            Action::Strobe,
+            "strobe",
+            if st.strobe {
+                "on — tap to kill".to_string()
+            } else {
+                "flashes on drum hits".to_string()
+            },
+            PadKind::Warn,
+            st.strobe,
+        ),
+        (
+            Action::ToggleRandom,
+            "scene order",
+            if s.random_order { "random" } else { "in order" }.to_string(),
+            PadKind::Neutral,
+            s.random_order,
+        ),
+        // Manual is a toggle like hold: lit while manual, tap again to
+        // release back to Auto.
+        (
+            if manual { Action::ModeAuto } else { Action::ModeManual },
+            "manual mode",
+            if manual {
+                "on — tap for auto".into()
+            } else {
+                "tap: nothing auto-cuts".into()
+            },
+            PadKind::Hold,
+            manual,
+        ),
+        (
+            Action::MarkPhrase,
+            "phrase start",
+            format!("this beat = bar 1 of {}", s.phrase_bars),
+            PadKind::Warn,
+            false,
+        ),
     ];
     let pad_w = ((ui.available_width() - 3.0 * 10.0) / 4.0).max(100.0);
-    // Fixed 88px pads — leftover height belongs to the previews (B1).
-    let pad_h = 88.0;
+    // Pads fill what's left under the previews, up to 88px; on a short
+    // window they shrink rather than letting the last row clip (B1).
+    let pad_h = ((ui.available_height() - 3.0 * 6.0) / 4.0).clamp(56.0, 88.0);
     for row in pads.chunks(4) {
         ui.horizontal(|ui| {
             for (a, label, sub, kind, active) in row {
-                // The hold pad fires ModeAuto to release, but its badge
-                // stays the hold key.
+                // Toggle pads fire ModeAuto to release, but their badges
+                // stay the enter key (hold → H, manual → M). The two states
+                // are disjoint, so `manual` tells them apart.
                 let key_of = if *a == Action::ModeAuto {
-                    &Action::ModeStatic
+                    if manual {
+                        &Action::ModeManual
+                    } else {
+                        &Action::ModeStatic
+                    }
                 } else {
                     a
                 };
