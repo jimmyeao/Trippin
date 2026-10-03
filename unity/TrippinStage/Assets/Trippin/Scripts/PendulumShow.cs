@@ -28,7 +28,8 @@ namespace TrippinStage
         {
             float gain = rx.Gain();
             float amp = (0.35f + 0.55f * rx.bassFast + 0.2f * rx.kick) * (1f - 0.6f * rx.tension) * (1f + 0.8f * rx.impact);
-            float basePhase = Mathf.PI * 2f * rx.clk / 32f + 0.4f * Mathf.Sin(rx.phrase);
+            // One full wave cycle per 96 clock beats (~45 s at a steady groove; faster as the track builds).
+            float basePhase = Mathf.PI * 2f * rx.clk / 96f + 0.4f * Mathf.Sin(rx.phrase);
             _rods.Set(N, new Vector3(-16f, Top, 0f), new Vector3(16f, Top, 0f), Kit.Hue(0.6f), gain * 0.8f, 0.07f);
             for (int i = 0; i < N; i++)
             {

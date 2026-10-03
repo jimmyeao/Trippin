@@ -34,7 +34,7 @@ namespace TrippinStage
 
         protected override void Frame(ShowState s, float dt)
         {
-            float gain = rx.Gain(0.5f, 1.35f);
+            float gain = rx.Gain(0.35f, 1.6f);
             float amp = (7f + 4f * rx.bassSlow + 5f * rx.bassFast + 6f * rx.impact) * (1f - 0.55f * rx.tension);
             _m.SetFloat("_Amp", amp);
             _m.SetFloat("_Scroll", rx.clk * 4f);

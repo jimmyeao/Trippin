@@ -70,7 +70,8 @@ Shader "Trippin/WireSurface"
                 }
                 float2 q = xz / float2(_SizeX, _SizeZ) + 0.5;
                 float n1 = _P0.x, m1 = _P0.y;
-                return _Amp * (cos(n1 * PI * q.x) * cos(m1 * PI * q.y) - cos(m1 * PI * q.x) * cos(n1 * PI * q.y));
+                const float kPi = 3.14159265;
+                return _Amp * (cos(n1 * kPi * q.x) * cos(m1 * kPi * q.y) - cos(m1 * kPi * q.x) * cos(n1 * kPi * q.y));
             }
 
             V vert(A i)

@@ -37,10 +37,11 @@ namespace TrippinStage
                 z -= Mathf.Floor(z);
                 z = Far * (1f - z);
                 float near = 1f - z / Far;
+                float life = Mathf.Clamp01(z / 12f) * Mathf.Clamp01((Far - z) / 14f); // fade at both ends so the wrap never pops
                 float len = stretch * (0.3f + near) * (0.4f + Kit.H(i, 5));
                 var p0 = new Vector3(Mathf.Cos(a) * r + cx, Mathf.Sin(a) * r + cy, z);
                 var p1 = p0 + new Vector3(0f, 0f, len);
-                _beams.Set(i, p0, p1, Kit.Hue(0.4f + 0.3f * Kit.H(i, 7)), gain * (0.3f + 0.9f * near) * (0.5f + Kit.H(i, 6)));
+                _beams.Set(i, p0, p1, Kit.Hue(0.4f + 0.3f * Kit.H(i, 7)), gain * (0.3f + 0.9f * near) * (0.5f + Kit.H(i, 6)) * life);
             }
             rig.Move(cam, new Vector3(0f, 0f, 0f), new Vector3(cx * 0.5f, cy * 0.5f, 50f), dt, 6f);
             cam.transform.rotation = cam.transform.rotation * Quaternion.AngleAxis(4f * Mathf.Sin(rx.phrase), Vector3.forward);

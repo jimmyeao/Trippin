@@ -35,7 +35,7 @@ namespace TrippinStage
 
         protected override void Frame(ShowState s, float dt)
         {
-            float gain = rx.Gain(0.5f, 1.35f);
+            float gain = rx.Gain(0.35f, 1.6f);
             float amp = (0.35f + 0.5f * rx.bassSlow + 0.45f * rx.bassFast + 0.5f * rx.impact) * (1f - 0.5f * rx.tension);
             _m.SetFloat("_Amp", amp);
             _m.SetFloat("_Phase", rx.clk * 0.35f);

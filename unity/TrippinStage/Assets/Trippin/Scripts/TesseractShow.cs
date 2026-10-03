@@ -41,7 +41,8 @@ namespace TrippinStage
                 _v[i] = x; _v[j] = y;
             }
             w = _v[3];
-            float f = scale / (d - _v[3]);
+            // d - w can approach zero (w reaches +-2): keep it clear of the 4D eye so no vertex flies off.
+            float f = scale / Mathf.Max(d - _v[3], 1.2f);
             return new Vector4(_v[0] * f, _v[1] * f, _v[2] * f, 0f);
         }
 
@@ -50,13 +51,13 @@ namespace TrippinStage
             for (int k = 0; k < 6; k++)
                 _a[k] = Rate[k] * rx.clk + 0.6f * Mathf.Sin(rx.phrase * (1f + k * 0.13f) + k);
             float gain = rx.Gain();
-            float d = 2.4f - 0.55f * rx.bassFast;
+            float d = 3.4f - 0.7f * rx.bassFast;
             float size = 8f * (1f + 0.22f * rx.bassFast + 0.12f * rx.kick) * (1f - 0.4f * rx.tension) * (1f + 0.5f * rx.impact);
             var centre = new Vector3(0f, 10f, 0f);
             int n = 0;
             for (int layer = 0; layer < 2; layer++)
             {
-                float scale = size * (layer == 0 ? 1f : 0.55f) * (d - 0.4f);
+                float scale = size * (layer == 0 ? 1f : 0.55f) * (d - 0.6f);
                 for (int v = 0; v < 16; v++)
                     for (int b = 0; b < 4; b++)
                     {

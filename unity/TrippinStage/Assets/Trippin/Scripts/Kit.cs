@@ -98,7 +98,7 @@ namespace TrippinStage
         /// Luminance gain shared by the kit shows: follows the music's
         /// loudness, dips through a build (the held breath) and flares on the
         /// drop. `lo`/`hi` bound it for quiet and loud passages.
-        public float Gain(float lo = 0.5f, float hi = 1.35f)
+        public float Gain(float lo = 0.6f, float hi = 1.5f)
         {
             return Mathf.Lerp(lo, hi, lum) * (1f - 0.35f * tension) * (1f + 1.2f * impact);
         }

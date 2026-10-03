@@ -43,7 +43,7 @@ namespace TrippinStage
             float m = Mathf.SmoothStep(0f, 1f, (rx.beat - _start) / 2f);
             float n = Mathf.Lerp(Modes[_prev, 0], Modes[_cur, 0], m) + 0.18f * rx.midFast;
             float mm = Mathf.Lerp(Modes[_prev, 1], Modes[_cur, 1], m) + 0.12f * rx.highFast;
-            float gain = rx.Gain(0.55f, 1.4f);
+            float gain = rx.Gain(0.35f, 1.6f);
             _m.SetFloat("_Amp", (3f + 3f * rx.bassFast + 4f * rx.impact) * (1f - 0.6f * rx.tension));
             _m.SetFloat("_Intensity", 0.8f * gain);
             _m.SetFloat("_Hue", 0.45f + 0.1f * Mathf.Sin(rx.phrase * 0.5f));
