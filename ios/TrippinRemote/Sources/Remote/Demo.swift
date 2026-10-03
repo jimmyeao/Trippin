@@ -62,8 +62,10 @@ final class DemoServer {
     static let clips = ["hiphop_01", "house_shuffle", "popping", "vogue", "breakdance_toprock", "stock_amber"]
     static let palettes = ["rainbow", "party", "ocean", "forest", "sunset", "lava", "fire", "ice",
                            "cyber", "magenta", "pastel", "gold"]
-    static let tracks = [("Bicep", "Glue"), ("Fred again..", "Delilah"), ("Peggy Gou", "Nanana"),
-                         ("Charlotte de Witte", "Overdrive")]
+    /// Made-up artists and titles: the demo appears in store screenshots,
+    /// so no real artists' names.
+    static let tracks = [("Nightshift Collective", "Neon Tides"), ("Kaia Ro", "After Hours"),
+                         ("Low Orbit", "Signal Bloom"), ("Mara Venn", "Glass Horizon")]
     /// Ids and labels as `config::Action` serialises them.
     static let actions: [(String, String)] = [
         ("NextScene", "Next scene"), ("PrevScene", "Previous scene"),
@@ -234,9 +236,15 @@ final class DemoServer {
         }
     }
 
-    /// A stand-in thumbnail: layered glows in the palette of the scene's
-    /// name hash, so tiles look like a visuals grid rather than grey boxes.
+    /// Real renders of the demo scenes (`trippin --snap`, 480x270 JPEG,
+    /// in Sources/DemoThumbs) — the generated glow is the fallback for a
+    /// scene without one.
     private func thumb(_ scene: String) {
+        if let url = Bundle.main.url(forResource: scene, withExtension: "jpg"),
+           let data = try? Data(contentsOf: url) {
+            emit(["type": "thumb", "scene": scene, "png_b64": data.base64EncodedString()])
+            return
+        }
         let seed = scene.unicodeScalars.reduce(UInt32(2166136261)) { ($0 ^ $1.value) &* 16777619 }
         let size = CGSize(width: 320, height: 180)
         let img = UIGraphicsImageRenderer(size: size).image { ctx in

@@ -41,13 +41,20 @@ final class RemoteFlowTests: XCTestCase {
 
     var isPhone: Bool { app.tabBars.firstMatch.exists }
 
-    /// iPhone: tab bar; iPad: the segmented page picker (Scenes is always on screen).
+    /// iPhone: tab bar; iPad: the segmented page picker (Scenes is always on
+    /// screen). Taps until the page's marker shows — a segment tap can be
+    /// swallowed right after a rotation.
     func page(_ name: String) {
-        if isPhone {
-            app.tabBars.buttons[name].tap()
-        } else if name != "Scenes" {
-            app.segmentedControls.buttons[name].tap()
+        let marker = app.descendants(matching: .any)["page.\(name.lowercased())"]
+        for _ in 0..<3 {
+            if isPhone {
+                app.tabBars.buttons[name].tap()
+            } else if name != "Scenes" {
+                app.segmentedControls.buttons[name].tap()
+            }
+            if name == "Scenes" || marker.waitForExistence(timeout: 2) { return }
         }
+        XCTFail("page \(name) didn't show")
     }
 
     func connectManually(pin typed: String?) {
@@ -243,5 +250,117 @@ final class RemoteFlowTests: XCTestCase {
         wait(app.buttons["pad.ModeManual"], value: "on", timeout: 2, "Manual lit")
         wait(app.buttons["pad.ModeAuto"], value: "off", timeout: 2, "Auto unlit")
         shot("50 toggles")
+    }
+
+    // MARK: App Store material
+
+    /// Staged screens for the App Store listing, from the demo. iPhone in
+    /// portrait; iPad in landscape (the split view is its best side) plus
+    /// one portrait. Run with the status bar overridden (9:41, full).
+    func test7_StoreShots() {
+        app.launchArguments = ["-uitestReset"]
+        app.launch()
+        app.buttons["demo"].tap()
+        wait(app.descendants(matching: .any)["link"], value: "Live", timeout: 5, "demo connected")
+        let iPad = !isPhone
+        if iPad { XCUIDevice.shared.orientation = .landscapeLeft; sleep(1) }
+
+        // Something queued, strobe lit: a live-looking show.
+        page("Scenes")
+        let next = app.descendants(matching: .any)["scene.synthwave"]
+        if !next.exists { app.swipeUp() }
+        wait(next, timeout: 5, "synthwave tile")
+        next.press(forDuration: 0.6)
+        wait(next, value: "next", timeout: 3, "synthwave queued")
+        if !iPad { app.swipeDown() }
+        let first = app.descendants(matching: .any)["scene.laser_show"]
+        wait(first, value: "thumb", timeout: 10, "thumbnails loaded")
+        sleep(2)
+        if isPhone { shot("store-02-scenes") }
+
+        page("Perform")
+        let strobe = wait(app.buttons["pad.Strobe"], "strobe pad")
+        strobe.tap()
+        wait(strobe, value: "on", timeout: 2, "strobe on")
+        sleep(1)
+        shot("store-01-perform")
+
+        page("Look")
+        sleep(1)
+        shot("store-03-look")
+
+        page("Dancer")
+        sleep(1)
+        shot("store-04-dancer")
+
+        page("Timeline")
+        let play = app.buttons.matching(NSPredicate(format: "label == 'Play'")).firstMatch
+        if play.exists { play.tap() }
+        sleep(3)
+        shot("store-05-timeline")
+
+        if iPad {
+            XCUIDevice.shared.orientation = .portrait
+            sleep(1)
+            page("Perform")
+            sleep(1)
+            shot("store-06-portrait")
+        }
+        XCUIDevice.shared.orientation = .portrait
+    }
+
+    /// A paced tour for the App Store preview video: the host screen-records
+    /// the Simulator while this runs, then trims from the first Perform frame.
+    /// TRIPPIN_PREVIEW_LANDSCAPE=1 runs it in landscape (iPad).
+    func test8_PreviewTour() {
+        app.launchArguments = ["-uitestReset"]
+        app.launch()
+        if ProcessInfo.processInfo.environment["TRIPPIN_PREVIEW_LANDSCAPE"] == "1" {
+            XCUIDevice.shared.orientation = .landscapeLeft
+        }
+        app.buttons["demo"].tap()
+        wait(app.descendants(matching: .any)["link"], value: "Live", timeout: 5, "demo connected")
+        let beat: UInt32 = 1_200_000 // µs between moves: a calm, readable pace
+        page("Perform")
+        usleep(beat * 2)
+        app.buttons["pad.Strobe"].tap(); usleep(beat * 2)
+        app.buttons["pad.Strobe"].tap(); usleep(beat)
+        app.buttons["pad.NextScene"].tap(); usleep(beat * 2)
+
+        page("Scenes")
+        for name in ["synthwave", "laser_show", "ocean"] {
+            let tile = app.descendants(matching: .any)["scene.\(name)"]
+            if tile.waitForExistence(timeout: 2) { tile.tap() }
+            usleep(beat * 2)
+        }
+        let q = app.descendants(matching: .any)["scene.stage_rig"]
+        if q.waitForExistence(timeout: 2) { q.press(forDuration: 0.6) }
+        usleep(beat * 2)
+
+        page("Look")
+        usleep(beat)
+        for p in ["sunset", "cyber", "ocean"] {
+            let chip = app.buttons["palette.\(p)"]
+            if chip.waitForExistence(timeout: 2) { chip.tap() }
+            usleep(beat)
+        }
+        let kaleido = app.buttons["Kaleido6"]
+        if kaleido.exists { kaleido.tap(); usleep(beat * 2) }
+
+        page("Dancer")
+        usleep(beat)
+        for c in ["house shuffle", "vogue"] {
+            let b = app.buttons[c]
+            if b.waitForExistence(timeout: 2) { b.tap() }
+            usleep(beat * 2)
+        }
+
+        page("Timeline")
+        let play = app.buttons.matching(NSPredicate(format: "label == 'Play'")).firstMatch
+        if play.exists { play.tap() }
+        usleep(beat * 3)
+        page("Perform")
+        usleep(beat * 2)
+        XCUIDevice.shared.orientation = .portrait
     }
 }

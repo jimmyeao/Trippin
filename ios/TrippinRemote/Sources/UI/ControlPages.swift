@@ -80,6 +80,7 @@ struct DancerView: View {
                     RemoteToggle(title: "Trails", key: "dancer_trails", value: s.dancerTrails)
                 }
                 SectionHeader(title: "Clips")
+                    .accessibilityIdentifier("page.dancer")
                 if conn.info.clips.isEmpty {
                     Text("No dancer clips on this Trippin.").foregroundStyle(Theme.muted)
                 }
@@ -110,6 +111,7 @@ struct LookView: View {
         ScrollView {
             VStack(spacing: 14) {
                 SectionHeader(title: "Palette")
+                    .accessibilityIdentifier("page.look")
                 FlowLayout(spacing: 8) {
                     ForEach(conn.info.palettes, id: \.self) { p in
                         Chip(title: p, selected: s.palette == p) { conn.set("palette", p) }
@@ -239,6 +241,7 @@ struct TransportView: View {
                     Pad(title: "Back to start", height: 52) { conn.transport("seek", pos: 0) }
                 }
                 SectionHeader(title: "Timeline")
+                    .accessibilityIdentifier("page.timeline")
                 HStack(spacing: 10) {
                     ActionPad(key: "TimelinePlay")
                     ActionPad(key: "TimelineRecord")
