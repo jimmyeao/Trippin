@@ -35,6 +35,7 @@ namespace TrippinStage
         readonly float[] _hazeBase = { 0.08f, 0.05f };
         MaterialPropertyBlock _mpb;
         float _bassSlow, _midSlow, _calmSlow, _farWas;
+        float _impS; // DropDirector.Impact with a short attack (see Update)
         Vector3 _camPos, _camLook;
         bool _camSet;
 
@@ -171,11 +172,18 @@ namespace TrippinStage
             _calmSlow += (s.calm - _calmSlow) * k1;
 
             float tn = Mathf.SmoothStep(0f, 1f, DropDirector.Tension);
-            float imp = DropDirector.Impact;
+            // Impact jumps 0 -> 1 in one frame; fed straight into fold depth (x1.8) and
+            // brightness it popped the whole sky in a single frame (M2 render: frame
+            // change 33 vs a 0.34 median). A ~0.25 s attack keeps the flare but eases it in.
+            float impT = DropDirector.Impact;
+            _impS = impT > _impS ? Mathf.Lerp(_impS, impT, 1f - Mathf.Exp(-dt * 12f)) : impT;
+            float imp = _impS;
             float phrase = beat / 64f * Mathf.PI * 2f;
 
-            // Brighter in a breakdown, subdued while the drums play.
-            float level = Mathf.Lerp(0.55f, 1f, _calmSlow) * (1f - 0.35f * tn) * (1f + 1.2f * imp);
+            // Brighter in a breakdown, subdued while the drums play. A breakdown is also
+            // when Tension builds, so a 0.35 tension dim cancelled the calm boost (only
+            // ~15% brighter than the drums on the M2): weaker dim, wider calm range.
+            float level = Mathf.Lerp(0.45f, 1f, _calmSlow) * (1f - 0.15f * tn) * (1f + 0.7f * imp);
             float hueBase = 0.45f + 0.06f * Mathf.Sin(phrase * 0.5f);
             float fold = (0.45f + 0.9f * Mathf.Clamp01(_bassSlow)) * (1f - 0.5f * tn) * (1f + 0.8f * imp);
             for (int i = 0; i < Curtains; i++)
@@ -186,7 +194,7 @@ namespace TrippinStage
                 float height = (15f + 8f * Mathf.Clamp01(_midSlow) + 4f * u + 5f * tn);
                 _mpb.Clear();
                 _mpb.SetFloat("_Hue", hueBase + u * 0.18f);
-                _mpb.SetFloat("_Intensity", 0.42f * level);
+                _mpb.SetFloat("_Intensity", 0.55f * level);
                 _mpb.SetFloat("_Phase", phase);
                 _mpb.SetFloat("_Fold", fold);
                 _mpb.SetFloat("_Height", height);
@@ -195,7 +203,7 @@ namespace TrippinStage
                 _mpb.SetFloat("_Seed", i * 0.37f);
                 _mpb.SetFloat("_Mirror", 0f);
                 _cur[i].SetPropertyBlock(_mpb);
-                _mpb.SetFloat("_Intensity", 0.42f * level * 0.3f);
+                _mpb.SetFloat("_Intensity", 0.55f * level * 0.3f);
                 _mpb.SetFloat("_Mirror", 1f);
                 _curMir[i].SetPropertyBlock(_mpb);
             }
