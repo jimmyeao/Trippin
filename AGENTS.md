@@ -80,6 +80,7 @@ overlays.
 - **Don't** force-push shared branches, rewrite pushed history, or delete
   someone else's branch.
 - **A new Unity show needs a new engine release.** `engine.rs::ASSET` pins a zip; an installed player that predates the show ignores its name (`ShowManager` keeps the current show), so Trippin would cut to `unity_<x>` and display a different show. Add the show in `StageBuilder`, a stub `shaders/scenes/unity_<x>.wgsl`, then publish `unity-engine-vN` (unity/README.md) before it ships.
+- **`DropDirector.Impact` steps 0→1 in one frame.** Geometry or brightness driven straight from it pops at the drop (aurora measured a frame change of 33 against a 0.34 median). Give the show its own ~0.25 s attack and instant release (`AuroraShow._impS`, `1-exp(-12 dt)`), and keep the peak flare modest. `Tension` is already an integrator and needs no smoothing. Also check in a recording that a build's contraction is actually visible on screen (prism's was cancelled by the camera creeping in), and that a calm boost isn't cancelled by the tension dim (a breakdown is exactly when Tension is high).
 - **Unity instanced draws need instancing on the material asset at build
   time** (`StageBuilder`: `mat.enableInstancing = true`). Enabling it only
   on a runtime copy lets the build strip the shader's instancing variant
