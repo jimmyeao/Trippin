@@ -38,6 +38,7 @@ namespace TrippinStage
         void Update()
         {
             var s = TrippinLink.State;
+            DropDirector.Tick(s, Time.deltaTime);
             string want;
             if (_forced != null) want = _forced;
             else if (TrippinLink.Live) want = s.scene;
