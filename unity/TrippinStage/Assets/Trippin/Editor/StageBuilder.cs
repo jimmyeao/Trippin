@@ -154,6 +154,7 @@ namespace TrippinStage.EditorTools
             var co = colGo.AddComponent<ColossusShow>();
             co.cam = cam;
             co.androidMat = Mat("Trippin/Android", "Android");
+            co.headMat = Mat("Trippin/AndroidHead", "AndroidHead");
             co.glowMat = Mat("Trippin/Backglow", "Backglow");
 
             mgr.shows = new[] { stage, crystals, flowGo, levGo, sculptGo, colGo };

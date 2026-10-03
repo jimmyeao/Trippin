@@ -4,9 +4,9 @@
 //    dark chrome, with glowing palette seams between them.
 //  - Kicks push the panels out along the normal (each panel its own
 //    amount), staggered from the feet up like a wave; a drop bursts them.
-//  - Light flows up the seams on the energy clock; the visor band on the
-//    helmet glows with the bass. The head turns (vertices near the head
-//    rotate about the neck), swinging with the phrase.
+//  - Light flows up the seams on the energy clock.
+//  - Skinned: ColossusShow poses an 11-bone skeleton (_Bones) each frame;
+//    the sculpted head is a separate mesh (AndroidHead.shader).
 Shader "Trippin/Android"
 {
     Properties
@@ -28,8 +28,9 @@ Shader "Trippin/Android"
             CBUFFER_START(UnityPerMaterial)
             float _SeamGain, _Mirror;
             CBUFFER_END
-            float4 _Head;          // xyz head centre (object space), w head yaw (radians)
-            float _Panel, _PanelWave, _Flow, _Visor, _FloorY, _Calm;
+            // Skeleton (ColossusShow): rest-pose object space -> posed.
+            float4x4 _Bones[11];
+            float _Panel, _PanelWave, _Flow, _FloorY, _Calm;
 
             #define CELLS 7.0
 
@@ -58,19 +59,7 @@ Shader "Trippin/Android"
                 }
             }
 
-            // Head turn: rotate about the neck, fading out below it.
-            float3 turnHead(float3 p)
-            {
-                float3 neck = _Head.xyz - float3(0, 0.075, 0);
-                float w = saturate(1.0 - (length(p - _Head.xyz) - 0.07) / 0.04) * saturate((p.y - neck.y + 0.02) / 0.04);
-                float a = _Head.w * w;
-                float c = cos(a), s = sin(a);
-                float3 q = p - neck;
-                q.xz = float2(c * q.x + s * q.z, -s * q.x + c * q.z);
-                return neck + q;
-            }
-
-            struct A { float4 pos : POSITION; float3 n : NORMAL; };
+            struct A { float4 pos : POSITION; float3 n : NORMAL; float4 bi : TEXCOORD1; float4 bw : TEXCOORD2; };
             struct V { float4 pos : SV_POSITION; float3 n : TEXCOORD0; float3 wp : TEXCOORD1; float3 op : TEXCOORD2; float push : TEXCOORD3; };
 
             V vert(A i)
@@ -84,9 +73,16 @@ Shader "Trippin/Android"
                 float front = exp(-(p.y - _PanelWave) * (p.y - _PanelWave) * 30.0);
                 float push = _Panel * (0.35 + 0.65 * h) * (0.4 + 0.6 * front);
                 p += i.n * push * 0.012;
-                float3 n = i.n;
-                float3 pt = turnHead(p);
-                n = normalize(turnHead(p + n * 0.01) - pt);
+                // Linear blend skinning (two bones per vertex from the tool;
+                // four slots read, unused weights are zero).
+                float3 pt = 0, n = 0;
+                [unroll] for (int k = 0; k < 4; k++)
+                {
+                    float4x4 B = _Bones[(uint)i.bi[k]];
+                    pt += i.bw[k] * mul(B, float4(p, 1)).xyz;
+                    n += i.bw[k] * mul((float3x3)B, i.n);
+                }
+                n = normalize(n);
                 o.wp = TransformObjectToWorld(pt);
                 o.pos = TransformWorldToHClip(o.wp);
                 o.n = TransformObjectToWorldNormal(n);
@@ -133,13 +129,6 @@ Shader "Trippin/Android"
                 float flow = 0.5 + 0.5 * sin(i.op.y * 40.0 - _Flow * 6.2831853);
                 float glow = (0.6 + 1.0 * flow * flow) * (1.0 - 0.35 * _Calm) + 30.0 * i.push;
                 col += TPalette(0.35 + i.op.y * 0.3) * seam * glow * _SeamGain;
-                // Visor: a band across the front of the helmet.
-                float3 hp = i.op - _Head.xyz;
-                float onHead = step(length(hp * float3(1.0, 0.8, 1.0)), 0.075) * step(0.0, hp.z);
-                // Low cameras see the helmet from below: sit the band a little
-                // under the equator so it reads as eyes, not a cap.
-                float band = smoothstep(0.016, 0.006, abs(hp.y + 0.012));
-                col += TPalette(0.05) * onHead * band * (1.0 + 2.5 * _Visor);
                 if (_Mirror > 0.5)
                 {
                     clip(_FloorY - i.wp.y);

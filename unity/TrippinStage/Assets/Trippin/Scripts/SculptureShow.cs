@@ -112,7 +112,7 @@ namespace TrippinStage
         }
 
         // Unit icosphere, `n` subdivisions (6 -> 40962 vertices).
-        static Mesh IcoSphere(int n)
+        internal static Mesh IcoSphere(int n)
         {
             float t = (1f + Mathf.Sqrt(5f)) / 2f;
             var v = new List<Vector3>
