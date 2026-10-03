@@ -1,0 +1,11 @@
+{
+  "name": "band_drummer",
+  "fps": 30,
+  "frames": 196,
+  "beats": 12,
+  "width": 912,
+  "height": 512,
+  "energy": 0.6,
+  "source": "Mixkit: https://mixkit.co/free-stock-video/silhouette-of-a-drummer-playing-on-a-green-background-44129/",
+  "accent": 0.551
+}

@@ -29,3 +29,12 @@ Mixkit (Mixkit Stock Video Free License):
 - `stock_floor`: https://mixkit.co/free-stock-video/urban-dancer-dancing-breakdance-3628/ (AI-matted)
 - `stock_glide`: https://mixkit.co/free-stock-video/breakdancer-practicing-488/ (AI-matted)
 - `stock_storm`: https://mixkit.co/free-stock-video/young-woman-dancing-and-spinning-in-a-dark-studio-39881/ (AI-matted)
+
+Musicians (`band_*`; `--matte bg`, looped at the footage's own tempo with
+`--bpm auto` so their hits land on the live beat grid):
+
+- `band_drummer`: https://mixkit.co/free-stock-video/silhouette-of-a-drummer-playing-on-a-green-background-44129/
+- `band_drummer_side`: https://mixkit.co/free-stock-video/shadow-of-a-drummer-playing-on-a-green-background-44128/
+- `band_guitar`: https://mixkit.co/free-stock-video/silhouette-of-a-rock-musician-playing-on-a-red-background-44154/
+- `band_guitar_seat`: https://mixkit.co/free-stock-video/silhouette-of-a-guitarist-playing-sitting-on-a-bench-44167/
+- `band_keys`: https://mixkit.co/free-stock-video/shadow-of-a-keyboardist-playing-on-a-blue-background-44148/
