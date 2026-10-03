@@ -42,6 +42,13 @@ pub struct Director {
     /// starts (every mode except Manual), or set by a "play next" click.
     /// Consumed by the cut; re-picked afterwards.
     pub next: Option<usize>,
+    /// `next` came from the operator's "play next" — the mood fitter must
+    /// not overwrite a human's pick.
+    pub next_queued: bool,
+    /// Beat pos of the last cut the director made (any kind). Event cuts
+    /// need ≥4 beats of clear air after it — a busy run of musical events
+    /// must not strobe the scene list.
+    last_cut_pos: f64,
     // --- Drum-fill detection ---------------------------------------------
     // The bar grid is a skeleton, not a cage: a fill is a burst of onsets
     // far above the section's baseline density. While one runs the render
@@ -65,6 +72,22 @@ pub struct Director {
     /// Read by the render loop: strobe gate while a fill plays. Scene
     /// type is checked there — the director doesn't know scene names.
     pub fill_strobe: bool,
+    // --- Free cuts --------------------------------------------------------
+    // The bar grid is a backstop, not the score: a breakdown start, an
+    // energy surge or a vocal break is a section boundary wherever it
+    // lands. Each detector has a sustained-on window plus its own
+    // refractory, and every event cut goes through `try_event_cut`'s gap.
+    /// Fast/slow energy EMAs for the surge detector.
+    energy_fast: f32,
+    energy_slow: f32,
+    /// Beat pos the energy jump was first seen (MAX = no candidate).
+    surge_since: f64,
+    /// No surge cut before this beat pos.
+    surge_cool: f64,
+    /// Beat pos the bass-out/mids-hot texture was first seen.
+    vocal_since: f64,
+    /// No vocal-break cut before this beat pos.
+    vocal_cool: f64,
 }
 
 impl Director {
@@ -90,6 +113,14 @@ impl Director {
             rng,
             pending_cut: false,
             next: None,
+            next_queued: false,
+            last_cut_pos: f64::MIN,
+            energy_fast: 0.0,
+            energy_slow: 0.5,
+            surge_since: f64::MAX,
+            surge_cool: 0.0,
+            vocal_since: f64::MAX,
+            vocal_cool: 0.0,
             beat_onset_acc: 0.0,
             beat_onset_n: 0,
             beat_idx: i64::MIN,
@@ -139,6 +170,13 @@ impl Director {
         self.pending_cut = true;
         // New scene → the next pick is stale; `update` re-picks it.
         self.next = None;
+        self.next_queued = false;
+        // A cut disarms the section detectors — nothing they were building
+        // toward belongs to the new scene.
+        self.in_fill = false;
+        self.fill_strobe = false;
+        self.surge_since = f64::MAX;
+        self.vocal_since = f64::MAX;
     }
 
     /// The scene that would play next — random (never the current one) or
@@ -168,6 +206,7 @@ impl Director {
     /// (a disabled scene would be cut away again immediately anyway).
     pub fn queue_next(&mut self, scene: usize) {
         self.next = Some(scene);
+        self.next_queued = true;
     }
 
     /// Next scene among `usable`: the queued pick if there is one, else
@@ -212,6 +251,7 @@ impl Director {
         // what's coming — in every mode that ever cuts by itself.
         if self.next.is_none() && s.mode != Mode::Manual {
             self.next = self.pick_next(usable, s.random_order);
+            self.next_queued = false;
         }
         // Two modes. With drums, intensity follows loudness *and* how hard
         // the groove is driving; in a breakdown it's capped low and follows
@@ -238,6 +278,7 @@ impl Director {
             self.next_scene(usable, s.random_order);
             self.flash = 1.0;
             self.pending_cut = false;
+            self.last_cut_pos = pos;
             ev.cut = true;
             return ev;
         }
@@ -245,6 +286,12 @@ impl Director {
         // The current scene was switched off in the playlist (or failed to compile).
         if !usable.is_empty() && !usable.contains(&self.scene) && s.mode != Mode::Manual {
             self.next_scene(usable, s.random_order);
+            self.last_cut_pos = pos;
+        }
+
+        self.update_events(f, pos, dt, enter, usable, s, &mut ev);
+        if ev.cut {
+            return ev;
         }
 
         self.update_fill(f, pos, usable, s, &mut ev);
@@ -270,12 +317,15 @@ impl Director {
         }
 
         // A drop: energy on this downbeat is well above the recent breakdown
-        // (loudness-based fallback; the groove detector handles most drops).
+        // (loudness-based fallback; the groove detector handles most drops
+        // and the surge detector catches jumps that weren't breakdowns, so
+        // this stays clear of anything already cut on).
         let drop = s.cut_on_drops
             && f.calm < 0.5
             && f.energy - self.recent_low > 0.35
             && f.energy > 0.55
-            && self.bars_in_scene >= 2;
+            && self.bars_in_scene >= 2
+            && pos - self.last_cut_pos >= 8.0;
         // Breakdowns breathe: phrases run twice as long before a cut.
         let bars = if f.calm > 0.5 { s.phrase_bars.max(1) * 2 } else { s.phrase_bars.max(1) };
         let phrase_end = self.bars_in_scene >= bars;
@@ -284,6 +334,7 @@ impl Director {
                 self.next_scene(usable, s.random_order);
                 ev.cut = true;
                 self.pending_cut = false;
+                self.last_cut_pos = pos;
             } else {
                 self.bars_in_scene = 0;
                 ev.phrase = true;
@@ -390,7 +441,114 @@ impl Director {
         {
             self.next_scene(usable, s.random_order);
             self.pending_cut = false;
+            self.last_cut_pos = pos;
             ev.cut = true;
+        }
+    }
+
+    /// Section changes off the grid: breakdown entry, energy surges and
+    /// vocal breaks. Every trigger routes through `try_event_cut`, which
+    /// enforces Auto mode, `cut_on_drops` and the one-bar/four-beat gap —
+    /// a detector arms freely but only fires through the gap.
+    fn update_events(
+        &mut self,
+        f: &Features,
+        pos: f64,
+        dt: f32,
+        entered_calm: bool,
+        usable: &[usize],
+        s: &Settings,
+        ev: &mut Events,
+    ) {
+        if ev.cut {
+            // Another path already cut this frame — the armed candidates
+            // belong to the old scene.
+            self.surge_since = f64::MAX;
+            self.vocal_since = f64::MAX;
+            return;
+        }
+        // The groove leaving — a breakdown or a vocal break — is a
+        // boundary the moment the detector commits to it.
+        if entered_calm && !f.silent {
+            self.try_event_cut(usable, s, pos, ev);
+        }
+
+        // Energy surge: the fast EMA jumping well past the slow one is a
+        // bigger section landing while the drums play (a chorus, or a
+        // second drop with no breakdown). ~1.5 beats of sustained jump,
+        // then a 24-beat refractory so a long loud section can't re-fire.
+        let kf = (dt * 3.0).min(1.0);
+        let ks = (dt * 0.12).min(1.0);
+        self.energy_fast += (f.energy - self.energy_fast) * kf;
+        self.energy_slow += (f.energy - self.energy_slow) * ks;
+        let surging = !f.silent
+            && f.calm < 0.5
+            && self.energy_fast > 0.55
+            && self.energy_fast > self.energy_slow * 1.5 + 0.1;
+        if surging {
+            if self.surge_since == f64::MAX {
+                self.surge_since = pos;
+            } else if pos - self.surge_since >= 1.5 && pos > self.surge_cool {
+                self.try_event_cut(usable, s, pos, ev);
+                if ev.cut {
+                    self.surge_cool = pos + 24.0;
+                }
+                self.surge_since = f64::MAX;
+            }
+        } else {
+            self.surge_since = f64::MAX;
+        }
+
+        // Vocal-break proxy: the groove's still on (calm low) but the bass
+        // has thinned out while the mids stay hot — a verse dropping to
+        // voice over air. Five beats of that is a section, not a breath.
+        let vocalish = !f.silent
+            && f.calm < 0.7
+            && f.lvl4[0] < 0.28
+            && f.lvl4[1] + f.lvl4[2] > 0.6;
+        if vocalish {
+            if self.vocal_since == f64::MAX {
+                self.vocal_since = pos;
+            } else if pos - self.vocal_since >= 5.0 && pos > self.vocal_cool {
+                self.try_event_cut(usable, s, pos, ev);
+                if ev.cut {
+                    self.vocal_cool = pos + 24.0;
+                }
+                self.vocal_since = f64::MAX;
+            }
+        } else {
+            self.vocal_since = f64::MAX;
+        }
+
+        if ev.cut {
+            self.surge_since = f64::MAX;
+            self.vocal_since = f64::MAX;
+        }
+    }
+
+    /// The gap every off-grid cut must clear: a full bar into the scene
+    /// and four beats since the last one.
+    fn cut_ok(&self, pos: f64) -> bool {
+        self.bars_in_scene >= 1 && pos - self.last_cut_pos >= 4.0
+    }
+
+    /// Pick + cut + bookkeeping, for every cut the director initiates.
+    fn cut(&mut self, usable: &[usize], s: &Settings, pos: f64, ev: &mut Events) {
+        self.next_scene(usable, s.random_order);
+        self.pending_cut = false;
+        self.last_cut_pos = pos;
+        ev.cut = true;
+    }
+
+    fn try_event_cut(&mut self, usable: &[usize], s: &Settings, pos: f64, ev: &mut Events) {
+        if s.mode == Mode::Auto
+            && s.cut_on_drops
+            && !usable.is_empty()
+            && !ev.cut
+            && !self.pending_cut
+            && self.cut_ok(pos)
+        {
+            self.cut(usable, s, pos, ev);
         }
     }
 }
@@ -478,5 +636,95 @@ mod tests {
         run(&mut d, &calm_fill, &mut pos, 2.0, &s);
         assert!(!d.in_fill);
         assert!(!d.fill_strobe);
+    }
+
+    /// A steady groove — energy mid, drums on, mids/bass present.
+    fn groove() -> Features {
+        let mut f = features(0.05);
+        f.energy = 0.4;
+        f.groove = 0.8;
+        f.lvl4 = [0.6, 0.4, 0.3, 0.2];
+        f
+    }
+
+    /// Settings with a long grid so the phrase clock can't explain a cut.
+    fn free_run() -> (Director, Settings, f64) {
+        let mut s = settings(Mode::Auto);
+        s.phrase_bars = 32;
+        (Director::new(), s, 0.0)
+    }
+
+    #[test]
+    fn breakdown_entry_cuts_off_grid() {
+        let (mut d, s, mut pos) = free_run();
+        run(&mut d, &groove(), &mut pos, 24.0, &s); // 6 bars, grid won't fire
+        assert!(!d.in_breakdown, "drums should end the initial breakdown");
+        // The groove detector commits to a breakdown mid-bar.
+        let mut calm_f = groove();
+        calm_f.calm = 0.8;
+        calm_f.energy = 0.25;
+        let cuts = run(&mut d, &calm_f, &mut pos, 2.0, &s);
+        assert_eq!(cuts, 1, "the breakdown landing is itself a cut point");
+    }
+
+    #[test]
+    fn energy_surge_cuts_off_grid() {
+        let (mut d, s, mut pos) = free_run();
+        run(&mut d, &groove(), &mut pos, 24.0, &s);
+        // The chorus slams in with the drums still playing — no breakdown.
+        let mut hot = groove();
+        hot.energy = 0.9;
+        let cuts = run(&mut d, &hot, &mut pos, 4.0, &s);
+        assert!(cuts >= 1, "a sustained energy jump should cut");
+        // …but a long loud section can't keep re-firing it.
+        let more = run(&mut d, &hot, &mut pos, 8.0, &s);
+        assert_eq!(more, 0, "the surge refractory must hold");
+    }
+
+    #[test]
+    fn vocal_break_cuts_off_grid() {
+        let (mut d, s, mut pos) = free_run();
+        run(&mut d, &groove(), &mut pos, 24.0, &s);
+        // Bass out, mids still hot — voice over air while the hats ride.
+        let mut vocal = groove();
+        vocal.lvl4 = [0.1, 0.5, 0.4, 0.2];
+        let cuts = run(&mut d, &vocal, &mut pos, 7.0, &s);
+        assert!(cuts >= 1, "a sustained vocal break should cut");
+    }
+
+    #[test]
+    fn event_cuts_respect_the_gap() {
+        let (mut d, s, mut pos) = free_run();
+        run(&mut d, &groove(), &mut pos, 24.0, &s);
+        let mut calm_f = groove();
+        calm_f.calm = 0.8;
+        let cuts = run(&mut d, &calm_f, &mut pos, 2.0, &s);
+        assert_eq!(cuts, 1);
+        // Fakeout: energy surges straight back — inside the 4-beat gap
+        // nothing else may cut, however hot the detector runs. (The run
+        // stays inside the gap; at +4 beats the surge could fire.)
+        let mut hot = groove();
+        hot.energy = 1.0;
+        let cuts = run(&mut d, &hot, &mut pos, 1.5, &s);
+        assert_eq!(cuts, 0, "the gap blocks back-to-back event cuts");
+    }
+
+    #[test]
+    fn events_stay_off_in_static_and_manual() {
+        for mode in [Mode::Static, Mode::Manual] {
+            let mut s = settings(mode);
+            s.phrase_bars = 32;
+            let mut d = Director::new();
+            let mut pos = 0.0;
+            run(&mut d, &groove(), &mut pos, 24.0, &s);
+            let mut calm_f = groove();
+            calm_f.calm = 0.8;
+            let mut hot = calm_f.clone();
+            hot.calm = 0.0;
+            hot.energy = 1.0;
+            let cuts = run(&mut d, &calm_f, &mut pos, 3.0, &s)
+                + run(&mut d, &hot, &mut pos, 6.0, &s);
+            assert_eq!(cuts, 0, "{mode:?} must not event-cut");
+        }
     }
 }

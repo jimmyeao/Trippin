@@ -1433,7 +1433,9 @@ fn inspector_body(
                 (Mode::Manual, "Manual"),
             ],
         );
-        ui.label(egui::RichText::new("Bars").size(12.0).color(MUTED));
+        // The bar grid is the backstop pace — event cuts can land sooner.
+        ui.label(egui::RichText::new("Bars max").size(12.0).color(MUTED))
+            .on_hover_text("Longest a scene runs in Auto before cutting — breakdowns, drops, fills and energy surges cut sooner");
         segmented_wide(
             ui,
             &mut s.phrase_bars,

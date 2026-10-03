@@ -3,9 +3,10 @@
 //! `Features` snapshot each frame and extrapolates the beat phase from it.
 
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -223,6 +224,10 @@ pub struct AudioEngine {
     pub features: SharedFeatures,
     pub commands: mpsc::Sender<Command>,
     pub device_name: String,
+    /// The stream reported a fatal error (`DeviceNotAvailable`). The
+    /// render loop rebuilds the engine when this fires — a dead stream
+    /// never recovers on its own.
+    pub dead: Arc<AtomicBool>,
 }
 
 pub fn list_devices() -> Result<()> {
@@ -298,6 +303,7 @@ impl AudioEngine {
                         "system audio".into(),
                         Backend::System(cap),
                         tap,
+                        Arc::new(AtomicBool::new(false)),
                     );
                 }
                 Err(e) => eprintln!("system audio unavailable: {e:#} — using the default input"),
@@ -340,16 +346,17 @@ impl AudioEngine {
         let channels = config.channels as usize;
         let sample_rate = config.sample_rate as f32;
 
+        let dead = Arc::new(AtomicBool::new(false));
         let stream = match supported.sample_format() {
-            SampleFormat::F32 => build_stream::<f32>(&dev, &config, channels, tx)?,
-            SampleFormat::I16 => build_stream::<i16>(&dev, &config, channels, tx)?,
-            SampleFormat::I32 => build_stream::<i32>(&dev, &config, channels, tx)?,
-            SampleFormat::U16 => build_stream::<u16>(&dev, &config, channels, tx)?,
+            SampleFormat::F32 => build_stream::<f32>(&dev, &config, channels, tx, dead.clone())?,
+            SampleFormat::I16 => build_stream::<i16>(&dev, &config, channels, tx, dead.clone())?,
+            SampleFormat::I32 => build_stream::<i32>(&dev, &config, channels, tx, dead.clone())?,
+            SampleFormat::U16 => build_stream::<u16>(&dev, &config, channels, tx, dead.clone())?,
             f => return Err(anyhow!("unsupported sample format {f:?}")),
         };
         stream.play()?;
 
-        Self::spawn(rx, sample_rate, name, Backend::Cpal(stream), tap)
+        Self::spawn(rx, sample_rate, name, Backend::Cpal(stream), tap, dead)
     }
 
     /// Play a timeline's clip regions: the player drives the analyser and
@@ -372,7 +379,14 @@ impl AudioEngine {
                 .join(" + ")
         );
         let player = crate::song::ShowPlayer::start(regions, analysis_sr, start_s, tx)?;
-        let eng = Self::spawn(rx, analysis_sr as f32, name, Backend::Song, tap)?;
+        let eng = Self::spawn(
+            rx,
+            analysis_sr as f32,
+            name,
+            Backend::Song,
+            tap,
+            Arc::new(AtomicBool::new(false)),
+        )?;
         Ok((eng, player))
     }
 
@@ -383,6 +397,7 @@ impl AudioEngine {
         device_name: String,
         backend: Backend,
         tap: Option<SharedEnv>,
+        dead: Arc<AtomicBool>,
     ) -> Result<Self> {
         let features: SharedFeatures = Arc::new(Mutex::new(Features::default()));
         let (cmd_tx, cmd_rx) = mpsc::channel();
@@ -396,6 +411,7 @@ impl AudioEngine {
             features,
             commands: cmd_tx,
             device_name,
+            dead,
         })
     }
 }
@@ -405,6 +421,7 @@ fn build_stream<T>(
     config: &cpal::StreamConfig,
     channels: usize,
     tx: mpsc::SyncSender<Vec<f32>>,
+    dead: Arc<AtomicBool>,
 ) -> Result<cpal::Stream>
 where
     T: SizedSample,
@@ -430,7 +447,19 @@ where
             // Drop audio rather than block the audio thread if analysis stalls.
             let _ = tx.try_send(mono);
         },
-        |e| eprintln!("audio stream error: {e}"),
+        move |e| {
+            eprintln!("audio stream error: {e}");
+            use cpal::ErrorKind as K;
+            // Fatal kinds: the stream never recovers, the render loop
+            // rebuilds. Xrun is a glitch, DeviceChanged already rerouted,
+            // Busy/Realtime are transient.
+            if !matches!(
+                e.kind(),
+                K::Xrun | K::DeviceChanged | K::DeviceBusy | K::RealtimeDenied
+            ) {
+                dead.store(true, Ordering::Relaxed);
+            }
+        },
         None,
     )?;
     Ok(stream)
@@ -784,9 +813,22 @@ impl Analyzer {
     }
 
     fn run(mut self, rx: mpsc::Receiver<Vec<f32>>) {
-        while let Ok(chunk) = rx.recv() {
-            for s in chunk {
-                self.push(s);
+        loop {
+            match rx.recv_timeout(Duration::from_secs(1)) {
+                Ok(chunk) => {
+                    for s in chunk {
+                        self.push(s);
+                    }
+                }
+                // A stalled capture shouldn't freeze the features mid-set:
+                // feed silence at the sample rate so levels decay and the
+                // UI reports "no signal" until the watchdog rebuilds.
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    for _ in 0..self.sr as usize {
+                        self.push(0.0);
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
             }
         }
     }
