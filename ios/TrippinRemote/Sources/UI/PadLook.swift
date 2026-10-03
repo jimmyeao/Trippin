@@ -14,7 +14,7 @@ struct PadLook {
     /// description ("Mark this beat as the downbeat"). Unknown ids keep the
     /// server's label.
     static let short: [String: String] = [
-        "PrevScene": "◀︎ Prev", "NextScene": "Next ▶︎",
+        "PrevScene": "◀︎ Prev", "NextScene": "Next ▶︎", "Strobe": "Strobe", "Blackout": "Blackout",
         "ModeAuto": "Auto", "ModeManual": "Manual", "ModeStatic": "Static",
         "ToggleDancer": "Dancer", "NextClip": "Next clip", "NextStyle": "Dancer look", "CycleCanon": "Canon",
         "CycleFx": "FX", "MarkDownbeat": "Downbeat", "MarkPhrase": "Phrase start", "ShowNowPlaying": "Now playing",

@@ -26,6 +26,7 @@ struct PerformView: View {
             VStack(spacing: 14) {
                 grid(Self.main, columns: 4, height: h(96))
                 SectionHeader(title: "Director")
+                    .accessibilityIdentifier("page.perform")
                 grid(Self.modes, columns: 3, height: h(60))
                 SectionHeader(title: "Show")
                 grid(Self.show, columns: 4, height: h(72))
