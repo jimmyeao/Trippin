@@ -158,15 +158,19 @@ namespace TrippinStage
 
         void Launch(float strength, float delay)
         {
+            // A free slot, else the ring furthest out (the most faded): with 4 slots and a
+            // kick every beat, skipping when full dropped most kicks (M2 render).
+            int slot = -1;
+            float far = -1f;
             for (int i = 0; i < Slots; i++)
-                if (!_live[i])
-                {
-                    _live[i] = true;
-                    _r[i] = 0.02f;
-                    _age[i] = -delay;
-                    _str[i] = strength;
-                    return;
-                }
+            {
+                if (!_live[i]) { slot = i; break; }
+                if (_r[i] > far) { far = _r[i]; slot = i; }
+            }
+            _live[slot] = true;
+            _r[slot] = 0.02f;
+            _age[slot] = -delay;
+            _str[slot] = strength;
         }
 
         void Update()
@@ -202,7 +206,9 @@ namespace TrippinStage
             }
             var rr = new Vector4(-1f, -1f, -1f, -1f);
             var ra = Vector4.zero;
-            float speed = 0.22f + 0.1f * Mathf.Clamp01(s.intensity);
+            // Plate radii per second. 0.22-0.32 took 3-4.5 s per ring, so kick rings piled
+            // into a near-static ripple instead of reading as one pulse per kick.
+            float speed = 0.9f + 0.4f * Mathf.Clamp01(s.intensity);
             for (int i = 0; i < Slots; i++)
             {
                 if (!_live[i]) continue;
@@ -219,8 +225,9 @@ namespace TrippinStage
             float phase = clk * 0.12f + 1.5f * Mathf.Sin(phrase); // direction reverses with the phrase
             float hue = 0.02f + 0.05f * Mathf.Sin(phrase * 0.5f);
             _mpb.Clear();
-            ApplyPlate(_plateM, amp, phase, rr, ra, hue, 0.45f * level);
-            ApplyPlate(_mirM, amp, phase, rr, ra, hue, 0.45f * level * 0.3f);
+            // 0.45 left the plate a faint wireframe under the shafts (M2 render): it's the subject.
+            ApplyPlate(_plateM, amp, phase, rr, ra, hue, 0.9f * level);
+            ApplyPlate(_mirM, amp, phase, rr, ra, hue, 0.9f * level * 0.3f);
 
             // Shafts: heights ride slow bass and a wave round the ring; fixed count.
             for (int i = 0; i < Shafts; i++)
@@ -234,7 +241,7 @@ namespace TrippinStage
                 c = new Color(c.r / mx, c.g / mx, c.b / mx);
                 _mpb.Clear();
                 _mpb.SetColor("_Color", c);
-                _mpb.SetFloat("_Intensity", 0.5f * level * (0.6f + 0.6f * s.intensity));
+                _mpb.SetFloat("_Intensity", 0.3f * level * (0.6f + 0.6f * s.intensity)); // 0.5 out-shone the plate
                 _shaftR[i].SetPropertyBlock(_mpb);
             }
 
@@ -260,8 +267,10 @@ namespace TrippinStage
         {
             float swing = Mathf.Sin(beat / 128f * Mathf.PI * 2f) * 1.0f;
             float r = Mathf.Lerp(34f, 28f, tn) + Mathf.Sin(beat / 64f * Mathf.PI * 2f) * 3f;
-            var want = new Vector3(Mathf.Sin(swing) * r, 7.5f + Mathf.Sin(beat / 48f * Mathf.PI * 2f) * 1.2f, -Mathf.Cos(swing) * r);
-            var look = new Vector3(0f, 6f + 2f * tn, 0f);
+            // Up at ~25 degrees (was 7.5 m, ~13): low, the plate was a thin ellipse behind
+            // the near shafts; from here it reads as a disc with rings crossing it.
+            var want = new Vector3(Mathf.Sin(swing) * r, 14f + Mathf.Sin(beat / 48f * Mathf.PI * 2f) * 1.2f, -Mathf.Cos(swing) * r);
+            var look = new Vector3(0f, 3.5f + 2f * tn, 0f);
             if (!_camSet) { _camPos = want; _camLook = look; _camSet = true; }
             float k = 1f - Mathf.Exp(-dt * 0.8f);
             _camPos = Vector3.Lerp(_camPos, want, k);

@@ -152,7 +152,12 @@ namespace TrippinStage
                 c = new Color(c.r / mx, c.g / mx, c.b / mx);
                 _mpb.Clear();
                 _mpb.SetColor("_Color", c);
-                _mpb.SetFloat("_Intensity", 0.5f * level * (0.6f + 0.6f * s.intensity));
+                // Fade pillars the orbiting camera passes close to: up close one filled
+                // the lens as a wide blurred slab (M2 render).
+                var cp = cam.transform.position;
+                var wp = _pil[i].position;
+                float near = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(5f, 14f, new Vector2(wp.x - cp.x, wp.z - cp.z).magnitude));
+                _mpb.SetFloat("_Intensity", 0.5f * level * near * (0.6f + 0.6f * s.intensity));
                 _pilR[i].SetPropertyBlock(_mpb);
             }
 
