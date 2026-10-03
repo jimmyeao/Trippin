@@ -40,6 +40,11 @@ namespace TrippinStage
         float _bassSlow, _calmSlow, _farWas;
         Vector3 _camPos, _camLook;
         bool _camSet;
+        /// Set on enable: the first frame lands in the current formation
+        /// instead of morphing in from wherever the heads were left (straight
+        /// down at launch), which swung all 48 beams across the frame for
+        /// the first half-second every time Trippin cut to this show.
+        bool _snap;
 
         void Awake()
         {
@@ -130,6 +135,7 @@ namespace TrippinStage
         {
             if (cam != null) { _farWas = cam.farClipPlane; cam.farClipPlane = 800f; }
             _camSet = false;
+            _snap = true;
         }
 
         void OnDisable()
@@ -196,6 +202,12 @@ namespace TrippinStage
             DropDirector.Tick(s, dt);
             int bar = Mathf.FloorToInt(beat / 4f);
             int f = (bar / 4) % Formations;
+            if (_snap)
+            {
+                _formation = f;
+                _formStart = beat - 1f; // morph already complete
+                _snap = false;
+            }
             if (f != _formation)
             {
                 for (int i = 0; i < Heads; i++) _from[i] = _cur[i];
