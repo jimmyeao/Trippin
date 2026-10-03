@@ -190,7 +190,9 @@ namespace TrippinStage
             float pinch = Mathf.Clamp01(_bassSlow);
             // Twist breathes with the slow bass; the drop unwinds a little extra.
             float tw = 1.1f + 0.9f * pinch + 0.35f * ph + 0.8f * imp;
-            float scale = (1f - 0.5f * tn) * (1f + 0.6f * imp);
+            // 0.35 rather than 0.5: with the camera creeping in, a 0.5 shrink read as ~0.72
+            // on screen and the build's contraction was barely visible (M2 render).
+            float scale = (1f - 0.65f * tn) * (1f + 0.6f * imp);
 
             if (_snap)
             {
@@ -248,7 +250,7 @@ namespace TrippinStage
         void UpdateCamera(float beat, float dt, float tn)
         {
             float swing = Mathf.Sin(beat / 128f * Mathf.PI * 2f) * 1.0f;
-            float r = Mathf.Lerp(36f, 25f, tn) + Mathf.Sin(beat / 64f * Mathf.PI * 2f) * 3f;
+            float r = Mathf.Lerp(36f, 31f, tn) + Mathf.Sin(beat / 64f * Mathf.PI * 2f) * 3f; // gentle creep, so the cage's contraction reads
             var want = new Vector3(Mathf.Sin(swing) * r, 4.5f + Mathf.Sin(beat / 48f * Mathf.PI * 2f) * 1.2f, -Mathf.Cos(swing) * r);
             var look = new Vector3(0f, 8f + 2f * tn, 0f);
             if (!_camSet) { _camPos = want; _camLook = look; _camSet = true; }
