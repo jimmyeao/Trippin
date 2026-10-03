@@ -1,13 +1,14 @@
 // Light-show show: the rig is the subject. A dark arena with 48 moving
 // heads (30 on three overhead trusses, 18 on a floor ring), each throwing a
 // wide haze cone plus a thin laser core, splashing onto a wet floor.
-//  - Shape: cone width follows the slow bass presence (iris opening), the
-//    beam spread breathes with it; formations are geometry (curtain, helix,
-//    cathedral, fan, crossing sheets, X-weave) that morph in over a beat,
-//    a new one every 4 bars. Head count never changes.
+//  - Shape: cone width (iris) opens with the bass level (eased: fast attack,
+//    slower release) on top of slow presence; each kick breathes the whole
+//    formation outward on a short eased envelope; formations are geometry
+//    (curtain, helix, cathedral, fan, crossing sheets, X-weave) that morph
+//    in over a beat, a new one every 4 bars. Head count never changes.
 //  - Motion: aim points ride the smooth energy clock (clock4) and swing
-//    direction on phrase-length sines; the camera orbit swings with the
-//    phrase. Nothing integrates raw audio.
+//    direction on phrase-length sines; busy mids widen the sweeps; the
+//    camera orbit swings with the phrase. Nothing integrates raw audio.
 //  - Drops: DropDirector tension pulls every beam into one cathedral point
 //    over the floor centre and dims the rig; the drop blows the formation
 //    outward and flares the cones for a few beats.
@@ -38,6 +39,9 @@ namespace TrippinStage
         int _formation = -1;
         float _formStart;
         float _bassSlow, _calmSlow, _farWas;
+        // Eased band levels and kick envelope (owner: "not very reactive" on real
+        // music; everything above rode slow presence only).
+        float _bassFast, _midFast, _kick, _impS;
         Vector3 _camPos, _camLook;
         bool _camSet;
         /// Set on enable: the first frame lands in the current formation
@@ -223,21 +227,36 @@ namespace TrippinStage
             _bassSlow += (pres0 - _bassSlow) * k;
             _calmSlow += (s.calm - _calmSlow) * k;
 
+            // Eased reactive signals: never raw audio straight into shape or motion.
+            float lvl0 = s.lvl4 != null && s.lvl4.Length > 0 ? s.lvl4[0] : 0.4f;
+            float lvl1 = s.lvl4 != null && s.lvl4.Length > 1 ? s.lvl4[1] : 0.4f;
+            float hit0 = s.hits4 != null && s.hits4.Length > 0 ? s.hits4[0] : 0f;
+            _bassFast += (lvl0 - _bassFast) * (1f - Mathf.Exp(-dt * (lvl0 > _bassFast ? 14f : 3f)));
+            _midFast += (lvl1 - _midFast) * (1f - Mathf.Exp(-dt * 4f));
+            _kick += (hit0 - _kick) * (1f - Mathf.Exp(-dt * (hit0 > _kick ? 20f : 4f)));
+
             float tn = Mathf.SmoothStep(0f, 1f, DropDirector.Tension);
-            float imp = DropDirector.Impact;
+            // Impact steps 0 -> 1 in one frame; into the x1.9 burst it popped the rig.
+            float impT = DropDirector.Impact;
+            _impS = impT > _impS ? Mathf.Lerp(_impS, impT, 1f - Mathf.Exp(-dt * 12f)) : impT;
+            float imp = _impS;
             var focus = new Vector3(0f, 16f, 0f);
             float burst = 1f + 0.9f * imp; // the drop blows the formation outward
+            // Kicks breathe the formation outward; busy mids widen the sweeps. Both
+            // spread aim points, not head count or brightness.
+            float breathe = (1f + 0.22f * Mathf.Clamp01(_kick)) * (0.85f + 0.35f * Mathf.Clamp01(_midFast));
 
             // Breakdowns keep every third head, dim and slow; tension wakes them up.
             float on = Mathf.Lerp(1f, 0.15f, _calmSlow);
             float drama = (1f - 0.5f * tn) * (1f + 1.6f * imp);
-            float iris = 0.65f + 0.9f * _bassSlow + 0.5f * imp; // cone opening, slow bass
+            float iris = 0.55f + 0.4f * _bassSlow + 0.9f * Mathf.Clamp01(_bassFast) + 0.5f * imp; // cone opening, eased bass level
 
             float hueBase = 0.1f * f + 0.03f * Mathf.Sin(beat / 64f * Mathf.PI * 2f);
             for (int i = 0; i < Heads; i++)
             {
-                var tgt = Target(i, f, clk, ph, beat);
-                tgt = new Vector3(tgt.x * burst, tgt.y, tgt.z * burst);
+                // Sweeps 1.6x faster on the energy clock (it already surges on drops).
+                var tgt = Target(i, f, clk * 1.6f, ph, beat);
+                tgt = new Vector3(tgt.x * burst * breathe, tgt.y, tgt.z * burst * breathe);
                 tgt = Vector3.Lerp(tgt, focus, tn * 0.55f); // 0.8 stacked all 48 beams in one point: white-out
                 var dirv = tgt - _pos[i];
                 var d = dirv.normalized;
