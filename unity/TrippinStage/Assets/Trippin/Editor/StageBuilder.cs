@@ -217,8 +217,25 @@ namespace TrippinStage.EditorTools
             au.groundMat = co.groundMat;
             au.hazeMat = dir.hazeMat;
 
-            mgr.shows = new[] { stage, crystals, flowGo, levGo, sculptGo, colGo, tidalGo, stormGo, prismGo, auroraGo };
-            mgr.names = new[] { "unity_stage", "unity_crystals", "unity_flow", "unity_leviathan", "unity_sculpture", "unity_colossus", "unity_tidal_cathedral", "unity_lightstorm", "unity_prism", "unity_aurora" };
+            var bassGo = new GameObject("unity_basscore");
+            bassGo.transform.SetParent(engine.transform, false);
+            var bc = bassGo.AddComponent<BasscoreShow>();
+            bc.cam = cam;
+            bc.membraneMat = Mat("Trippin/Membrane", "Membrane");
+            bc.beamMat = dir.beamMat;
+            bc.groundMat = co.groundMat;
+            bc.hazeMat = dir.hazeMat;
+
+            var pillarsGo = new GameObject("unity_pillars");
+            pillarsGo.transform.SetParent(engine.transform, false);
+            var pl = pillarsGo.AddComponent<PillarsShow>();
+            pl.cam = cam;
+            pl.beamMat = dir.beamMat;
+            pl.groundMat = co.groundMat;
+            pl.hazeMat = dir.hazeMat;
+
+            mgr.shows = new[] { stage, crystals, flowGo, levGo, sculptGo, colGo, tidalGo, stormGo, prismGo, auroraGo, bassGo, pillarsGo };
+            mgr.names = new[] { "unity_stage", "unity_crystals", "unity_flow", "unity_leviathan", "unity_sculpture", "unity_colossus", "unity_tidal_cathedral", "unity_lightstorm", "unity_prism", "unity_aurora", "unity_basscore", "unity_pillars" };
 
             // Frames go to Trippin through the shared-memory file it passes
             // (FrameExporter) — no Spout/Syphon, the same on every platform.
