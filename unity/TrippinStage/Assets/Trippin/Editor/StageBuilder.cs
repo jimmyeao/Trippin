@@ -200,8 +200,16 @@ namespace TrippinStage.EditorTools
             ls.hazeMat = dir.hazeMat;
 
 
-            mgr.shows = new[] { stage, crystals, flowGo, levGo, sculptGo, colGo, tidalGo, stormGo };
-            mgr.names = new[] { "unity_stage", "unity_crystals", "unity_flow", "unity_leviathan", "unity_sculpture", "unity_colossus", "unity_tidal_cathedral", "unity_lightstorm" };
+            var prismGo = new GameObject("unity_prism");
+            prismGo.transform.SetParent(engine.transform, false);
+            var pr = prismGo.AddComponent<PrismShow>();
+            pr.cam = cam;
+            pr.beamMat = dir.beamMat;
+            pr.groundMat = co.groundMat;
+            pr.hazeMat = dir.hazeMat;
+
+            mgr.shows = new[] { stage, crystals, flowGo, levGo, sculptGo, colGo, tidalGo, stormGo, prismGo };
+            mgr.names = new[] { "unity_stage", "unity_crystals", "unity_flow", "unity_leviathan", "unity_sculpture", "unity_colossus", "unity_tidal_cathedral", "unity_lightstorm", "unity_prism" };
 
             // Frames go to Trippin through the shared-memory file it passes
             // (FrameExporter) — no Spout/Syphon, the same on every platform.
