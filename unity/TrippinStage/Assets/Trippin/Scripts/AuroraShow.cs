@@ -35,6 +35,7 @@ namespace TrippinStage
         readonly float[] _hazeBase = { 0.08f, 0.05f };
         MaterialPropertyBlock _mpb;
         float _bassSlow, _midSlow, _calmSlow, _farWas;
+        float _bassFast, _midEase, _highEase; // eased fast vocabulary: shape reacts within ~70 ms, never steps
         float _impS; // DropDirector.Impact with a short attack (see Update)
         Vector3 _camPos, _camLook;
         bool _camSet;
@@ -169,6 +170,9 @@ namespace TrippinStage
             float k1 = 1f - Mathf.Exp(-dt * 0.9f);
             _bassSlow += (pres0 - _bassSlow) * k1;
             _midSlow += (pres1 - _midSlow) * k1;
+            _bassFast = Eased.Follow(_bassFast, Eased.Lvl(s, 0), 14f, 3f, dt);
+            _midEase = Eased.Follow(_midEase, Eased.Lvl(s, 1), 5f, 3f, dt);
+            _highEase = Eased.Follow(_highEase, Eased.Lvl(s, 3), 6f, 3f, dt);
             _calmSlow += (s.calm - _calmSlow) * k1;
 
             float tn = Mathf.SmoothStep(0f, 1f, DropDirector.Tension);
@@ -185,13 +189,13 @@ namespace TrippinStage
             // ~15% brighter than the drums on the M2): weaker dim, wider calm range.
             float level = Mathf.Lerp(0.45f, 1f, _calmSlow) * (1f - 0.15f * tn) * (1f + 0.7f * imp);
             float hueBase = 0.45f + 0.06f * Mathf.Sin(phrase * 0.5f);
-            float fold = (0.45f + 0.9f * Mathf.Clamp01(_bassSlow)) * (1f - 0.5f * tn) * (1f + 0.8f * imp);
+            float fold = (0.45f + 0.9f * Mathf.Clamp01(_bassSlow) + 0.7f * _bassFast) * (1f - 0.5f * tn) * (1f + 0.8f * imp);
             for (int i = 0; i < Curtains; i++)
             {
                 float u = i / (Curtains - 1f);
                 float swing = Mathf.Sin(phrase + i * 1.3f) * 2.2f; // travel direction reverses with the phrase
                 float phase = clk * 0.05f + swing;
-                float height = (15f + 8f * Mathf.Clamp01(_midSlow) + 4f * u + 5f * tn);
+                float height = (15f + 8f * Mathf.Clamp01(_midSlow) + 7f * _midEase + 4f * u + 5f * tn);
                 _mpb.Clear();
                 _mpb.SetFloat("_Hue", hueBase + u * 0.18f);
                 _mpb.SetFloat("_Intensity", 0.55f * level);
@@ -212,7 +216,7 @@ namespace TrippinStage
             for (int i = 0; i < Lights; i++)
             {
                 var toCentre = new Vector3(-_lightPos[i].x, 0f, -_lightPos[i].z + 10f).normalized;
-                float sweep = Mathf.Sin(phrase * 0.5f + i * 1.05f) * 38f;
+                float sweep = Mathf.Sin(phrase * 0.5f + i * 1.05f) * 38f * (0.85f + 0.4f * _highEase); // highs widen the sweep
                 float elev = (58f + 14f * Mathf.Sin(clk * 0.045f + i * 0.9f) + 14f * imp) * Mathf.Deg2Rad;
                 var horiz = Quaternion.Euler(0f, sweep * (1f + 0.6f * imp), 0f) * toCentre;
                 var d = (horiz * Mathf.Cos(elev) + Vector3.up * Mathf.Sin(elev)).normalized;

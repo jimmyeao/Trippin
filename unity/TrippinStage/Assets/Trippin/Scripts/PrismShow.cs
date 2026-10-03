@@ -38,6 +38,7 @@ namespace TrippinStage
         int _formation = -1;
         float _formStart;
         float _bassSlow, _calmSlow, _farWas;
+        float _bassFast, _kick, _midEase; // eased fast vocabulary: shape reacts within ~70 ms, never steps
         Vector3 _camPos, _camLook;
         bool _camSet, _snap = true;
 
@@ -187,12 +188,15 @@ namespace TrippinStage
 
             float tn = Mathf.SmoothStep(0f, 1f, DropDirector.Tension);
             float imp = DropDirector.Impact;
-            float pinch = Mathf.Clamp01(_bassSlow);
+            _bassFast = Eased.Follow(_bassFast, Eased.Lvl(s, 0), 14f, 3f, dt);
+            _kick = Eased.Follow(_kick, Eased.Hit(s, 0), 20f, 4f, dt);
+            _midEase = Eased.Follow(_midEase, Eased.Lvl(s, 1), 4f, 4f, dt);
+            float pinch = Mathf.Clamp01(_bassSlow + 0.4f * _midEase);
             // Twist breathes with the slow bass; the drop unwinds a little extra.
-            float tw = 1.1f + 0.9f * pinch + 0.35f * ph + 0.8f * imp;
+            float tw = 1.1f + 0.9f * pinch + 0.5f * _bassFast + 0.35f * ph + 0.8f * imp;
             // 0.35 rather than 0.5: with the camera creeping in, a 0.5 shrink read as ~0.72
             // on screen and the build's contraction was barely visible (M2 render).
-            float scale = (1f - 0.65f * tn) * (1f + 0.6f * imp);
+            float scale = (1f - 0.65f * tn) * (1f + 0.6f * imp) * (1f + 0.18f * _kick); // the cage breathes out on each kick
 
             if (_snap)
             {
