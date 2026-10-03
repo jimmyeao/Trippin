@@ -9,7 +9,8 @@
 //! |-------------------|------------------------------------------------------------|
 //! | Media session     | Windows SMTC (Spotify, Apple Music, browsers, djay, …);    |
 //! |                   | macOS: AppleScript for Spotify / Music                     |
-//! | Serato            | newest `_Serato_/History/Sessions/*.session` (binary)      |
+//! | Serato            | Serato 4+: `Library/master.sqlite` → `history_entry`;      |
+//! |                   | ≤3.x: `_Serato_/History/Sessions/*.session` (binary)       |
 //! | VirtualDJ         | `Documents/VirtualDJ/History/tracklist.txt`                |
 //! | rekordbox         | encrypted `master.db` (SQLCipher) → `djmdSongHistory`      |
 //! | Mixxx             | `mixxxdb.sqlite` → the hidden history ("set log") playlist |
@@ -286,20 +287,43 @@ fn home() -> Option<PathBuf> {
 
 // ---- Serato --------------------------------------------------------------
 
-/// Serato writes each session to `_Serato_/History/Sessions/<n>.session`:
-/// chunks of (4-byte tag, u32 BE length, payload). Each played track is an
-/// `oent` chunk wrapping an `adat` chunk of fields (u32 BE id, u32 BE len,
-/// data). Field ids: 2 path, 6 title, 7 artist (UTF-16BE), 28 start time,
-/// 29 end time (u32 BE unix seconds), 31 deck.
+/// Serato DJ 4+ keeps its history in a plain SQLite library,
+/// `~/Library/Application Support/Serato/Library/master.sqlite` (Windows:
+/// `%APPDATA%\Serato\Library\master.sqlite`): every track on a deck is a
+/// `history_entry` row, with `played` flipped to 1 once it's audible —
+/// cued-but-unplayed loads stay 0 and are skipped. It's in WAL mode and
+/// written live, so watch the `-wal` file for changes.
+///
+/// Serato DJ Pro ≤3.x writes each session to
+/// `_Serato_/History/Sessions/<n>.session`: chunks of (4-byte tag, u32 BE
+/// length, payload). Each played track is an `oent` chunk wrapping an
+/// `adat` chunk of fields (u32 BE id, u32 BE len, data). Field ids: 2 path,
+/// 6 title, 7 artist (UTF-16BE), 28 start time, 29 end time (u32 BE unix
+/// seconds), 31 deck.
 #[derive(Default)]
 struct Serato {
     file: Option<PathBuf>,
+    db: Option<PathBuf>,
     seen: Option<SystemTime>,
     last: Option<Track>,
     scanned: Option<Instant>,
 }
 
 impl Serato {
+    fn db_path() -> Option<PathBuf> {
+        let mut c = Vec::new();
+        if let Some(a) = std::env::var_os("APPDATA") {
+            c.push(PathBuf::from(a).join("Serato/Library/master.sqlite"));
+        }
+        if let Some(a) = std::env::var_os("LOCALAPPDATA") {
+            c.push(PathBuf::from(a).join("Serato/Library/master.sqlite"));
+        }
+        if let Some(h) = home() {
+            c.push(h.join("Library/Application Support/Serato/Library/master.sqlite"));
+        }
+        c.into_iter().find(|p| p.is_file())
+    }
+
     fn session_dirs() -> Vec<PathBuf> {
         let mut dirs = Vec::new();
         if let Some(h) = home() {
@@ -381,15 +405,45 @@ pub fn parse_serato_session(data: &[u8]) -> Option<Track> {
     best.map(|(_, t)| t)
 }
 
+/// Serato 4+: the newest track the crowd actually heard (`played = 1`),
+/// across all sessions in `master.sqlite`.
+fn serato_db_track(db: &Path) -> Result<Option<Track>, String> {
+    let c = rusqlite::Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(|e| e.to_string())?;
+    let r = c.query_row(
+        "SELECT IFNULL(artist, ''), IFNULL(name, '') FROM history_entry \
+         WHERE played = 1 AND (name <> '' OR artist <> '') \
+         ORDER BY start_time DESC, id DESC LIMIT 1",
+        [],
+        |r| Ok(Track { artist: r.get(0)?, title: r.get(1)?, source: "Serato".into() }),
+    );
+    match r {
+        Ok(t) => Ok(Some(t)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 impl Source for Serato {
     fn kind(&self) -> NpSource {
         NpSource::Serato
     }
     fn poll(&mut self) -> Result<Option<Track>, String> {
-        // Re-scan for a newer session file every 10 s (new set = new file).
+        // Re-scan every 10 s (new set = new file; Serato 4 may appear later).
         if self.scanned.is_none_or(|t| t.elapsed() > Duration::from_secs(10)) {
             self.scanned = Some(Instant::now());
+            self.db = Self::db_path();
             self.file = Self::newest_session();
+        }
+        if let Some(db) = self.db.clone() {
+            // WAL mode: the live rows are in the -wal file between
+            // checkpoints, so watch it too.
+            let m = mtime(&db.with_file_name("master.sqlite-wal")).max(mtime(&db));
+            if m != self.seen {
+                self.seen = m;
+                self.last = serato_db_track(&db)?;
+            }
+            return Ok(self.last.clone());
         }
         let Some(f) = self.file.clone() else {
             return Err("no Serato history found".into());
@@ -833,6 +887,27 @@ mod tests {
         let t = parse_serato_session(&f).unwrap();
         assert_eq!(t.title, "Third");
         assert_eq!(t.artist, "C");
+    }
+
+    #[test]
+    fn serato_db_latest_played_wins() {
+        let dir = std::env::temp_dir();
+        let db = dir.join(format!("trippin-serato-test-{}.db", std::process::id()));
+        {
+            let c = rusqlite::Connection::open(&db).unwrap();
+            c.execute_batch(
+                "CREATE TABLE history_entry (id INTEGER PRIMARY KEY AUTOINCREMENT, \
+                 artist TEXT NOT NULL DEFAULT '', name TEXT NOT NULL DEFAULT '', \
+                 played INTEGER NOT NULL DEFAULT 0, start_time INTEGER NOT NULL DEFAULT 0); \
+                 INSERT INTO history_entry (artist, name, played, start_time) VALUES \
+                 ('A', 'First', 1, 100), ('C', 'Newest played', 1, 300), \
+                 ('B', 'Older', 1, 200), ('Cued', 'Not yet played', 0, 400);",
+            )
+            .unwrap();
+        }
+        let t = serato_db_track(&db).unwrap().unwrap();
+        assert_eq!((t.artist.as_str(), t.title.as_str()), ("C", "Newest played"));
+        let _ = std::fs::remove_file(&db);
     }
 
     #[test]

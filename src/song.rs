@@ -54,8 +54,25 @@ pub fn load(path: &Path) -> Result<Song> {
     let duration = mono.len() as f64 / sr as f64;
     let fps = sr as f64 / HOP as f64;
     let (onsets, bass) = onset_envelope(&mono, sr);
-    let (bpm, first_beat) = estimate_bpm(&onsets, fps as f32).unwrap_or((120.0, 0.0));
-    let first_beat = align_downbeat(&bass, fps, bpm, first_beat);
+    let (mut bpm, first_beat) = estimate_bpm(&onsets, fps as f32).unwrap_or((120.0, 0.0));
+    let mut first_beat = align_downbeat(&bass, fps, bpm, first_beat);
+    // Beat This! when its model is on hand: a regressed tempo (the
+    // autocorrelation is often 0.1-0.3 BPM off — most of a beat of drift by
+    // the end of a track) and real downbeats for the bar phase. Weak
+    // downbeat agreement keeps its tempo but votes the bar by bass.
+    if crate::beats::ready() {
+        match crate::beats::song_grid(path, &mono, sr, 144.0) {
+            Ok(g) => {
+                bpm = g.bpm;
+                first_beat = if g.phase_agreement >= 0.5 {
+                    g.first_downbeat
+                } else {
+                    align_downbeat(&bass, fps, g.bpm, g.first_downbeat)
+                };
+            }
+            Err(e) => eprintln!("beat tracking failed for {}: {e:#}", path.display()),
+        }
+    }
     let overview = make_overview(&mono, 1600);
     let name = path
         .file_stem()

@@ -26,7 +26,7 @@ scenes on phrase boundaries and drops.
 
 Download `Trippin-Setup-<version>.exe` from the GitHub **Releases** page (or
 from the artifacts of the latest *Build installer* workflow run) and run it.
-Settings are saved to `%APPDATA%\Trippin	rippin.json`.
+Settings are saved to `%APPDATA%\Trippin\trippin.json`.
 
 To release a new version: **Actions → Build installer → Run workflow**, enter
 the version (e.g. `0.2.0`) — it bumps `Cargo.toml`, commits, tags `v<version>`,
@@ -38,18 +38,24 @@ Build the installer locally (needs Inno Setup 6):
 
 ```
 cargo build --release --features gui
-"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=0.1.0 installer	rippin.iss
+"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=0.1.0 installer\trippin.iss
 ```
 
 ### macOS
 
-CI also builds `Trippin.app` as a universal binary (Intel + Apple Silicon) —
-grab `Trippin-macOS-<version>.zip` from releases or workflow artifacts, unzip,
-and drag to Applications. CI artifacts are signed and notarized when the
-signing secrets below are configured, so they open like any other app;
-unsigned builds still hit Gatekeeper — `xattr -dr com.apple.quarantine
-Trippin.app`, or attempt to open then **System Settings → Privacy &
-Security → Open Anyway**.
+CI also builds `Trippin.app` as a universal binary (Intel + Apple Silicon).
+Install it with **`Trippin-macOS-<version>.pkg`** from releases or workflow
+artifacts: it installs to `/Applications`, and running a newer package
+upgrades in place. It quits a running Trippin, then replaces the old app.
+Settings, timelines and the downloaded Unity engine in `~/Library/Application
+Support/Trippin` are kept. `Trippin-macOS-<version>.zip` (the bare app, drag
+to Applications) is still published.
+
+The app is signed and notarized when the signing secrets below are
+configured. The package is signed and notarized when the installer
+certificate secrets are also set. An unsigned package or app hits Gatekeeper:
+try to open it, then **System Settings → Privacy & Security → Open
+Anyway**.
 
 #### Signing secrets (repo → Settings → Secrets and variables → Actions)
 
@@ -64,6 +70,14 @@ Security → Open Anyway**.
 - `APPLE_PASSWORD` — an **app-specific password** for that account
   (appleid.apple.com → Sign-In and Security → App-Specific Passwords).
 - `APPLE_TEAM_ID` — the 10-char team ID (developer.apple.com → Membership).
+- `APPLE_INSTALLER_CERTIFICATE` — base64 of a **Developer ID Installer**
+  cert + private key `.p12`. It's a separate certificate from the
+  Application one: developer.apple.com → Certificates → + → Developer ID
+  Installer. Signs the `.pkg`.
+- `APPLE_INSTALLER_CERTIFICATE_PASSWORD` — that `.p12`'s export password.
+- `APPLE_INSTALLER_SIGNING_IDENTITY` — e.g.
+  `Developer ID Installer: Name (TEAMID)`; `security find-identity -v`
+  prints it.
 
 Settings live in `~/Library/Application Support/Trippin/trippin.json`. Shaders
 and dancers resolve from the bundle's `Contents/Resources/`; running from a
@@ -72,11 +86,13 @@ checkout uses the repo directories as before.
 **Audio:** macOS captures the system output mix directly via ScreenCaptureKit
 — the same API OBS uses — so no mic or BlackHole loopback is needed. macOS
 prompts once for screen/system-audio recording permission on first launch
-(macOS 13+; on older systems it falls back to the default input). `--mic`
-forces the microphone, and `--device "<name>"` picks a specific input or
-interface for a DJ booth-out. `--list-devices` shows what's available.
-The panel key is **P** on macOS (F1 is a brightness key on Touch Bar
-machines; Fn+F1 also works). On macOS, presents are ungated from vsync and
+(macOS 13+; on older systems it falls back to the default input). If the DJ
+software sends audio straight to a controller's own interface (e.g. Serato
+→ a Rane/Pioneer USB card) it never enters that mix — pick the controller's
+input under Settings → **Audio in** (saved; restarts live),
+or pass `--device "<name>"`. `--mic` forces the microphone, and
+`--list-devices` shows what's available.
+On macOS, presents are ungated from vsync and
 the render
 loop self-paces at the display's refresh — vsync-gated presents stall ~2
 frames whenever the compositor is loaded (e.g. another app fullscreen on a
@@ -87,6 +103,9 @@ second display); `--vsync` restores them if that ever causes trouble.
 ```
 cargo run --release                         # capture what you hear (loopback / system audio)
 cargo run --release -- --list-devices       # list capture devices
+cargo run --release -- --probe-audio "Rane" # capture ~6 s from a device, print signal + BPM
+cargo run --release -- --beats track.flac   # old onset grid vs the Beat This! grid, with timings
+cargo run --release -- --list-midi          # list MIDI inputs (pad/key controllers)
 cargo run --release -- --device "Serato"    # a specific input (or output-as-loopback)
 cargo run --release -- --mic                # force the default input instead of system audio
 cargo run --release -- --scene tunnel       # start on a scene, auto-pilot off
@@ -112,13 +131,29 @@ works for GPU budgeting on any machine.
 
 Drag the visuals window to the projector / LED wall and press **F**. A
 **control panel** window opens alongside it (F1 shows/hides it), organised
-into tabs — **Show** (modes, scene stepping, length, blackout, fullscreen,
-latency/downbeat), **Scenes** (the playlist: tick to include, search filter,
-"show" to jump to one now), **Dancer** (on/off, look, canon, size, which
-routines), **Effects** (the post effect + strength — picks apply live to the
-output, so the panel doubles as a preview), **Stream** (OBS output, now
-playing, branding, ticker, clips — see below) and **Keys** (rebindable
-hotkeys: click Rebind, then press a key). Everything is saved to `trippin.json`, and
+into tabs — **Perform** (the scene library: tick to include, search filter,
+click to preview, plus the inspector with mode, phrase length, dancer, look,
+effect and palette; the Pads toggle swaps in big performance pads),
+**Dancer & FX** (dancer on/off, look, canon, size, which routines, and the
+post effect + strength — picks apply live to the output, so the panel
+doubles as a preview), **Stream** (OBS output, now playing, branding,
+ticker, clips — see below), **Timeline** (saved shows), **Keys** (MIDI
+input and rebindable hotkeys: click Rebind, then press a key) and
+**Settings** (audio input, latency, mark-downbeat, neural beat tracking,
+what the auto-pilot may do — breakdowns, drop cuts, random order — and the
+AI show builder's provider, model and API key).
+
+**Neural beat tracking** (Settings, on by default) finds song tempos and
+the bar's "one" with the Beat This! model — the same one BeatDis uses —
+instead of guessing the bar from the bass. It fixes bars landing a beat or
+three off after drum-roll intros, and tempos that drifted most of a beat by
+the end of a long track. The ~80 MB model downloads once in the
+background; a song's first analysis takes a few seconds, then it's cached.
+**Build cues** in the AI show builder re-detects the grid of clips added
+before the model arrived. Live, it re-checks the last 15 s of audio every
+5 s on a background thread (two cores, ~0.5 s per check): it moves the beat
+onto the real beat when the tracker has locked onto off-beat bass or hats,
+and sets the bar's "one" — the hand-tap downbeat key stays as an override. Everything is saved to `trippin.json`, and
 the visuals keep animating while the panel is being moved — rendering runs
 on its own thread.
 
@@ -136,6 +171,7 @@ Default keys (all rebindable in the panel):
 | D | dancer on / off |
 | C / S / V | next routine / next look / canon auto→on→off |
 | B | blackout (fade to black and back) |
+| Z | strobe on / off (flashes on the live drum hits) |
 | F | fullscreen on / off |
 | Space | mark this beat as the downbeat |
 | [ / ] | latency −/+ 5 ms |
@@ -146,8 +182,15 @@ Default keys (all rebindable in the panel):
 | N | show the now-playing card again |
 | K | save a clip (the replay buffer) |
 | J | record the whole set: start / stop |
-| F1 (P on macOS) | show / hide the control panel |
+| F1 | show / hide the control panel |
 | Esc | leave fullscreen (it never quits; close the window to quit) |
+
+**MIDI controllers:** every action above can also sit on a MIDI pad or key.
+Pick the input at the top of the Keys tab (`--list-midi` shows the names),
+then click a row's **midi** button and hit the pad — the note is bound.
+Pressing the pad fires the action exactly like the hotkey, including while
+the timeline is recording. Right-click a bound note to clear it. Unplugging
+and replugging the controller is picked up automatically.
 
 ## Scenes
 
@@ -270,6 +313,25 @@ an RTX 5070 Ti.
 
 When writing a scene, use `u.flow` for camera travel. `u.beat` gets phase
 corrections from the beat tracker, so motion driven by it stutters.
+
+### Unity engine scenes (experimental)
+
+Settings → **Unity engine link** adds three festival-screen scenes rendered
+by a separate Unity engine:
+
+- `unity_stage`: a festival stage with lasers in haze, an LED rig, confetti and
+  phone lights;
+- `unity_crystals`: a flight through a chrome crystal tunnel. Each kick sends
+  a wave down it, and the speed follows the track's energy;
+- `unity_flow`: a particle cloud morphing between shapes, with kick
+  shockwaves.
+
+There's nothing to install or start: the first time you switch the link on,
+Trippin downloads the engine (about 40 MB, Windows and macOS). After that,
+Trippin runs it in the background and closes it when Trippin quits. The
+Settings tab shows its status. The auto-pilot only picks `unity_*` scenes
+while the engine is sending frames, and the AI show builder never uses them.
+Developer notes are in `unity/README.md`.
 
 ## Beats vs breakdowns
 
@@ -462,18 +524,47 @@ boundaries and cue transitions land on the "one", not just on beats.
   audio onset envelope against the track's stored envelope, locks on when
   the same song is playing in the room and fires the cues at the matching
   position — a pre-programmed show that follows the DJ's deck.
+- **Strobe** (timeline cue, Cues library): while it runs the picture is
+  black and cuts in on each drum hit — hard cuts, no fade — so it follows
+  whatever the drums actually play.
+- **Text effects** (timeline text cues, or the AI): besides the style and
+  entrance animation, a card can **punch** (pops on every beat), **shake**
+  (jolts on kicks), **strobe** (eighth-note flicker), **bounce** (a wave
+  through the letters) or **shatter** (blocks jump apart on kicks).
 - **✦ AI show…** (editor toolbar) writes the cue list for you. Trippin
   analyses each clip locally — per-bar energy, onset density, a vocal
   likelihood, >5 kHz "air" — and segments the track into labelled ~4-bar
   phrase blocks (intro / groove / build / drop / peak / breakdown / outro).
-  The model directs the show block by block (scene, dancer, routine, look,
-  fx, palette, text per phrase), and Trippin expands that plan into cue blocks —
-  enforcing variety itself (a scene can't run longer than ~12 bars, dancer
-  routines rotate, `void` only ever plays a song out). BYOAI: Anthropic,
+  Sections come from where the *sound* changes (onset density, vocals,
+  brightness, tonal balance), not just loudness, and drum fills — bars with
+  a roll or snare run — mark the phrase ends, so even a flat-energy house
+  track gets phrased. The model sees each scene's description and measured
+  visual energy (1-5), each routine's pace (calm / medium / fast), the
+  sections and fills, and directs the show block by block — with extra
+  scene cuts inside a block (1-2 bar scenes, accelerating cuts through a
+  build), a strobe / stutter / flash hit on drum fills (the strobe
+  covers the fill's real hits — rolls that start mid-bar or cross the bar
+  line — and flashes the picture on each drum hit it hears), and text as a
+  performance (a word per beat on the drop, hook words landed on their
+  beat, beat-driven text effects). Trippin expands that plan into cue
+  blocks, enforcing the show rules itself: a scene can't run longer than
+  ~12 bars, a frantic scene can't sit in a breakdown or a near-static one
+  on a drop, breakdowns and intros only get calm routines (drops and peaks
+  never do), routines rotate on section starts, a sung breakdown puts the
+  dancer in neon, every drop changes the scene plus at least one more thing,
+  a fill leading into a new section or drop always gets a hit (never a
+  strobe on tunnel/flight scenes — those stutter), a track with no text gets
+  its title hit word by word on the first drop, and `void` only ever plays a
+  song out. With
+  Anthropic, **Look up each track online first** (Settings, on by default)
+  lets the model web-search each track's genre, mood and hook words before
+  planning — up to 4 searches per build. BYOAI: Anthropic,
   OpenAI, Gemini, or any OpenAI-compatible endpoint (Groq, Mistral,
-  Ollama…); the key lives in `trippin.json` or the provider's usual env var
-  (`ANTHROPIC_API_KEY` etc.). Nothing but the feature summary leaves the
-  machine — no audio is uploaded. Preview the summary with
+  Ollama…); pick the provider and paste the key under control panel →
+  **Settings** (saved to `trippin.json`), or leave it blank to use the
+  provider's usual env var (`ANTHROPIC_API_KEY` etc.). Nothing but the
+  feature summary and the track names leaves the machine — no audio is
+  uploaded. Preview the summary with
   `--analyze <file>`, or run the whole build without the editor with
   `--ai-build <file>` (prints every cue).
 

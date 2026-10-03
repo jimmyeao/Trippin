@@ -31,6 +31,58 @@ pub struct TextSpec {
     /// Entrance animation — how the card comes in (block end always fades).
     #[serde(default)]
     pub anim: TextAnim,
+    /// Beat-driven effect while the card is up.
+    #[serde(default)]
+    pub fx: TextFx,
+    /// Height relative to the default (None = 1.0). Big for impact hits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<f32>,
+}
+
+/// Beat-driven text effect — runs for the card's whole life, on top of the
+/// style and entrance. See `shaders/text.wgsl`.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TextFx {
+    #[default]
+    None,
+    /// Pops bigger on every beat.
+    Punch,
+    /// Jolts sideways on the kicks.
+    Shake,
+    /// Flickers on and off on the eighth notes.
+    Strobe,
+    /// A wave runs through the letters on the beat.
+    Bounce,
+    /// Breaks into blocks that jump apart on the kicks.
+    Shatter,
+}
+
+impl TextFx {
+    pub const ALL: [TextFx; 6] = [
+        Self::None,
+        Self::Punch,
+        Self::Shake,
+        Self::Strobe,
+        Self::Bounce,
+        Self::Shatter,
+    ];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::None => "no fx",
+            Self::Punch => "punch",
+            Self::Shake => "shake",
+            Self::Strobe => "strobe",
+            Self::Bounce => "bounce",
+            Self::Shatter => "shatter",
+        }
+    }
+
+    /// Shader-side index — keep in sync with `text.wgsl`.
+    pub fn index(&self) -> f32 {
+        *self as usize as f32
+    }
 }
 
 /// Video-editor-style entrance animation — see `shaders/text.wgsl`.
@@ -169,7 +221,8 @@ pub struct TextSlotU {
     pub hue: f32,
     /// `TextAnim::index()` — entrance animation.
     pub anim: f32,
-    pub _pad: f32,
+    /// `TextFx::index()` — beat-driven effect.
+    pub fx: f32,
 }
 
 /// Both slots — must match `T` in `shaders/text.wgsl`.

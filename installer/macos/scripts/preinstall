@@ -1,0 +1,22 @@
+#!/bin/sh
+# Runs as root before the new Trippin.app is laid down.
+# - Quit a running Trippin (and its Unity engine) so the bundle can be
+#   replaced cleanly.
+# - Remove the old bundle: a package install merges files, so anything an
+#   older version shipped that this one doesn't would otherwise linger.
+# Settings, timelines and the downloaded Unity engine live in
+# ~/Library/Application Support/Trippin and are left alone.
+
+APP="/Applications/Trippin.app"
+
+pkill -x trippin 2>/dev/null
+pkill -f "TrippinStage.app/Contents/MacOS/Trippin Stage" 2>/dev/null
+sleep 1
+
+if [ -d "$APP" ]; then
+    id=$(/usr/bin/defaults read "$APP/Contents/Info" CFBundleIdentifier 2>/dev/null)
+    if [ "$id" = "com.deviousweb.trippin" ]; then
+        rm -rf "$APP"
+    fi
+fi
+exit 0

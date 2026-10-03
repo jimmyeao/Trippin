@@ -77,7 +77,7 @@ struct AiJob {
     busy: bool,
     status: String,
     /// Finished build: cues + a summary note, or the error message.
-    result: Option<Result<(Vec<Cue>, String), String>>,
+    result: Option<Result<crate::ai::ShowBuild, String>>,
 }
 
 /// What part of a cue block is being dragged.
@@ -157,7 +157,6 @@ impl Editor {
         routines: &[String],
         tl_shared: &crate::timeline::Shared,
         settings: &Mutex<crate::config::Settings>,
-        settings_dirty: &std::sync::atomic::AtomicBool,
         thumb_store: &Mutex<HashMap<String, (u32, u32, Vec<u8>)>>,
     ) -> (Vec<UiCommand>, Frame) {
         let mut cmd = Vec::new();
@@ -504,8 +503,14 @@ impl Editor {
                 .take()
             {
                 match res {
-                    Ok((cues, note)) => {
+                    Ok(crate::ai::ShowBuild { cues, grids, note }) => {
                         if let Some(doc) = doc_opt.as_mut() {
+                            for (i, bpm, first_beat) in grids {
+                                if let Some(c) = doc.clips.get_mut(i) {
+                                    c.bpm = bpm;
+                                    c.first_beat = first_beat;
+                                }
+                            }
                             if *ai_replace {
                                 doc.cues.clear();
                             }
@@ -522,89 +527,27 @@ impl Editor {
             }
             if *ai_open {
                 let mut open = true;
-                let mut s_dirty = false;
                 egui::Window::new("AI show builder")
                     .open(&mut open)
                     .collapsible(false)
                     .default_width(430.0)
                     .show(ui, |ui| {
-                        let mut s = settings.lock().unwrap_or_else(|e| e.into_inner());
-                        ui.horizontal(|ui| {
-                            ui.label("provider");
-                            egui::ComboBox::from_id_salt("ai_prov")
-                                .selected_text(s.ai_provider.label())
-                                .show_ui(ui, |ui| {
-                                    for p in crate::ai::AiProvider::ALL {
-                                        if ui
-                                            .selectable_label(s.ai_provider == p, p.label())
-                                            .clicked()
-                                        {
-                                            s_dirty = true;
-                                            // Reset fields that still hold another
-                                            // provider's defaults.
-                                            if crate::ai::AiProvider::ALL
-                                                .iter()
-                                                .any(|o| s.ai_endpoint == o.default_endpoint())
-                                            {
-                                                s.ai_endpoint.clear();
-                                            }
-                                            if crate::ai::AiProvider::ALL.iter().any(|o| {
-                                                !o.default_model().is_empty()
-                                                    && s.ai_model == o.default_model()
-                                            }) {
-                                                s.ai_model.clear();
-                                            }
-                                            s.ai_provider = p;
-                                        }
-                                    }
-                                });
-                        });
-                        let def_ep = s.ai_provider.default_endpoint();
-                        ui.horizontal(|ui| {
-                            ui.label("endpoint ");
-                            if ui
-                                .add(
-                                    egui::TextEdit::singleline(&mut s.ai_endpoint)
-                                        .hint_text(def_ep)
-                                        .desired_width(330.0),
-                                )
-                                .changed()
-                            {
-                                s_dirty = true;
-                            }
-                        });
-                        let def_model = s.ai_provider.default_model();
-                        ui.horizontal(|ui| {
-                            ui.label("model    ");
-                            if ui
-                                .add(
-                                    egui::TextEdit::singleline(&mut s.ai_model)
-                                        .hint_text(def_model)
-                                        .desired_width(200.0),
-                                )
-                                .changed()
-                            {
-                                s_dirty = true;
-                            }
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label("API key  ");
-                            if ui
-                                .add(
-                                    egui::TextEdit::singleline(&mut s.ai_key)
-                                        .password(true)
-                                        .hint_text("or env var")
-                                        .desired_width(240.0),
-                                )
-                                .changed()
-                            {
-                                s_dirty = true;
-                            }
-                        });
-                        ui.small(format!(
-                            "blank key tries {} — saved to trippin.json (gitignored)",
-                            s.ai_provider.env_keys().join(" / ")
-                        ));
+                        // Provider, model and key live on the control
+                        // panel's Settings page — summarise them here.
+                        let conf = {
+                            let s = settings.lock().unwrap_or_else(|e| e.into_inner());
+                            crate::ai::AiConf::from_settings(&s)
+                        };
+                        let model = if conf.model.is_empty() {
+                            "default model".to_string()
+                        } else {
+                            conf.model.clone()
+                        };
+                        ui.label(format!("{} · {model}", conf.provider.label()));
+                        ui.small("Change the provider, model or API key on the control panel's Settings tab (F1).");
+                        if conf.key.is_empty() && conf.provider != crate::ai::AiProvider::Compatible {
+                            ui.colored_label(t::WARN, "No API key set.");
+                        }
                         ui.checkbox(ai_replace, "replace existing cues");
                         let busy = ai_job.lock().unwrap_or_else(|e| e.into_inner()).busy;
                         ui.horizontal(|ui| {
@@ -622,7 +565,7 @@ impl Editor {
                                 let clips = doc_opt.as_ref().unwrap().clips.clone();
                                 let scenes = scenes.to_vec();
                                 let routines = routines.to_vec();
-                                let conf = crate::ai::AiConf::from_settings(&s);
+                                let conf = conf.clone();
                                 let job = ai_job.clone();
                                 {
                                     let mut j = job.lock().unwrap_or_else(|e| e.into_inner());
@@ -637,7 +580,7 @@ impl Editor {
                                     let mut j = job.lock().unwrap_or_else(|e| e.into_inner());
                                     j.busy = false;
                                     j.status = match &r {
-                                        Ok((_, n)) => n.clone(),
+                                        Ok(b) => b.note.clone(),
                                         Err(e) => e.clone(),
                                     };
                                     j.result = Some(r);
@@ -657,9 +600,6 @@ impl Editor {
                         });
                     });
                 *ai_open = open;
-                if s_dirty {
-                    settings_dirty.store(true, std::sync::atomic::Ordering::Relaxed);
-                }
             }
 
             // --- Inspector (right, mockup 1d): selected cue / clip ----------
@@ -796,6 +736,7 @@ impl Editor {
                                     ("static mode", CueKind::Mode(crate::config::Mode::Static)),
                                     ("manual mode", CueKind::Mode(crate::config::Mode::Manual)),
                                     ("blackout", CueKind::Blackout(true)),
+                                    ("strobe", CueKind::Strobe(true)),
                                 ]
                                 .into_iter()
                                 .filter(|(l, _)| show(l))
@@ -848,6 +789,18 @@ impl Editor {
                                                 for v in crate::text::TextAnim::ALL {
                                                     ui.selectable_value(
                                                         &mut text_draft.anim,
+                                                        v,
+                                                        v.label(),
+                                                    );
+                                                }
+                                            });
+                                        egui::ComboBox::from_id_salt("text_fx")
+                                            .width(74.0)
+                                            .selected_text(text_draft.fx.label())
+                                            .show_ui(ui, |ui| {
+                                                for v in crate::text::TextFx::ALL {
+                                                    ui.selectable_value(
+                                                        &mut text_draft.fx,
                                                         v,
                                                         v.label(),
                                                     );

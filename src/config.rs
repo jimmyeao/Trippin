@@ -21,6 +21,7 @@ pub enum Action {
     NextStyle,
     CycleCanon,
     Blackout,
+    Strobe,
     Fullscreen,
     MarkDownbeat,
     LatencyDown,
@@ -42,7 +43,7 @@ pub enum Action {
 }
 
 impl Action {
-    pub const ALL: [Action; 29] = [
+    pub const ALL: [Action; 30] = [
         Action::NextScene,
         Action::PrevScene,
         Action::ModeAuto,
@@ -54,6 +55,7 @@ impl Action {
         Action::NextStyle,
         Action::CycleCanon,
         Action::Blackout,
+        Action::Strobe,
         Action::Fullscreen,
         Action::MarkDownbeat,
         Action::LatencyDown,
@@ -87,6 +89,7 @@ impl Action {
             Action::NextStyle => "Next dancer look",
             Action::CycleCanon => "Canon: auto / on / off",
             Action::Blackout => "Blackout (fade to black)",
+            Action::Strobe => "Strobe on / off (flashes on the drum hits)",
             Action::Fullscreen => "Fullscreen on / off",
             Action::MarkDownbeat => "Mark this beat as the downbeat",
             Action::LatencyDown => "Latency -5 ms (visuals later)",
@@ -121,20 +124,15 @@ impl Action {
             Action::NextStyle => "S",
             Action::CycleCanon => "V",
             Action::Blackout => "B",
+            Action::Strobe => "Z",
             Action::Fullscreen => "F",
             Action::MarkDownbeat => "Space",
             Action::LatencyDown => "[",
             Action::LatencyUp => "]",
             Action::CycleFx => "X",
             Action::ReloadShaders => "F5",
-            // No F-keys on Touch Bar Macs — F1 is a brightness key there.
-            Action::TogglePanel => {
-                if cfg!(target_os = "macos") {
-                    "P"
-                } else {
-                    "F1"
-                }
-            }
+            Action::TogglePanel => "F1",
+            // No F-keys on Touch Bar Macs — F2 is a brightness key there.
             Action::ToggleEditor => {
                 if cfg!(target_os = "macos") {
                     "E"
@@ -297,6 +295,12 @@ pub enum Tristate {
 #[serde(default)]
 pub struct Settings {
     pub keys: BTreeMap<Action, String>,
+    /// MIDI input port to listen on ("" = off). Note-on presses fire the
+    /// action bound in `midi_notes`.
+    pub midi_in: String,
+    /// Action → MIDI note number, same shape as `keys`. Bound on the Keys
+    /// page by learning: click "midi", then hit the pad.
+    pub midi_notes: BTreeMap<Action, u8>,
     pub mode: Mode,
     pub random_order: bool,
     /// Bars per scene in auto mode.
@@ -341,7 +345,23 @@ pub struct Settings {
     pub ai_endpoint: String,
     pub ai_model: String,
     pub ai_key: String,
+    /// Let the model look each track up online (Anthropic web search)
+    /// before planning — genre, mood, hook words.
+    pub ai_web_search: bool,
+    /// Neural beat/downbeat tracking (Beat This!) for song grids — the
+    /// model downloads on first use.
+    pub beat_model: bool,
+    /// External engine link (the Unity stage): send the show-state feed
+    /// over UDP and take frames back from a Spout sender as the
+    /// `unity_stage` scene.
+    pub unity_link: bool,
+    /// UDP port the show-state feed goes to (127.0.0.1).
+    pub link_port: u16,
     pub latency_ms: f32,
+    /// Audio capture source: a device-name substring resolved like
+    /// `--device`. "" = the platform default tap (ScreenCaptureKit output
+    /// mix on macOS, output loopback on Windows).
+    pub audio_in: String,
     pub show_panel: bool,
     /// NDI network output — sends the composited frame (FX + text included)
     /// to OBS/another display. Needs the free NDI runtime installed; a
@@ -399,6 +419,19 @@ pub struct Settings {
     pub ticker_on: bool,
     pub ticker_text: String,
     pub ticker_speed: f32,
+    /// LAN remote for the companion iOS app: a WebSocket JSON server on
+    /// `remote_port`, advertised over mDNS as `_trippin._tcp`. Clients must
+    /// `hello` with `remote_pin`. Off by default — no silent open ports.
+    pub remote_on: bool,
+    pub remote_port: u16,
+    /// 4-digit pairing PIN shown on the Settings tab. Blank while
+    /// `remote_on` is regenerated on load so a blanked field can't silently
+    /// disable auth.
+    pub remote_pin: String,
+    /// OSC input (UDP) for TouchOSC/Lemur-style controllers — see the
+    /// address table in `osc.rs`.
+    pub osc_on: bool,
+    pub osc_port: u16,
 }
 
 impl Default for Settings {
@@ -408,6 +441,8 @@ impl Default for Settings {
                 .iter()
                 .map(|a| (*a, a.default_key().to_string()))
                 .collect(),
+            midi_in: String::new(),
+            midi_notes: BTreeMap::new(),
             mode: Mode::Auto,
             random_order: true,
             phrase_bars: 16,
@@ -433,7 +468,12 @@ impl Default for Settings {
             ai_endpoint: String::new(),
             ai_model: String::new(),
             ai_key: String::new(),
+            ai_web_search: true,
+            beat_model: true,
+            unity_link: false,
+            link_port: 9137,
             latency_ms: 30.0,
+            audio_in: String::new(),
             show_panel: true,
             ndi_enabled: false,
             ndi_name: "Trippin".into(),
@@ -465,6 +505,11 @@ impl Default for Settings {
             ticker_on: false,
             ticker_text: String::new(),
             ticker_speed: 1.0,
+            remote_on: false,
+            remote_port: 9138,
+            remote_pin: String::new(),
+            osc_on: false,
+            osc_port: 9139,
         }
     }
 }
@@ -498,6 +543,17 @@ fn path() -> PathBuf {
 }
 
 /// The folder `trippin.json` lives in — `nowplaying.txt` goes here too.
+/// TLS for every HTTP client: trust what the OS trusts (macOS keychain,
+/// Windows cert store). ureq's default is a bundled Mozilla root list,
+/// which fails with `UnknownIssuer` on networks that inspect HTTPS with
+/// their own root (antivirus web shields, VPNs, company proxies) even
+/// though browsers there work. Downloads stay SHA-pinned regardless.
+pub fn tls() -> ureq::tls::TlsConfig {
+    ureq::tls::TlsConfig::builder()
+        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+        .build()
+}
+
 pub fn data_dir() -> PathBuf {
     match path().parent() {
         Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
@@ -517,13 +573,7 @@ pub fn timelines_dir() -> PathBuf {
 impl Settings {
     pub fn load() -> Self {
         let mut s: Settings = std::fs::read_to_string(path())
-            .ok()
-            .and_then(|t| {
-                // Notepad (and PowerShell 5) save UTF-8 with a BOM.
-                serde_json::from_str(t.trim_start_matches('\u{feff}'))
-                    .map_err(|e| eprintln!("trippin.json ignored: {e}"))
-                    .ok()
-            })
+            .map(|t| Settings::parse_lenient(&t))
             .unwrap_or_default();
         // Actions added in newer versions get their default key.
         for a in Action::ALL {
@@ -531,20 +581,62 @@ impl Settings {
                 .entry(a)
                 .or_insert_with(|| a.default_key().to_string());
         }
-        // macOS builds moved the panel off F1 (a brightness key on Touch Bar
-        // machines); a saved "F1" is the old default, not a deliberate pick.
+        // macOS builds briefly defaulted the panel to P (F1 is a brightness
+        // key on Touch Bar machines) — reverted; a saved "P" is that old
+        // default, not a deliberate pick.
         #[cfg(target_os = "macos")]
-        if s.keys.get(&Action::TogglePanel).is_some_and(|k| k == "F1") {
+        if s.keys.get(&Action::TogglePanel).is_some_and(|k| k == "P") {
             s.keys.insert(
                 Action::TogglePanel,
                 Action::TogglePanel.default_key().to_string(),
             );
         }
         // Retired model ids saved by older builds → back to the default.
-        if s.ai_model == "gemini-2.5-flash" {
+        if s.ai_model == "gemini-2.5-flash" || s.ai_model == "claude-sonnet-4-5" {
             s.ai_model.clear();
         }
+        // A blanked PIN must not silently open the remote to anyone.
+        if s.remote_on && s.remote_pin.is_empty() {
+            s.remote_pin = crate::remote::new_pin();
+        }
         s
+    }
+
+    /// Parse trippin.json, keeping everything this build understands. A
+    /// strict parse threw the whole file away on one unknown value (say, a
+    /// hotkey for an action a newer build added), so every setting,
+    /// including the Unity link, reset to its default. Now: hotkey and MIDI
+    /// entries for unknown actions are dropped, then each top-level field
+    /// that still doesn't fit is skipped on its own.
+    pub fn parse_lenient(text: &str) -> Settings {
+        use serde_json::Value;
+        // Notepad (and PowerShell 5) save UTF-8 with a BOM.
+        let text = text.trim_start_matches('\u{feff}');
+        if let Ok(s) = serde_json::from_str::<Settings>(text) {
+            return s;
+        }
+        let Ok(Value::Object(mut file)) = serde_json::from_str::<Value>(text) else {
+            eprintln!("trippin.json isn't valid JSON: using defaults");
+            return Settings::default();
+        };
+        for key in ["keys", "midi_notes"] {
+            if let Some(Value::Object(m)) = file.get_mut(key) {
+                m.retain(|name, _| serde_json::from_value::<Action>(Value::String(name.clone())).is_ok());
+            }
+        }
+        let mut merged = serde_json::to_value(Settings::default()).unwrap_or(Value::Null);
+        for (k, v) in file {
+            let Value::Object(cur) = &merged else { break };
+            let mut trial = cur.clone();
+            trial.insert(k.clone(), v);
+            let trial = Value::Object(trial);
+            if serde_json::from_value::<Settings>(trial.clone()).is_ok() {
+                merged = trial;
+            } else {
+                eprintln!("trippin.json: skipped \"{k}\" (not understood by this version)");
+            }
+        }
+        serde_json::from_value(merged).unwrap_or_default()
     }
 
     pub fn save(&self) {
@@ -564,6 +656,14 @@ impl Settings {
             .find(|(_, k)| k.as_str() == key)
             .map(|(a, _)| *a)
     }
+
+    /// The action bound to a MIDI note number (any channel).
+    pub fn midi_action_for(&self, note: u8) -> Option<Action> {
+        self.midi_notes
+            .iter()
+            .find(|(_, n)| **n == note)
+            .map(|(a, _)| *a)
+    }
 }
 
 /// Stable, human-readable name for a key ("A", "Space", "ArrowRight", "F5").
@@ -578,6 +678,24 @@ pub fn key_name(key: &Key) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn settings_from_a_newer_build_keep_what_this_build_knows() {
+        // A newer build's hotkey and an unknown enum value used to throw the
+        // whole file away (unity_link silently back to off).
+        let text = r#"{
+            "unity_link": true,
+            "phrase_bars": 8,
+            "keys": { "NextScene": "J", "SomeFutureAction": "Q" },
+            "mode": "SomeFutureMode",
+            "a_field_from_the_future": 3
+        }"#;
+        let s = Settings::parse_lenient(text);
+        assert!(s.unity_link);
+        assert_eq!(s.phrase_bars, 8);
+        assert_eq!(s.keys.get(&Action::NextScene).map(String::as_str), Some("J"));
+        assert!(s.mode == Settings::default().mode);
+    }
 
     #[test]
     fn month_day_matches_known_dates() {

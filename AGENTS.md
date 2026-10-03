@@ -13,7 +13,7 @@ something durable.
 Trippin is **live, music-reactive visuals for DJ sets**. It's written in
 Rust with wgpu, and the visuals are WGSL fullscreen fragment shaders. It
 listens to the system audio (WASAPI loopback on Windows, ScreenCaptureKit on
-macOS) and analyses it:
+macOS) or a picked input device, and analyses it:
 
 - band levels, onsets and kicks;
 - tempo and the beat/bar phase;
@@ -79,6 +79,18 @@ overlays.
   latest; another agent may have pushed since you last looked.
 - **Don't** force-push shared branches, rewrite pushed history, or delete
   someone else's branch.
+- **Unity instanced draws need instancing on the material asset at build
+  time** (`StageBuilder`: `mat.enableInstancing = true`). Enabling it only
+  on a runtime copy lets the build strip the shader's instancing variant
+  ("after built-in stripping: 1" in Editor.log), and
+  `Graphics.RenderMeshInstanced` then draws nothing, without any error.
+- **One agent per checkout.** Switching branches in a folder another agent
+  is using swaps the files under it. A Unity build that was running then
+  silently compiles the other branch's code (the v4 Mac engine almost
+  shipped without its new shows this way). Give each agent its own
+  `git worktree add ../Trippin-<topic> <branch>`, and build releases from a
+  worktree. The first Unity build in a new worktree re-imports the project
+  (several minutes).
 - **Small commits.** Each commit gets a descriptive message that says what
   changed and why. Push when a piece works, so the other agent can see it.
 - **Merging to master:** `git merge --no-ff` with a `Merge feat/<x>: …`
@@ -102,8 +114,12 @@ cargo run --release -- --snap laser_show,stage_rig --snap-size 1920x1080   # hea
 cargo run --release -- --snap all --snap-bench 120   # perf table in snaps/bench.tsv
 cargo run --release -- --snap x --snap-calm 1        # preview breakdown (no drums) mode
 cargo run --release -- --nowplaying       # prints what each now-playing source sees
+cargo run --release -- --list-devices     # capture devices (names for --device / the Audio in picker)
+cargo run --release -- --probe-audio [name]   # capture ~6 s, print band peaks + BPM; exits nonzero on silence
+cargo run --release -- --beats track.flac     # onset grid vs Beat This! grid + timings (TRIPPIN_BEATS_DEBUG=1: per-30 s tempo)
 cargo run --release -- --spout-grab <name> out.png   # receive one Spout frame (Windows)
 cargo run --release -- --ndi-monitor [name]
+cargo run --release -- --list-midi          # MIDI input ports (pad/key controllers)
 ```
 
 - If `trippin.exe` is running, it locks `target/release`. Build into another
@@ -117,6 +133,9 @@ cargo run --release -- --ndi-monitor [name]
   so don't clobber them**.
 - **Key injection:** `SendKeys` sometimes misses the winit window.
   `PostMessage` WM_KEYDOWN/UP to the hwnd is reliable.
+- The agent Bash tool's heredocs expand `\n` into real newlines, which
+  silently breaks Rust string literals edited through `python - <<EOF`.
+  Write edit scripts to a file (or use the Edit tool) instead.
 - The dev box has no ffmpeg on PATH. imageio-ffmpeg's binary (Python) works
   via the `ffmpeg_path` setting.
 
@@ -125,7 +144,8 @@ cargo run --release -- --ndi-monitor [name]
 | Path | What |
 |---|---|
 | `src/main.rs` | The winit app and CLI flags. `render_loop` runs on **its own thread** (Windows' modal move loop would freeze it otherwise). The event thread runs input and the egui panel. They share `Shared` (a `Mutex<Settings>`, a `Mutex<Status>`, and atomics) and talk over `mpsc::Msg`. |
-| `src/audio.rs` | Capture, FFT, onsets and kicks (level-independent: flux > mean×1.8), tempo PLL, groove, `calm` (breakdown), the four-band vocabulary, and the triggered waveform. |
+| `src/audio.rs`, `src/sysaudio.rs` | Capture (CPAL devices; the macOS system-output tap lives in `sysaudio.rs`), FFT, onsets and kicks (level-independent: flux > mean×1.8), tempo PLL, groove, `calm` (breakdown), the four-band vocabulary, the triggered waveform, and the neural downbeat check (`nn_*`: a 15 s window every 5 s to a `beat-nn` worker thread). |
+| `src/beats.rs` | Beat This! (`beat-this` crate, ONNX via pure-Rust `rten`, as in BeatDis): model download to `<data dir>/models` (SHA-checked, from the public `BeatDis-models` release), detection with sub-frame refine, the constant-tempo grid fit, and the per-song grid cache (`<data dir>/beatcache`). |
 | `src/director.rs` | Auto-pilot: phrase cuts, drop cuts, intensity, and the beats/breakdown modes. |
 | `src/render.rs` | wgpu. Ping-pong Rgba16Float feedback targets, per-scene pipelines, hot reload, and the `Uniforms` struct (**must match `U` in `shaders/common.wgsl`**). |
 | `src/gfx.rs`, `shaders/bloom.wgsl` | The baked 64³ noise volume and blue noise, and the bloom chain. |
@@ -139,10 +159,15 @@ cargo run --release -- --ndi-monitor [name]
 | `src/output.rs` | The output tap. It re-runs present at the output size, reads it back asynchronously, and feeds the sinks (NDI, Spout, recorder). |
 | `src/ndi.rs`, `src/spout.rs` | NDI (runtime loaded dynamically), and a native Spout2 sender (D3D11 shared texture plus the Spout shared-memory registry). |
 | `src/rec.rs` | Clip recording: the ffmpeg replay buffer and set recording. |
-| `src/timeline.rs`, `src/song.rs`, `src/editor.rs`, `src/ai.rs` | The timeline show editor (F2), song playback, and the AI show builder. |
-| `src/panel.rs` | The egui control panel. Tabs: Show, Scenes, Dancer, Effects, Stream, Timeline, Keys. |
+| `src/timeline.rs`, `src/song.rs`, `src/editor.rs`, `src/ai.rs` | The timeline show editor (F2), song playback, and the AI show builder (local analysis → prompt → plan → `expand_plan` rules → cues). |
+| `src/panel.rs` | The egui control panel. Tabs: Perform, Dancer & FX, Stream, Timeline, Keys, Settings. App-wide preferences (audio in, latency, director rules, AI provider/key) live on **Settings** (`settings_tab`), not in collapsibles on other pages or in the timeline editor. |
 | `src/config.rs` | `Settings` (serde, `#[serde(default)]`), actions and hotkeys, and `data_dir()`. |
+| `src/midi.rs` | MIDI input (midir): one port, note-ons become `Action`s. |
+| `src/remote.rs` | LAN remote for the iOS companion app: a WebSocket JSON server (TCP 9138, Bonjour `_trippin._tcp`, PIN-gated) — protocol at the top of the file, details in §8. |
+| `ios/TrippinRemote/` | The iOS/iPadOS remote app (SwiftUI, iOS 17+): Bonjour discovery, PIN pairing in the Keychain, pads, scene grid with thumbnails, look/FX, dancer and transport pages, plus a built-in `DemoServer` for use without a rig (and for App Review). The `.xcodeproj` is generated: run `xcodegen` in that folder (it's git-ignored). Speaks the `remote.rs` protocol; UI tests in `UITests/`. See its README. |
+| `src/osc.rs` | OSC UDP input (9139) for TouchOSC/Lemur — maps addresses onto the same `RemoteCmd`s as the app. |
 | `src/snap.rs` | Headless snapshot and benchmark rendering. |
+| `src/engine.rs`, `src/link.rs`, `unity/` | Unity engine (shows `unity_stage`, `unity_crystals`, `unity_flow`, `unity_leviathan`, `unity_sculpture`, `unity_colossus`, `unity_tidal_cathedral`; any `unity_*` scene is gated on live frames and hidden from the AI builder). `engine.rs` launches the player headless and supervises it; frames come back through a memory-mapped file (seqlock, top row first) into `gfx::Statics::ext` (binding 8 `ext_tex`); `link.rs` sends the show state over UDP. Cross-platform, nothing to start by hand. See `unity/README.md`. |
 | `tools/*.py` | Offline pipelines: mocap and stock video to dancer clips, and so on. |
 
 ## 6. Writing a scene
@@ -216,6 +241,13 @@ cargo run --release -- --ndi-monitor [name]
 - New `Settings` fields need a `Default` value. `#[serde(default)]` keeps
   old files loading. Enums that can lose variants use `#[serde(other)]` on
   the last variant.
+- **trippin.json must survive newer builds** (`Settings::parse_lenient`): a
+  strict parse once dropped the whole file over one unknown hotkey action
+  written by a newer dev build, so every setting (the Unity link included)
+  reset on each launch of the installed app. Unknown actions in `keys` /
+  `midi_notes` are filtered and any other field that doesn't fit is
+  skipped on its own. Dev builds run from the repo use the owner's real
+  settings: run them from a scratch folder (§4).
 - `trippin.json` can carry a UTF-8 BOM (Notepad, PowerShell 5), and loading
   strips it. Do the same for any user-edited text files you read.
 - Anything that re-installs global taps (see `rec.rs`) must drop the old
@@ -226,6 +258,139 @@ cargo run --release -- --ndi-monitor [name]
   pass `/SUBSYSTEM:WINDOWS` via `RUSTFLAGS`.
 - Worker threads must always reply to their channel, even when they panic
   (use `catch_unwind`). A dropped reply wedged the editor.
+- **Windows `accept` inherits non-blocking** (unlike Unix): a stream from
+  a `set_nonblocking(true)` `TcpListener` arrives non-blocking, and
+  `set_read_timeout` is a dead letter on it — `read` returns `WouldBlock`
+  instantly. Call `set_nonblocking(false)` on every accepted stream (see
+  `remote.rs::client`). The symptom is random `WouldBlock`/reset reads —
+  easy to misread as a firewall.
+- **Network tests bind `127.0.0.1`** (`Server::start_on`, `Osc::start_on`):
+  binding `0.0.0.0` in a test pops the Windows firewall prompt and stalls
+  the socket I/O until it's acknowledged. Same reason mDNS adverts are
+  skipped on loopback binds.
+- `f32::signum(+0.0)` is **1.0**, not 0.0. An ease like
+  `v += rate*dt*(target - v).signum()` never rests: at `v == target` it
+  steps up `rate*dt` then eases back — a two-frame judder (this made the
+  branding logo wobble horizontally whenever the DJ name was off). Guard
+  the at-rest case (see `overlay.rs::ease_vis`).
+- **HTTP clients use the OS trust store** (`config::tls()`, ureq's
+  `platform-verifier` feature). ureq's default bundled roots failed with
+  `invalid certificate: UnknownIssuer` on the owner's M2, whose network
+  inspects HTTPS. Every new `ureq::Agent` must set
+  `.tls_config(crate::config::tls())`.
+- The render thread is **not unwound on quit**: its locals' `Drop`s never
+  run (macOS Cmd-Q doesn't even return from `run_app`). Process-level
+  cleanup (killing the Unity player: `engine::shutdown`) goes in
+  `ApplicationHandler::exiting`, with state the event thread can reach.
+- Panel scene thumbnails are rendered once and disk-cached, except
+  `unity_*` tiles (`panel.rs::live_thumb`): they re-render about every
+  0.5 s from the engine's current frame and are never cached.
+- The pointer over the visuals is hidden while fullscreen (synced in
+  `about_to_wait`); the panel/editor windows keep theirs.
+- **MIDI** (`midi.rs`): midir's callback thread posts `AppEvent::MidiNote`
+  through an `EventLoopProxy` — the event loop type is
+  `EventLoop<AppEvent>`, so `ApplicationHandler<AppEvent>::user_event`
+  dispatches. `App::midi_note` is the single entry point: it serves
+  MIDI-learn (Keys page `midi_learn`) or runs `apply` like a hotkey, so
+  pad presses record as timeline cues too. Only note-on with velocity > 0
+  counts (note-off / vel-0 is the pad release — acting on it doubles
+  toggles). Bindings are `Settings::midi_notes` (action → note, any
+  channel; one note = one action, learning steals it). WinMM has no
+  unplug event: `about_to_wait` rescans `midi::ports()` every 3 s and
+  drops a connection whose port vanished, so replugging recovers. midir's
+  macOS backend is CoreMIDI — the code isn't cfg-gated, but it hasn't been
+  compiled for macOS yet.
+- **Beat This! grid fit** (`beats.rs::fit_grid`): the model sometimes emits
+  *confident* beats at ~1.5x tempo plus dozens of junk downbeats through a
+  breakdown. Counting those as beats skewed tempos by 2-3%, and a slightly
+  wrong tempo spreads the downbeat vote over all four phases. So: refine
+  beat times sub-frame (raw peaks are on a 20 ms grid), take the period
+  from steady runs that agree with the median, number each beat against
+  the previous accepted one and skip beats between grid lines, reject
+  residual outliers and refit, and let only accepted beats' downbeats vote.
+  Check changes with `--beats` on several tracks: real tempos come out as
+  round numbers (125.00, 130.01, 140.87).
+- **Live beat phase** (`audio.rs` `nn_vote`): the onset comb locks onto the
+  strongest onsets, which in a lot of house are the off-beat bass/hats —
+  measured with `--groove-test`, the live "one" was on the bar only 5-30%
+  of the time. The neural window measures where real downbeats sit on the
+  live grid (circular mean), shifts the phase and stores `nn_bias`, which
+  `correct_phase` adds to the comb target so it doesn't drag the phase
+  back. Then the downbeats vote the bar (decisive when >=4 agree at 85%).
+  `--groove-test` prints `bar N` (live "one" vs the file grid; 0 = right),
+  `TRIPPIN_NO_NN=1` compares without the check, `TRIPPIN_NN_DEBUG=1` logs
+  each window. `main` caps rten at 2 threads (`RTEN_NUM_THREADS`); it
+  barely scales past 4 and would otherwise take every core.
+- `song::load` uses the Beat This! grid when `beats::ready()` (downloaded and
+  `Settings::beat_model` on); downbeat agreement < 50% keeps its tempo but
+  picks the bar by bass vote. `ai::build_show` returns re-detected grids
+  (`ShowBuild::grids`) and the editor applies them before adding cues.
+- **AI show builder** (`ai.rs::anthropic`): the default is
+  `claude-sonnet-5-5`. Claude 5-family models reject a forced
+  `tool_choice` (`tool`/`any`) with a 400, so `emit_plan` is offered with
+  `auto` and the system prompt asks for the call. Thinking is always on
+  and counts toward `max_tokens` (keep it ≥16k). Check `stop_reason`
+  (`refusal`, `max_tokens`) before reading content. `output_config.effort`
+  and `fallbacks: "default"` are sent only for the 5-family ids (the model
+  and endpoint are user-editable), and the fallback only to
+  api.anthropic.com. When bumping a default model, add the old id to the
+  retired-id reset in `Settings::load`.
+  - With `Settings::ai_web_search` the request also offers the
+    `web_search` server tool (max 4 uses); a `pause_turn` stop is resumed
+    by re-sending with the paused content appended as the assistant turn.
+  - Show rules live in two places: the system prompt asks for them, and
+    `expand_plan` enforces them (routine pace by block kind via
+    `routine_energies`/`CALM_MAX`, neon look in sung calm blocks, drop
+    impact top-up, title card fallback, mid-song `void` ignored). Change
+    both together. Unknown routine names are replaced by pace, not dropped.
+  - Analysis runs on the *timeline clip's* grid (`analyze_song(…, c.bpm,
+    c.first_beat)`) so an editor-nudged grid still lines bars up with cues.
+  - Structure (`find_boundaries`): novelty over 3-bar-median-filtered,
+    z-scored features (energy, onsets, vocal, air, mid) + half the
+    bar-to-bar jump, isolated fills boost the next bar, phrase grid voted
+    with a bar-0 prior, snap only when the on-grid neighbour scores ≥60%,
+    min 4 bars apart, then fill-led splits of long flat stretches. Section
+    kinds are relative to the track's own median/p75. Check with
+    `--analyze` (`TRIPPIN_AI_DEBUG=1` prints the novelty curve) on a flat
+    house track (Krush – House Arrest) and an EDM one (D.O.D.).
+  - Scene energy comes from `shaders/scene_energy.json`, generated by
+    `--snap all --snap-energy` (motion ×2 + brightness + colour, ranked).
+    **Re-run it when you add scenes** (unknown scenes default to 0.5).
+    `scene_meta` lifts laser/festival rigs to ≥0.6 and flags tunnel/flight
+    scenes, which never get strobe/flash fills (they stutter instead).
+  - Plan dialect extras: `cuts` (in-block scene changes), `fill`
+    (strobe/stutter/flash on fill bars), text `fx`/`size`/`at`/`seq`.
+  - **Strobe** is `CueKind::Strobe`, not blackout: blackout eases `master`
+    at ~3/s so sub-beat pulses never got dark. The strobe gate in the render
+    loop is hard (no easing) and opens only while the live analyser's
+    `onset` ≥ 0.45 (~70 ms per hit), so flashes follow the drums actually
+    playing, not the bar grid. The AI places it over `fill_span` — the
+    dense run of `ClipAnalysis::beat_onsets` around the fill bar, which can
+    start mid-bar or reach into the bar before. `STROBE` is a static flag
+    (reset in `apply_playhead` and `end_show`). Check with
+    `--groove-test` + `TRIPPIN_GATE=from-to` (prints the gate per hop, `|`
+    per beat) and `--analyze` (`fill_spans`). `TRIPPIN_CUE_TEST='{"Strobe":true}'`
+    fires any cue at startup.
+  - Dancer routines re-anchor their loop to the bar they were requested in
+    (`Slot::pending_anchor`), so a routine switched in on a phrase starts
+    from its first frame there.
+- **Text effects** (`TextFx`, `text.wgsl`): punch/shake/strobe/bounce/
+  shatter use the slot's former padding float (`TextSlotU::fx`), so the
+  uniform layout didn't change. `TRIPPIN_TEXT_TEST="WORDS|fx"` fires one
+  text cue at startup — screenshot the visuals window to look at an effect
+  without playing audio.
+- **macOS audio:** ScreenCaptureKit hears only the *system output mix*.
+  DJ software routed straight to a controller's own interface (Serato → a
+  Rane's USB card) never enters it — capture shows "no signal" while music
+  plays, and the tap is flaky even when the audio does enter the mix.
+  The fix is the controller's input device: `Settings::audio_in`
+  (panel picker on the Settings tab, live-restarts the engine
+  via the settings diff in `render_loop`), or `--device`/`--mic` per run.
+  `audio_in` is a device-name substring resolved by `AudioEngine::start`,
+  and a stale value falls back to the default tap rather than blocking
+  startup. `Settings::load` runs before `AudioEngine::start` in `main` so
+  the saved source applies at launch — keep that order. Debug capture
+  with `--probe-audio [name]` (no window needed).
 - egui layout rules the UI relies on (learned the hard way, review A1):
   - `ui.horizontal` children see the parent's `max_rect`, not the shrunk
     `cursor` — a `right_to_left` or `available_width()` inside one can
@@ -257,7 +422,10 @@ cargo run --release -- --ndi-monitor [name]
 - **Now playing** (`nowplaying.rs`):
   - **Sources:** the OS media session (Windows SMTC; on macOS, AppleScript
     for Spotify and Music, and only for apps that are running), Serato
-    session files, VirtualDJ `tracklist.txt`, rekordbox `master.db`
+    (4+: `Library/master.sqlite` `history_entry` where `played`=1, in
+    `Application Support/Serato` / `%APPDATA%\Serato`, WAL-mode — watch the
+    `-wal` mtime; ≤3.x: `_Serato_/History/Sessions/*.session` binary),
+    VirtualDJ `tracklist.txt`, rekordbox `master.db`
     (decrypted SQLCipher), the Mixxx set log, and a text-file watcher.
   - **Auto** picks the source whose track changed most recently. History
     files don't count as a change at startup; live sources do.
@@ -281,6 +449,45 @@ cargo run --release -- --ndi-monitor [name]
     48 kHz stereo, and chunked on the same 2 s grid.
   - A save concatenates the segments (`-c copy` for 16:9, re-encoded for
     9:16 crop and fit). The concat lists need **absolute** paths.
+
+## 8.5 LAN remote (iOS app + OSC)
+
+- **WebSocket server** (`remote.rs`, `Settings::remote_*`, default off):
+  TCP **9138** on all interfaces, Bonjour `_trippin._tcp` as "Trippin on
+  <host>"; the Settings card shows `IP:port` as the manual fallback and
+  the pairing PIN. `remote_on` with a blank PIN gets a fresh one on load —
+  auth can't silently disable.
+- **Protocol** (documented at the top of `remote.rs`): JSON text frames;
+  the first must be `{"cmd":"hello","pin":…}` — a wrong PIN earns an `err`
+  frame, a 500 ms penalty, and a close. `hello` replies with scene/clip/
+  palette/action lists. Commands (`action`, `goto_scene`, `queue_next`,
+  `show_clip`, `set`, `transport`, `thumb`) become `RemoteCmd`s posted to
+  `AppEvent::Remote` → `App::remote_cmd`, which runs `Action`s through
+  `apply()` so remote presses record into an armed timeline like hotkeys.
+- **State pushes** run ~10 Hz from a pusher thread that serialises once
+  and hands each client a copy over a bounded channel — a client whose
+  queue stays full is dropped. `thumb` requests queue until
+  `shared.thumbs` has `"scene:<name>"` (requested via `Msg::Thumb`), then
+  ship as base64 PNG. No lock is held across socket I/O.
+- **OSC** (`osc.rs`, `Settings::osc_*`, default off): UDP **9139**, the
+  `/trippin/…` address table at the top of `osc.rs`, mapped onto the same
+  `RemoteCmd`s. Buttons fire on press only — a falsy first arg is the
+  release (the MIDI note-off lesson); `/set/*` and `/scene/goto|queue`
+  read their arg verbatim.
+- First enable pops the Windows firewall prompt once — expected.
+- **The advertised address** (`remote::local_ip`, used for Bonjour and the
+  Settings card) comes from the interface list, preferring 192.168/16,
+  then 10/8 and 172.16/12, and skipping link-local 169.254 and Tailscale's
+  100.64/10. Routing towards the mDNS multicast group picked Tailscale's
+  self-assigned 169.254 adapter on the owner's PC, so phones were sent an
+  unreachable IP.
+- `tools/remote_test.html` is a browser harness for the same protocol —
+  pads, scene grid, thumbs — for testing without the iOS app. The server
+  serves it on a plain HTTP GET (no WS upgrade headers), so browsing to
+  `http://<ip>:9138` is the no-install remote. `serve_page` peeks at the
+  request without consuming it; when it answers, it must **drain the
+  request bytes first** — closing a socket with unread inbound data RSTs
+  it and the response can be lost.
 
 ## 9. Docs
 

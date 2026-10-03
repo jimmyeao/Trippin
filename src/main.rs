@@ -1,6 +1,6 @@
 //! Trippin — live music-reactive visuals for DJ sets.
 //!
-//! Usage: trippin [--list-devices] [--device "<name part>"] [--mic] [--scene <name>]
+//! Usage: trippin [--list-devices] [--list-midi] [--device "<name part>"] [--mic] [--scene <name>]
 //!                [--dancer [style]] [--no-dancer] [--canon] [--no-panel]
 //!                [--gpu low] [--scale 0.75] [--fullscreen] [--vsync]
 //!                [--song <audio file>] [--analyze <audio file>]
@@ -23,18 +23,27 @@
 // Installer builds (`--features gui`) are a windowed app with no console;
 // plain `cargo run` keeps the console for shader errors and logs.
 #![cfg_attr(all(feature = "gui", windows), windows_subsystem = "windows")]
+// The remote state frame is one big json! literal; its field count passed
+// the default macro recursion limit (128).
+#![recursion_limit = "256"]
 
 mod ai;
 mod audio;
+mod beats;
+mod engine;
+mod link;
 mod config;
 mod dancer;
 mod director;
 mod editor;
 mod gfx;
 mod egui_win;
+mod midi;
 mod ndi;
 mod nowplaying;
+mod osc;
 mod overlay;
+mod remote;
 mod rec;
 #[cfg(windows)]
 mod spout;
@@ -51,13 +60,33 @@ mod timeline;
 mod ui_theme;
 
 use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Strobe cue state (`CueKind::Strobe`) — set by timeline cues, read by the
+/// render loop's master gate. A flag rather than another `&mut` threaded
+/// through every cue path: it only lives inside a show, and
+/// `apply_playhead` resets it on play / seek / stop.
+static STROBE: AtomicBool = AtomicBool::new(false);
+
+/// Whether the visuals window is fullscreen. The event thread owns the
+/// window and publishes this every `about_to_wait`; the render thread copies
+/// it into `Status` so the remote's state frame (and anything else reading
+/// the shared status) sees it — the panel used to patch only its own copy.
+static FULLSCREEN: AtomicBool = AtomicBool::new(false);
+
+/// Frames are arriving from the external engine (Spout in) — the
+/// `unity_stage` scene is only in rotation while this holds.
+pub(crate) static EXT_LIVE: AtomicBool = AtomicBool::new(false);
+
+/// The Unity engine's state for the Settings tab ("running", "not
+/// installed", an error…).
+pub(crate) static ENGINE_STATUS: Mutex<String> = Mutex::new(String::new());
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::Key;
 use winit::window::{Fullscreen, Icon, Window, WindowId};
 
@@ -103,6 +132,20 @@ struct Shared {
     /// the editor each look up the keys they asked for, so the two windows
     /// can't eat each other's results.
     thumbs: Mutex<std::collections::HashMap<String, (u32, u32, Vec<u8>)>>,
+    /// MIDI connection state for the panel's status dot: (connected, label).
+    /// Written by the event thread where the connection lives.
+    midi_status: Mutex<(bool, String)>,
+    /// Remote-server state for the Settings card: (listening, status line).
+    remote_status: Mutex<(bool, String)>,
+}
+
+/// A pad press on the MIDI keyboard, posted to the event loop from midir's
+/// callback thread. The raw note (not the mapped action) travels so the
+/// Keys page can capture it for MIDI-learn. Remote commands (the iOS app's
+/// WebSocket clients, OSC controllers) arrive the same way.
+enum AppEvent {
+    MidiNote(u8),
+    Remote(remote::RemoteCmd),
 }
 
 /// Work the event thread hands to the render thread.
@@ -154,6 +197,7 @@ fn usable_scenes(r: &Renderer, s: &Settings) -> Vec<usize> {
         // `void` is the timeline's "scenes off" baseline — reachable only
         // via an explicit cue, never by autopilot or next/prev.
         .filter(|&i| names[i] != "void")
+        .filter(|&i| !names[i].starts_with("unity_") || EXT_LIVE.load(Ordering::Relaxed))
         .filter(|&i| !s.disabled_scenes.contains(&names[i]))
         .filter(|&i| heavy_on || !heavy[i])
         .filter(|&i| s.flat_scenes || heavy[i])
@@ -247,6 +291,7 @@ fn end_show(
             s.palette = b.palette.clone();
         }
         *blackout = b.blackout;
+        STROBE.store(false, Ordering::Relaxed);
         dancer.showing = b.dancer_showing;
         if dir.scene != b.scene {
             dir.cut_to(b.scene);
@@ -309,6 +354,7 @@ fn fire_cue(
         CueKind::Trails(b) => s.dancer_trails = *b,
         CueKind::Canon(t) => s.canon = *t,
         CueKind::Blackout(b) => *blackout = *b,
+        CueKind::Strobe(b) => STROBE.store(*b, Ordering::Relaxed),
         CueKind::Fx(f) => {
             s.fx_auto = false;
             s.fx = *f;
@@ -395,6 +441,7 @@ fn apply_playhead(
             s.palette = p.clone();
         }
         *blackout = st.blackout;
+        STROBE.store(st.strobe, Ordering::Relaxed);
     }
 
     // Scene: the last absolute cue wins; before any scene cue the baseline
@@ -452,7 +499,7 @@ fn render_loop(
     mut dir: Director,
     mut dancer: DancerLayer,
     mut audio: AudioEngine,
-    audio_cfg: (Option<String>, bool),
+    mut audio_cfg: (Option<String>, bool),
     shared: Arc<Shared>,
     rx: mpsc::Receiver<Msg>,
 ) {
@@ -467,6 +514,10 @@ fn render_loop(
     let mut last_status = Instant::now();
     let mut fps = 0.0f32;
     let mut flow = 0.0f64;
+    // External engine link (Settings > unity_link).
+    let mut link_out: Option<link::Link> = None;
+    let mut engine: Option<engine::Engine> = None;
+    let mut ext_seq = 0u64;
     let mut flow_bpm = 120.0f32;
     let groove_log = std::env::var_os("TRIPPIN_GROOVE_LOG").is_some();
     let mut last_groove_log = Instant::now();
@@ -507,6 +558,9 @@ fn render_loop(
     // Global seconds up to which cues were already dispatched — one-shot.
     let mut fired_past = f64::MIN;
     let mut was_locked = false;
+    // The saved audio source the running engine corresponds to — a panel
+    // change to `audio_in` restarts capture live (see the frame loop).
+    let mut audio_sel = lock(&shared.settings).audio_in.clone();
     let spawn_load = |tx: &mpsc::Sender<(std::path::PathBuf, Result<song::Song, String>)>,
                       path: std::path::PathBuf| {
         let tx = tx.clone();
@@ -792,6 +846,26 @@ fn render_loop(
                     delay_s: s.np_delay_s,
                     file: s.np_file.clone(),
                 };
+            }
+        }
+        // Audio-in picker: switching the saved source swaps the capture
+        // live. While a show plays the engine belongs to it — the new
+        // source takes over when the show ends (audio_cfg feeds stop_song).
+        if s.audio_in != audio_sel {
+            audio_sel = s.audio_in.clone();
+            audio_cfg.0 = (!audio_sel.is_empty()).then(|| audio_sel.clone());
+            if player.is_none() {
+                match AudioEngine::start(
+                    audio_cfg.0.as_deref(),
+                    audio_cfg.1,
+                    Some(shared.env.clone()),
+                ) {
+                    Ok(eng) => {
+                        println!("Audio: {}", eng.device_name);
+                        audio = eng;
+                    }
+                    Err(e) => eprintln!("audio input switch failed: {e:#}"),
+                }
             }
         }
         // Global palette — a no-op while the name is unchanged.
@@ -1154,6 +1228,16 @@ fn render_loop(
         }
         let target = if blackout { 0.0 } else { 1.0 };
         master += (target - master) * (dt * 3.0).min(1.0);
+        // Strobe: black, with a hard cut to the picture on each drum hit the
+        // analyser hears (`onset` jumps on a hit and decays over ~0.12 s, so
+        // each flash lasts ~70 ms). It follows the actual fill — rolls that
+        // start mid-bar or cross the bar line — not a grid, and no easing
+        // (blackout's fade is far too slow for this).
+        let strobe_gate = if STROBE.load(Ordering::Relaxed) && f.onset < 0.45 {
+            0.0
+        } else {
+            1.0
+        };
 
         let (w, h) = r.size();
         let mut spectrum = [0.0; audio::SPECTRUM_BINS];
@@ -1187,7 +1271,7 @@ fn render_loop(
             seed: dir.seed,
             flash: dir.flash,
             flow: flow as f32,
-            master,
+            master: master * strobe_gate,
             fx: if s.fx_auto { fx_current } else { s.fx }.index(),
             fx_amt: s.fx_amt,
             spectrum,
@@ -1203,6 +1287,46 @@ fn render_loop(
             clock4: clock4.map(|c| c as f32),
             misc4: [0.0; 4],
         };
+        // External engine link: Trippin runs the Unity engine itself (see
+        // engine.rs) — show state out over UDP, frames back through shared
+        // memory. Cross-platform; nothing for the user to start.
+        if s.unity_link {
+            if link_out.is_none() {
+                link_out = link::Link::new(s.link_port).ok();
+            }
+            if let Some(l) = link_out.as_mut() {
+                l.send(&u, r.scene_name(dir.scene), &s.palette, f.calm < 0.5);
+            }
+            if engine.is_none() {
+                match engine::Engine::new(s.link_port) {
+                    Ok(e) => engine = Some(e),
+                    Err(e) => *lock(&ENGINE_STATUS) = format!("{e:#}"),
+                }
+            }
+            if let Some(e) = engine.as_mut() {
+                e.tick();
+                let latest = e.latest.lock().unwrap_or_else(|p| p.into_inner());
+                if let Some(fr) = latest.as_ref() {
+                    if fr.seq != ext_seq {
+                        ext_seq = fr.seq;
+                        r.upload_external(&fr.rgba);
+                    }
+                }
+                drop(latest);
+                let live = e.live();
+                EXT_LIVE.store(live, Ordering::Relaxed);
+                let st = if live { "running".to_string() } else { e.status.clone() };
+                let mut g = lock(&ENGINE_STATUS);
+                if *g != st {
+                    *g = st;
+                }
+            }
+        } else if link_out.is_some() || engine.is_some() {
+            link_out = None;
+            engine = None; // Drop kills the player
+            EXT_LIVE.store(false, Ordering::Relaxed);
+            lock(&ENGINE_STATUS).clear();
+        }
         // Text overlays: fade in over 0.35 s, out over 0.5 s; a faded-out
         // slot drops off (its texture stays bound but the shader skips it).
         let now_t = u.time;
@@ -1220,7 +1344,7 @@ fn render_loop(
             }
             // 11% of screen height; squeeze wider text to fit the screen.
             let screen_asp = w as f32 / h.max(1) as f32;
-            let mut half_h = 0.11f32;
+            let mut half_h = 0.11f32 * ts.spec.size.unwrap_or(1.0).clamp(0.4, 2.5);
             let mut half_w = half_h * ts.aspect;
             if half_w > screen_asp * 0.92 {
                 half_w = screen_asp * 0.92;
@@ -1235,7 +1359,7 @@ fn render_loop(
                 life: 0.0,
                 hue: (slot as f32) * 0.37 + ts.spec.style.index() * 0.11,
                 anim: ts.spec.anim.index(),
-                _pad: 0.0,
+                fx: ts.spec.fx.index(),
             };
             any_text = true;
         }
@@ -1283,8 +1407,8 @@ fn render_loop(
                 },
                 clip: dancer.loaded_name(),
                 blackout,
-                // Filled in by the event thread — it owns the window state.
-                fullscreen: false,
+                // Published by the event thread — it owns the window state.
+                fullscreen: FULLSCREEN.load(Ordering::Relaxed),
                 fx: if s.fx_auto { fx_current } else { s.fx },
                 output: r.output_status(),
                 groove: f.groove,
@@ -1349,6 +1473,12 @@ fn apply_render(
             }
         }
         Action::Blackout => *blackout = !*blackout,
+        // The same gate as the timeline's strobe cue: flashes ride the
+        // live drum onsets while it's on.
+        Action::Strobe => {
+            let on = !STROBE.load(Ordering::Relaxed);
+            STROBE.store(on, Ordering::Relaxed);
+        }
         Action::MarkDownbeat => {
             let _ = audio.commands.send(Command::MarkDownbeat);
         }
@@ -1361,12 +1491,13 @@ fn apply_render(
         Action::ToggleLogo => {
             s.brand_logo_on = !s.brand_logo_on;
             // Showing a piece also enables the block, so the pad always has
-            // a visible effect; hiding leaves the master as it was.
-            s.brand_on |= s.brand_logo_on;
+            // a visible effect; hiding leaves the master as it was. With no
+            // logo set there's nothing to show, so the block stays as it is.
+            s.brand_on |= s.brand_logo_on && !s.brand_logo.trim().is_empty();
         }
         Action::ToggleName => {
             s.brand_name_on = !s.brand_name_on;
-            s.brand_on |= s.brand_name_on;
+            s.brand_on |= s.brand_name_on && !s.brand_name.trim().is_empty();
         }
         Action::ToggleTicker => s.ticker_on = !s.ticker_on,
         Action::LatencyDown => s.latency_ms -= 5.0,
@@ -1434,6 +1565,26 @@ struct App {
     last_panel_toggle: Instant,
     /// Title-bar/taskbar icon, decoded once from the bundled PNG.
     icon: Option<Icon>,
+    /// Posts MIDI notes from midir's callback thread into `user_event`.
+    midi_proxy: EventLoopProxy<AppEvent>,
+    /// Pointer over the visuals is hidden while fullscreen — synced to the
+    /// window's real fullscreen state in `about_to_wait`.
+    cursor_hidden: bool,
+    /// The open MIDI input, if any — its port name tells when `midi_in`
+    /// points somewhere new.
+    midi: Option<midi::Midi>,
+    /// Throttle for a failing/absent device retry, and for the port-list
+    /// scan that notices an unplugged device (WinMM has no disconnect event).
+    midi_retry: Instant,
+    midi_scan: Instant,
+    /// The LAN remote (WebSocket server for the iOS app) and the OSC
+    /// listener — respawned when their settings change, like `midi`.
+    remote: Option<remote::Server>,
+    osc: Option<osc::Osc>,
+    /// Throttle for bind-failure retries (port already in use).
+    remote_retry: Instant,
+    /// Last client count shown in the remote status line.
+    remote_clients: usize,
 }
 
 impl App {
@@ -1517,6 +1668,11 @@ impl App {
                     Some(p) => {
                         let show = p.window.is_visible() == Some(false);
                         p.window.set_visible(show);
+                        if !show {
+                            // A pending learn behind a hidden window would
+                            // eat the next pad press.
+                            p.midi_learn = None;
+                        }
                         if show {
                             p.window.request_redraw();
                         } else if let Some(w) = &self.window {
@@ -1574,11 +1730,233 @@ impl App {
         }
     }
 
+    /// A MIDI note-on from `midi_proxy`. While the Keys page is in learn mode
+    /// the note becomes the binding instead of firing.
+    fn midi_note(&mut self, event_loop: &ActiveEventLoop, note: u8) {
+        if self.shared.is_none() {
+            return;
+        }
+        if let Some(a) = self.panel.as_mut().and_then(|p| p.midi_learn.take()) {
+            {
+                let mut s = self.settings_mut();
+                // One note, one action — steal it from whatever had it.
+                s.midi_notes.retain(|_, n| *n != note);
+                s.midi_notes.insert(a, note);
+            }
+            self.mark_dirty();
+            if let Some(p) = &self.panel {
+                p.window.request_redraw();
+            }
+            return;
+        }
+        let action = self
+            .shared
+            .as_ref()
+            .and_then(|sh| lock(&sh.settings).midi_action_for(note));
+        if let Some(a) = action {
+            self.apply(a, event_loop);
+        }
+    }
+
+    /// A command from the LAN remote (iOS app) or an OSC controller — same
+    /// dispatch as a hotkey, so presses record into an armed timeline too.
+    fn remote_cmd(&mut self, event_loop: &ActiveEventLoop, cmd: remote::RemoteCmd) {
+        use remote::{RemoteCmd as R, SetKey};
+        let Some(sh) = self.shared.clone() else { return };
+        match cmd {
+            R::Act(a) => self.apply(a, event_loop),
+            R::GoToScene(sel) => {
+                if let Some(i) = sel.resolve(&sh.scene_names) {
+                    self.record_cue(CueKind::Scene(sh.scene_names[i].clone()));
+                    self.send(Msg::GoToScene(i));
+                }
+            }
+            R::QueueNext(sel) => {
+                if let Some(i) = sel.resolve(&sh.scene_names) {
+                    self.send(Msg::QueueNext(i));
+                }
+            }
+            R::ShowClip(name) => {
+                let i = sh
+                    .clip_names
+                    .iter()
+                    .position(|c| *c == name)
+                    .or_else(|| {
+                        sh.clip_names
+                            .iter()
+                            .position(|c| c.eq_ignore_ascii_case(&name))
+                    });
+                if let Some(i) = i {
+                    self.record_cue(CueKind::Clip(sh.clip_names[i].clone()));
+                    self.send(Msg::ShowClip(i));
+                }
+            }
+            R::Transport(ctl) => self.send(Msg::Transport(ctl)),
+            // The remote's pusher thread ships the PNG once the render
+            // thread produces it ("scene:<name>" in shared.thumbs).
+            R::Thumb(name) => self.send(Msg::Thumb(format!("scene:{name}"))),
+            R::Set(k) => {
+                {
+                    let mut s = self.settings_mut();
+                    match k {
+                        // Unknown palettes fall back inside palettes::lut;
+                        // validate anyway so a typo can't save a dead name.
+                        SetKey::Palette(p) if palettes::names().any(|n| n == p) => {
+                            s.palette = p;
+                        }
+                        SetKey::Palette(_) => return,
+                        SetKey::Fx(fx) => {
+                            s.fx_auto = false;
+                            s.fx = fx;
+                        }
+                        SetKey::FxAmt(v) => s.fx_amt = v,
+                        SetKey::FxAuto(b) => s.fx_auto = b,
+                        SetKey::DancerSize(v) => s.dancer_size = v,
+                        SetKey::DancerTrails(b) => s.dancer_trails = b,
+                        SetKey::PhraseBars(n) => s.phrase_bars = n,
+                        SetKey::CutOnDrops(b) => s.cut_on_drops = b,
+                        SetKey::LatencyMs(v) => s.latency_ms = v,
+                        SetKey::NpSize(v) => s.np_size = v,
+                        SetKey::BrandOpacity(v) => s.brand_opacity = v,
+                        SetKey::TickerSpeed(v) => s.ticker_speed = v,
+                        SetKey::TickerText(t) => s.ticker_text = t,
+                    }
+                }
+                self.mark_dirty();
+            }
+        }
+    }
+
+    /// The closures the remote server drives: commands go to the event
+    /// loop via the proxy, state/meta/thumbs read the shared state.
+    fn remote_hooks(&self) -> Option<remote::Hooks> {
+        let sh = self.shared.clone()?;
+        let proxy = self.midi_proxy.clone();
+        let (meta_sh, state_sh, thumb_sh) = (sh.clone(), sh.clone(), sh);
+        Some(remote::Hooks {
+            cmd: Box::new(move |c| {
+                let _ = proxy.send_event(AppEvent::Remote(c));
+            }),
+            meta: Box::new(move || {
+                serde_json::json!({
+                    "type": "hello",
+                    "ok": true,
+                    "version": env!("CARGO_PKG_VERSION"),
+                    "scenes": meta_sh.scene_names,
+                    "heavy": meta_sh.scene_heavy,
+                    "clips": meta_sh.clip_names,
+                    "palettes": palettes::names().collect::<Vec<_>>(),
+                    "actions": Action::ALL
+                        .iter()
+                        .map(|a| serde_json::json!({
+                            "id": serde_json::to_value(a).unwrap_or_default(),
+                            "label": a.label(),
+                        }))
+                        .collect::<Vec<_>>(),
+                    "addr": remote::local_ip(),
+                })
+            }),
+            state: Box::new(move || {
+                // Timeline first and released before settings is taken (the
+                // lock-order rule), then status, then settings.
+                let (song, tl_recording) = {
+                    let tl = lock(&state_sh.timeline);
+                    let song = tl.doc.as_ref().map(|d| {
+                        serde_json::json!({
+                            "playing": tl.mode == PlayMode::Playing,
+                            "pos": tl.pos_s,
+                            "len": d.end_s(),
+                            "name": d.name,
+                        })
+                    });
+                    (song, tl.recording)
+                };
+                // Status copy first, settings second — never nested, same
+                // order the panel uses.
+                let st = lock(&state_sh.status).clone();
+                let s = lock(&state_sh.settings);
+                serde_json::json!({
+                    "type": "state",
+                    "bpm": st.bpm,
+                    "conf": st.confidence,
+                    "beat_in_bar": st.beat_in_bar,
+                    "fps": st.fps,
+                    "silent": st.silent,
+                    "device": st.device,
+                    "scene": st.scene,
+                    "scene_name": state_sh.scene_names.get(st.scene),
+                    "next_scene": st.next_scene,
+                    "next_scene_name": st.next_scene.and_then(|i| state_sh.scene_names.get(i)),
+                    "bar_in_scene": st.bar_in_scene,
+                    "song": song,
+                    "timeline_recording": tl_recording,
+                    "strobe": STROBE.load(Ordering::Relaxed),
+                    "cut_on_drops": s.cut_on_drops,
+                    "bars_total": st.bars_total,
+                    "clip": st.clip,
+                    "blackout": st.blackout,
+                    "fullscreen": st.fullscreen,
+                    "fx": st.fx,
+                    "groove": st.groove,
+                    "calm": st.calm,
+                    "np": st.np_track,
+                    "rec_on": st.rec.is_some(),
+                    "mode": s.mode,
+                    "dancer": s.dancer_enabled,
+                    "dancer_style": s.dancer_style,
+                    "palette": s.palette,
+                    "random_order": s.random_order,
+                    "phrase_bars": s.phrase_bars,
+                    "fx_amt": s.fx_amt,
+                    "fx_auto": s.fx_auto,
+                    "dancer_size": s.dancer_size,
+                    "dancer_trails": s.dancer_trails,
+                    "latency_ms": s.latency_ms,
+                    "np_size": s.np_size,
+                    "canon": s.canon,
+                    "brand_on": s.brand_on,
+                    // The pieces and whether there's anything to show: the
+                    // remote lit Logo from brand_on alone, which only ever
+                    // goes on, so the pad stuck lit.
+                    "brand_logo_on": s.brand_logo_on,
+                    "brand_name_on": s.brand_name_on,
+                    "has_logo": !s.brand_logo.trim().is_empty(),
+                    "has_name": !s.brand_name.trim().is_empty(),
+                    "brand_opacity": s.brand_opacity,
+                    "ticker_on": s.ticker_on,
+                    "ticker_speed": s.ticker_speed,
+                    "ticker_text": s.ticker_text,
+                })
+            }),
+            thumb: Box::new(move |name| {
+                let got = lock(&thumb_sh.thumbs)
+                    .get(&format!("scene:{name}"))
+                    .cloned();
+                let (w, h, px) = got?;
+                use image::ImageEncoder;
+                let mut out = Vec::new();
+                image::codecs::png::PngEncoder::new(&mut out)
+                    .write_image(&px, w, h, image::ExtendedColorType::Rgba8)
+                    .ok()?;
+                Some(out)
+            }),
+        })
+    }
+
     /// Dispatch a key through the binding map. Returns false when no action
     /// is bound, letting callers offer the key a fallback meaning (the
     /// editor's unbound-Space transport toggle).
     fn key(&mut self, event_loop: &ActiveEventLoop, key: &Key) -> bool {
         let Some(name) = key_name(key) else { return false };
+        // Esc also cancels a pending MIDI-learn — the cancel button isn't the
+        // only way out.
+        if name == "Escape" && self.panel.as_mut().is_some_and(|p| p.midi_learn.is_some()) {
+            if let Some(p) = &mut self.panel {
+                p.midi_learn = None;
+                p.window.request_redraw();
+            }
+            return true;
+        }
         // Rebinding: the next key press becomes the action's key (Esc cancels).
         if let Some(action) = self.panel.as_mut().and_then(|p| p.rebinding.take()) {
             if name != "Escape" {
@@ -1612,6 +1990,8 @@ impl App {
         if let Some(w) = &self.window {
             status.fullscreen = w.fullscreen().is_some();
         }
+        let midi_status = lock(&shared.midi_status).clone();
+        let remote_status = lock(&shared.remote_status).clone();
         // The UI runs under the settings lock; the GPU acquire/present must
         // not — a blocked surface acquire would freeze the render thread
         // through the lock.
@@ -1630,6 +2010,8 @@ impl App {
                 &shared.clip_names,
                 &shared.timeline,
                 &shared.thumbs,
+                &midi_status,
+                &remote_status,
             )
         };
         if let Some(p) = self.panel.as_mut() {
@@ -1704,7 +2086,6 @@ impl App {
                 &shared.clip_names,
                 &shared.timeline,
                 &shared.settings,
-                &shared.dirty,
                 &shared.thumbs,
             )
         };
@@ -1725,7 +2106,31 @@ fn toggle_fullscreen(w: &Window) {
     }
 }
 
-impl ApplicationHandler for App {
+/// The Settings card status line: "192.168.1.20:9138 · 2 clients".
+fn remote_line(srv: &remote::Server) -> String {
+    let ip = remote::local_ip().unwrap_or_else(|| "?".into());
+    let n = srv.client_count();
+    format!(
+        "{ip}:{} · {n} client{}",
+        srv.port,
+        if n == 1 { "" } else { "s" }
+    )
+}
+
+impl ApplicationHandler<AppEvent> for App {
+    fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
+        match event {
+            AppEvent::MidiNote(note) => self.midi_note(event_loop, note),
+            AppEvent::Remote(cmd) => self.remote_cmd(event_loop, cmd),
+        }
+    }
+
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        // The render thread (which owns the Engine) isn't unwound on quit —
+        // macOS Cmd-Q never returns from run_app — so stop the player here.
+        engine::shutdown();
+    }
+
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.shared.is_some() {
             return;
@@ -1790,6 +2195,8 @@ impl ApplicationHandler for App {
                 .map(|d| d.clip_names())
                 .unwrap_or_default(),
             thumbs: Mutex::new(std::collections::HashMap::new()),
+            midi_status: Mutex::new((false, "off".into())),
+            remote_status: Mutex::new((false, "off".into())),
         });
         self.shared = Some(shared.clone());
         let (tx, rx) = mpsc::channel();
@@ -1816,6 +2223,28 @@ impl ApplicationHandler for App {
             .expect("spawn render thread");
 
         self.window = Some(window);
+        if let Ok(v) = std::env::var("TRIPPIN_TEXT_TEST") {
+            let (w, fx) = v.split_once('|').unwrap_or((v.as_str(), "none"));
+            let spec: text::TextSpec = serde_json::from_value(serde_json::json!({
+                "text": w, "style": "chrome", "anim": "zoom", "fx": fx, "size": 1.6
+            }))
+            .unwrap();
+            self.send(Msg::FireCue(timeline::CueKind::Text(spec)));
+        }
+        // Dev aid: fire any cue ~3 s after startup (once the render loop has
+        // settled), e.g. TRIPPIN_CUE_TEST='{"Strobe":true}'.
+        if let Ok(v) = std::env::var("TRIPPIN_CUE_TEST") {
+            match (serde_json::from_str::<timeline::CueKind>(&v), self.render_tx.clone()) {
+                (Ok(k), Some(tx)) => {
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_secs(3));
+                        let _ = tx.send(Msg::FireCue(k));
+                    });
+                }
+                (Err(e), _) => eprintln!("TRIPPIN_CUE_TEST: {e}"),
+                _ => {}
+            }
+        }
         if let Some(p) = self.start_song.take() {
             if p.extension()
                 .and_then(|e| e.to_str())
@@ -1916,8 +2345,9 @@ impl ApplicationHandler for App {
                 WindowEvent::CloseRequested => {
                     // Hide rather than destroy — reopening is then instant and
                     // can't fail partway through.
-                    if let Some(p) = &self.panel {
+                    if let Some(p) = &mut self.panel {
                         p.window.set_visible(false);
+                        p.midi_learn = None;
                     }
                     if let Some(w) = &self.window {
                         w.focus_window();
@@ -2038,10 +2468,123 @@ impl ApplicationHandler for App {
                 e.window.request_redraw();
             }
         }
+        // MIDI input: (re)connect when the chosen port changes. WinMM gives
+        // no unplug callback, so every few seconds the port list is scanned —
+        // a vanished port means a dead connection; drop it and the retry
+        // below picks the device back up the moment it's plugged in again.
+        if let Some(sh) = &self.shared {
+            let want = lock(&sh.settings).midi_in.clone();
+            if self.midi_scan.elapsed() > Duration::from_secs(3) {
+                self.midi_scan = Instant::now();
+                if self.midi.is_some() && !midi::ports().iter().any(|p| *p == want) {
+                    self.midi = None;
+                }
+            }
+            let have = self.midi.as_ref().map(|m| m.name.as_str()).unwrap_or("");
+            if want != have && (want.is_empty() || self.midi_retry.elapsed() > Duration::from_secs(3))
+            {
+                // Drop the old connection before opening a new one — a port
+                // can't be held twice.
+                self.midi = None;
+                self.midi_retry = Instant::now();
+                let status = if want.is_empty() {
+                    (false, "off".to_string())
+                } else {
+                    let proxy = self.midi_proxy.clone();
+                    match midi::connect(&want, move |note| {
+                        let _ = proxy.send_event(AppEvent::MidiNote(note));
+                    }) {
+                        Ok(m) => {
+                            let status = (true, m.name.clone());
+                            self.midi = Some(m);
+                            status
+                        }
+                        Err(e) => (false, format!("{want}: {e:#}")),
+                    }
+                };
+                *lock(&sh.midi_status) = status;
+            }
+        }
+        // LAN remote + OSC: (re)start when the toggles/ports/PIN change —
+        // same lifecycle shape as MIDI above, retries throttled on a busy
+        // port.
+        if let Some(sh) = &self.shared {
+            let (want_on, want_port, want_pin, want_osc, want_osc_port) = {
+                let s = lock(&sh.settings);
+                (
+                    s.remote_on,
+                    s.remote_port,
+                    s.remote_pin.clone(),
+                    s.osc_on,
+                    s.osc_port,
+                )
+            };
+            let want = want_on.then_some((want_port, want_pin));
+            let have = self.remote.as_ref().map(|r| (r.port, r.pin.clone()));
+            if want != have
+                && (want.is_none() || self.remote_retry.elapsed() > Duration::from_secs(2))
+            {
+                self.remote_retry = Instant::now();
+                self.remote = None;
+                let status = match want.and_then(|(port, pin)| {
+                    self.remote_hooks()
+                        .map(|h| (port, remote::Server::start(port, &pin, h)))
+                }) {
+                    Some((_, Ok(srv))) => {
+                        let line = remote_line(&srv);
+                        self.remote = Some(srv);
+                        self.remote_clients = 0;
+                        (true, line)
+                    }
+                    Some((port, Err(e))) => (false, format!("port {port}: {e:#}")),
+                    None => (false, "off".into()),
+                };
+                *lock(&sh.remote_status) = status;
+            }
+            // Refresh the status line when the client count moves.
+            if let Some(srv) = &self.remote {
+                let n = srv.client_count();
+                if n != self.remote_clients {
+                    self.remote_clients = n;
+                    *lock(&sh.remote_status) = (true, remote_line(srv));
+                }
+            }
+            // OSC: keyed on (on, port). Shares the remote command path —
+            // OSC presses act exactly like remote-app presses.
+            let want_osc_p = want_osc.then_some(want_osc_port);
+            let have_osc = self.osc.as_ref().map(|o| o.port);
+            if want_osc_p != have_osc
+                && (want_osc_p.is_none()
+                    || self.remote_retry.elapsed() > Duration::from_secs(2))
+            {
+                self.osc = None;
+                if let Some(port) = want_osc_p {
+                    let proxy = self.midi_proxy.clone();
+                    self.osc = osc::Osc::start(port, move |c| {
+                        let _ = proxy.send_event(AppEvent::Remote(c));
+                    })
+                    .map_err(|e| eprintln!("OSC listener: {e:#}"))
+                    .ok();
+                }
+            }
+        }
         // Settings changed on the render thread also need flushing to disk.
         if let Some(sh) = &self.shared {
             if sh.dirty.load(Ordering::Relaxed) && self.dirty_since.is_none() {
                 self.dirty_since = Some(Instant::now());
+            }
+        }
+        // Fullscreen visuals get no pointer; the panel/editor keep theirs
+        // (cursor visibility is per hovered window).
+        let fs = self
+            .window
+            .as_ref()
+            .is_some_and(|w| w.fullscreen().is_some());
+        FULLSCREEN.store(fs, Ordering::Relaxed);
+        if fs != self.cursor_hidden {
+            self.cursor_hidden = fs;
+            if let Some(w) = &self.window {
+                w.set_cursor_visible(!fs);
             }
         }
         if let Some(t) = self.dirty_since {
@@ -2146,7 +2689,7 @@ fn ai_build(path: &std::path::Path) -> Result<()> {
         song.bpm,
         (song.duration - song.first_beat) * song.bpm / 60.0
     );
-    let (cues, note) = ai::build_show(&[clip], &scenes, &routines, &conf)?;
+    let ai::ShowBuild { cues, note, .. } = ai::build_show(&[clip], &scenes, &routines, &conf)?;
     println!("{note}");
     for cue in &cues {
         println!("  {:>6.1} bt  clip {}  {:?}", cue.beat, cue.clip, cue.kind);
@@ -2163,9 +2706,57 @@ fn main() -> Result<()> {
         eprintln!("panic on thread {:?}: {info}", thread.name());
         hook(info);
     }));
+    // Beat This! inference (rten) defaults to every physical core; two keep
+    // the live downbeat check (~0.8 s per 5 s window) clear of the render
+    // and audio threads. Beyond 4 threads it barely speeds up anyway.
+    if std::env::var_os("RTEN_NUM_THREADS").is_none() {
+        // SAFETY: first thing in main, before any other thread exists.
+        unsafe { std::env::set_var("RTEN_NUM_THREADS", "2") };
+    }
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--list-devices") {
         return audio::list_devices();
+    }
+    // `--probe-audio [name]` captures ~6 s on a device (or the default tap)
+    // and prints the analysed level — verifies a source carries signal
+    // without opening the window.
+    if args.iter().any(|a| a == "--probe-audio") {
+        let name = arg_value(&args, "--probe-audio").filter(|s| !s.is_empty());
+        let eng = AudioEngine::start(name, false, None)?;
+        println!("Listening on {} …", eng.device_name);
+        let mut peak = [0f32; 4];
+        let mut silent = true;
+        let end = Instant::now() + Duration::from_secs(6);
+        while Instant::now() < end {
+            std::thread::sleep(Duration::from_millis(200));
+            let f = eng.features.lock().unwrap_or_else(|e| e.into_inner()).clone();
+            for (i, v) in f.lvl4.iter().enumerate() {
+                peak[i] = peak[i].max(*v);
+            }
+            silent &= f.silent;
+        }
+        let f = eng.features.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        println!(
+            "signal: {}  peak bands [{:.2} {:.2} {:.2} {:.2}]  bpm {:.1}",
+            if silent { "none (silent)" } else { "OK" },
+            peak[0], peak[1], peak[2], peak[3], f.bpm,
+        );
+        return if silent {
+            Err(anyhow::anyhow!("no signal on {}", eng.device_name))
+        } else {
+            Ok(())
+        };
+    }
+    // `--list-midi`: print MIDI input port names (what the Keys page lists).
+    if args.iter().any(|a| a == "--list-midi") {
+        let ports = midi::ports();
+        if ports.is_empty() {
+            println!("No MIDI inputs found.");
+        }
+        for p in ports {
+            println!("{p}");
+        }
+        return Ok(());
     }
     // `--snap <scenes|all>` renders scenes headless to PNG and times them.
     if args.iter().any(|a| a == "--snap") {
@@ -2199,6 +2790,11 @@ fn main() -> Result<()> {
         println!("{}", ai::analyze_file(std::path::Path::new(&p))?);
         return Ok(());
     }
+    // `--beats track.mp3`: compare the autocorrelation grid with Beat This!
+    // (downloads the model on first use) and time the inference.
+    if let Some(p) = arg_value(&args, "--beats") {
+        return beats::beat_test(std::path::Path::new(&p));
+    }
     // `--ai-build track.mp3` runs the whole pipeline end-to-end (analysis,
     // provider call, cue expansion) and prints the cue list — a preview of
     // what "Build cues" in the editor would generate.
@@ -2212,14 +2808,34 @@ fn main() -> Result<()> {
         let name = arg_value(&args, "--ndi-monitor");
         return ndi::Ndi::load().and_then(|n| n.monitor(name.as_deref(), 12));
     }
-    let device = arg_value(&args, "--device");
+    let cli_device = arg_value(&args, "--device");
     let mic = args.iter().any(|a| a == "--mic");
     let env = audio::EnvLog::new();
-    let audio = AudioEngine::start(device, mic, Some(env.clone()))?;
+
+    let mut settings = Settings::load();
+    // Neural beat tracking: fetch the model in the background on first run.
+    beats::set_enabled(settings.beat_model);
+    if settings.beat_model {
+        beats::ensure_models();
+    }
+    // Audio source: --device/--mic win for this run; otherwise the saved
+    // panel choice ("" = the platform default tap).
+    let device: Option<String> = cli_device.map(str::to_string).or_else(|| {
+        (!mic && !settings.audio_in.is_empty()).then(|| settings.audio_in.clone())
+    });
+    let audio = match AudioEngine::start(device.as_deref(), mic, Some(env.clone())) {
+        Ok(a) => a,
+        // A saved device that's gone (controller unplugged) falls back to
+        // the default tap rather than blocking startup.
+        Err(e) if cli_device.is_none() && device.is_some() => {
+            eprintln!("saved audio input {device:?} unavailable: {e:#} — using the default");
+            AudioEngine::start(None, mic, Some(env.clone()))?
+        }
+        Err(e) => return Err(e),
+    };
     println!("Audio: {}", audio.device_name);
     let start_song = arg_value(&args, "--song").map(std::path::PathBuf::from);
 
-    let mut settings = Settings::load();
     let mut no_save = false;
     if args.iter().any(|a| a == "--no-dancer") {
         settings.dancer_enabled = false;
@@ -2259,8 +2875,9 @@ fn main() -> Result<()> {
         dancer.request(first);
     }
 
-    let event_loop = EventLoop::new()?;
+    let event_loop = EventLoop::<AppEvent>::with_user_event().build()?;
     event_loop.set_control_flow(ControlFlow::Poll);
+    let midi_proxy = event_loop.create_proxy();
     let mut app = App {
         audio: Some(audio),
         window: None,
@@ -2272,7 +2889,7 @@ fn main() -> Result<()> {
         settings,
         shared: None,
         render_tx: None,
-        audio_cfg: (device.map(str::to_string), mic),
+        audio_cfg: (device, mic),
         start_song,
         env,
         dirty_since: None,
@@ -2288,7 +2905,25 @@ fn main() -> Result<()> {
         last_title: Instant::now(),
         last_panel_toggle: Instant::now() - Duration::from_secs(1),
         icon: load_icon(),
+        cursor_hidden: false,
+        midi_proxy,
+        midi: None,
+        // Backdated so a configured device connects immediately at startup
+        // rather than after one retry interval.
+        midi_retry: Instant::now()
+            .checked_sub(Duration::from_secs(4))
+            .unwrap_or_else(Instant::now),
+        midi_scan: Instant::now(),
+        remote: None,
+        osc: None,
+        // Backdated like midi_retry so a saved `remote_on` starts the
+        // server immediately at launch.
+        remote_retry: Instant::now()
+            .checked_sub(Duration::from_secs(4))
+            .unwrap_or_else(Instant::now),
+        remote_clients: 0,
     };
     event_loop.run_app(&mut app)?;
+    engine::shutdown();
     Ok(())
 }

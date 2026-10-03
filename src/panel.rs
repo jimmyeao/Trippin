@@ -215,6 +215,9 @@ enum Tab {
     Stream,
     Timeline,
     Keys,
+    /// App-wide preferences: audio source & sync, auto-pilot rules, and
+    /// the AI show builder's provider/key.
+    Settings,
 }
 
 /// Scene-library filter chip (mockup 1b toolbar).
@@ -229,12 +232,13 @@ enum LibChip {
 }
 
 impl Tab {
-    const ALL: [Tab; 5] = [
+    const ALL: [Tab; 6] = [
         Tab::Perform,
         Tab::DancerFx,
         Tab::Stream,
         Tab::Timeline,
         Tab::Keys,
+        Tab::Settings,
     ];
 
     fn label(self) -> &'static str {
@@ -244,6 +248,7 @@ impl Tab {
             Tab::Stream => "Stream",
             Tab::Timeline => "Timeline",
             Tab::Keys => "Keys",
+            Tab::Settings => "Settings",
         }
     }
 }
@@ -254,6 +259,9 @@ pub struct Panel {
     win: crate::egui_win::EguiWin,
     /// Waiting for a key press to bind to this action.
     pub rebinding: Option<Action>,
+    /// Waiting for a MIDI pad press (note-on) to bind to this action —
+    /// captured globally by `App::midi_note`, whichever window is focused.
+    pub midi_learn: Option<Action>,
     tab: Tab,
     /// Text filter for the scene list.
     scene_filter: String,
@@ -264,6 +272,10 @@ pub struct Panel {
     /// Thumbnails we've asked the render thread for (Instant = last request,
     /// for re-requesting a thumb that never came back).
     want_thumbs: HashMap<String, Instant>,
+    /// Fingerprint of the last image taken per live (engine) tile.
+    live_fp: HashMap<String, u64>,
+    /// When each engine tile last wrote its still to the disk cache.
+    live_saved: HashMap<String, Instant>,
     /// Dancer mid-frame thumbs, keyed by clip name — decoded straight from
     /// the clip's frames on disk (no render thread involved).
     clip_thumbs: HashMap<String, Option<egui::TextureHandle>>,
@@ -298,11 +310,14 @@ impl Panel {
             window,
             win,
             rebinding: None,
+            midi_learn: None,
             tab: Tab::Perform,
             scene_filter: String::new(),
             chip: LibChip::All,
             thumbs: HashMap::new(),
             want_thumbs: HashMap::new(),
+            live_fp: HashMap::new(),
+            live_saved: HashMap::new(),
             clip_thumbs: HashMap::new(),
             keys_filter: String::new(),
             saved: SavedCache::default(),
@@ -331,9 +346,20 @@ impl Panel {
         clips: &[String],
         tl_shared: &crate::timeline::Shared,
         thumb_store: &Mutex<HashMap<String, (u32, u32, Vec<u8>)>>,
+        midi_status: &(bool, String),
+        remote_status: &(bool, String),
     ) -> (Vec<UiCommand>, bool, PanelFrame) {
         let mut commands = Vec::new();
         let mut changed = false;
+        // The engine renders one show at a time: only the unity_* scene on
+        // screen (with frames arriving) may take fresh thumbnails.
+        let on_air = scenes
+            .get(status.scene)
+            .filter(|_| crate::EXT_LIVE.load(std::sync::atomic::Ordering::Relaxed))
+            .map(|n| format!("scene:{n}"))
+            .unwrap_or_default();
+        ON_AIR.with(|c| *c.borrow_mut() = on_air.clone());
+        let mut save: Vec<String> = Vec::new();
 
         // Collect finished thumbs we asked the render thread for. The store
         // is shared with the editor window — we only take keys we requested.
@@ -341,16 +367,39 @@ impl Panel {
         {
             let store = thumb_store.lock().unwrap_or_else(|e| e.into_inner());
             for k in self.want_thumbs.keys() {
-                if self.thumbs.contains_key(k) {
+                let Some((w, h, px)) = store.get(k) else { continue };
+                // An engine tile's render shows whatever show is running —
+                // only trust it while that tile's own show is on air.
+                if live_thumb(k) && *k != on_air {
                     continue;
                 }
-                if let Some((w, h, px)) = store.get(k) {
-                    got.push((k.clone(), *w, *h, px.clone()));
+                if live_thumb(k)
+                    && self.live_saved.get(k).is_none_or(|t| t.elapsed() > Duration::from_secs(20))
+                {
+                    // Keep a still on disk so the tile has a real preview
+                    // while another show runs (and on the next launch).
+                    self.live_saved.insert(k.clone(), Instant::now());
+                    save.push(k.clone());
                 }
+                if self.thumbs.contains_key(k) {
+                    // Live engine tiles re-render: take a new image when
+                    // its (sparsely sampled) pixels changed.
+                    if !live_thumb(k) {
+                        continue;
+                    }
+                    let fp = px.iter().step_by(61).fold(px.len() as u64, |a, &b| {
+                        a.wrapping_mul(31).wrapping_add(b as u64)
+                    });
+                    if self.live_fp.insert(k.clone(), fp) == Some(fp) {
+                        continue;
+                    }
+                }
+                got.push((k.clone(), *w, *h, px.clone()));
             }
         }
 
         let rebinding = &mut self.rebinding;
+        let midi_learn = &mut self.midi_learn;
         let tab = &mut self.tab;
         let scene_filter = &mut self.scene_filter;
         let chip = &mut self.chip;
@@ -366,13 +415,20 @@ impl Panel {
                     [*w as usize, *h as usize],
                     px,
                 );
-                let tex = ui.ctx().load_texture(
-                    format!("panel_thumb:{key}"),
-                    img,
-                    egui::TextureOptions::LINEAR,
-                );
-                thumbs.insert(key.clone(), tex);
-                cache_thumb_png(key, *w, *h, px);
+                if let Some(t) = thumbs.get_mut(key) {
+                    // A refresh (live engine tiles): update in place.
+                    t.set(img, egui::TextureOptions::LINEAR);
+                } else {
+                    let tex = ui.ctx().load_texture(
+                        format!("panel_thumb:{key}"),
+                        img,
+                        egui::TextureOptions::LINEAR,
+                    );
+                    thumbs.insert(key.clone(), tex);
+                }
+                if !live_thumb(key) || save.contains(key) {
+                    cache_thumb_png(key, *w, *h, px);
+                }
             }
             changed |= build_ui(
                 ui,
@@ -384,6 +440,9 @@ impl Panel {
                 clips,
                 tl_shared,
                 rebinding,
+                midi_learn,
+                midi_status,
+                remote_status,
                 tab,
                 scene_filter,
                 chip,
@@ -416,6 +475,9 @@ fn build_ui(
     clips: &[String],
     tl_shared: &crate::timeline::Shared,
     rebinding: &mut Option<Action>,
+    midi_learn: &mut Option<Action>,
+    midi_status: &(bool, String),
+    remote_status: &(bool, String),
     tab: &mut Tab,
     scene_filter: &mut String,
     chip: &mut LibChip,
@@ -494,7 +556,8 @@ fn build_ui(
                         }
                         Tab::Stream => stream_tab(ui, s, st, cmd),
                         Tab::Timeline => timeline_tab(ui, tl_shared, saved, cmd),
-                        Tab::Keys => keys_tab(ui, s, rebinding, keys_filter),
+                        Tab::Keys => keys_tab(ui, s, rebinding, midi_learn, midi_status, keys_filter),
+                        Tab::Settings => settings_tab(ui, s, st, remote_status, cmd),
                         Tab::Perform => unreachable!(),
                     });
             }
@@ -1452,61 +1515,6 @@ fn inspector_body(
         });
     });
 
-    ui.add_space(6.0);
-    // The quiet stuff: what the auto-pilot is allowed to do, plus sync.
-    egui::CollapsingHeader::new(
-        egui::RichText::new("director & sync").size(12.0).color(MUTED),
-    )
-    .default_open(false)
-    .show(ui, |ui| {
-        card().show(ui, |ui| {
-            ui.spacing_mut().item_spacing.y = 6.0;
-            ui.checkbox(&mut s.breakdown_mode, "Detect breakdowns")
-                .on_hover_text("Quiet sections switch the show into calm mode");
-            ui.checkbox(&mut s.cut_on_drops, "Cut early on a drop")
-                .on_hover_text("A drop lands early — cut to the next scene with it");
-            ui.checkbox(&mut s.random_order, "Random order")
-                .on_hover_text("Shuffle the rotation instead of playing it in order");
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Latency").size(12.0).color(MUTED));
-                ui.add(
-                    egui::Slider::new(&mut s.latency_ms, 0.0..=200.0)
-                        .suffix(" ms")
-                        .fixed_decimals(0),
-                );
-            });
-            // Audio in + groove: how steadily kicks are landing (sustained
-            // low groove = the show's in a breakdown).
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(format!("in: {}", st.device))
-                        .size(10.5)
-                        .color(FAINT),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let (r, _) =
-                        ui.allocate_exact_size(egui::vec2(46.0, 6.0), egui::Sense::hover());
-                    let pp = ui.painter();
-                    pp.rect_filled(r, 3.0, INSET);
-                    pp.rect_filled(
-                        egui::Rect::from_min_size(
-                            r.min,
-                            egui::vec2(r.width() * st.groove.clamp(0.0, 1.0), r.height()),
-                        ),
-                        3.0,
-                        BREAKDOWN,
-                    );
-                    ui.label(egui::RichText::new("groove").size(10.5).color(FAINT));
-                });
-            });
-            if ui
-                .button("Mark this beat as the downbeat (the \"one\")")
-                .clicked()
-            {
-                cmd.push(UiCommand::Do(Action::MarkDownbeat));
-            }
-        });
-    });
 }
 
 /// A summary row — label left, monospaced value right, chevron — that
@@ -1844,6 +1852,15 @@ fn pads_view(
                     a
                 };
                 let key = key_short(s.keys.get(key_of).map_or("", String::as_str));
+                // No key bound? Show the MIDI note instead ("n36").
+                let key = if key.is_empty() {
+                    s.midi_notes
+                        .get(key_of)
+                        .map(|n| format!("n{n}"))
+                        .unwrap_or_default()
+                } else {
+                    key
+                };
                 if pad_button(ui, pad_w, pad_h, label, sub, &key, *kind, *active) {
                     cmd.push(UiCommand::Do(*a));
                 }
@@ -2115,8 +2132,18 @@ fn thumb_tex(
     key: &str,
     cmd: &mut Vec<UiCommand>,
 ) -> Option<egui::TextureId> {
+    let live = live_thumb(key);
+    let on_air = live && ON_AIR.with(|c| *c.borrow() == key);
     if let Some(t) = thumbs.get(key) {
-        return Some(t.id());
+        let id = t.id();
+        // Engine scenes are only a camera on the external frame — keep
+        // re-rendering the one on air so its tile follows it (and never
+        // sticks on the black it showed before frames arrived).
+        if on_air && want.get(key).is_none_or(|t| t.elapsed() > Duration::from_millis(500)) {
+            want.insert(key.to_string(), Instant::now());
+            cmd.push(UiCommand::Thumb(key.to_string()));
+        }
+        return Some(id);
     }
     if !want.contains_key(key) {
         // First time we've seen this key this run — try the disk cache
@@ -2126,6 +2153,13 @@ fn thumb_tex(
             thumbs.insert(key.to_string(), t);
             return Some(id);
         }
+    }
+    if live && !on_air {
+        // Rendering it now would show another show's frame: keep the
+        // placeholder until its own show plays. (Marked wanted so the disk
+        // cache isn't re-tried every frame.)
+        want.entry(key.to_string()).or_insert_with(Instant::now);
+        return None;
     }
     let stale = match want.get(key) {
         None => true,
@@ -2144,7 +2178,23 @@ fn thumbs_dir() -> PathBuf {
 }
 
 fn thumb_file(key: &str) -> PathBuf {
-    thumbs_dir().join(format!("{}.png", key.replace(':', "_")))
+    // Engine stills get their own names: 0.8.0 cached black unity_* tiles
+    // under the plain ones.
+    let pre = if live_thumb(key) { "engine-" } else { "" };
+    thumbs_dir().join(format!("{pre}{}.png", key.replace(':', "_")))
+}
+
+thread_local! {
+    /// Thumb key ("scene:<name>") of the unity_* show the engine is
+    /// rendering right now, or empty.
+    static ON_AIR: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+
+/// Unity engine scenes show whatever the engine is sending right now: only
+/// the one on air refreshes (about every 0.5 s); each keeps a still on
+/// disk, saved at most every 20 s while it plays.
+fn live_thumb(key: &str) -> bool {
+    key.starts_with("scene:unity_")
 }
 
 fn cached_thumb(ctx: &egui::Context, key: &str) -> Option<egui::TextureHandle> {
@@ -2923,12 +2973,13 @@ fn clip_tex(
     }
 }
 
-/// One `action | key badge | rebind` row inside a keys-page Grid (must
-/// emit exactly three cells + `end_row`).
+/// One `action | key badge | rebind | midi` row inside a keys-page Grid
+/// (must emit exactly four cells + `end_row`).
 fn key_row(
     ui: &mut egui::Ui,
     s: &mut Settings,
     rebinding: &mut Option<Action>,
+    midi_learn: &mut Option<Action>,
     bound: &HashMap<String, u32>,
     a: Action,
 ) {
@@ -2938,7 +2989,7 @@ fn key_row(
     // Column 1: action label, left-aligned — fixed generous width so
     // full names show (truncate() alone let the grid squeeze the column).
     ui.add_sized(
-        [220.0, 18.0],
+        [200.0, 18.0],
         egui::Label::new(egui::RichText::new(a.label()).size(12.0).color(TEXT)).truncate(),
     );
     // Column 2: key badge, fixed 90px.
@@ -2982,6 +3033,35 @@ fn key_row(
             }
         }
     });
+    // Column 4: MIDI pad binding — click to learn the next note-on,
+    // right-click a bound note to clear it.
+    ui.scope(|ui| {
+        if *midi_learn == Some(a) {
+            ui.label(
+                egui::RichText::new("hit a pad…")
+                    .size(11.0)
+                    .color(WARN),
+            );
+            if ui.small_button("cancel").clicked() {
+                *midi_learn = None;
+            }
+        } else {
+            let note = s.midi_notes.get(&a).copied();
+            let txt = note.map_or_else(|| "midi".to_string(), |n| n.to_string());
+            let mut b = ui.add_sized(
+                [56.0, 24.0],
+                egui::Button::new(egui::RichText::new(txt).size(11.0)),
+            );
+            if let Some(n) = note {
+                b = b.on_hover_text(format!("note {n} = {}", crate::midi::note_name(n)));
+            }
+            if b.clicked() {
+                *midi_learn = Some(a);
+            } else if b.secondary_clicked() {
+                s.midi_notes.remove(&a);
+            }
+        }
+    });
     ui.end_row();
     if conflict {
         ui.label("");
@@ -2990,6 +3070,7 @@ fn key_row(
                 .size(10.0)
                 .color(WARN),
         );
+        ui.label("");
         ui.label("");
         ui.end_row();
     }
@@ -3000,9 +3081,43 @@ fn keys_tab(
     ui: &mut egui::Ui,
     s: &mut Settings,
     rebinding: &mut Option<Action>,
+    midi_learn: &mut Option<Action>,
+    midi_status: &(bool, String),
     filter: &mut String,
 ) {
     use crate::ui_theme::*;
+    // MIDI input: pick the controller port, then the per-action "midi"
+    // buttons learn whatever pad is hit next. Ports are listed only while
+    // the dropdown is open — enumeration creates a fresh client each call.
+    ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new("midi input")
+                .size(11.0)
+                .color(MUTED),
+        );
+        egui::ComboBox::from_id_salt("midi_in")
+            .width(200.0)
+            .selected_text(if s.midi_in.is_empty() {
+                "off".to_string()
+            } else {
+                s.midi_in.clone()
+            })
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut s.midi_in, String::new(), "off");
+                for name in crate::midi::ports() {
+                    ui.selectable_value(&mut s.midi_in, name.clone(), name);
+                }
+            });
+        status_dot(
+            ui,
+            midi_status.0,
+            if s.midi_in.is_empty() {
+                "off"
+            } else {
+                midi_status.1.as_str()
+            },
+        );
+    });
     // Filter styled like the library search, aligned with the card's edge.
     egui::Frame::NONE
         .fill(INSET)
@@ -3099,9 +3214,9 @@ fn keys_tab(
         })
         .collect();
     let avail = ui.available_width();
-    // A row needs ~400px: label 220 + badge 90 + rebind 70 + grid spacing
-    // + card margin. Two columns fit a 900px window, three at ~1400px.
-    let ncol = ((avail / 410.0) as usize).clamp(1, 3).min(groups.len().max(1));
+    // A row needs ~470px: label 200 + badge 90 + rebind 70 + midi 56 +
+    // grid spacing + card margin. Two columns fit a 980px window.
+    let ncol = ((avail / 470.0) as usize).clamp(1, 3).min(groups.len().max(1));
     // Greedy balance by row count — a group is never split across columns.
     let total: usize = groups.iter().map(|(_, a)| a.len() + 1).sum();
     let target = total.div_ceil(ncol);
@@ -3133,11 +3248,11 @@ fn keys_tab(
             for (group, acts) in bucket {
                 section_label(ui, group);
                 egui::Grid::new(egui::Id::new("keys_grid").with(group))
-                    .num_columns(3)
+                    .num_columns(4)
                     .spacing(egui::vec2(8.0, 6.0))
                     .show(ui, |ui| {
                         for &a in acts {
-                            key_row(ui, s, rebinding, &bound, a);
+                            key_row(ui, s, rebinding, midi_learn, &bound, a);
                         }
                     });
                 ui.add_space(6.0);
@@ -3192,7 +3307,7 @@ pub(crate) fn cue_color(k: &CueKind) -> egui::Color32 {
         | CueKind::Look(_)
         | CueKind::Trails(_)
         | CueKind::Canon(_) => t::LANE_DANCER,
-        CueKind::Blackout(_) => t::DANGER,
+        CueKind::Blackout(_) | CueKind::Strobe(_) => t::DANGER,
         CueKind::Mode(_) | CueKind::Palette(_) => t::LANE_SHOW,
         CueKind::Text(_) | CueKind::TextOff(_) => t::LANE_TEXT,
     }
@@ -3232,7 +3347,7 @@ pub(crate) fn cue_param_ui(
                 | ui.selectable_value(m, Mode::Static, "static").changed()
                 | ui.selectable_value(m, Mode::Manual, "manual").changed()
         }
-        CueKind::Dancer(b) | CueKind::Blackout(b) | CueKind::FxAuto(b) => {
+        CueKind::Dancer(b) | CueKind::Blackout(b) | CueKind::Strobe(b) | CueKind::FxAuto(b) => {
             ui.checkbox(b, "on").changed()
         }
         CueKind::Look(l) => {
@@ -3302,12 +3417,339 @@ pub(crate) fn cue_param_ui(
                         changed |= ui.selectable_value(&mut spec.anim, v, v.label()).changed();
                     }
                 });
+            egui::ComboBox::from_id_salt(id.with("tf"))
+                .width(70.0)
+                .selected_text(spec.fx.label())
+                .show_ui(ui, |ui| {
+                    for v in crate::text::TextFx::ALL {
+                        changed |= ui.selectable_value(&mut spec.fx, v, v.label()).changed();
+                    }
+                });
             changed |= ui.selectable_value(&mut spec.lane, 0, "lane 1").changed();
             changed |= ui.selectable_value(&mut spec.lane, 1, "lane 2").changed();
             changed
         }
         _ => false,
     }
+}
+
+/// Settings page: app-wide preferences that aren't part of performing —
+/// audio source & sync, what the auto-pilot may do, and the AI show
+/// builder's provider. Two bounded columns, like the Stream page (A1).
+fn settings_tab(
+    ui: &mut egui::Ui,
+    s: &mut Settings,
+    st: &Status,
+    remote_status: &(bool, String),
+    cmd: &mut Vec<UiCommand>,
+) {
+    use crate::ui_theme::*;
+    ui.spacing_mut().item_spacing = egui::vec2(12.0, 12.0);
+    let row_w = ui.available_width();
+    let col_w = ((row_w - 12.0) / 2.0).max(220.0);
+    let top = ui.cursor().min;
+    let mut mk_col = |x: f32, w: f32| {
+        ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(egui::Rect::from_min_size(
+                    egui::pos2(top.x + x, top.y),
+                    egui::vec2(w, 4000.0),
+                ))
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+        )
+    };
+    let left_h = {
+        let ui = &mut mk_col(0.0, col_w);
+        card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            section_label(ui, "audio & sync");
+            status_dot(
+                ui,
+                !st.silent,
+                &if st.silent {
+                    format!("{} · no signal", st.device)
+                } else {
+                    st.device.clone()
+                },
+            );
+            ui.small(
+                "Pick your controller's input if the DJ software sends audio straight \
+                 to it (Serato into a Rane's USB card never reaches the system mix).",
+            );
+            // Measured outside the grid: inside a cell available_width
+            // reads the unshrunk max_rect (A1).
+            let combo_w = (ui.available_width() - 112.0).max(80.0);
+            egui::Grid::new("set_audio_grid")
+                .num_columns(2)
+                .min_col_width(96.0)
+                .spacing(egui::vec2(8.0, 8.0))
+                .show(ui, |ui| {
+                    // Audio source — saved, restarts capture live.
+                    grow(ui, "Audio in", |ui| {
+                        let sel = if s.audio_in.is_empty() {
+                            crate::audio::system_audio_label()
+                        } else {
+                            s.audio_in.as_str()
+                        };
+                        let shown = ellipsize(
+                            ui.painter(),
+                            sel,
+                            &egui::FontId::proportional(12.0),
+                            combo_w - 24.0,
+                        );
+                        egui::ComboBox::from_id_salt("audio_in")
+                            .width(combo_w)
+                            .selected_text(shown)
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(
+                                    &mut s.audio_in,
+                                    String::new(),
+                                    crate::audio::system_audio_label(),
+                                );
+                                // Only built while the popup is open.
+                                for n in crate::audio::capture_device_names() {
+                                    ui.selectable_value(&mut s.audio_in, n.clone(), n);
+                                }
+                            });
+                    });
+                    grow(ui, "Latency", |ui| {
+                        ui.add(
+                            egui::Slider::new(&mut s.latency_ms, 0.0..=200.0)
+                                .suffix(" ms")
+                                .fixed_decimals(0),
+                        )
+                        .on_hover_text("Delay the visuals to line up with what the crowd hears");
+                    });
+                    // How steadily kicks are landing (sustained low groove =
+                    // the show's in a breakdown).
+                    grow(ui, "Groove", |ui| {
+                        let (r, _) = ui
+                            .allocate_exact_size(egui::vec2(120.0, 6.0), egui::Sense::hover());
+                        let pp = ui.painter();
+                        pp.rect_filled(r, 3.0, INSET);
+                        pp.rect_filled(
+                            egui::Rect::from_min_size(
+                                r.min,
+                                egui::vec2(r.width() * st.groove.clamp(0.0, 1.0), r.height()),
+                            ),
+                            3.0,
+                            BREAKDOWN,
+                        );
+                    });
+                });
+            if ui
+                .button("Mark this beat as the downbeat (the \"one\")")
+                .clicked()
+            {
+                cmd.push(UiCommand::Do(Action::MarkDownbeat));
+            }
+            // Neural beat tracking (Beat This!): song grids for timelines
+            // and the AI builder, plus the live downbeat check.
+            if ui
+                .checkbox(&mut s.beat_model, "Neural beat tracking")
+                .on_hover_text(
+                    "Finds the tempo and the bar's \"one\" with the Beat This! model \
+                     (as in BeatDis) instead of guessing from the bass — fixes bars \
+                     landing early or late after drum-roll intros. Downloads ~80 MB once.",
+                )
+                .changed()
+                && s.beat_model
+            {
+                crate::beats::ensure_models();
+            }
+            crate::beats::set_enabled(s.beat_model);
+            if s.beat_model {
+                use crate::beats::ModelState;
+                match crate::beats::state() {
+                    ModelState::Ready => {
+                        ui.small("Model ready.");
+                    }
+                    ModelState::Downloading { received, total, .. } => {
+                        ui.small(if total > 0 {
+                            format!("Downloading the model… {} of {} MB", received >> 20, total >> 20)
+                        } else {
+                            "Downloading the model…".to_string()
+                        });
+                    }
+                    ModelState::Failed(e) => {
+                        ui.horizontal(|ui| {
+                            ui.small(egui::RichText::new("Model download failed.").color(WARN))
+                                .on_hover_text(e);
+                            if ui.small_button("Retry").clicked() {
+                                crate::beats::ensure_models();
+                            }
+                        });
+                    }
+                    ModelState::Missing | ModelState::Unknown => {
+                        if ui.small_button("Download the model").clicked() {
+                            crate::beats::ensure_models();
+                        }
+                    }
+                }
+            }
+        });
+        ui.add_space(12.0);
+        card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.spacing_mut().item_spacing.y = 6.0;
+            section_label(ui, "director");
+            ui.small("What the auto-pilot is allowed to do when it cuts scenes.");
+            ui.checkbox(&mut s.breakdown_mode, "Detect breakdowns")
+                .on_hover_text("Quiet sections switch the show into calm mode");
+            ui.checkbox(&mut s.cut_on_drops, "Cut early on a drop")
+                .on_hover_text("A drop lands early — cut to the next scene with it");
+            ui.checkbox(&mut s.random_order, "Random order")
+                .on_hover_text("Shuffle the rotation instead of playing it in order");
+            // External engine (the Unity shows in unity/): its unity_* scenes
+            // join the rotation while its frames are arriving.
+            ui.checkbox(&mut s.unity_link, "Unity engine link")
+                .on_hover_text(
+                    "Trippin runs the Unity engine in the background and adds its \
+                     festival scenes (unity_stage, unity_crystals, unity_flow) to the \
+                     rotation, driven by the music.",
+                );
+            if s.unity_link {
+                let st = crate::ENGINE_STATUS
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone();
+                ui.small(if crate::EXT_LIVE.load(std::sync::atomic::Ordering::Relaxed) {
+                    "Unity engine running.".to_string()
+                } else if st.is_empty() || st == "running" {
+                    "Starting the Unity engine…".to_string()
+                } else {
+                    format!("Unity engine: {st}")
+                });
+            }
+        });
+        ui.min_rect().height()
+    };
+    let right_h = {
+        let ui = &mut mk_col(col_w + 12.0, col_w);
+        card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            section_label(ui, "ai show builder");
+            let saved = !s.ai_key.trim().is_empty();
+            let env = s
+                .ai_provider
+                .env_keys()
+                .iter()
+                .any(|k| std::env::var(k).is_ok_and(|v| !v.trim().is_empty()));
+            status_dot(
+                ui,
+                saved || env,
+                if saved {
+                    "key saved"
+                } else if env {
+                    "key from environment"
+                } else {
+                    "no key"
+                },
+            );
+            ui.small("Used by the timeline editor's AI build (F2) to design cues for a show.");
+            let field_w = (ui.available_width() - 112.0).max(80.0);
+            egui::Grid::new("set_ai_grid")
+                .num_columns(2)
+                .min_col_width(96.0)
+                .spacing(egui::vec2(8.0, 8.0))
+                .show(ui, |ui| {
+                    grow(ui, "Provider", |ui| {
+                        egui::ComboBox::from_id_salt("ai_prov")
+                            .width(field_w)
+                            .selected_text(s.ai_provider.label())
+                            .show_ui(ui, |ui| {
+                                for p in crate::ai::AiProvider::ALL {
+                                    if ui
+                                        .selectable_label(s.ai_provider == p, p.label())
+                                        .clicked()
+                                    {
+                                        crate::ai::set_provider(s, p);
+                                    }
+                                }
+                            });
+                    });
+                    let def_ep = s.ai_provider.default_endpoint();
+                    grow(ui, "Endpoint", |ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut s.ai_endpoint)
+                                .hint_text(def_ep)
+                                .desired_width(field_w),
+                        );
+                    });
+                    let def_model = s.ai_provider.default_model();
+                    grow(ui, "Model", |ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut s.ai_model)
+                                .hint_text(def_model)
+                                .desired_width(field_w),
+                        );
+                    });
+                    grow(ui, "API key", |ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut s.ai_key)
+                                .password(true)
+                                .hint_text("or env var")
+                                .desired_width(field_w),
+                        );
+                    });
+                });
+            ui.small(format!(
+                "A blank key tries {}. A saved key lives in trippin.json.",
+                s.ai_provider.env_keys().join(" / ")
+            ));
+            ui.add_enabled_ui(s.ai_provider == crate::ai::AiProvider::Anthropic, |ui| {
+                ui.checkbox(&mut s.ai_web_search, "Look up each track online first")
+                    .on_hover_text(
+                        "The model searches the web for each track's genre, mood and \
+                         hook words before planning. Anthropic only; up to 4 searches \
+                         (about a cent each) per build.",
+                    );
+            });
+        });
+        ui.add_space(12.0);
+        card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.spacing_mut().item_spacing.y = 6.0;
+            section_label(ui, "remote control");
+            ui.small(
+                "Drive the show from the iPad/iPhone app or a TouchOSC-style \
+                 controller on the same network.",
+            );
+            if ui
+                .checkbox(&mut s.remote_on, "iOS app remote (WebSocket)")
+                .changed()
+                && s.remote_on
+                && s.remote_pin.is_empty()
+            {
+                s.remote_pin = crate::remote::new_pin();
+            }
+            if s.remote_on {
+                status_dot(ui, remote_status.0, &remote_status.1);
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(format!("PIN {}", s.remote_pin)).monospace());
+                    if ui
+                        .small_button("new")
+                        .on_hover_text("Regenerate — paired apps need the new PIN")
+                        .clicked()
+                    {
+                        s.remote_pin = crate::remote::new_pin();
+                    }
+                });
+                ui.small(
+                    "Finds the rig over Bonjour (_trippin._tcp) — or type the \
+                     address above into the app.",
+                );
+            }
+            ui.checkbox(&mut s.osc_on, "OSC input (TouchOSC / Lemur)")
+                .on_hover_text("UDP port 9139 — address map in AGENTS.md");
+            if s.osc_on {
+                ui.small(format!("listening on UDP :{}", s.osc_port));
+            }
+        });
+        ui.min_rect().height()
+    };
+    // Claim the taller column so the ScrollArea knows the page height.
+    ui.add_space(left_h.max(right_h));
 }
 
 #[allow(clippy::too_many_arguments)]

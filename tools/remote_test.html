@@ -1,0 +1,152 @@
+<!doctype html>
+<!-- Trippin LAN-remote test harness. Open from file:// — it talks the same
+     WebSocket JSON protocol the iOS app will (ws://<host>:9138). -->
+<html>
+<head>
+<meta charset="utf-8">
+<title>Trippin remote</title>
+<style>
+  :root { color-scheme: dark; }
+  body { background:#111; color:#ddd; font:14px/1.4 system-ui,sans-serif;
+         margin:0; padding:16px; max-width:1100px; margin:auto; }
+  button { background:#2a2a35; color:#ddd; border:1px solid #444;
+           border-radius:6px; padding:8px 12px; cursor:pointer; }
+  button:hover { background:#3a3a48; }
+  input { background:#1c1c24; color:#eee; border:1px solid #444;
+          border-radius:6px; padding:7px 9px; }
+  .bar { display:flex; gap:8px; align-items:center; flex-wrap:wrap;
+         margin-bottom:14px; }
+  .dot { width:10px; height:10px; border-radius:50%; background:#666;
+         display:inline-block; }
+  .dot.on { background:#4c4; }
+  #state { font-variant-numeric:tabular-nums; color:#9ad; }
+  #pads button { font-size:15px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,160px);
+          gap:8px; }
+  .tile { padding:0; overflow:hidden; text-align:left; font-size:12px; }
+  .tile img { display:block; width:100%; height:90px; object-fit:cover;
+              background:#000; }
+  .tile span { display:block; padding:5px 7px; }
+  .tile.cur { outline:2px solid #6cf; }
+  .tile.next span { color:#fd5; }
+  h3 { color:#888; font-weight:normal; letter-spacing:.08em;
+       text-transform:lowercase; margin:18px 0 8px; }
+  #log { font:11px/1.5 monospace; color:#778; height:90px;
+         overflow-y:auto; border-top:1px solid #333; padding-top:6px; }
+</style>
+</head>
+<body>
+<div class="bar">
+  <input id="host" size="12"> :
+  <input id="port" size="5" style="width:60px">
+  PIN <input id="pin" size="5" maxlength="6" style="width:64px">
+  <button id="connect">connect</button>
+  <span class="dot" id="dot"></span><span id="conn">offline</span>
+  <span id="state"></span>
+</div>
+
+<h3>pads</h3>
+<div id="pads" class="bar"></div>
+
+<h3>scenes <small style="color:#555">click = go · shift-click = queue next</small>
+  <button id="thumbs">reload thumbs</button></h3>
+<div id="scenes" class="grid"></div>
+
+<h3>dancers</h3>
+<div id="clips" class="bar"></div>
+
+<div id="log"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+let ws, sceneNames = [], cur = -1, next = -1;
+// Served by trippin itself at http://<ip>:9138 — point the WS at the
+// same host; from file:// fall back to localhost.
+$("host").value = location.hostname || "127.0.0.1";
+$("port").value = location.port || "9138";
+
+function log(m) {
+  const el = $("log");
+  el.textContent = m + "\n" + el.textContent.split("\n").slice(0, 60).join("\n");
+}
+function send(o) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); }
+
+$("connect").onclick = () => {
+  if (ws) { ws.close(); ws = null; }
+  $("conn").textContent = "connecting…";
+  ws = new WebSocket(`ws://${$("host").value}:${$("port").value}`);
+  ws.onopen = () => send({cmd:"hello", v:1, name:"browser test", pin:$("pin").value});
+  ws.onclose = () => { $("dot").className="dot"; $("conn").textContent="offline"; };
+  ws.onerror = () => { $("conn").textContent="error"; };
+  ws.onmessage = e => {
+    let m; try { m = JSON.parse(e.data); } catch { return log("bad frame " + e.data); }
+    if (m.type === "hello") { hello(m); }
+    else if (m.type === "state") { state(m); }
+    else if (m.type === "thumb") { thumb(m); }
+    else if (m.type === "err") { log("ERR " + m.msg); $("conn").textContent = m.msg; }
+  };
+};
+
+function hello(m) {
+  $("dot").className = "dot on";
+  $("conn").textContent = `connected · trippin ${m.version || "?"} · ${m.addr || ""}`;
+  sceneNames = m.scenes || [];
+  // Pads straight from the action list the server advertises.
+  $("pads").innerHTML = "";
+  for (const a of m.actions || []) {
+    const b = document.createElement("button");
+    b.textContent = a.label || a.id;
+    b.onclick = () => send({cmd:"action", action: a.id});
+    $("pads").appendChild(b);
+  }
+  // Scene grid.
+  $("scenes").innerHTML = "";
+  sceneNames.forEach((name, i) => {
+    const b = document.createElement("button");
+    b.className = "tile"; b.dataset.i = i;
+    b.innerHTML = `<img alt=""><span>${i} · ${name}</span>`;
+    b.onclick = ev =>
+      send(ev.shiftKey ? {cmd:"queue_next", scene:name} : {cmd:"goto_scene", scene:name});
+    $("scenes").appendChild(b);
+  });
+  // Dancer-clip buttons.
+  $("clips").innerHTML = "";
+  for (const c of m.clips || []) {
+    const b = document.createElement("button");
+    b.textContent = c;
+    b.onclick = () => send({cmd:"show_clip", clip:c});
+    $("clips").appendChild(b);
+  }
+  log(`hello ok — ${sceneNames.length} scenes`);
+  loadThumbs();
+}
+
+function loadThumbs() {
+  // Stagger so the render thread isn't asked for 130 thumbs in one tick.
+  sceneNames.forEach((n, i) =>
+    setTimeout(() => send({cmd:"thumb", scene:n}), i * 40));
+}
+$("thumbs").onclick = loadThumbs;
+
+function thumb(m) {
+  for (const el of document.querySelectorAll(".tile")) {
+    if (sceneNames[+el.dataset.i] === m.scene)
+      el.querySelector("img").src = "data:image/png;base64," + m.png_b64;
+  }
+}
+
+function state(m) {
+  cur = m.scene; next = m.next_scene ?? -1;
+  $("state").textContent =
+    `${(m.bpm||0).toFixed(1)} bpm · ${m.scene_name||"?"} → ${m.next_scene_name||"—"}` +
+    ` · ${m.fps||0} fps` + (m.blackout ? " · BLACKOUT" : "") +
+    (m.rec_on ? " · REC" : "");
+  document.querySelectorAll(".tile").forEach(el => {
+    const i = +el.dataset.i;
+    el.classList.toggle("cur", i === cur);
+    el.classList.toggle("next", i === next);
+  });
+}
+</script>
+</body>
+</html>

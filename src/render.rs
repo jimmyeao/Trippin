@@ -144,11 +144,12 @@ pub struct FrameRes<'a> {
     pub blue: &'a wgpu::TextureView,
     pub repeat: &'a wgpu::Sampler,
     pub bloom: &'a wgpu::TextureView,
+    pub ext: &'a wgpu::TextureView,
 }
 
 impl FrameRes<'_> {
-    /// Bind group entries 3..=7 (after uniforms, feedback and sampler).
-    pub fn entries(&self) -> [wgpu::BindGroupEntry<'_>; 5] {
+    /// Bind group entries 3..=8 (after uniforms, feedback and sampler).
+    pub fn entries(&self) -> [wgpu::BindGroupEntry<'_>; 6] {
         [
             wgpu::BindGroupEntry {
                 binding: 3,
@@ -169,6 +170,10 @@ impl FrameRes<'_> {
             wgpu::BindGroupEntry {
                 binding: 7,
                 resource: wgpu::BindingResource::TextureView(self.bloom),
+            },
+            wgpu::BindGroupEntry {
+                binding: 8,
+                resource: wgpu::BindingResource::TextureView(self.ext),
             },
         ]
     }
@@ -219,6 +224,8 @@ pub fn frame_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
             sampler(6),
             // Half-res bloom result.
             tex_entry(7, D2),
+            // External frame (Spout in) — gfx::Statics::ext.
+            tex_entry(8, D2),
         ],
     })
 }
@@ -641,6 +648,7 @@ impl Renderer {
                 blue: &statics.blue_view,
                 repeat: &statics.repeat,
                 bloom: bloom.view(),
+                ext: &statics.ext_view,
             },
         );
 
@@ -773,7 +781,7 @@ impl Renderer {
     ) -> [wgpu::BindGroup; 2] {
         let make = |t: &wgpu::Texture| {
             let view = t.create_view(&Default::default());
-            let [e3, e4, e5, e6, e7] = res.entries();
+            let [e3, e4, e5, e6, e7, e8] = res.entries();
             device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: None,
                 layout,
@@ -795,6 +803,7 @@ impl Renderer {
                     e5,
                     e6,
                     e7,
+                    e8,
                 ],
             })
         };
@@ -822,6 +831,7 @@ impl Renderer {
             blue: &self.statics.blue_view,
             repeat: &self.statics.repeat,
             bloom: self.bloom.view(),
+            ext: &self.statics.ext_view,
         };
         self.bind_groups = Self::make_bind_groups(
             &self.device,
@@ -936,6 +946,38 @@ impl Renderer {
 
     pub fn scene_names(&self) -> Vec<String> {
         self.scenes.iter().map(|s| s.name.clone()).collect()
+    }
+
+    /// One scene's name without cloning the whole list.
+    pub fn scene_name(&self, i: usize) -> &str {
+        self.scenes.get(i).map_or("", |s| s.name.as_str())
+    }
+
+    /// Upload an external frame (RGBA8, EXT_W x EXT_H) for `ext_tex`.
+    pub fn upload_external(&self, rgba: &[u8]) {
+        use crate::gfx::{EXT_H, EXT_W};
+        if rgba.len() != (EXT_W * EXT_H * 4) as usize {
+            return;
+        }
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.statics.ext,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            rgba,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(EXT_W * 4),
+                rows_per_image: Some(EXT_H),
+            },
+            wgpu::Extent3d {
+                width: EXT_W,
+                height: EXT_H,
+                depth_or_array_layers: 1,
+            },
+        );
     }
 
     /// Indices of scenes that currently compile.
@@ -1585,6 +1627,7 @@ impl Renderer {
                 blue: &self.statics.blue_view,
                 repeat: &self.statics.repeat,
                 bloom: self.bloom.view(),
+                ext: &self.statics.ext_view,
             },
             c.clone(),
         ) {
@@ -1706,6 +1749,7 @@ impl Renderer {
                 blue: &self.statics.blue_view,
                 repeat: &self.statics.repeat,
                 bloom: self.bloom.view(),
+                ext: &self.statics.ext_view,
             },
         );
         // The present pipeline is built for the surface format (usually

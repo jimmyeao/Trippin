@@ -1,4 +1,4 @@
-/target
+﻿/target
 /recordings
 __pycache__/
 *.pyc
@@ -10,3 +10,5 @@ __pycache__/
 /tools/.stock_cache
 /snaps/
 HANDOFF-ADD-SITE.md
+/models/
+/beatcache/
