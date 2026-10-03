@@ -25,7 +25,7 @@ struct PadLook {
     ]
 
     /// `dancer::STYLES` by index.
-    static let styles = ["shadow", "neon", "strobe"]
+    static let styles = ["shadow", "neon", "strobe", "comic", "wire"]
 
     static func of(_ a: RemoteAction, _ s: ShowState) -> PadLook {
         var l = PadLook(title: short[a.key] ?? a.label)

@@ -824,7 +824,7 @@ in order, covering EVERY block of every clip:\n\
   \"cuts\": [{\"beat\":4,\"scene\":\"name\"}], // optional: more scene changes INSIDE the block, beat = offset from its start (1..last beat)\n\
   \"fill\": \"strobe\"|\"stutter\"|\"flash\", // optional: hit on the block's fill bar\n\
   \"dancer\": \"off\" | \"on\" | \"ROUTINE_NAME\",  // optional; routine name implies on\n\
-  \"look\": 0|1|2,   // optional: 0=shadow, 1=neon, 2=strobe\n\
+  \"look\": 0|1|2|3|4,   // optional: 0=shadow, 1=neon, 2=strobe, 3=comic (pencil sketch), 4=wire (neon CGI)\n\
   \"trails\": true|false, \"canon\": \"auto\"|\"on\"|\"off\", // optional dancer extras\n\
   \"fx\": \"off\"|\"mirror_x\"|\"mirror_y\"|\"quad\"|\"kaleido6\"|\"kaleido8\"|\"auto\", // optional\n\
   \"palette\": \"PALETTE_NAME\", // optional: global colour palette, latches\n\

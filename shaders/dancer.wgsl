@@ -13,7 +13,7 @@ struct Slot {
 struct D {
     slots: array<Slot, 3>,
     opacity: f32,
-    style: f32,    // 0 shadow, 1 neon, 2 strobe
+    style: f32,    // 0 shadow, 1 neon, 2 strobe, 3 comic, 4 wire
     count: f32,    // 1, or 3 for the canon
     scale: f32,    // main dancer height as a fraction of screen height
     trail: f32,    // 1 = ghost echoes of earlier frames trail her movement
@@ -132,13 +132,152 @@ fn over(front: vec4<f32>, back: vec4<f32>) -> vec4<f32> {
     return front + back * (1.0 - front.a);
 }
 
+// ---- Drawn looks: comic (a-ha, Take On Me) and wire (Dire Straits, Money for
+// Nothing). Both sample the mask a few times around the pixel, so they bail
+// out early outside the sprite.
+
+// Screen-space edge strength of the mask at mask uv `luv`; `k` widens the
+// line (the sampling distance, in 2-texel units).
+fn edge_at(slot: i32, luv: vec2<f32>, k: f32) -> f32 {
+    let texel = 2.0 * k / mask_size(slot);
+    let gx = mask_at(slot, luv + vec2<f32>(texel.x, 0.0)) - mask_at(slot, luv - vec2<f32>(texel.x, 0.0));
+    let gy = mask_at(slot, luv + vec2<f32>(0.0, texel.y)) - mask_at(slot, luv - vec2<f32>(0.0, texel.y));
+    return clamp(length(vec2<f32>(gx, gy)) * 1.5, 0.0, 1.0);
+}
+
+// Cheap 5-tap blur of the mask: the centre plus a cross at radius `r`
+// (a fraction of the sprite height, so the same on screen in x and y).
+fn blur5(slot: i32, luv: vec2<f32>, r: f32) -> f32 {
+    let rx = r / d.slots[slot].aspect;
+    return (mask_at(slot, luv) * 2.0
+        + mask_at(slot, luv + vec2<f32>(rx, 0.0)) + mask_at(slot, luv - vec2<f32>(rx, 0.0))
+        + mask_at(slot, luv + vec2<f32>(0.0, r)) + mask_at(slot, luv - vec2<f32>(0.0, r))) / 6.0;
+}
+
+fn outside_sprite(luv: vec2<f32>) -> bool {
+    return any(luv < vec2<f32>(-0.2)) || any(luv > vec2<f32>(1.2));
+}
+
+fn saturate_hue(c: vec3<f32>) -> vec3<f32> {
+    return c / max(max(c.r, max(c.g, c.b)), 1e-3);
+}
+
+// Comic action lines radiating from behind the dancer: a fixed set of
+// strokes whose reach follows the slow bass presence (and a little of the
+// kick), so they swell and relax rather than flash.
+fn comic_lines(p: vec2<f32>, x: f32, size: f32) -> vec4<f32> {
+    let h = 2.0 * d.scale * size;
+    let q = p - vec2<f32>(x, 0.98 - h * 0.5);
+    let r = length(q) / h;
+    let k = angle(q) / TAU * 56.0;
+    let id = floor(k);
+    let on = step(0.74, hash21(vec2<f32>(id, 11.0)));
+    let drive = (0.6 * u.pres4.x + 0.4 * u.hits4.x) * (1.0 - 0.6 * u.calm);
+    let reach = 0.12 + 0.35 * drive;
+    let r0 = 0.58 + 0.2 * hash21(vec2<f32>(id, 5.0));
+    let along = smoothstep(r0, r0 + 0.03, r) * (1.0 - smoothstep(r0 + 0.04, r0 + reach, r));
+    let w = abs(fract(k) - 0.5) * 2.0;
+    // Each stroke starts fat and narrows to a point.
+    let width_here = clamp(0.32 - (r - r0) * 1.2, 0.02, 0.32);
+    let taper = 1.0 - smoothstep(width_here * 0.6, width_here, w);
+    let a = on * along * taper * 0.9 * (0.5 + 0.5 * (1.0 - u.calm));
+    return vec4<f32>(vec3<f32>(0.95, 0.92, 0.85) * a, a) * d.opacity;
+}
+
+// Comic: a rotoscoped pencil sketch, a-ha "Take On Me". Ink outline, graphite
+// hatching on the shadow side, a paper fill that picks up colour as the track
+// drives (pure pencil in a breakdown), Ben-Day dots round the figure and a
+// 12 fps line boil like hand-redrawn frames.
+fn comic_look(
+    slot: i32, p: vec2<f32>, x: f32, size: f32, flip: bool, tint: f32,
+) -> vec4<f32> {
+    let lines = comic_lines(p, x, size);
+    let luv0 = dancer_luv(p, slot, x, size, flip);
+    if outside_sprite(luv0) {
+        return lines;
+    }
+    // Line boil: the sampling position wobbles, stepped at 12 fps.
+    let step_t = floor(u.time * 12.0);
+    let wob = (vec2<f32>(noise(luv0 * 22.0 + step_t * 1.7), noise(luv0 * 22.0 + 37.0 - step_t * 1.3)) - 0.5) * 0.014;
+    let luv = luv0 + wob;
+    let m = mask_at(slot, luv);
+    let edge = edge_at(slot, luv, 2.5);
+    let inner = blur5(slot, luv, 0.03);
+    // Light from the left: the right-hand side of the figure is in shadow.
+    let lit = mask_at(slot, luv - vec2<f32>(0.02, 0.0)) - mask_at(slot, luv + vec2<f32>(0.02, 0.0));
+    let shade = clamp(0.22 + 0.5 * (1.0 - inner) + 0.5 * max(lit, 0.0), 0.0, 1.0);
+    // Pencil hatching, cross-hatched in the darkest parts; stroke width follows the shade.
+    let hp = (p.x + p.y) * 64.0 + noise(p * 30.0 + step_t) * 0.6;
+    let h1 = 1.0 - smoothstep(0.0, 0.04 + 0.3 * shade, abs(fract(hp) - 0.5));
+    let hp2 = (p.x - p.y) * 64.0 + noise(p * 30.0 + 9.0 + step_t) * 0.6;
+    let h2 = 1.0 - smoothstep(0.0, 0.6 * max(shade - 0.55, 0.0), abs(fract(hp2) - 0.5));
+    let hatch = clamp(h1 + h2, 0.0, 1.0) * (0.55 + 0.45 * noise(p * 140.0));
+    let paper = vec3<f32>(0.94, 0.91, 0.83);
+    let wash_amt = (1.0 - u.calm) * (0.1 + 0.3 * u.intensity);
+    let wash = palette(tint + 0.55 + luv.y * 0.25);
+    let base = mix(paper, paper * (0.35 + 1.1 * wash), wash_amt);
+    let ink = clamp(edge * 2.2 + hatch * 1.0, 0.0, 1.0);
+    let body = mix(base, vec3<f32>(0.03, 0.03, 0.05), ink);
+    let a_body = max(m, edge);
+    // Ben-Day dots in the halo outside the figure: dot size follows how far from the body.
+    let halo = clamp(blur5(slot, luv, 0.07) - m, 0.0, 1.0);
+    let cell = fract(rot(0.7854) * (p * 48.0)) - 0.5;
+    let dot_r = 0.5 * sqrt(clamp(halo * 2.2, 0.0, 1.0));
+    let dots = (1.0 - smoothstep(dot_r - 0.08, dot_r, length(cell))) * step(0.02, halo) * (1.0 - a_body);
+    let dot_c = palette(tint + 0.1 + u.time * 0.03);
+    let col = body * a_body + dot_c * dot_c * dots;
+    let a = clamp(a_body + dots, 0.0, 1.0);
+    return over(vec4<f32>(col, a) * d.opacity, lines);
+}
+
+// Wire: neon CGI figures, Dire Straits "Money for Nothing". A two-colour
+// outline split by a small chromatic offset, nested contour lines inside the
+// body, a soft halo and CRT scanlines, on a dark glass body.
+fn wire_look(
+    slot: i32, p: vec2<f32>, x: f32, size: f32, flip: bool, tint: f32,
+) -> vec4<f32> {
+    let luv = dancer_luv(p, slot, x, size, flip);
+    if outside_sprite(luv) {
+        return vec4<f32>(0.0);
+    }
+    let m = mask_at(slot, luv);
+    let split = 0.004 + 0.008 * u.pres4.x;
+    let e_a = edge_at(slot, luv + vec2<f32>(split, 0.0), 1.6);
+    let e_b = edge_at(slot, luv - vec2<f32>(split, 0.0), 1.6);
+    let b2 = blur5(slot, luv, 0.03);
+    let halo = clamp(blur5(slot, luv, 0.07) - m * 0.6, 0.0, 1.0);
+    // Contour lines inside the body: iso-lines of the blurred mask follow the shape.
+    let c1 = 1.0 - smoothstep(0.0, 0.025, abs(b2 - 0.62));
+    let c2 = 1.0 - smoothstep(0.0, 0.02, abs(b2 - 0.84));
+    let contour = max(c1, c2 * 0.8) * m;
+    let neon_a = saturate_hue(palette(tint));
+    let neon_b = saturate_hue(palette(tint + 0.5));
+    let outline = e_a * neon_a + e_b * neon_b;
+    let inner = contour * mix(neon_b, neon_a, smoothstep(0.2, 0.8, luv.y));
+    let glow = halo * 0.35 * mix(neon_a, neon_b, 0.5);
+    let scan = 0.8 + 0.2 * sin(p.y * 440.0 + u.time * 3.0);
+    let gain = 1.5 + 0.8 * u.pres4.x;
+    let light = (outline * 1.6 + inner * 0.7 + glow) * scan * gain;
+    let line_a = max(max(e_a, e_b), max(contour * 0.8, halo * 0.3));
+    let a = clamp(m * 0.5 + line_a, 0.0, 1.0);
+    return vec4<f32>(light, a) * d.opacity;
+}
+
 // A dancer with her motion echoes layered behind her: earlier frames of the
 // same routine sampled at a lag, hue-shifted and dimmer — cheap "video echo"
 // trails that work under every look.
 fn shaded_with_trails(
     p: vec2<f32>, slot: i32, x: f32, size: f32, flip: bool, tint: f32,
 ) -> vec4<f32> {
-    var acc = shade(dancer_at(p, slot, x, size, flip), tint);
+    let style = i32(d.style + 0.5);
+    var acc: vec4<f32>;
+    if style == 3 {
+        acc = comic_look(slot, p, x, size, flip, tint);
+    } else if style == 4 {
+        acc = wire_look(slot, p, x, size, flip, tint);
+    } else {
+        acc = shade(dancer_at(p, slot, x, size, flip), tint);
+    }
     if d.trail > 0.5 {
         let luv = dancer_luv(p, slot, x, size, flip);
         let frame = d.slots[slot].frame;
