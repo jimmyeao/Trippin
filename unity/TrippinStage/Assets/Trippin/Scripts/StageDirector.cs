@@ -46,20 +46,16 @@ namespace TrippinStage
         RenderParams _crowdMeshRp;
 
         int _formation = -1, _prevFormation;
-        float _ftSum, _ftLast;
-        int _ftN;
         float _formStart;
         int _lastBar8 = -1;
         int _lastBar = -1;
         float[] _wallBlendStart;
-        float _calmLong; // how long the drums have been out
-        bool _drumsWas = true;
         Vector3 _camPos;
         Vector3 _camLook;
 
         void Start()
         {
-            Application.targetFrameRate = 60;
+            if (!ShowManager.Uncapped) Application.targetFrameRate = 60;
             QualitySettings.vSyncCount = 0;
             Application.runInBackground = true;
             _mpb = new MaterialPropertyBlock();
@@ -269,6 +265,9 @@ namespace TrippinStage
             }
         }
 
+        readonly List<Material> _hazeM = new List<Material>();
+        readonly List<float> _hazeBase = new List<float>();
+
         void BuildHaze()
         {
             float[] z = { 14, 6, -4, -16 };
@@ -277,6 +276,8 @@ namespace TrippinStage
             {
                 var m = new Material(hazeMat);
                 m.SetFloat("_Density", d[i]);
+                _hazeM.Add(m);
+                _hazeBase.Add(d[i]);
                 m.SetFloat("_HueOff", i * 0.13f);
                 Prim(PrimitiveType.Quad, new Vector3(0, 18, z[i]), new Vector3(140, 44, 1), m, default, "haze " + i);
             }
@@ -678,7 +679,7 @@ namespace TrippinStage
             }
 
             // Kinetic tiles: a travelling wave (energy clock), bigger when loud.
-            float amp = Mathf.Lerp(1.6f, 0.6f, s.calm);
+            float amp = Mathf.Lerp(1.6f, 0.6f, s.calm) * (1f + 0.5f * DropDirector.Tension) + 2.2f * DropDirector.Impact;
             float clk = s.clock4 != null && s.clock4.Length > 1 ? s.clock4[1] : beat;
             for (int i = 0; i < _tiles.Count && i < _tileHome.Count; i++)
             {
@@ -699,11 +700,9 @@ namespace TrippinStage
             int bar = Mathf.FloorToInt(beat / 4f);
             float dt = Time.deltaTime;
 
-            // Drops: drums back after at least ~4 s out.
-            if (!s.drums) _calmLong += dt;
-            if (s.drums && !_drumsWas && _calmLong > 4f) Drop();
-            if (s.drums) _calmLong = 0f;
-            _drumsWas = s.drums;
+            // Drops: drums back after at least ~4 s out (see DropDirector).
+            DropDirector.Tick(s, dt);
+            if (DropDirector.Dropped) Drop();
             // Peaks: a pair of flames on every 8th bar's downbeat.
             if (bar != _lastBar)
             {
@@ -716,18 +715,15 @@ namespace TrippinStage
                 }
             }
 
+            // Fog thickens through a build and puffs out on the drop.
+            for (int i = 0; i < _hazeM.Count; i++)
+                _hazeM[i].SetFloat("_Density", _hazeBase[i] * (1f + 0.8f * DropDirector.Tension + 0.8f * DropDirector.Impact));
+
             UpdateLasers(s, beat, bar);
             UpdateSetPieces(s, beat, dt);
             UpdateShafts(s, beat);
             UpdateWalls(s, beat, bar);
             UpdateCamera(s, beat, dt);
-            _ftSum += Time.unscaledDeltaTime;
-            _ftN++;
-            if (Time.unscaledTime - _ftLast > 5f)
-            {
-                Debug.Log($"[Stage] {1000f * _ftSum / _ftN:F2} ms/frame avg over {_ftN} frames, link {(TrippinLink.Live ? "live" : "synthetic")}");
-                _ftSum = 0; _ftN = 0; _ftLast = Time.unscaledTime;
-            }
             // Fixture glows flicker with the high hits.
             float hh = s.hits4 != null && s.hits4.Length > 3 ? s.hits4[3] : 0f;
             _mpb.Clear();
@@ -794,6 +790,15 @@ namespace TrippinStage
                     d = Quaternion.Euler((i % 2 == 0 ? -6 : 12) + phrase * 6, side * 46 * (i % 2 == 0 ? 1 : -1), 0) * Vector3.back;
                     break;
             }
+            // Building to a drop: every beam leans in to one point over the
+            // crowd, easing with the tension integrator (smooth, no re-spacing).
+            float tn = Mathf.SmoothStep(0f, 1f, DropDirector.Tension);
+            if (tn > 0.001f)
+            {
+                var focus = new Vector3(0f, 12f, -28f);
+                var toFocus = (focus - _lasers[i].localPosition).normalized;
+                d = Vector3.Slerp(d.normalized, toFocus, tn * 0.85f);
+            }
             // Beam runs along local +Y.
             return Quaternion.FromToRotation(Vector3.up, d.normalized);
         }
@@ -816,13 +821,15 @@ namespace TrippinStage
             {
                 _lasers[i].localRotation = Quaternion.Slerp(_laserFrom[i], Aim(i, f, s), m);
                 bool keep = i % 3 == 0;
-                float vis = Mathf.Max(on, keep ? 0.35f : 0f);
+                float vis = Mathf.Max(on, keep ? 0.35f : 0f, DropDirector.Tension * 0.5f);
                 Color c = TrippinLink.Palette(0.12f * f + i * 0.015f);
                 float mx = Mathf.Max(c.r, Mathf.Max(c.g, c.b), 1e-3f);
                 c = new Color(c.r / mx, c.g / mx, c.b / mx); // fully saturated
                 float hit = s.hits4 != null && s.hits4.Length > 2 ? s.hits4[2] : 0f;
                 _mpb.SetColor("_Color", c);
-                _mpb.SetFloat("_Intensity", vis * (2.2f + 1.6f * hit) * (0.6f + 0.6f * s.intensity));
+                // Held breath before the drop (dimmer, tighter), full burst after.
+                float drama = (1f - 0.35f * DropDirector.Tension) * (1f + 1.2f * DropDirector.Impact);
+                _mpb.SetFloat("_Intensity", vis * drama * (2.2f + 1.6f * hit) * (0.6f + 0.6f * s.intensity));
                 _laserR[i].SetPropertyBlock(_mpb);
             }
         }
@@ -910,6 +917,9 @@ namespace TrippinStage
             var want = ShotPos[shot] + new Vector3(Mathf.Sin(phrase) * 4f, Mathf.Sin(phrase * 0.5f) * 1.2f, 3f * s.intensity);
             var look = ShotLook[shot] + new Vector3(Mathf.Sin(phrase + 0.6f) * 2f, Mathf.Sin(phrase * 0.7f) * 1f, 0);
             float k = 1f - Mathf.Exp(-dt * 0.9f);
+            // Creep towards the look point as tension builds; the lag in k
+            // lets it spring back out over a few seconds after the drop.
+            want = Vector3.Lerp(want, look, 0.18f * DropDirector.Tension);
             _camPos = Vector3.Lerp(_camPos, want, k);
             _camLook = Vector3.Lerp(_camLook, look, k);
             cam.transform.position = _camPos;

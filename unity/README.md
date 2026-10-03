@@ -11,6 +11,7 @@ A Unity engine of festival-grade shows, driven live by Trippin and shown in Trip
 | `unity_sculpture` | Screen content: a morphing monolith on a mirror flat at night (`SculptureShow.cs`, `Sculpture.shader`) — night sky, wet floor carrying its reflection, a searchlight ring raking the sky, ground mist and a horizon glow that blooms on drops. |
 | `unity_colossus` | Screen content: an armoured android (Alice mesh, 11-bone skinning) in a night city (`ColossusShow.cs`, `Android`/`AndroidHead`/`City`/`Sky`/`Ground` shaders) — lit towers, rooftop searchlights, a wet plaza floor. |
 | `unity_tidal_cathedral` | Screen content: four pairs of fixed pointed glass-vault ribs framing asymmetric moving membranes over a dark sea with broken light reflections and an Alice-generated stained-glass rose window at the far end (`TidalCathedralShow.cs`, `Textures/TidalRose.png`, `TidalFrame`/`TidalSail`/`TidalSea`/`TidalSky`/`TidalCore` shaders). Bass widens the membranes, mids send folds through them, highs sharpen the edge sheen, and the camera travels through the aisle on the flow clock. Eight fixed laser fixtures sweep through smoky 4-bar formations with smoothed energy, never beat flashes. |
+| `unity_lightstorm` | A light show where the rig is the subject: 48 moving heads (three overhead trusses plus a floor ring), each a wide haze cone plus a thin laser core, splashing on a wet floor (`LightstormShow.cs`, reusing `Beam`/`Backglow`/`Ground`/`Haze`). A new geometric formation every 4 bars (curtain, helix, fan, cathedral, crossing sheets, X-weave). Cone width follows slow bass presence; aim rides `clock4`; the camera orbit swings with phrases. |
 
 Future standalone show ideas (not yet built):
 - **Kinetic Garden:** metallic flowers open in layers by frequency band; smooth waves bend the stems, and seeds drift on drops. The ground stays fixed.
@@ -29,6 +30,10 @@ Future standalone show ideas (not yet built):
   - pyro, CO2 and fireworks on drops;
   - camera shots that change every 8 bars;
   - set pieces: a sun disc and ring behind the set (`Sun.shader`) that blooms on drops; god-ray sweeps strongest in breakdowns; a kinetic 6x8 LED tile rig rippling over the deck; instanced phone lights over the crowd in breakdowns (`Phones.shader`); confetti cannons plus an overhead confetti release on drops (`Confetti.shader`).
+
+## Build and drop (`DropDirector.cs`)
+
+`ShowManager` ticks a shared `DropDirector` every frame, so any show can read `Tension` (0..1 slow integrator: climbs through breakdowns and rising `build`, drains otherwise), `Impact` (1 at the drop, gone after ~6 beats) and `Dropped` (one frame). `build` from the audio is only a fast-vs-slow energy trend, not a riser detector, so the drop itself is still "drums return after >4 s out"; Tension provides the anticipation before it. `unity_stage` and `unity_lightstorm` pull their beams to one point, thicken the fog and creep the camera in on Tension, then flare on Impact. Flight/tunnel shows may use these for shape and motion only, never strobes.
 
 ## Following the music
 
