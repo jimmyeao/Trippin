@@ -17,6 +17,8 @@ Mattes:
   light   bright dancer on a dark background (white silhouette on black)
   dark    dark dancer on a bright background (black silhouette on white)
   green   coloured (green) dancer on a dark background
+  bg      subject darker or a different colour than a seamless-paper
+          backdrop (silhouette on red/blue/green paper, whatever the luma)
 """
 import argparse
 import json
@@ -84,12 +86,47 @@ def matte(frames, kind, threshold, softness):
     if kind == "green":
         # How much greener than it is red/blue: the dancer, not the dark background.
         v = f[..., 1] - np.maximum(f[..., 0], f[..., 2]) * 0.5
+    elif kind == "bg":
+        # Distance from the backdrop colour (the frame's median): the subject is
+        # whatever isn't seamless paper. Works for saturated backdrops where a
+        # pure luma matte would key the background itself (deep red/blue paper).
+        bg = np.median(f.reshape(len(f), -1, 3), axis=1)[:, None, None, :]
+        v = np.sqrt(((f - bg) ** 2).sum(-1) / 3.0)
     elif kind == "dark":
         v = 1.0 - f
     else:
         v = f
     lo, hi = threshold - softness, threshold + softness
     return np.clip((v - lo) / (hi - lo), 0.0, 1.0)
+
+
+def measure_beat_seconds(masks):
+    """The footage's own tempo: dominant period of the mask-motion series, in
+    seconds. Musicians (and dancers) hit on a period; choosing the loop length
+    in whole periods keeps those hits on the grid Trippin retimes to. Returns
+    None when there's no clear periodic motion."""
+    small = np.stack([np.asarray(Image.fromarray((m * 255).astype(np.uint8)).resize((64, 36), Image.BILINEAR),
+                                 np.float32) / 255.0 for m in masks])
+    motion = np.abs(small[1:] - small[:-1]).mean(axis=(1, 2))
+    motion = motion - motion.mean()
+    var = float(motion.var())
+    if var < 1e-8:
+        return None
+    lo, hi = int(0.18 * FPS), int(0.9 * FPS)          # 66-330 hits/min
+    ac = np.array([float((motion[: len(motion) - l] * motion[l:]).mean())
+                   for l in range(hi + 1)]) / var
+    lag = lo + int(np.argmax(ac[lo:]))
+    # Sub-harmonic unwrap: if the hits are really twice as fast (8ths/16ths),
+    # half lags correlate nearly as well — take the shortest strong one.
+    while lag >= 2 * lo and ac[lag // 2] > 0.8 * ac[lag]:
+        lag //= 2
+    if ac[lag] < 0.15:
+        return None
+    # Sub-frame refine around the peak.
+    if 0 < lag < hi:
+        y0, y1, y2 = ac[lag - 1], ac[lag], ac[lag + 1]
+        lag = lag + 0.5 * (y0 - y2) / max(y0 - 2 * y1 + y2, 1e-9)
+    return lag / FPS
 
 
 def find_loop(masks, lengths, blend):
@@ -124,21 +161,40 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("video", type=Path)
     ap.add_argument("--name", required=True)
-    ap.add_argument("--matte", choices=["light", "dark", "green"], default="light")
+    ap.add_argument("--matte", choices=["light", "dark", "green", "bg"], default="light")
     ap.add_argument("--threshold", type=float, default=0.5)
     ap.add_argument("--softness", type=float, default=0.12)
     ap.add_argument("--height", type=int, default=512)
     ap.add_argument("--beats", type=int, nargs="+", default=[16, 12, 8],
-                    help="loop lengths to consider, in beats at 124 BPM")
+                    help="loop lengths to consider, in beats at --bpm")
+    ap.add_argument("--bpm", default=str(REF_BPM),
+                    help="tempo the loop beats are counted at: a number, or 'auto' "
+                         "to measure the footage's own playing tempo (musicians — "
+                         "their hits then land on the live grid)")
     ap.add_argument("--fill", action="store_true",
                     help="close gaps and fill holes in the matte (for glow/outline footage)")
     ap.add_argument("--energy", type=float, help="0 calm .. 1 driving (default: measured)")
     ap.add_argument("--source", default="", help="credit / origin, stored in clip.json")
     args = ap.parse_args()
 
-    rgb = args.matte == "green"
+    rgb = args.matte in ("green", "bg")
     # Pass 1 (low res): where does the dancer go over the whole clip?
     scout = matte(read_frames(args.video, rgb, SCOUT_HEIGHT), args.matte, args.threshold, args.softness)
+    ref_bpm = REF_BPM
+    if args.bpm == "auto":
+        beat_sec = measure_beat_seconds(scout)
+        if beat_sec is not None:
+            ref_bpm = 60.0 / beat_sec
+            # Hits can come twice per beat: snap into a sensible tempo band.
+            while ref_bpm > 190.0:
+                ref_bpm /= 2.0
+            while ref_bpm < 66.0:
+                ref_bpm *= 2.0
+            print(f"measured footage tempo: {ref_bpm:.1f} BPM")
+        else:
+            print(f"no clear tempo in the footage; keeping {REF_BPM:.0f} BPM")
+    else:
+        ref_bpm = float(args.bpm)
     ys, xs = np.nonzero(scout.max(axis=0) > 0.3)
     if len(xs) == 0:
         raise SystemExit("no dancer found; try another --matte or --threshold")
@@ -182,14 +238,14 @@ def main():
 
     blend = 8
     # Lengths within 4% of a whole number of beats at the reference tempo.
-    lengths = sorted({int(round(b * 60 / REF_BPM * FPS * k))
+    lengths = sorted({int(round(b * 60 / ref_bpm * FPS * k))
                       for b in args.beats for k in np.linspace(0.96, 1.04, 9)})
     lengths = [L for L in lengths if L + blend + 2 < len(masks) and L <= 240]
     if not lengths:
         raise SystemExit("clip too short for any loop length")
     s, L, cost, motion = find_loop(masks, lengths, blend)
-    beats = min(args.beats, key=lambda b: abs(b * 60 / REF_BPM * FPS - L))
-    print(f"loop: {s / FPS:.2f}s + {L / FPS:.2f}s ({beats} beats at {REF_BPM:.0f} BPM), seam cost {cost:.3f}")
+    beats = min(args.beats, key=lambda b: abs(b * 60 / ref_bpm * FPS - L))
+    print(f"loop: {s / FPS:.2f}s + {L / FPS:.2f}s ({beats} beats at {ref_bpm:.0f} BPM), seam cost {cost:.3f}")
 
     # Crossfade the seam: the last frames blend into the frames just before the start.
     loop = masks[s:s + L].copy()

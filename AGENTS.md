@@ -260,6 +260,23 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
 - Domain-repeated cities and facades: evaluate the current cell only, and
   clamp the march step.
 
+### Adding a dancer/musician clip
+
+- Sources are free stock silhouettes (credited in `dancers/CREDITS.md`).
+  `tools/stock_dancer.py` mattes, loop-searches, seam-crossfades and crops;
+  `tools/ai_dancer.py` (rembg) handles footage that isn't a silhouette.
+  Then `tools/beat_align.py` (accent on the downbeat), a contact sheet to
+  eyeball it, and `tools/mirror_clip.py` for the `_mir` variant.
+- **`--matte bg`** keys off the frame's median backdrop colour — use it for a
+  subject on saturated seamless paper (red/blue/green), where `dark`'s pure
+  luma test keys the backdrop itself.
+- **`--bpm auto`** measures the footage's own playing tempo from mask motion
+  and counts the loop in whole footage beats. Musicians need it: a clip
+  looped at 124 BPM while the drummer plays at 106 lands hits between the
+  live beats Trippin retimes to.
+- The auto `energy` measure undervalues clips with big props or small
+  movement (drum kit, seated strumming) — hand-set it in clip.json.
+
 ## 7. Rust and app gotchas
 
 - **Never take the same `Mutex` twice in one statement.** Temporaries live
