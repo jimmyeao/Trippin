@@ -207,13 +207,18 @@ fn comic_look(
     let lit = mask_at(slot, luv - vec2<f32>(0.02, 0.0)) - mask_at(slot, luv + vec2<f32>(0.02, 0.0));
     let shade = clamp(0.22 + 0.5 * (1.0 - inner) + 0.5 * max(lit, 0.0), 0.0, 1.0);
     // Pencil hatching, cross-hatched in the darkest parts; stroke width follows the shade.
-    let hp = (p.x + p.y) * 64.0 + noise(p * 30.0 + step_t) * 0.6;
-    let h1 = 1.0 - smoothstep(0.0, 0.04 + 0.3 * shade, abs(fract(hp) - 0.5));
-    let hp2 = (p.x - p.y) * 64.0 + noise(p * 30.0 + 9.0 + step_t) * 0.6;
+    // Only where it's shaded: shade never drops below 0.22, so ungated strokes
+    // hatched the lit side too and the body read as an engraving texture (M2
+    // render, 1080p). A lighter warp keeps them straight like pencil strokes.
+    let hp = (p.x + p.y) * 64.0 + noise(p * 30.0 + step_t) * 0.25;
+    let h1 = (1.0 - smoothstep(0.0, 0.04 + 0.3 * shade, abs(fract(hp) - 0.5))) * smoothstep(0.35, 0.6, shade);
+    let hp2 = (p.x - p.y) * 64.0 + noise(p * 30.0 + 9.0 + step_t) * 0.25;
     let h2 = 1.0 - smoothstep(0.0, 0.6 * max(shade - 0.55, 0.0), abs(fract(hp2) - 0.5));
     let hatch = clamp(h1 + h2, 0.0, 1.0) * (0.55 + 0.45 * noise(p * 140.0));
     let paper = vec3<f32>(0.94, 0.91, 0.83);
-    let wash_amt = (1.0 - u.calm) * (0.1 + 0.3 * u.intensity);
+    // ~2x the first value: at 0.1 + 0.3i the paper barely tinted while the track
+    // drove (torso saturation 0.125 vs 0.111 in a breakdown, M2 render).
+    let wash_amt = (1.0 - u.calm) * (0.2 + 0.5 * u.intensity);
     let wash = palette(tint + 0.55 + luv.y * 0.25);
     let base = mix(paper, paper * (0.35 + 1.1 * wash), wash_amt);
     let ink = clamp(edge * 2.2 + hatch * 1.0, 0.0, 1.0);
@@ -241,7 +246,9 @@ fn wire_look(
         return vec4<f32>(0.0);
     }
     let m = mask_at(slot, luv);
-    let split = 0.004 + 0.008 * u.pres4.x;
+    // Half the first value: ~16 px between the red and cyan edges at 1080p read as
+    // an anaglyph glitch rather than neon CGI (M2 render).
+    let split = 0.002 + 0.004 * u.pres4.x;
     let e_a = edge_at(slot, luv + vec2<f32>(split, 0.0), 1.6);
     let e_b = edge_at(slot, luv - vec2<f32>(split, 0.0), 1.6);
     let b2 = blur5(slot, luv, 0.03);
