@@ -581,6 +581,12 @@ fn render_loop(
     let mut master = 1.0f32;
     // `palette = "auto"` mood matcher (palettes::Auto).
     let mut auto_pal = palettes::Auto::default();
+    // Audio watchdog: a stream that dies or goes silent gets rebuilt after
+    // `audio_retry` of sustained silence, backing off when the source is
+    // genuinely quiet so it isn't re-opened forever.
+    let mut silent_since: Option<Instant> = None;
+    let mut last_audio_attempt: Option<Instant> = None;
+    let mut audio_retry = Duration::from_secs(15);
     // The post effect showing now — the auto-pilot's pick when `fx_auto` is on.
     let mut fx_current = lock(&shared.settings).fx;
 
@@ -1206,6 +1212,47 @@ fn render_loop(
         }
 
         let mut f = audio.features.lock().map(|f| f.clone()).unwrap_or_default();
+        // Audio watchdog: a stream can die outright (`dead`, or the
+        // analyser starving — phase_at goes stale when the zero-feed is
+        // the only thing keeping it warm) or keep delivering silence from
+        // a stranded loopback (Windows doesn't move a live capture when
+        // the default device changes). Only cure is a rebuild, which also
+        // picks up the current default device. Shows own their engine —
+        // a paused timeline's silence is legit and must not rebuild.
+        if player.is_none() {
+            let stream_dead = audio.dead.load(Ordering::Relaxed);
+            let ana_dead = f.phase_at.elapsed() > Duration::from_secs(3);
+            if f.silent || stream_dead || ana_dead {
+                let since = *silent_since.get_or_insert(now);
+                // First dead signal retries at once; after an attempt,
+                // wait out the backoff so a rebuild that keeps failing
+                // (device gone for good) doesn't spin every frame.
+                let due = match last_audio_attempt {
+                    Some(t) => now - t >= audio_retry,
+                    None => stream_dead || ana_dead || now - since >= audio_retry,
+                };
+                if due {
+                    audio.dead.store(false, Ordering::Relaxed);
+                    last_audio_attempt = Some(now);
+                    match AudioEngine::start(
+                        audio_cfg.0.as_deref(),
+                        audio_cfg.1,
+                        Some(shared.env.clone()),
+                    ) {
+                        Ok(eng) => {
+                            println!("Audio: {} (rebuilt after stream loss)", eng.device_name);
+                            audio = eng;
+                        }
+                        Err(e) => eprintln!("audio rebuild failed: {e:#}"),
+                    }
+                    audio_retry = (audio_retry * 4).min(Duration::from_secs(300));
+                }
+            } else {
+                silent_since = None;
+                last_audio_attempt = None;
+                audio_retry = Duration::from_secs(15);
+            }
+        }
         // TRIPPIN_GROOVE_LOG=1: print the beats/breakdown detector once a
         // second (tuning aid for live audio).
         if groove_log && now - last_groove_log > Duration::from_secs(1) {

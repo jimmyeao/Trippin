@@ -271,6 +271,17 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   a named palette, with hysteresis so the LUT can't strobe). Pickers and
   validators must use `palettes::all_names()` / `is_valid()`, never
   `names()` alone, or the option silently disappears.
+- **Audio streams die mid-set and must be rebuilt, not just logged.** A
+  WASAPI loopback can strand silently (default-device change, session
+  invalidation) — the callback keeps running but delivers nothing, or the
+  error callback fires once and the stream is over. `AudioEngine.dead`
+  flags fatal `cpal::ErrorKind`s (`Xrun`/`DeviceChanged` are *not* fatal:
+  glitches and automatic reroutes); the analyser's `recv_timeout` feeds
+  silence on a stall so features decay instead of freezing; and a
+  render-loop watchdog rebuilds the engine on `dead`, a stale `phase_at`,
+  or ~15 s of silence, with backoff so a genuinely quiet/unavailable source
+  isn't re-opened every frame. Never run that watchdog while a timeline
+  show is playing — a paused song's silence is legitimate.
 - `trippin.json` can carry a UTF-8 BOM (Notepad, PowerShell 5), and loading
   strips it. Do the same for any user-edited text files you read.
 - Anything that re-installs global taps (see `rec.rs`) must drop the old
