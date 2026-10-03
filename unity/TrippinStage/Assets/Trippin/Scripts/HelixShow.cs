@@ -55,7 +55,7 @@ namespace TrippinStage
                 float u = i / (Pts - 1f);
                 _beams.Set(n++, _p[i], _p[Pts + i], Kit.Hue(0.1f + u * 0.4f), gain * (0.4f + 0.9f * rx.Spec(u)));
             }
-            rig.Orbit(cam, rx, 34f, 12f, 13f, dt);
+            rig.Orbit(cam, rx, 40f, 12f, 13f, dt);
         }
     }
 }

@@ -35,7 +35,7 @@ namespace TrippinStage
                 int arm = i % 2;
                 float r = 1f + 22f * Mathf.Sqrt(Kit.H(i, 1));
                 float th = arm * Mathf.PI + r * tight + rx.clk * 0.006f * (8f / (r + 4f)) + 0.15f * Mathf.Sin(rx.phrase);
-                float scatter = (Kit.H(i, 2) - 0.5f) * (2.2f + r * 0.12f);
+                float scatter = (Kit.H(i, 2) - 0.5f) * (3.4f + r * 0.18f);
                 float px = Mathf.Cos(th) * r + Mathf.Cos(th + 1.5708f) * scatter;
                 float pz = Mathf.Sin(th) * r + Mathf.Sin(th + 1.5708f) * scatter;
                 float py = (Kit.H(i, 3) - 0.5f) * 1.5f * (1f - r / 26f);
@@ -46,7 +46,7 @@ namespace TrippinStage
             _core.Set(0, Vector3.zero, 9f * (1f + 0.5f * rx.bassFast), 0.08f, gain * 1.3f, face);
             _core.Set(1, Vector3.zero, 4.5f * (1f + 0.4f * rx.bassFast), 0.0f, gain * 1.6f, face);
             float tilt = 18f + 6f * Mathf.Sin(rx.phrase * 0.5f);
-            rig.Orbit(cam, rx, 34f, tilt, 0f, dt, 1f, 0.15f);
+            rig.Orbit(cam, rx, 42f, tilt, 0f, dt, 1f, 0.15f);
         }
     }
 }

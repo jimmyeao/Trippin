@@ -60,7 +60,7 @@ namespace TrippinStage
                 float glow = Mathf.Pow(1f - d, 2.5f);
                 _beams.Set(i, p0, p1, Kit.Hue(0.2f + t * 0.9f), gain * (0.3f + 1.5f * glow));
             }
-            rig.Orbit(cam, rx, 30f, 12f, 10f, dt);
+            rig.Orbit(cam, rx, 24f, 12f, 10f, dt);
         }
     }
 }

@@ -39,7 +39,7 @@ namespace TrippinStage
                 for (int i = 0; i <= Segs; i++)
                 {
                     float a = i / (float)Segs * Mathf.PI * 2f;
-                    float rip = 1f + 0.18f * rx.Spec(Mathf.Abs(Mathf.Sin(a * 0.5f)));
+                    float rip = 1f + 0.08f * rx.Spec(Mathf.Abs(Mathf.Sin(a * 0.5f)));
                     _pt[i] = centre + q * new Vector3(Mathf.Cos(a) * rad * rip, Mathf.Sin(a) * rad * rip, 0f);
                 }
                 float lvl = 0.45f + 1.1f * band + 0.3f * rx.lum;

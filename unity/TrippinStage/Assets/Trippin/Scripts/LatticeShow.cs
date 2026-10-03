@@ -40,7 +40,7 @@ namespace TrippinStage
         protected override void Frame(ShowState s, float dt)
         {
             float gain = rx.Gain();
-            float amp = (1.0f + 2.4f * rx.bassFast) * (1f - 0.4f * rx.tension) * (1f + 0.9f * rx.impact);
+            float amp = (0.5f + 1.1f * rx.bassFast) * (1f - 0.4f * rx.tension) * (1f + 0.9f * rx.impact);
             float spin = rx.clk * 0.02f + 0.6f * Mathf.Sin(rx.phrase);
             Quaternion q = Quaternion.Euler(18f, spin * Mathf.Rad2Deg, 0f);
             var centre = new Vector3(0f, 11f, 0f);
@@ -52,7 +52,7 @@ namespace TrippinStage
                     Mathf.Sin(b.y * 0.7f + rx.clk * 0.25f),
                     Mathf.Sin(b.z * 0.7f + rx.clk * 0.21f + 1.3f),
                     Mathf.Sin(b.x * 0.7f + rx.clk * 0.17f + 2.1f)) * amp;
-                Vector3 radial = b.normalized * (2.2f * lvl + 1.2f * rx.kick);
+                Vector3 radial = b.normalized * (1.2f * lvl + 0.6f * rx.kick);
                 _pos[i] = centre + q * (b + off + radial);
             }
             int n = 0;
