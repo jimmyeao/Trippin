@@ -109,7 +109,8 @@ cargo run --release -- --list-midi          # list MIDI inputs (pad/key controll
 cargo run --release -- --device "Serato"    # a specific input (or output-as-loopback)
 cargo run --release -- --mic                # force the default input instead of system audio
 cargo run --release -- --scene tunnel       # start on a scene, auto-pilot off
-cargo run --release -- --dancer neon --canon  # force a dancer look (auto-pilot changes it on cuts)
+cargo run --release -- --dancer neon --canon  # force a dancer look: shadow|neon|strobe|comic|wire (auto-pilot changes it on cuts)
+cargo run --release -- --snap aurora --snap-dancer comic --snap-clip stock_disco   # PNG of a dancer look over a scene
 cargo run --release -- --no-dancer          # start with the dancer layer off
 cargo run --release -- --no-panel           # no control panel window
 cargo run --release -- --gpu low            # use the integrated GPU (renders at 75% by default)
@@ -573,10 +574,21 @@ boundaries and cue transitions land on the "one", not just on beats.
 Trippin ships with a library of female dancer silhouettes in the style of Bond
 title sequences and 90s music videos, drawn over any scene. Auto-pilot runs it
 by itself. On each scene cut it decides whether she's on screen (always during
-breakdowns), picks the look (mostly the classic black shadow; neon, colour fill,
-or strobe when the track is driving), goes to a three-dancer canon on
+breakdowns), picks the look (mostly the classic black shadow and neon;
+sometimes a drawn look; strobe when the track is driving), goes to a three-dancer canon on
 high-energy sections, and swaps to a clip whose energy suits the track:
 graceful moves for breakdowns, salsa and grooves for drops.
+
+The looks, by index (`dancer::STYLES`, which timeline cues, AI plans and the
+remote use):
+
+| # | Look | What |
+|---|---|---|
+| 0 | shadow | black cut-out with a rim glow that pumps with the kick |
+| 1 | neon | glowing outline round a dark body |
+| 2 | strobe | white body flash on the beat, outline between |
+| 3 | comic | a-ha "Take On Me": a rotoscoped pencil sketch. Ink outline, graphite hatching on the shadow side, paper that picks up colour as the track drives (pure pencil in a breakdown), Ben-Day dots round the figure, radiating action lines that swell with the bass, and a 12 fps line boil |
+| 4 | wire | Dire Straits "Money for Nothing": neon CGI figures. A two-colour outline split by a chromatic offset, nested contour lines inside the body, a soft halo and CRT scanlines |
 
 Each clip is a loop of 8-bit masks in `dancers/<name>/` with a `clip.json`
 giving its beat count and energy. Frame 0 lands on the downbeat, and playback

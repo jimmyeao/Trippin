@@ -13,7 +13,11 @@ use crate::config::Tristate;
 /// Largest frame count we upload (wgpu's default texture-array limit is 256).
 pub const MAX_FRAMES: usize = 256;
 
-pub const STYLES: [&str; 3] = ["shadow", "neon", "strobe"];
+/// Dancer looks, by index (the shader's `style`): shadow, neon, strobe, comic
+/// (rotoscoped pencil sketch, a-ha "Take On Me") and wire (neon CGI,
+/// Dire Straits "Money for Nothing"). Indices are stored in saved settings,
+/// timeline cues and AI plans, so only ever append.
+pub const STYLES: [&str; 5] = ["shadow", "neon", "strobe", "comic", "wire"];
 
 #[derive(Deserialize)]
 struct ClipMeta {
@@ -450,13 +454,20 @@ impl DancerLayer {
     ) {
         // On screen most of the time, and always through breakdowns.
         self.showing = intensity < 0.35 || rand() < 0.7;
-        // Mostly the classic black shadow; strobe only when the track drives.
+        // Mostly the classic black shadow and neon; the two drawn looks come up
+        // now and then; strobe only when the track drives.
         let r = rand();
         self.style = if let Some(s) = style {
             s.min(STYLES.len() - 1)
-        } else if r < 0.45 {
+        } else if r < 0.35 {
             0
-        } else if r < 0.9 || intensity < 0.6 {
+        } else if r < 0.6 {
+            1
+        } else if r < 0.75 {
+            3
+        } else if r < 0.9 {
+            4
+        } else if intensity < 0.6 {
             1
         } else {
             2
@@ -607,5 +618,34 @@ impl DancerLayer {
             canon_fade: self.canon_amt,
             _pad2: [0.0; 2],
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The auto-pilot reaches every look, indices stay in range, and a fixed
+    /// look from the settings always wins.
+    #[test]
+    fn auto_pilot_reaches_every_look() {
+        let mut seen = [false; STYLES.len()];
+        for r in 0..100 {
+            let want = r as f32 / 100.0;
+            let mut dl = DancerLayer::new();
+            // First draw decides "showing", the second picks the look; the
+            // rest (canon, routine) get a neutral 0.5.
+            let mut draws = vec![0.0, want].into_iter();
+            dl.on_cut(0.8, || draws.next().unwrap_or(0.5), None, Tristate::Off, &[]);
+            assert!(dl.style < STYLES.len());
+            seen[dl.style] = true;
+        }
+        assert!(seen.iter().all(|s| *s), "every look is reachable: {seen:?}");
+
+        let mut dl = DancerLayer::new();
+        dl.on_cut(0.8, || 0.5, Some(3), Tristate::Off, &[]);
+        assert_eq!(dl.style, 3);
+        dl.on_cut(0.8, || 0.5, Some(99), Tristate::Off, &[]);
+        assert_eq!(dl.style, STYLES.len() - 1, "an out-of-range look is clamped");
     }
 }
