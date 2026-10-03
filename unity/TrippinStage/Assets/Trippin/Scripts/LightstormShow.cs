@@ -75,7 +75,8 @@ namespace TrippinStage
                     _pos[i] = new Vector3(Mathf.Cos(a) * 24f, 0.4f, Mathf.Sin(a) * 24f);
                 }
                 _cone[i] = MakeBeam(beamMesh, _pos[i], 0.30f, 0.040f, 6f, 0.55f, 0.9f, 0f, "cone " + i, out _coneR[i]);
-                _core[i] = MakeBeam(beamMesh, _pos[i], 0.025f, 0.0012f, 40f, 0.75f, 0.9f, 0.6f, "core " + i, out _coreR[i]);
+                // _Hot 0.2: a 0.6 white-hot centre burnt every core to white (pastel); keep them saturated.
+                _core[i] = MakeBeam(beamMesh, _pos[i], 0.025f, 0.0012f, 40f, 0.75f, 0.9f, 0.2f, "core " + i, out _coreR[i]);
                 var q = GameObject.CreatePrimitive(PrimitiveType.Quad);
                 Destroy(q.GetComponent<Collider>());
                 q.name = "splash " + i;
@@ -217,7 +218,7 @@ namespace TrippinStage
 
             // Breakdowns keep every third head, dim and slow; tension wakes them up.
             float on = Mathf.Lerp(1f, 0.15f, _calmSlow);
-            float drama = (1f - 0.3f * tn) * (1f + 1.6f * imp);
+            float drama = (1f - 0.5f * tn) * (1f + 1.6f * imp);
             float iris = 0.65f + 0.9f * _bassSlow + 0.5f * imp; // cone opening, slow bass
 
             float hueBase = 0.1f * f + 0.03f * Mathf.Sin(beat / 64f * Mathf.PI * 2f);
@@ -225,7 +226,7 @@ namespace TrippinStage
             {
                 var tgt = Target(i, f, clk, ph, beat);
                 tgt = new Vector3(tgt.x * burst, tgt.y, tgt.z * burst);
-                tgt = Vector3.Lerp(tgt, focus, tn * 0.8f);
+                tgt = Vector3.Lerp(tgt, focus, tn * 0.55f); // 0.8 stacked all 48 beams in one point: white-out
                 var dirv = tgt - _pos[i];
                 var d = dirv.normalized;
                 var want = Quaternion.FromToRotation(Vector3.up, d);
@@ -247,15 +248,17 @@ namespace TrippinStage
 
                 _mpb.Clear();
                 _mpb.SetColor("_Color", c);
-                _mpb.SetFloat("_Width", 0.30f * iris);
-                _mpb.SetFloat("_Spread", 0.030f + 0.018f * iris);
+                // Haze cones were ~1.8 m wide at the floor (x3 for the glow quad) and added up
+                // across 48 heads into a flat wash; a third of the width keeps dark gaps.
+                _mpb.SetFloat("_Width", 0.12f * iris);
+                _mpb.SetFloat("_Spread", 0.012f + 0.008f * iris);
                 _mpb.SetFloat("_Fade", hit ? 0.95f : 0.5f);
-                _mpb.SetFloat("_Intensity", vis * drama * 0.55f * (0.55f + 0.45f * s.intensity));
+                _mpb.SetFloat("_Intensity", vis * drama * 0.16f * (0.55f + 0.45f * s.intensity));
                 _coneR[i].SetPropertyBlock(_mpb);
                 _mpb.Clear();
                 _mpb.SetColor("_Color", c);
                 _mpb.SetFloat("_Fade", hit ? 0.95f : 0.55f);
-                _mpb.SetFloat("_Intensity", vis * drama * (1.8f + 1.2f * _bassSlow) * (0.6f + 0.6f * s.intensity));
+                _mpb.SetFloat("_Intensity", vis * drama * (0.9f + 0.5f * _bassSlow) * (0.6f + 0.6f * s.intensity));
                 _coreR[i].SetPropertyBlock(_mpb);
 
                 // Floor splash where the beam lands, stretched along the beam.
