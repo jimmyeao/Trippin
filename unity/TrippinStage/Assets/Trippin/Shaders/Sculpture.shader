@@ -108,17 +108,31 @@ Shader "Trippin/Sculpture"
                 return o;
             }
 
-            // Studio environment: two softboxes, a top light and a faint
-            // horizon band, fixed in the world.
+            // The night world the object reflects: the glowing horizon band
+            // (the same one the camera sees), sweeping searchlight streaks,
+            // a warm key and a cool fill, stars overhead, and the dark flat
+            // bouncing back from below.
             float3 env(float3 r)
             {
+                float az = atan2(r.x, r.z) / 6.2831853 + 0.5;
                 float3 c = 0;
                 // Big near-white softboxes (a touch of palette) make it read
                 // as polished metal; the palette lives in the rims and lines.
                 c += pow(saturate(dot(r, normalize(float3(0.8, 0.35, 0.5)))), 10.0) * 3.0 * lerp(1.0, TPalette(0.05), 0.35);
                 c += pow(saturate(dot(r, normalize(float3(-0.7, 0.15, -0.6)))), 8.0) * 1.8 * lerp(1.0, TPalette(0.55), 0.5);
+                // Sky: dark zenith going down to the glowing horizon.
                 c += pow(saturate(r.y), 3.0) * 1.4;
-                c += exp(-r.y * r.y * 30.0) * 0.25 * TPalette(0.3);
+                c += exp(-r.y * r.y * 18.0) * (0.3 + 0.5 * _TIntensity) * TPalette(0.42);
+                // Searchlights: three narrow streaks sweeping the sky, so
+                // their reflections slide over the surface as they turn.
+                float band = saturate(1.0 - abs(r.y - 0.45) / 0.5);
+                c += TPalette(az + _TFlow * 0.004) * band *
+                     pow(saturate(1.0 - abs(frac(az * 3.0 + _TFlow * 0.015) - 0.5) * 14.0), 2.0) * 1.6;
+                // Stars overhead, and the dark flat below bouncing a hint of
+                // the sky back up into the metal.
+                float2 sc = floor(float2(az * 90.0, r.y * 120.0));
+                c += step(0.9965, THash(sc)) * saturate(r.y - 0.15) * 0.5;
+                c += lerp(float3(0.015, 0.015, 0.02), TPalette(0.35) * 0.25, 0.4) * pow(saturate(-r.y), 1.5);
                 return c;
             }
 
@@ -143,7 +157,11 @@ Shader "Trippin/Sculpture"
                 // The kick ripple: a soft wide glow travelling down the form.
                 float ripple = exp(-(i.d.y - _WaveFront) * (i.d.y - _WaveFront) * 9.0) * _WaveAmp;
                 col += TPalette(0.4 + i.op.y * 0.15) * ripple * _LineGain * 0.45 * (0.4 + 0.6 * pow(1.0 - nv, 1.5)) * (1.0 - 0.5 * _TCalm);
-                // Hat glints: sparse surface cells catch the hits.
+                // Hat glints: sparse tiny cells twinkle near the silhouette
+                // as the highs land — like dew catching light on the rim.
+                float2 gc = floor(i.d.xz * 60.0 + i.d.y * 17.0);
+                float glint = step(0.996, THash(gc + floor(_TBeat * 2.0) * 3.17));
+                col += glint * TPalette(0.15 + i.op.y * 0.1) * pow(1.0 - nv, 2.0) * (0.25 + 1.6 * _THits.w);
                 // The floor reflection copy fades into the dark below the floor.
                 if (_Mirror > 0.5)
                 {

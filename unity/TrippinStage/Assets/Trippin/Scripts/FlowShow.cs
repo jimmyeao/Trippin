@@ -3,7 +3,8 @@
 // morphing over two beats. Turbulence rides the smoothed mids/highs, the
 // outward push the smoothed bass (never raw audio into the integrator); a
 // drop scatters the cloud and lets it re-form. The camera orbits slowly,
-// swinging direction with the phrase.
+// swinging direction with the phrase. Behind it all: a nebula dome of
+// drifting wisps and stars, and a soft core light at the shape's heart.
 
 using UnityEngine;
 
@@ -13,13 +14,14 @@ namespace TrippinStage
     {
         public Camera cam;
         public ComputeShader flow;
-        public Material pointsMat;
+        public Material pointsMat, nebulaMat, glowMat;
 
         const int Count = 1 << 18;
         const int Shapes = 5;
 
         ComputeBuffer _pos, _vel;
-        Material _mat;
+        Material _mat, _nebM, _glowM;
+        Transform _glowT;
         RenderParams _rp;
         int _kernel;
         int _shapeA, _shapeB = 1, _lastBar4 = -1;
@@ -41,6 +43,24 @@ namespace TrippinStage
             _mat = new Material(pointsMat);
             _mat.SetBuffer("_Pos", _pos);
             _rp = new RenderParams(_mat) { worldBounds = new Bounds(Vector3.zero, Vector3.one * 500f) };
+
+            // Depth: a nebula dome behind the cloud, and a soft additive
+            // glow at the shape's heart so it reads as a thing in space.
+            var dome = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            Destroy(dome.GetComponent<Collider>());
+            dome.name = "nebula";
+            dome.transform.SetParent(transform, false);
+            dome.transform.localScale = Vector3.one * 700f;
+            _nebM = new Material(nebulaMat);
+            dome.GetComponent<Renderer>().sharedMaterial = _nebM;
+            var glow = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            Destroy(glow.GetComponent<Collider>());
+            glow.name = "core glow";
+            glow.transform.SetParent(transform, false);
+            glow.transform.localScale = Vector3.one * 34f;
+            _glowM = new Material(glowMat);
+            glow.GetComponent<Renderer>().sharedMaterial = _glowM;
+            _glowT = glow.transform;
         }
 
         void OnDestroy()
@@ -119,6 +139,15 @@ namespace TrippinStage
             var p = new Vector3(Mathf.Sin(_orbit) * 34f, 6f + Mathf.Sin(phrase) * 9f, Mathf.Cos(_orbit) * 34f);
             cam.transform.position = Vector3.Lerp(cam.transform.position, p, 1f - Mathf.Exp(-dt * 1.5f));
             cam.transform.LookAt(Vector3.zero);
+
+            // The core light at the heart of the shape, billboarded to the
+            // camera; brighter and larger as the track drives.
+            _glowT.position = Vector3.zero;
+            _glowT.rotation = Quaternion.LookRotation(cam.transform.position - _glowT.position);
+            _glowT.localScale = Vector3.one * (26f + 14f * _energy);
+            _glowM.SetFloat("_Glow", 0.12f + 0.3f * s.intensity + 0.5f * Mathf.SmoothStep(0, 1, _scatter));
+            _glowM.SetFloat("_Hue", 0.55f + 0.1f * Mathf.Sin(phrase * 0.25f));
+            _nebM.SetFloat("_Wisp", 0.4f + 0.35f * _energy);
         }
     }
 }

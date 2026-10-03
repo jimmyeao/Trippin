@@ -5,8 +5,11 @@ A Unity engine of festival-grade shows, driven live by Trippin and shown in Trip
 | Show / Trippin scene | What |
 |---|---|
 | `unity_stage` | The festival main stage (below). |
-| `unity_crystals` | Screen content: a flight through a spiralling tunnel of faceted chrome crystals with a light at the end (`CrystalShow.cs`, `Chrome.shader`). Bass swells the crystals, the spiral swings with phrases, drops bloom it outward. |
-| `unity_flow` | Screen content: 262k GPU particles forming shapes (sphere, torus, helix, galaxy, gyroscope) that morph every 4 bars (`FlowShow.cs`, `Flow.compute`, `Points.shader`). Turbulence wobbles target slots (not a force field — fields with sinks clump particles into threads); drops scatter and re-form. |
+| `unity_crystals` | Screen content: a flight through a spiralling tunnel of faceted chrome crystals with a light at the end (`CrystalShow.cs`, `Chrome.shader`). Bass swells the crystals, the spiral swings with phrases, drops bloom it outward. Behind it all a `Nebula` dome of wisps and stars, and `Points` dust motes stream past the lens. |
+| `unity_flow` | Screen content: 262k GPU particles forming shapes (sphere, torus, helix, galaxy, gyroscope) that morph every 4 bars (`FlowShow.cs`, `Flow.compute`, `Points.shader`). Turbulence wobbles target slots (not a force field — fields with sinks clump particles into threads); drops scatter and re-form. A `Nebula` dome gives it depth and a `Backglow` core light burns at the shape's heart. |
+| `unity_leviathan` | Screen content: a manta-like creature of light (`LeviathanShow.cs`, `Leviathan.compute`, `LevSkin`/`Filament` shaders) swimming a dark void of drifting motes. Kicks send a glow pulse head-to-tail; drops flare the strands. |
+| `unity_sculpture` | Screen content: a morphing monolith on a mirror flat at night (`SculptureShow.cs`, `Sculpture.shader`) — night sky, wet floor carrying its reflection, a searchlight ring raking the sky, ground mist and a horizon glow that blooms on drops. |
+| `unity_colossus` | Screen content: an armoured android (Alice mesh, 11-bone skinning) in a night city (`ColossusShow.cs`, `Android`/`AndroidHead`/`City`/`Sky`/`Ground` shaders) — lit towers, rooftop searchlights, a wet plaza floor. |
 
 
 - **Trippin → Unity:** `src/link.rs` sends one JSON datagram per frame to 127.0.0.1:9137, with the audio vocabulary, beat/bar, palette and cut flag. `TrippinLink.cs` receives it and pushes shader globals (`_TBeat`, `_TLvl`, `_TPal`…). With no feed it runs a synthetic 126 BPM show.

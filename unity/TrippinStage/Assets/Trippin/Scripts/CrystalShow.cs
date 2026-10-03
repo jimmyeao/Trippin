@@ -7,6 +7,8 @@
 //  - spin speed follows the smoothed highs; the spiral swings direction
 //    on phrase-length sines;
 //  - a drop blooms the tunnel radius outward, easing back over ~4 bars.
+//  - the gaps between crystals are deep space: a nebula dome of wisps and
+//    stars, and dust motes streaming past to sell the speed.
 
 using UnityEngine;
 
@@ -15,16 +17,20 @@ namespace TrippinStage
     public class CrystalShow : MonoBehaviour
     {
         public Camera cam;
-        public Material chromeMat, sunMat;
+        public Material chromeMat, sunMat, nebulaMat, pointsMat;
 
         const int Count = 600;
         const float Length = 240f;
+        const int Motes = 2048;
 
         Mesh _mesh;
         Matrix4x4[] _m = new Matrix4x4[Count];
         float[] _rad, _sz, _spin, _h;
-        RenderParams _rp;
+        RenderParams _rp, _moteRp;
         Material _sun;
+        ComputeBuffer _motes;
+        Vector4[] _moteD;
+        Material _moteM, _nebM;
         float _bass, _bloom, _calmLong;
         float _kick, _mid, _high, _energy, _travel, _spinPhase;
         readonly float[] _kickHist = new float[96];
@@ -55,7 +61,35 @@ namespace TrippinStage
             g.transform.localPosition = new Vector3(0, 0, 230);
             g.transform.localScale = Vector3.one * 120f;
             g.GetComponent<Renderer>().sharedMaterial = _sun;
+
+            // Deep space behind the crystals: a nebula dome, and dust
+            // motes inside the tunnel streaming past the camera.
+            var dome = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            Destroy(dome.GetComponent<Collider>());
+            dome.name = "nebula";
+            dome.transform.SetParent(transform, false);
+            dome.transform.localScale = Vector3.one * 900f;
+            _nebM = new Material(nebulaMat) { };
+            _nebM.SetFloat("_Wisp", 0.45f);
+            dome.GetComponent<Renderer>().sharedMaterial = _nebM;
+
+            _motes = new ComputeBuffer(Motes, 16);
+            _moteD = new Vector4[Motes];
+            var mrnd = new System.Random(9);
+            for (int i = 0; i < Motes; i++)
+            {
+                float a = (float)mrnd.NextDouble() * Mathf.PI * 2f;
+                float r = Mathf.Sqrt((float)mrnd.NextDouble()) * 13f;
+                _moteD[i] = new Vector4(Mathf.Cos(a) * r, Mathf.Sin(a) * r, (float)mrnd.NextDouble() * Length, 0);
+            }
+            _motes.SetData(_moteD);
+            _moteM = new Material(pointsMat);
+            _moteM.SetBuffer("_Pos", _motes);
+            _moteM.SetFloat("_Size", 0.05f);
+            _moteRp = new RenderParams(_moteM) { worldBounds = new Bounds(Vector3.zero, Vector3.one * 1000f) };
         }
+
+        void OnDestroy() { _motes?.Release(); }
 
         // A faceted crystal: n-sided bipyramid, flat-shaded (split vertices).
         static Mesh Bipyramid(int n, float r, float h)
@@ -97,7 +131,8 @@ namespace TrippinStage
             _energy += (s.energy - _energy) * (1f - Mathf.Exp(-dt / 0.6f));
             // Speed and spin integrate smoothed values (no raw audio in the
             // integrator — motion stays smooth).
-            _travel += dt * s.bpm / 60f * (1.2f + 7f * _energy * (1f - 0.6f * s.calm));
+            float dTravel = dt * s.bpm / 60f * (1.2f + 7f * _energy * (1f - 0.6f * s.calm));
+            _travel += dTravel;
             _spinPhase += dt * (0.3f + 3.5f * _high);
             if (!s.drums) _calmLong += dt;
             if (s.drums && !_drumsWas && _calmLong > 4f) _bloom = 1f;
@@ -123,13 +158,28 @@ namespace TrippinStage
                 float punch = _kickHist[(_kh - delay + _kickHist.Length) % _kickHist.Length];
                 var p = new Vector3(Mathf.Cos(a) * r, Mathf.Sin(a) * r, z);
                 var rot = Quaternion.Euler(_spinPhase * 60f * _spin[i], a * Mathf.Rad2Deg, _spinPhase * 35f * _spin[i] + 90f);
-                // Grow in from the far fog so recycled crystals don't pop.
-                float fade = Mathf.SmoothStep(0, 1, Mathf.InverseLerp(Length - 6f, Length - 40f, z));
+                // Grow in from the far fog so recycled crystals don't pop,
+                // and shrink out as they reach the lens so nothing passes
+                // through the camera as a giant flat kite.
+                float fade = Mathf.SmoothStep(0, 1, Mathf.InverseLerp(Length - 6f, Length - 40f, z))
+                           * Mathf.SmoothStep(0, 1, Mathf.InverseLerp(-6f, 6f, z));
                 _m[i] = Matrix4x4.TRS(p, rot, Vector3.one * (_sz[i] * swell * (1f + 0.6f * punch) * fade));
             }
             Graphics.RenderMeshInstanced(_rp, _mesh, 0, _m);
 
             _sun.SetFloat("_Glow", 0.35f + 0.5f * Mathf.SmoothStep(0, 1, _bloom) + 0.2f * s.intensity);
+            // Dust motes: wrapped along the tunnel with the same travel, a
+            // touch faster than the crystals so they stream past.
+            for (int i = 0; i < Motes; i++)
+            {
+                var m = _moteD[i];
+                m.z = Mathf.Repeat(m.z - dTravel * 1.4f, Length) - 10f;
+                _moteD[i] = m;
+            }
+            _motes.SetData(_moteD);
+            _moteM.SetFloat("_Gain", 0.45f + 0.4f * _energy);
+            _nebM.SetFloat("_Wisp", 0.3f + 0.35f * _energy);
+            Graphics.RenderPrimitives(_moteRp, MeshTopology.Triangles, Motes * 6);
             // Camera: centred, banking gently with the phrase.
             cam.transform.position = new Vector3(Mathf.Sin(phrase * 0.5f) * 1.5f, Mathf.Cos(phrase * 0.7f) * 1.0f, -8f);
             cam.transform.rotation = Quaternion.Euler(0, Mathf.Sin(phrase * 0.5f) * 4f, Mathf.Sin(phrase) * 7f);

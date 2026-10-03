@@ -1,14 +1,17 @@
-// Screen-content show: one big solid sculpture alone in a void, lit like a
-// product shot. Its own thing on the screen: no stage, no crowd.
+// Screen-content show: one big solid sculpture on a dark flat at night —
+// a monolith on the salt flats. Its own thing on the screen: no stage, no
+// crowd.
 //  - Shape: a new form every 8 bars, melting in over two beats (pebble,
 //    urchin, twisted spire, lobed flower, dimpled disc); it swells with
 //    the bass; each kick sends a ripple from top to bottom; the twist
 //    swings with the phrase.
 //  - Motion: rotation speed integrates the smoothed energy and reverses
 //    on phrase-length sines; the camera orbits slowly round it.
-//  - Light: studio reflections slide over the surface as it turns; an
-//    iridescent sheen drifts on the flow clock; a soft glow rides the
-//    kick ripple.
+//  - Light: sky and searchlight reflections slide over the surface as it
+//    turns; an iridescent sheen drifts on the flow clock; a soft glow
+//    rides the kick ripple. The world: night sky, a black-mirror flat
+//    carrying the reflection, distant searchlights raking the sky, low
+//    ground mist and a glow on the horizon that blooms on drops.
 
 using System.Collections.Generic;
 using UnityEngine;
@@ -18,16 +21,21 @@ namespace TrippinStage
     public class SculptureShow : MonoBehaviour
     {
         public Camera cam;
-        public Material sculptMat;
+        public Material sculptMat, skyMat, groundMat, beamMat, glowMat, hazeMat;
 
         const int Forms = 5;
 
         const float FloorY = -3.0f;
 
-        Transform _obj, _mirror;
-        Material _mat, _mirMat;
+        Transform _obj, _mirror, _glowT;
+        Material _mat, _mirMat, _skyM, _groundM, _hazeM, _glowM;
+        readonly List<Transform> _beams = new List<Transform>();
+        readonly List<Renderer> _beamR = new List<Renderer>();
+        MaterialPropertyBlock _mpb;
         int _formA, _formB = 1, _lastBar8 = -1;
         float _morphStart, _bass, _energy, _kick, _rot, _orbit, _wave = 2f, _waveAmp, _lastKickT = -1f, _lineT;
+        float _calmLong, _burst;
+        bool _drumsWas = true;
 
         void Awake()
         {
@@ -52,6 +60,88 @@ namespace TrippinStage
             _mirror = mg.transform;
             _mirror.localPosition = new Vector3(0, 2f * FloorY, 0);
             _mirror.localScale = new Vector3(2.2f, -2.2f, 2.2f);
+            BuildEnv();
+        }
+
+        // The world around the object: sky dome, the wet flat (a mostly
+        // opaque layer over the mirror copy, so the reflection shows
+        // through the "puddles"), horizon glow, ground mist and a ring of
+        // searchlights. Everything static — only the lights react.
+        void BuildEnv()
+        {
+            _mpb = new MaterialPropertyBlock();
+            var sky = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            Destroy(sky.GetComponent<Collider>());
+            sky.name = "sky";
+            sky.transform.SetParent(transform, false);
+            sky.transform.localScale = Vector3.one * 560f;
+            _skyM = new Material(skyMat);
+            sky.GetComponent<Renderer>().sharedMaterial = _skyM;
+
+            var ground = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            Destroy(ground.GetComponent<Collider>());
+            ground.name = "salt flat";
+            ground.transform.SetParent(transform, false);
+            ground.transform.localPosition = new Vector3(0, FloorY + 0.02f, 0);
+            ground.transform.localRotation = Quaternion.Euler(90, 0, 0);
+            ground.transform.localScale = new Vector3(700, 700, 1);
+            _groundM = new Material(groundMat);
+            _groundM.SetFloat("_FogDist", 120f);
+            ground.GetComponent<Renderer>().sharedMaterial = _groundM;
+
+            // Low mist lying on the flat: a big additive smoke layer
+            // horizontal above the floor.
+            var mist = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            Destroy(mist.GetComponent<Collider>());
+            mist.name = "ground mist";
+            mist.transform.SetParent(transform, false);
+            mist.transform.localPosition = new Vector3(0, FloorY + 0.6f, 0);
+            mist.transform.localRotation = Quaternion.Euler(90, 0, 0);
+            mist.transform.localScale = new Vector3(140, 140, 1);
+            _hazeM = new Material(hazeMat);
+            _hazeM.SetFloat("_Density", 0.3f);
+            _hazeM.SetFloat("_Scale", 0.05f);
+            mist.GetComponent<Renderer>().sharedMaterial = _hazeM;
+
+            // The glow that silhouettes the object (repositioned to sit
+            // opposite the camera every frame).
+            var glow = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            Destroy(glow.GetComponent<Collider>());
+            glow.name = "horizon glow";
+            glow.transform.SetParent(transform, false);
+            _glowM = new Material(glowMat);
+            glow.GetComponent<Renderer>().sharedMaterial = _glowM;
+            _glowT = glow.transform;
+
+            // Searchlights standing on the flat, beams raking the sky —
+            // same unit quad along +Y as the colossus rooftops.
+            var beamMesh = new Mesh { name = "beam" };
+            beamMesh.vertices = new[] { new Vector3(0, 0, 0), new Vector3(1, 0, 0), new Vector3(0, 1, 0), new Vector3(1, 1, 0) };
+            beamMesh.uv = new[] { new Vector2(0, 0), new Vector2(1, 0), new Vector2(0, 1), new Vector2(1, 1) };
+            beamMesh.triangles = new[] { 0, 2, 1, 1, 2, 3 };
+            beamMesh.bounds = new Bounds(Vector3.zero, Vector3.one * 600f);
+            for (int i = 0; i < 7; i++)
+            {
+                float a = i / 7f * Mathf.PI * 2f + 0.55f;
+                float r = 38f + (i % 3) * 14f;
+                var g = new GameObject("searchlight " + i);
+                g.transform.SetParent(transform, false);
+                g.transform.localPosition = new Vector3(Mathf.Cos(a) * r, FloorY, Mathf.Sin(a) * r);
+                g.transform.localScale = new Vector3(1, 60f + (i % 4) * 18f, 1);
+                g.AddComponent<MeshFilter>().sharedMesh = beamMesh;
+                var mr = g.AddComponent<MeshRenderer>();
+                var m = new Material(beamMat);
+                m.SetFloat("_Width", 0.35f);
+                m.SetFloat("_Spread", 0.06f);
+                m.SetFloat("_Core", 8f);
+                m.SetFloat("_Smoke", 0.65f);
+                m.SetFloat("_Fade", 0.25f);
+                m.SetFloat("_Hot", 0.1f);
+                mr.sharedMaterial = m;
+                mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                _beams.Add(g.transform);
+                _beamR.Add(mr);
+            }
         }
 
         void Update()
@@ -83,6 +173,12 @@ namespace TrippinStage
             _kick = kt;
             _wave -= dt * 3.2f;
             _waveAmp *= Mathf.Exp(-dt / 0.5f);
+            // A drop (drums return after a long breakdown) blooms the glow.
+            if (!s.drums) _calmLong += dt;
+            if (s.drums && !_drumsWas && _calmLong > 4f) _burst = 1f;
+            if (s.drums) _calmLong = 0f;
+            _drumsWas = s.drums;
+            _burst = Mathf.Max(0f, _burst - dt * 0.4f);
 
             float phrase = s.beat / 64f * Mathf.PI * 2f;
             _rot += dt * (0.12f + 0.9f * _energy) * (1f - 0.5f * s.calm) * Mathf.Sin(phrase * 0.5f + 0.4f);
@@ -105,10 +201,36 @@ namespace TrippinStage
 
             // Camera: a slow orbit, rising and falling with the phrase.
             _orbit += dt * (0.05f + 0.06f * s.intensity);
-            float dist = 10f + 1.2f * s.calm;
-            var p = new Vector3(Mathf.Sin(_orbit) * dist, 1.2f + 1.6f * Mathf.Sin(phrase * 0.5f + 1f), Mathf.Cos(_orbit) * dist);
+            float dist = 10.5f + 1.4f * s.calm;
+            var p = new Vector3(Mathf.Sin(_orbit) * dist, 1.4f + 1.6f * Mathf.Sin(phrase * 0.5f + 1f), Mathf.Cos(_orbit) * dist);
             cam.transform.position = Vector3.Lerp(cam.transform.position, p, 1f - Mathf.Exp(-dt * 1.5f));
             cam.transform.LookAt(new Vector3(0, -0.6f, 0));
+
+            // Horizon glow sits opposite the camera so the object reads
+            // against it; it blooms when the drums come back.
+            var back = -new Vector3(cam.transform.position.x, 0, cam.transform.position.z).normalized;
+            _glowT.position = new Vector3(0, 6f, 0) + back * 160f;
+            _glowT.rotation = Quaternion.LookRotation(back);
+            _glowT.localScale = Vector3.one * 130f;
+            _glowM.SetFloat("_Glow", 0.3f + 0.35f * s.intensity + 0.8f * Mathf.SmoothStep(0, 1, _burst));
+            _glowM.SetFloat("_Hue", 0.45f + 0.08f * Mathf.Sin(phrase * 0.25f));
+
+            // Searchlights: slow sweeps swinging with the phrase, brighter
+            // with energy, settled in breakdowns — never flashing.
+            for (int i = 0; i < _beams.Count; i++)
+            {
+                float u = i / (float)_beams.Count;
+                float sweep = Mathf.Sin(phrase * 0.5f + u * 6.28f) * 30f + Mathf.Sin(_lineT * 0.06f + u * 11f) * 9f;
+                float tilt = 10f + 14f * (0.5f + 0.5f * Mathf.Sin(phrase * 0.25f + u * 4f));
+                var toCentre = -_beams[i].localPosition;
+                float baseYaw = Mathf.Atan2(toCentre.x, toCentre.z) * Mathf.Rad2Deg + 180f;
+                _beams[i].localRotation = Quaternion.Euler(0, baseYaw + sweep, 0) * Quaternion.Euler(tilt, 0, 0);
+                _mpb.Clear();
+                _mpb.SetColor("_Color", TrippinLink.Palette(0.3f + u * 0.45f));
+                _mpb.SetFloat("_Intensity", (0.05f + 0.1f * _energy) * (1f - 0.6f * s.calm));
+                _beamR[i].SetPropertyBlock(_mpb);
+            }
+            _skyM.SetFloat("_Glow", 0.3f + 0.5f * s.intensity);
         }
 
         // Unit icosphere, `n` subdivisions (6 -> 40962 vertices).
