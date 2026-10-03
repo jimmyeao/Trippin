@@ -13,3 +13,6 @@ HANDOFF-ADD-SITE.md
 /models/
 /beatcache/
 Website/sshkey/theiaweb_key.pem
+
+/website/sshkey/
+/website/reel_work/

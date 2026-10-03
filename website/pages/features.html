@@ -1,0 +1,145 @@
+Trippin features — analysis, auto-pilot, dancer, streaming|How Trippin analyses your music, cuts scenes on phrases and drops, and streams clean video, overlays and clips to OBS.|features
+<header class="page-hero"><div class="wrap"><span class="pill">Features</span><h1>Built to <span class="grad">feel the music</span></h1><p class="lead">Trippin doesn't loop pretty clips. It listens, works out where the music is going, and moves with it.</p></div></header>
+
+<section style="padding-top:50px">
+  <div class="wrap split">
+    <div class="reveal">
+      <div class="eyebrow">Listening</div>
+      <h2>It knows the song</h2>
+      <p class="sec-lead">Band levels, onsets and kicks are tracked live, along with tempo and the beat and bar phase. A neural downbeat check keeps the "one" on the one, even in house music where off-beat hats try to steal the grid.</p>
+      <ul class="ticks">
+        <li><span><b>Four bands</b> of loudness, transients and slow presence drive every scene.</span></li>
+        <li><span><b>Breakdowns detected.</b> When the drums drop out, the camera slows, flashes stop and the visuals soften.</span></li>
+        <li><span><b>Level independent.</b> It works the same at a quiet bedroom volume or a loud club system.</span></li>
+      </ul>
+    </div>
+    <div class="reveal"><div class="frame"><img loading="lazy" src="img/stage_rig.jpg" alt="Stage rig scene"></div></div>
+  </div>
+</section>
+
+<section style="background:var(--bg2)">
+  <div class="wrap split rev">
+    <div class="reveal"><div class="frame"><img loading="lazy" src="img/glass_monoliths.jpg" alt="Glass monoliths scene"></div></div>
+    <div class="reveal">
+      <div class="eyebrow">Motion, not flashing</div>
+      <h2>The music changes the shape</h2>
+      <p class="sec-lead">Brightness is the least interesting thing a visual can do. In Trippin the music reshapes objects, swings the camera with each phrase, and drives speed and complexity as a track builds.</p>
+      <ul class="ticks">
+        <li><span><b>Shape:</b> morphs, displacement and geometry follow the sound.</span></li>
+        <li><span><b>Direction:</b> motion reverses and swings over phrases.</span></li>
+        <li><span><b>Energy:</b> travel speeds up and surges on drops, always smoothly.</span></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="timeline" class="dive">
+  <div class="wrap">
+    <div class="head reveal">
+      <span class="tag">Timeline editor + AI</span>
+      <h2>Script a whole set, or let AI direct it</h2>
+      <p class="sec-lead">Load a track and Trippin analyses it offline: waveform, beat and bar grid anchored to the real downbeat, and the structure of the song. Then build the show by hand, record it live, or have an AI write the cue list for you.</p>
+    </div>
+    <div class="frame reveal" style="padding:0;background:#07060d">
+      <video autoplay muted loop playsinline preload="none" poster="img/features/editor-reel-poster-v3.jpg" style="width:100%;display:block"><source src="img/features/editor-reel-v3.mp4" type="video/mp4"></video>
+    </div>
+    <p class="sub reveal" style="text-align:center;margin:12px 0 28px">The real timeline editor playing a 6-minute show: scene cuts on the phrase, dancer routines, palette and effect changes, all landing on the beat. Click the still below to zoom in.</p>
+    <div class="frame reveal"><img loading="lazy" src="img/features/timeline-editor-v2.webp" alt="The whole show in the timeline editor: waveform, 130 scene thumbnails, and lanes for dancer, effects and show cues" width="2300" height="570"></div>
+    <p class="sub reveal" style="text-align:center;margin:12px 0 0">The whole show at a glance. Click it to zoom in. Every block is draggable, resizable and yours to change.</p>
+
+    <div class="pipe reveal" style="margin-top:22px">
+      <div><b>Analyse</b>Per-bar energy, onsets, vocals and "air", all computed on your machine.</div>
+      <div><b>Segment</b>Intro, groove, build, drop, peak, breakdown, outro, found by where the <em>sound</em> changes.</div>
+      <div><b>Direct</b>The model picks scenes by measured visual energy, with extra cuts through builds.</div>
+      <div><b>Enforce</b>Trippin's own show rules fix the plan: calm in breakdowns, a change on every drop.</div>
+      <div><b>Edit</b>Everything lands as cues you can drag, retime or delete. It's your show.</div>
+    </div>
+
+    <div class="grid g3" style="margin-top:34px">
+      <div class="card reveal"><h3>Drum-fill aware</h3><p>Rolls and snare runs mark phrase ends. The AI places strobe, stutter and flash hits on the fill's real drum hits, never as a flash on tunnel scenes.</p></div>
+      <div class="card reveal"><h3>Text as performance</h3><p>A word per beat on the drop, hook words landed on their beat, and punch, shake, bounce or shatter effects. If there's no text, it hits the track title on the first drop.</p></div>
+      <div class="card reveal"><h3>Record mode</h3><p>Arm record, play the track, and perform with your hotkeys, MIDI pads or the remote. Every move lands on the strip as a cue. Save it, replay it, tweak it.</p></div>
+      <div class="card reveal"><h3>Follow live</h3><p>Playing the same song in the room? Trippin locks onto the live audio and fires the pre-programmed show in step with the DJ's deck.</p></div>
+      <div class="card reveal"><h3>Bring your own AI</h3><p>Anthropic, OpenAI, Gemini, or any OpenAI-compatible endpoint including local Ollama. Paste your key in Settings.</p></div>
+      <div class="card reveal"><h3>Your audio stays yours</h3><p>No audio is ever uploaded. Only a numeric summary of the track and its title leave your machine, and only when you ask for an AI show.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="midi" class="dive" style="background:var(--bg2)">
+  <div class="wrap split">
+    <div class="reveal">
+      <span class="tag">MIDI mapping</span>
+      <h2>Every action on a pad</h2>
+      <p class="sec-lead">Plug in any pad or key controller. Pick it, click <b>midi</b> next to an action, hit a pad, and it's bound. No config files, no drivers to learn.</p>
+      <ul class="ticks">
+        <li><span><b>Everything is mappable:</b> scene cuts, strobe, blackout, dancer, palettes, effects, save clip, record set and more.</span></li>
+        <li><span><b>One-press learn.</b> Re-learning a note simply steals it, so one pad is always one action.</span></li>
+        <li><span><b>Records into your show.</b> Pad hits land on the timeline like hotkeys when you record.</span></li>
+        <li><span><b>Hot-plug friendly.</b> Unplug and replug mid-set and it reconnects on its own.</span></li>
+        <li><span><b>Any MIDI channel</b>, with clean press-only triggering so toggles never double-fire.</span></li>
+      </ul>
+    </div>
+    <div class="reveal"><div class="frame" style="max-width:540px;margin:0 auto"><img loading="lazy" src="img/features/midi-keys-v2.webp" alt="The Keys page: every action with a keyboard binding, a rebind button and a midi learn button" width="540" height="660"></div>
+      <p class="sub" style="text-align:center;margin-top:12px">The Keys page, shown at full size. Click <b>midi</b> next to any action, hit a pad, done.</p></div>
+  </div>
+</section>
+
+<section id="output" class="dive">
+  <div class="wrap">
+    <div class="head center reveal">
+      <span class="tag">NDI &amp; Spout</span>
+      <h2>Into OBS, Resolume or vMix in a click</h2>
+      <p class="sec-lead">The finished frame (scene, dancer, effects, overlays, text) goes out as a live video source. Choose the route that fits your setup.</p>
+    </div>
+    <div class="diagram reveal">
+      <div class="route">
+        <div class="node hot">Trippin<br><small style="color:#fff;opacity:.85;font-weight:500">scene + dancer + overlays</small></div>
+        <div class="stack">
+          <div class="lane"><b>Spout</b><small>Same PC · GPU texture sharing · zero network, near-zero latency</small></div>
+          <div class="lane"><b>NDI</b><small>Over your network · to another PC or a streaming machine</small></div>
+        </div>
+        <div class="stack">
+          <div class="node"><b>OBS</b><small>Spout2 Capture / NDI Source</small></div>
+          <div class="node"><b>Resolume · vMix · TouchDesigner</b><small>anything that reads Spout or NDI</small></div>
+        </div>
+      </div>
+    </div>
+    <div class="frame narrow2 reveal" style="max-width:528px;margin:22px auto 0"><img loading="lazy" src="img/features/video-output-v2.webp" alt="The Video output card: Spout and NDI toggles, scenes or transparent background, 720p to 2160p, 30 or 60 fps" width="528" height="228"></div>
+    <p class="sub reveal" style="text-align:center;margin:10px 0 0">The Video output card on the Stream tab.</p>
+    <div class="grid g3" style="margin-top:22px">
+      <div class="card reveal"><h3>720p to 4K, 30 or 60 fps</h3><p>Output size and frame rate are independent of the window. If a receiver falls behind, frames drop. Your visuals never stutter.</p></div>
+      <div class="card reveal"><h3>Transparent mode</h3><p>Turn the scenes off and send only the dancer, glow, overlays and text with true alpha. Layer Trippin straight over your camera in OBS.</p></div>
+      <div class="card reveal"><h3>Native Spout</h3><p>Spout is built in, with no extra DLLs on our side. In OBS, add the free Spout2 Capture plugin. NDI loads its free runtime on demand, and the app works fine without it.</p></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="head center reveal"><div class="eyebrow">Everything else</div><h2>The whole toolkit</h2></div>
+    <div class="grid g3">
+      <div class="card reveal"><h3>Auto-pilot</h3><p>Cuts on phrase boundaries and drops, picks scenes by energy, and never strobes a tunnel. Or run it manually, or lock a single scene.</p></div>
+      <div class="card reveal"><h3>Beat-locked dancer</h3><p>Silhouette clips dance on the beat over any scene, with glow and trails, and re-anchor to the bar so routines start cleanly on a phrase.</p></div>
+      <div class="card reveal"><h3>Timeline &amp; AI show builder</h3><p>Script a full set cue by cue, or let the AI builder analyse a track and lay out scenes, text, fills and strobes for you to tweak.</p></div>
+      <div class="card reveal"><h3>Text &amp; effects</h3><p>Timeline text cues with punch, shake, strobe, bounce and shatter. Mirror and kaleidoscope effects on top of any scene.</p></div>
+      <div class="card reveal"><h3>Palettes</h3><p>One global palette recolours every scene, the dancer glow and the text, so your whole set matches your brand.</p></div>
+      <div class="card reveal"><h3>Hotkeys &amp; MIDI</h3><p>Every action has a key, and MIDI pad controllers can be mapped with one-click learn. Pad presses record into your timeline.</p></div>
+    </div>
+  </div>
+</section>
+
+<section style="background:var(--bg2)">
+  <div class="wrap">
+    <div class="head center reveal"><div class="eyebrow">For streamers</div><h2>On air in a click</h2><p class="sec-lead">The streaming kit is part of the app, not an afterthought.</p></div>
+    <div class="grid g3">
+      <div class="card reveal"><h3>Spout &amp; NDI</h3><p>Clean video straight into OBS at 720p, 1080p or 4K, 30 or 60 fps, without dropping render frames. A transparent mode layers it over your camera.</p></div>
+      <div class="card reveal"><h3>Now playing</h3><p>Reads the track from the OS media session, Serato, VirtualDJ, rekordbox, Mixxx or a text file, with a debounce that ignores headphone cue-ups.</p></div>
+      <div class="card reveal"><h3>Branding &amp; ticker</h3><p>Your logo, DJ name and a scrolling ticker, drawn crisp over the visuals and easy to toggle live.</p></div>
+      <div class="card reveal"><h3>Instant clips</h3><p>A replay buffer saves the last moments with audio. Export 16:9 or crop to vertical 9:16 for TikTok, Reels and Shorts.</p></div>
+      <div class="card reveal"><h3>Set recording</h3><p>Record your entire set with visuals and audio, ready to upload after the stream.</p></div>
+      <div class="card reveal"><h3>Remote control</h3><p>Run it from your phone with the free iPhone and iPad app, or any browser or OSC controller on your network.</p><p style="margin-top:10px"><a href="remote.html" class="grad" style="font-weight:600">See Trippin Remote →</a></p></div>
+    </div>
+    <p class="reveal" style="text-align:center;margin-top:46px"><a class="btn primary" href="download.html">Download Trippin</a></p>
+  </div>
+</section>
