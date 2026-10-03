@@ -236,6 +236,13 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
 - New `Settings` fields need a `Default` value. `#[serde(default)]` keeps
   old files loading. Enums that can lose variants use `#[serde(other)]` on
   the last variant.
+- **trippin.json must survive newer builds** (`Settings::parse_lenient`): a
+  strict parse once dropped the whole file over one unknown hotkey action
+  written by a newer dev build, so every setting (the Unity link included)
+  reset on each launch of the installed app. Unknown actions in `keys` /
+  `midi_notes` are filtered and any other field that doesn't fit is
+  skipped on its own. Dev builds run from the repo use the owner's real
+  settings: run them from a scratch folder (§4).
 - `trippin.json` can carry a UTF-8 BOM (Notepad, PowerShell 5), and loading
   strips it. Do the same for any user-edited text files you read.
 - Anything that re-installs global taps (see `rec.rs`) must drop the old

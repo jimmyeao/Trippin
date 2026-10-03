@@ -573,13 +573,7 @@ pub fn timelines_dir() -> PathBuf {
 impl Settings {
     pub fn load() -> Self {
         let mut s: Settings = std::fs::read_to_string(path())
-            .ok()
-            .and_then(|t| {
-                // Notepad (and PowerShell 5) save UTF-8 with a BOM.
-                serde_json::from_str(t.trim_start_matches('\u{feff}'))
-                    .map_err(|e| eprintln!("trippin.json ignored: {e}"))
-                    .ok()
-            })
+            .map(|t| Settings::parse_lenient(&t))
             .unwrap_or_default();
         // Actions added in newer versions get their default key.
         for a in Action::ALL {
@@ -606,6 +600,43 @@ impl Settings {
             s.remote_pin = crate::remote::new_pin();
         }
         s
+    }
+
+    /// Parse trippin.json, keeping everything this build understands. A
+    /// strict parse threw the whole file away on one unknown value (say, a
+    /// hotkey for an action a newer build added), so every setting,
+    /// including the Unity link, reset to its default. Now: hotkey and MIDI
+    /// entries for unknown actions are dropped, then each top-level field
+    /// that still doesn't fit is skipped on its own.
+    pub fn parse_lenient(text: &str) -> Settings {
+        use serde_json::Value;
+        // Notepad (and PowerShell 5) save UTF-8 with a BOM.
+        let text = text.trim_start_matches('\u{feff}');
+        if let Ok(s) = serde_json::from_str::<Settings>(text) {
+            return s;
+        }
+        let Ok(Value::Object(mut file)) = serde_json::from_str::<Value>(text) else {
+            eprintln!("trippin.json isn't valid JSON: using defaults");
+            return Settings::default();
+        };
+        for key in ["keys", "midi_notes"] {
+            if let Some(Value::Object(m)) = file.get_mut(key) {
+                m.retain(|name, _| serde_json::from_value::<Action>(Value::String(name.clone())).is_ok());
+            }
+        }
+        let mut merged = serde_json::to_value(Settings::default()).unwrap_or(Value::Null);
+        for (k, v) in file {
+            let Value::Object(cur) = &merged else { break };
+            let mut trial = cur.clone();
+            trial.insert(k.clone(), v);
+            let trial = Value::Object(trial);
+            if serde_json::from_value::<Settings>(trial.clone()).is_ok() {
+                merged = trial;
+            } else {
+                eprintln!("trippin.json: skipped \"{k}\" (not understood by this version)");
+            }
+        }
+        serde_json::from_value(merged).unwrap_or_default()
     }
 
     pub fn save(&self) {
@@ -647,6 +678,24 @@ pub fn key_name(key: &Key) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn settings_from_a_newer_build_keep_what_this_build_knows() {
+        // A newer build's hotkey and an unknown enum value used to throw the
+        // whole file away (unity_link silently back to off).
+        let text = r#"{
+            "unity_link": true,
+            "phrase_bars": 8,
+            "keys": { "NextScene": "J", "SomeFutureAction": "Q" },
+            "mode": "SomeFutureMode",
+            "a_field_from_the_future": 3
+        }"#;
+        let s = Settings::parse_lenient(text);
+        assert!(s.unity_link);
+        assert_eq!(s.phrase_bars, 8);
+        assert_eq!(s.keys.get(&Action::NextScene).map(String::as_str), Some("J"));
+        assert!(s.mode == Settings::default().mode);
+    }
 
     #[test]
     fn month_day_matches_known_dates() {
