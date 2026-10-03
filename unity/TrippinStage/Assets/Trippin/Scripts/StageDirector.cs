@@ -46,8 +46,6 @@ namespace TrippinStage
         RenderParams _crowdMeshRp;
 
         int _formation = -1, _prevFormation;
-        float _ftSum, _ftLast;
-        int _ftN;
         float _formStart;
         int _lastBar8 = -1;
         int _lastBar = -1;
@@ -57,7 +55,7 @@ namespace TrippinStage
 
         void Start()
         {
-            Application.targetFrameRate = 60;
+            if (!ShowManager.Uncapped) Application.targetFrameRate = 60;
             QualitySettings.vSyncCount = 0;
             Application.runInBackground = true;
             _mpb = new MaterialPropertyBlock();
@@ -726,13 +724,6 @@ namespace TrippinStage
             UpdateShafts(s, beat);
             UpdateWalls(s, beat, bar);
             UpdateCamera(s, beat, dt);
-            _ftSum += Time.unscaledDeltaTime;
-            _ftN++;
-            if (Time.unscaledTime - _ftLast > 5f)
-            {
-                Debug.Log($"[Stage] {1000f * _ftSum / _ftN:F2} ms/frame avg over {_ftN} frames, link {(TrippinLink.Live ? "live" : "synthetic")}");
-                _ftSum = 0; _ftN = 0; _ftLast = Time.unscaledTime;
-            }
             // Fixture glows flicker with the high hits.
             float hh = s.hits4 != null && s.hits4.Length > 3 ? s.hits4[3] : 0f;
             _mpb.Clear();
