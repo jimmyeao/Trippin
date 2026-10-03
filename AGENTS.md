@@ -84,6 +84,8 @@ overlays.
   latest; another agent may have pushed since you last looked.
 - **Don't** force-push shared branches, rewrite pushed history, or delete
   someone else's branch.
+- **A new Unity show needs a new engine release.** `engine.rs::ASSET` pins a zip; an installed player that predates the show ignores its name (`ShowManager` keeps the current show), so Trippin would cut to `unity_<x>` and display a different show. Add the show in `StageBuilder`, a stub `shaders/scenes/unity_<x>.wgsl`, then publish `unity-engine-vN` (unity/README.md) before it ships.
+- **`DropDirector.Impact` steps 0→1 in one frame.** Geometry or brightness driven straight from it pops at the drop (aurora measured a frame change of 33 against a 0.34 median). Give the show its own ~0.25 s attack and instant release (`AuroraShow._impS`, `1-exp(-12 dt)`), and keep the peak flare modest. `Tension` is already an integrator and needs no smoothing. Also check in a recording that a build's contraction is actually visible on screen (prism's was cancelled by the camera creeping in), and that a calm boost isn't cancelled by the tension dim (a breakdown is exactly when Tension is high).
 - **Unity instanced draws need instancing on the material asset at build
   time** (`StageBuilder`: `mat.enableInstancing = true`). Enabling it only
   on a runtime copy lets the build strip the shader's instancing variant
@@ -172,7 +174,7 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
 | `ios/TrippinRemote/` | The iOS/iPadOS remote app (SwiftUI, iOS 17+): Bonjour discovery, PIN pairing in the Keychain, pads, scene grid with thumbnails, look/FX, dancer and transport pages, plus a built-in `DemoServer` for use without a rig (and for App Review). The `.xcodeproj` is generated: run `xcodegen` in that folder (it's git-ignored). Speaks the `remote.rs` protocol; UI tests in `UITests/`. See its README. |
 | `src/osc.rs` | OSC UDP input (9139) for TouchOSC/Lemur — maps addresses onto the same `RemoteCmd`s as the app. |
 | `src/snap.rs` | Headless snapshot and benchmark rendering. |
-| `src/engine.rs`, `src/link.rs`, `unity/` | Unity engine (shows `unity_stage`, `unity_crystals`, `unity_flow`, `unity_leviathan`, `unity_sculpture`, `unity_colossus`, `unity_tidal_cathedral`, `unity_kinetic_garden`; any `unity_*` scene is gated on live frames and hidden from the AI builder). `engine.rs` launches the player headless and supervises it; frames come back through a memory-mapped file (seqlock, top row first) into `gfx::Statics::ext` (binding 8 `ext_tex`); `link.rs` sends the show state over UDP. Cross-platform, nothing to start by hand. See `unity/README.md`. |
+| `src/engine.rs`, `src/link.rs`, `unity/` | Unity engine (shows `unity_stage`, `unity_crystals`, `unity_flow`, `unity_leviathan`, `unity_sculpture`, `unity_colossus`, `unity_tidal_cathedral`, `unity_lightstorm`, `unity_prism`, `unity_aurora`, `unity_basscore`, `unity_pillars`, `unity_orbit_foundry`; any `unity_*` scene is gated on live frames and hidden from the AI builder). `engine.rs` launches the player headless and supervises it; frames come back through a memory-mapped file (seqlock, top row first) into `gfx::Statics::ext` (binding 8 `ext_tex`); `link.rs` sends the show state over UDP. Cross-platform, nothing to start by hand. See `unity/README.md`. |
 | `tools/*.py` | Offline pipelines: mocap and stock video to dancer clips, and so on. |
 
 ## 6. Writing a scene

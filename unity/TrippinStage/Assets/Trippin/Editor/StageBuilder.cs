@@ -189,6 +189,50 @@ namespace TrippinStage.EditorTools
             tidal.hazeMat = Mat("Trippin/TidalMist", "TidalMist");
             tidal.beamMat = dir.beamMat;
 
+            var stormGo = new GameObject("unity_lightstorm");
+            stormGo.transform.SetParent(engine.transform, false);
+            var ls = stormGo.AddComponent<LightstormShow>();
+            ls.cam = cam;
+            ls.beamMat = dir.beamMat;
+            ls.glowMat = co.glowMat;
+            ls.groundMat = co.groundMat;
+            ls.hazeMat = dir.hazeMat;
+
+
+            var prismGo = new GameObject("unity_prism");
+            prismGo.transform.SetParent(engine.transform, false);
+            var pr = prismGo.AddComponent<PrismShow>();
+            pr.cam = cam;
+            pr.beamMat = dir.beamMat;
+            pr.groundMat = co.groundMat;
+            pr.hazeMat = dir.hazeMat;
+
+            var auroraGo = new GameObject("unity_aurora");
+            auroraGo.transform.SetParent(engine.transform, false);
+            var au = auroraGo.AddComponent<AuroraShow>();
+            au.cam = cam;
+            au.auroraMat = Mat("Trippin/Aurora", "Aurora");
+            au.beamMat = dir.beamMat;
+            au.groundMat = co.groundMat;
+            au.hazeMat = dir.hazeMat;
+
+            var bassGo = new GameObject("unity_basscore");
+            bassGo.transform.SetParent(engine.transform, false);
+            var bc = bassGo.AddComponent<BasscoreShow>();
+            bc.cam = cam;
+            bc.membraneMat = Mat("Trippin/Membrane", "Membrane");
+            bc.beamMat = dir.beamMat;
+            bc.groundMat = co.groundMat;
+            bc.hazeMat = dir.hazeMat;
+
+            var pillarsGo = new GameObject("unity_pillars");
+            pillarsGo.transform.SetParent(engine.transform, false);
+            var pl = pillarsGo.AddComponent<PillarsShow>();
+            pl.cam = cam;
+            pl.beamMat = dir.beamMat;
+            pl.groundMat = co.groundMat;
+            pl.hazeMat = dir.hazeMat;
+
             var orbitGo = new GameObject("unity_orbit_foundry");
             orbitGo.transform.SetParent(engine.transform, false);
             var orbit = orbitGo.AddComponent<OrbitFoundryShow>();
@@ -200,8 +244,8 @@ namespace TrippinStage.EditorTools
             orbit.beamMat = dir.beamMat;
             orbit.pointsMat = Mat("Trippin/Points", "Points");
 
-            mgr.shows = new[] { stage, crystals, flowGo, levGo, sculptGo, colGo, tidalGo, orbitGo };
-            mgr.names = new[] { "unity_stage", "unity_crystals", "unity_flow", "unity_leviathan", "unity_sculpture", "unity_colossus", "unity_tidal_cathedral", "unity_orbit_foundry" };
+            mgr.shows = new[] { stage, crystals, flowGo, levGo, sculptGo, colGo, tidalGo, stormGo, prismGo, auroraGo, bassGo, pillarsGo, orbitGo };
+            mgr.names = new[] { "unity_stage", "unity_crystals", "unity_flow", "unity_leviathan", "unity_sculpture", "unity_colossus", "unity_tidal_cathedral", "unity_lightstorm", "unity_prism", "unity_aurora", "unity_basscore", "unity_pillars", "unity_orbit_foundry" };
 
             // Frames go to Trippin through the shared-memory file it passes
             // (FrameExporter) — no Spout/Syphon, the same on every platform.

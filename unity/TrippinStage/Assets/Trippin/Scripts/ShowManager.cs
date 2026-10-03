@@ -19,9 +19,16 @@ namespace TrippinStage
 
         int _cur = -1;
 
+        /// `-uncapped`: no 60 fps cap, so the frame-time log shows the real
+        /// cost (profiling only — Trippin never passes it).
+        public static bool Uncapped { get; private set; }
+        float _ftSum, _ftLast;
+        int _ftN;
+
         void Start()
         {
-            Application.targetFrameRate = 60;
+            Uncapped = System.Array.IndexOf(System.Environment.GetCommandLineArgs(), "-uncapped") >= 0;
+            Application.targetFrameRate = Uncapped ? -1 : 60;
             QualitySettings.vSyncCount = 0;
             Application.runInBackground = true;
             StageRecorder.TryStart(gameObject, output);
@@ -38,6 +45,7 @@ namespace TrippinStage
         void Update()
         {
             var s = TrippinLink.State;
+            DropDirector.Tick(s, Time.deltaTime);
             string want;
             if (_forced != null) want = _forced;
             else if (TrippinLink.Live) want = s.scene;
@@ -49,6 +57,16 @@ namespace TrippinStage
                 if (_cur >= 0) shows[_cur].SetActive(false);
                 shows[idx].SetActive(true);
                 _cur = idx;
+                _ftSum = 0; _ftN = 0; _ftLast = Time.unscaledTime;
+            }
+
+            // Frame time for whichever show is up (was StageDirector-only).
+            _ftSum += Time.unscaledDeltaTime;
+            _ftN++;
+            if (Time.unscaledTime - _ftLast > 5f && _ftN > 0)
+            {
+                Debug.Log($"[Stage] {1000f * _ftSum / _ftN:F2} ms/frame avg over {_ftN} frames, show {names[_cur]}, link {(TrippinLink.Live ? "live" : "synthetic")}{(Uncapped ? ", uncapped" : "")}");
+                _ftSum = 0; _ftN = 0; _ftLast = Time.unscaledTime;
             }
         }
 
