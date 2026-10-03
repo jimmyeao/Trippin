@@ -7,8 +7,8 @@ Material:
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_Name: Points
-  m_Shader: {fileID: 4800000, guid: 5d0d9aef6312d4b439ddef8b942d0ed6, type: 3}
+  m_Name: OrbitCore
+  m_Shader: {fileID: 4800000, guid: 5bc29e208e63dfc49861155ecb0e4889, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords: []
@@ -25,9 +25,12 @@ Material:
     m_TexEnvs: []
     m_Ints: []
     m_Floats:
-    - _Gain: 0.5
-    - _Size: 0.07
-    - _Spark: 1
-    m_Colors: []
+    - _Amp: 0.1
+    - _Bass: 0
+    - _Heat: 0.5
+    - _Kick: 0
+    - _NoiseT: 0
+    m_Colors:
+    - _Morph: {r: 1, g: 1, b: 1, a: 0}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

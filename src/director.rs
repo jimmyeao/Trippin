@@ -42,6 +42,29 @@ pub struct Director {
     /// starts (every mode except Manual), or set by a "play next" click.
     /// Consumed by the cut; re-picked afterwards.
     pub next: Option<usize>,
+    // --- Drum-fill detection ---------------------------------------------
+    // The bar grid is a skeleton, not a cage: a fill is a burst of onsets
+    // far above the section's baseline density. While one runs the render
+    // loop strobes on its hits (except tunnels — jerky there), and when
+    // it ends the next section lands — a good spot for a sub-bar cut.
+    /// Onset accumulator for the beat currently being measured.
+    beat_onset_acc: f32,
+    beat_onset_n: u32,
+    /// Beat index (`pos.floor()`) the accumulator belongs to.
+    beat_idx: i64,
+    /// Slow EMA of per-beat mean onset — the baseline hit density.
+    onset_base: f32,
+    /// True while a fill is running.
+    in_fill: bool,
+    /// Beat pos the fill started on — the strobe caps at one bar.
+    fill_start: f64,
+    /// Peak density reached during the fill, as a multiple of baseline.
+    fill_peak: f32,
+    /// No new fill may start before this beat pos.
+    fill_cool: f64,
+    /// Read by the render loop: strobe gate while a fill plays. Scene
+    /// type is checked there — the director doesn't know scene names.
+    pub fill_strobe: bool,
 }
 
 impl Director {
@@ -67,6 +90,15 @@ impl Director {
             rng,
             pending_cut: false,
             next: None,
+            beat_onset_acc: 0.0,
+            beat_onset_n: 0,
+            beat_idx: i64::MIN,
+            onset_base: 0.3,
+            in_fill: false,
+            fill_start: 0.0,
+            fill_peak: 0.0,
+            fill_cool: 0.0,
+            fill_strobe: false,
         }
     }
 
@@ -215,6 +247,11 @@ impl Director {
             self.next_scene(usable, s.random_order);
         }
 
+        self.update_fill(f, pos, usable, s, &mut ev);
+        if ev.cut {
+            return ev;
+        }
+
         let bar = ((pos - f.downbeat as f64) / 4.0).floor() as i64;
         // A re-marked downbeat re-anchors the grid — not a new bar.
         if f.downbeat != self.last_downbeat {
@@ -255,5 +292,191 @@ impl Director {
         // Let the breakdown memory drift back up so old lows don't linger.
         self.recent_low = (self.recent_low + 0.1).min(f.energy.max(self.recent_low));
         ev
+    }
+
+    /// Drum fills, evaluated every frame (not just on bar lines): the mean
+    /// onset level per beat is compared to a slow baseline EMA. A beat
+    /// running far hotter starts a fill — the render loop strobes it —
+    /// and when the burst collapses the new section lands: a cut there is
+    /// musical even mid-bar. Big fills can also cut mid-phrase.
+    fn update_fill(
+        &mut self,
+        f: &Features,
+        pos: f64,
+        usable: &[usize],
+        s: &Settings,
+        ev: &mut Events,
+    ) {
+        let beat_idx = pos.floor() as i64;
+        if self.beat_idx == i64::MIN {
+            self.beat_idx = beat_idx;
+        }
+        if beat_idx > self.beat_idx {
+            // The beat closed: judge its density, then reset the window.
+            let mean = self.beat_onset_acc / self.beat_onset_n.max(1) as f32;
+            if self.in_fill {
+                // The burst collapsing means the new section has landed.
+                if mean < self.onset_base * 1.4 {
+                    self.end_fill(f, pos, usable, s, ev);
+                }
+            } else if !f.silent && f.calm < 0.5 {
+                // Baseline only learns from ordinary beats.
+                self.onset_base =
+                    (self.onset_base * 0.92 + mean * 0.08).clamp(0.05, 0.8);
+            }
+            self.beat_idx = beat_idx;
+            self.beat_onset_acc = 0.0;
+            self.beat_onset_n = 0;
+        }
+        self.beat_onset_acc += f.onset;
+        self.beat_onset_n += 1;
+
+        let run = self.beat_onset_acc / self.beat_onset_n.max(1) as f32;
+        if !self.in_fill {
+            // Mid-beat trigger once the running mean is worth trusting.
+            if !f.silent
+                && f.calm < 0.5
+                && pos > self.fill_cool
+                && pos.fract() > 0.35
+                && run > 0.3
+                && run > self.onset_base * 2.2
+            {
+                self.in_fill = true;
+                self.fill_start = pos - pos.fract();
+                self.fill_peak = run / self.onset_base.max(0.05);
+                // Strobes ride the fill in every mode except Manual —
+                // there the operator runs the rig.
+                self.fill_strobe = s.mode != Mode::Manual;
+            }
+        } else {
+            self.fill_peak = self.fill_peak.max(run / self.onset_base.max(0.05));
+            // Hard stops: a full bar of density is the new section, not a
+            // fill; a breakdown or silence kills it instantly.
+            if pos - self.fill_start >= 4.0 || f.calm > 0.6 || f.silent {
+                self.end_fill(f, pos, usable, s, ev);
+            }
+        }
+    }
+
+    fn end_fill(
+        &mut self,
+        f: &Features,
+        pos: f64,
+        usable: &[usize],
+        s: &Settings,
+        ev: &mut Events,
+    ) {
+        self.in_fill = false;
+        self.fill_strobe = false;
+        self.fill_cool = pos + 8.0;
+        if f.calm > 0.6 || f.silent {
+            return;
+        }
+        let bars = if f.calm > 0.5 {
+            s.phrase_bars.max(1) * 2
+        } else {
+            s.phrase_bars.max(1)
+        };
+        // A fill into the phrase boundary always cuts — that IS the
+        // section change. A really big fill can cut mid-phrase too.
+        let due = self.bars_in_scene + 1 >= bars || self.fill_peak > 3.0;
+        if s.mode == Mode::Auto
+            && s.cut_on_drops
+            && due
+            && self.bars_in_scene >= 2
+            && !usable.is_empty()
+            && !ev.cut
+            && !self.pending_cut
+        {
+            self.next_scene(usable, s.random_order);
+            self.pending_cut = false;
+            ev.cut = true;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::audio::Features;
+
+    fn settings(mode: Mode) -> Settings {
+        Settings {
+            mode,
+            cut_on_drops: true,
+            phrase_bars: 4,
+            ..Default::default()
+        }
+    }
+
+    fn features(onset: f32) -> Features {
+        let mut f = Features::default();
+        f.silent = false;
+        f.calm = 0.0;
+        f.onset = onset;
+        f.bpm = 126.0;
+        f.downbeat = 0;
+        f
+    }
+
+    /// Advance `pos` by `beats` at 30 frames a beat, counting cuts.
+    fn run(d: &mut Director, f: &Features, pos: &mut f64, beats: f64, s: &Settings) -> usize {
+        let usable = [0usize, 1, 2, 3];
+        let mut cuts = 0;
+        for _ in 0..(beats * 30.0) as usize {
+            *pos += 1.0 / 30.0;
+            if d.update(f, *pos, 0.016, &usable, s).cut {
+                cuts += 1;
+            }
+        }
+        cuts
+    }
+
+    #[test]
+    fn fill_strobes_then_cuts_off_grid() {
+        let s = settings(Mode::Auto);
+        let mut d = Director::new();
+        let mut pos = 0.0;
+        // A plain groove for three bars — the baseline settles low.
+        let quiet = features(0.08);
+        run(&mut d, &quiet, &mut pos, 12.0, &s);
+        // A fill: a dense burst through one beat. Strobe on mid-beat.
+        let fill = features(0.7);
+        run(&mut d, &fill, &mut pos, 0.7, &s);
+        assert!(d.in_fill, "a dense beat should register as a fill");
+        assert!(d.fill_strobe, "the fill should strobe");
+        // The burst ends — the new section lands. Cut here, mid-bar.
+        let cuts = run(&mut d, &quiet, &mut pos, 1.5, &s);
+        assert!(cuts >= 1, "a strong fill should end in a cut");
+        assert!(!d.fill_strobe, "strobe off once the fill is over");
+    }
+
+    #[test]
+    fn fills_never_fire_in_manual() {
+        let s = settings(Mode::Manual);
+        let mut d = Director::new();
+        let mut pos = 0.0;
+        let quiet = features(0.08);
+        run(&mut d, &quiet, &mut pos, 12.0, &s);
+        let fill = features(0.7);
+        let cuts = run(&mut d, &fill, &mut pos, 2.0, &s)
+            + run(&mut d, &quiet, &mut pos, 2.0, &s);
+        assert_eq!(cuts, 0, "manual mode must not cut");
+        assert!(!d.fill_strobe, "manual mode must not strobe by itself");
+    }
+
+    #[test]
+    fn breakdown_doesnt_fill() {
+        let s = settings(Mode::Auto);
+        let mut d = Director::new();
+        let mut pos = 0.0;
+        let quiet = features(0.08);
+        run(&mut d, &quiet, &mut pos, 8.0, &s);
+        // Melodic hits in a breakdown are not drum fills.
+        let mut calm_fill = features(0.7);
+        calm_fill.calm = 0.8;
+        run(&mut d, &calm_fill, &mut pos, 2.0, &s);
+        assert!(!d.in_fill);
+        assert!(!d.fill_strobe);
     }
 }

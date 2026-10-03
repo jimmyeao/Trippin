@@ -7,8 +7,8 @@ Material:
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_Name: Points
-  m_Shader: {fileID: 4800000, guid: 5d0d9aef6312d4b439ddef8b942d0ed6, type: 3}
+  m_Name: OrbitFloor
+  m_Shader: {fileID: 4800000, guid: eb212c08a3631044494521074a686ed4, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords: []
@@ -25,9 +25,8 @@ Material:
     m_TexEnvs: []
     m_Ints: []
     m_Floats:
-    - _Gain: 0.5
-    - _Size: 0.07
-    - _Spark: 1
+    - _Drift: 0
+    - _Glow: 0.3
     m_Colors: []
   m_BuildTextureStacks: []
   m_AllowLocking: 1

@@ -189,7 +189,6 @@ namespace TrippinStage.EditorTools
             tidal.hazeMat = Mat("Trippin/TidalMist", "TidalMist");
             tidal.beamMat = dir.beamMat;
 
-
             var stormGo = new GameObject("unity_lightstorm");
             stormGo.transform.SetParent(engine.transform, false);
             var ls = stormGo.AddComponent<LightstormShow>();
@@ -234,8 +233,19 @@ namespace TrippinStage.EditorTools
             pl.groundMat = co.groundMat;
             pl.hazeMat = dir.hazeMat;
 
-            mgr.shows = new[] { stage, crystals, flowGo, levGo, sculptGo, colGo, tidalGo, stormGo, prismGo, auroraGo, bassGo, pillarsGo };
-            mgr.names = new[] { "unity_stage", "unity_crystals", "unity_flow", "unity_leviathan", "unity_sculpture", "unity_colossus", "unity_tidal_cathedral", "unity_lightstorm", "unity_prism", "unity_aurora", "unity_basscore", "unity_pillars" };
+            var orbitGo = new GameObject("unity_orbit_foundry");
+            orbitGo.transform.SetParent(engine.transform, false);
+            var orbit = orbitGo.AddComponent<OrbitFoundryShow>();
+            orbit.cam = cam;
+            orbit.coreMat = Mat("Trippin/OrbitCore", "OrbitCore");
+            orbit.ringMat = Mat("Trippin/OrbitRing", "OrbitRing");
+            orbit.floorMat = Mat("Trippin/OrbitFloor", "OrbitFloor");
+            orbit.skyMat = Mat("Trippin/TidalSky", "TidalSky");
+            orbit.beamMat = dir.beamMat;
+            orbit.pointsMat = Mat("Trippin/Points", "Points");
+
+            mgr.shows = new[] { stage, crystals, flowGo, levGo, sculptGo, colGo, tidalGo, stormGo, prismGo, auroraGo, bassGo, pillarsGo, orbitGo };
+            mgr.names = new[] { "unity_stage", "unity_crystals", "unity_flow", "unity_leviathan", "unity_sculpture", "unity_colossus", "unity_tidal_cathedral", "unity_lightstorm", "unity_prism", "unity_aurora", "unity_basscore", "unity_pillars", "unity_orbit_foundry" };
 
             // Frames go to Trippin through the shared-memory file it passes
             // (FrameExporter) — no Spout/Syphon, the same on every platform.

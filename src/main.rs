@@ -1232,8 +1232,13 @@ fn render_loop(
         // analyser hears (`onset` jumps on a hit and decays over ~0.12 s, so
         // each flash lasts ~70 ms). It follows the actual fill — rolls that
         // start mid-bar or cross the bar line — not a grid, and no easing
-        // (blackout's fade is far too slow for this).
-        let strobe_gate = if STROBE.load(Ordering::Relaxed) && f.onset < 0.45 {
+        // (blackout's fade is far too slow for this). `dir.fill_strobe` is
+        // the auto-pilot strobing a detected fill — suppressed on
+        // tunnel/flight scenes, where it reads as jerky (AGENTS.md).
+        let fill_strobe = dir.fill_strobe
+            && !crate::ai::scene_meta(r.scene_name(dir.scene)).flight;
+        let strobe_live = STROBE.load(Ordering::Relaxed) || fill_strobe;
+        let strobe_gate = if strobe_live && f.onset < 0.45 {
             0.0
         } else {
             1.0
@@ -1407,6 +1412,7 @@ fn render_loop(
                 },
                 clip: dancer.loaded_name(),
                 blackout,
+                strobe: strobe_live,
                 // Published by the event thread — it owns the window state.
                 fullscreen: FULLSCREEN.load(Ordering::Relaxed),
                 fx: if s.fx_auto { fx_current } else { s.fx },

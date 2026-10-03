@@ -118,6 +118,7 @@ namespace TrippinStage
             sky.transform.SetParent(transform, false);
             sky.transform.localScale = Vector3.one * 520f;
             _sky = new Material(skyMat);
+            _sky.SetFloat("_Aurora", 1f);
             sky.GetComponent<Renderer>().sharedMaterial = _sky;
 
             var glow = GameObject.CreatePrimitive(PrimitiveType.Quad);
