@@ -14,7 +14,7 @@ namespace TrippinStage
     public sealed class LatticeShow : KitShow
     {
         const int N = 5, Nodes = N * N * N;
-        const float Pitch = 4.4f;
+        const float Pitch = 3.8f;
         BeamPool _beams;
         GlowPool _glows;
         readonly Vector3[] _base = new Vector3[Nodes], _pos = new Vector3[Nodes];
@@ -71,7 +71,7 @@ namespace TrippinStage
                 float lvl = rx.Spec(_shell[i]);
                 _glows.Set(i, _pos[i], 0.9f + 1.4f * lvl + 0.5f * rx.kick, 0.1f + _shell[i] * 0.6f, gain * (0.45f + 0.9f * lvl), cam.transform.rotation);
             }
-            rig.Orbit(cam, rx, 30f, 12f, 11f, dt);
+            rig.Orbit(cam, rx, 36f, 12f, 11f, dt);
         }
 
         int Edge(int n, int a, int b, float gain, float la)

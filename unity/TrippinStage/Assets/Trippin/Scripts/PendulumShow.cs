@@ -42,7 +42,7 @@ namespace TrippinStage
                 _rods.Set(i, pivot, bob, Kit.Hue(h), gain * (0.4f + 0.5f * band));
                 _bobs.Set(i, bob, 1.5f + 1.2f * band, h, gain * (0.7f + 1.1f * band), cam.transform.rotation);
             }
-            rig.Orbit(cam, rx, 30f, 11f, 10f, dt, 0.9f);
+            rig.Orbit(cam, rx, 36f, 11f, 12f, dt, 0.9f);
         }
     }
 }

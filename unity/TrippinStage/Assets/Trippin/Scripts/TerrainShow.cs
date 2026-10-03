@@ -42,10 +42,10 @@ namespace TrippinStage
             _m.SetFloat("_Hue", 0.5f + 0.1f * Mathf.Sin(rx.phrase * 0.5f));
             _m.SetVector("_P0", new Vector4(14f + 5f * Mathf.Sin(rx.phrase), 22f, 0f, 0f));
             Quaternion face = Quaternion.identity;
-            _sun.Set(0, new Vector3(0f, 16f, 205f), 120f * (1f + 0.2f * rx.bassFast), 0.1f, gain * 0.9f, face);
-            _sun.Set(1, new Vector3(0f, 16f, 204f), 70f * (1f + 0.25f * rx.bassFast), 0.02f, gain * 1.2f, face);
+            _sun.Set(0, new Vector3(0f, 26f, 205f), 90f * (1f + 0.2f * rx.bassFast), 0.1f, gain * 0.9f, face);
+            _sun.Set(1, new Vector3(0f, 26f, 204f), 55f * (1f + 0.25f * rx.bassFast), 0.02f, gain * 1.2f, face);
             float sway = Mathf.Sin(rx.phrase);
-            rig.Move(cam, new Vector3(6f * sway, 4.5f + 1.2f * Mathf.Sin(rx.beat / 32f * Mathf.PI * 2f), 0f), new Vector3(3f * sway, 7f, 60f), dt, 1.2f);
+            rig.Move(cam, new Vector3(6f * sway, 4.5f + 1.2f * Mathf.Sin(rx.beat / 32f * Mathf.PI * 2f), 0f), new Vector3(3f * sway, 11f, 60f), dt, 1.2f);
         }
     }
 }

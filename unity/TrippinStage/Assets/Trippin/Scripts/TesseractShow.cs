@@ -72,7 +72,7 @@ namespace TrippinStage
                             Kit.Hue(0.55f + 0.3f * w + 0.15f * layer), gain * (0.35f + 0.9f * near) * (layer == 0 ? 1f : 0.8f));
                     }
             }
-            rig.Orbit(cam, rx, 28f, 8f, 10f, dt);
+            rig.Orbit(cam, rx, 34f, 8f, 10f, dt);
         }
     }
 }

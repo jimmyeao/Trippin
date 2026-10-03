@@ -32,7 +32,7 @@ namespace TrippinStage
             float thin = 1f - 0.5f * rx.tension;
             for (int i = 0; i < N; i++)
             {
-                float x = (Kit.H(i, 1) - 0.5f) * 70f, z = (Kit.H(i, 2) - 0.5f) * 50f + 6f;
+                float x = (Kit.H(i, 1) - 0.5f) * 56f, z = (Kit.H(i, 2) - 0.5f) * 44f + 12f;
                 float speed = 0.6f + 0.8f * Kit.H(i, 3);
                 float fall = rx.clk * 0.06f * speed + Kit.H(i, 4);
                 fall -= Mathf.Floor(fall);
@@ -43,7 +43,7 @@ namespace TrippinStage
                 float edge = Mathf.Clamp01(y / 4f) * Mathf.Clamp01((Top - y) / 6f);
                 _beams.Set(i, p0, p1, Kit.Hue(0.3f + x * 0.008f), gain * (0.4f + 0.7f * Kit.H(i, 6)) * edge * thin);
             }
-            rig.Orbit(cam, rx, 26f, 3.5f, 9f, dt, 0.5f, 0.1f);
+            rig.Orbit(cam, rx, 32f, 3.5f, 9f, dt, 0.5f, 0.1f);
         }
     }
 }

@@ -54,7 +54,7 @@ namespace TrippinStage
                 _lights.Set(i, from, to, Kit.Hue(0.5f + i * 0.08f), gain * (0.5f + 0.8f * rx.midFast));
             }
             float sway = Mathf.Sin(rx.phrase * 0.5f);
-            rig.Move(cam, new Vector3(5f * sway, 6f, 0f), new Vector3(2f * sway, 6f, 80f), dt, 1f);
+            rig.Move(cam, new Vector3(5f * sway, 6f, 0f), new Vector3(2f * sway, 14f, 80f), dt, 1f);
         }
     }
 }

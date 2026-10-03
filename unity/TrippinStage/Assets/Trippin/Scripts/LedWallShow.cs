@@ -17,7 +17,7 @@ namespace TrippinStage
     public sealed class LedWallShow : KitShow
     {
         const int W = 36, H = 20, Patterns = 4;
-        const float Pitch = 1.0f, Z = 24f;
+        const float Pitch = 1.0f, Z = 10f;
         GlowPool _cells;
         int _cur = -1, _prev;
         float _start;
@@ -75,7 +75,7 @@ namespace TrippinStage
                     float lit = 0.06f + v;                           // a faint grid even where dark
                     _cells.Set(j * W + i, pos, 0.55f + 0.65f * v, 0.1f * _cur + i * 0.012f + j * 0.008f, gain * lit * 0.9f, face);
                 }
-            rig.Orbit(cam, rx, 30f, 11f, 12f, dt, 0.4f);
+            rig.Orbit(cam, rx, 20f, 11f, 12f, dt, 0.4f);
         }
     }
 }
