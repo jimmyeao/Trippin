@@ -131,6 +131,7 @@ cargo run --release -- --check-shaders    # naga-validates every shader, no GPU/
 cargo run --release -- --snap laser_show,stage_rig --snap-size 1920x1080   # headless PNGs to snaps/ + ms/frame
 cargo run --release -- --snap all --snap-bench 120   # perf table in snaps/bench.tsv
 cargo run --release -- --snap x --snap-calm 1        # preview breakdown (no drums) mode
+cargo run --release -- --snap aurora --snap-dancer comic --snap-clip stock_disco   # a dancer look over a scene (name or index; default clip = first)
 cargo run --release -- --nowplaying       # prints what each now-playing source sees
 cargo run --release -- --list-devices     # capture devices (names for --device / the Audio in picker)
 cargo run --release -- --probe-audio [name]   # capture ~6 s, print band peaks + BPM; exits nonzero on silence
@@ -140,6 +141,19 @@ cargo run --release -- --ndi-monitor [name]
 cargo run --release -- --list-midi          # MIDI input ports (pad/key controllers)
 ```
 
+- **Dancer looks** are `dancer::STYLES` (shadow, neon, strobe, comic, wire); the
+  index is stored in settings, timeline cues, AI plans and the iOS remote, so
+  only ever append. `--snap-dancer <look>` renders one over a scene, which is how
+  to check a new look (dancer.wgsl is full-screen, so keep per-pixel mask taps
+  behind the `outside_sprite` early-out).
+- In the Linux cloud container the app can't be built as-is: `src/midi.rs`
+  fails on midir's ALSA types (`?` needs `Sync`). Patch it locally with
+  `.map_err(|e| anyhow::anyhow!(e.to_string()))?` after `input.connect(...)` to
+  build, run `--check-shaders` and render with `--snap` on llvmpipe (install
+  `libasound2-dev pkg-config libudev-dev mesa-vulkan-drivers libvulkan1`; about
+  4 minutes a 640x360 frame for the comic look), and **don't commit the patch**.
+  `overlay::tests::overlay_images_render` also fails there if `target/` doesn't
+  exist (it writes PNGs into it).
 - If `trippin.exe` is running, it locks `target/release`. Build into another
   directory: `--target-dir target/verify`.
 - `--snap` drives scenes with a synthetic 126 BPM groove at 60 fps, and time

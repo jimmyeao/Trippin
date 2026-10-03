@@ -9,7 +9,9 @@
 //! Flags: `--snap a,b,c` (or `all`), `--snap-size WxH` (default 1280x720),
 //! `--snap-at 2,6` (seconds, default 6), `--snap-out dir` (default
 //! `snaps/`), `--snap-bench N` (frames timed, default 60; 0 = skip),
-//! `--gpu low`.
+//! `--gpu low`, `--snap-dancer <style>` (a dancer look by name or index,
+//! drawn over each scene with the real dancer shader) with `--snap-clip
+//! <name>` to pick the routine (default: the first clip).
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -17,6 +19,7 @@ use std::time::Instant;
 use anyhow::{Context, Result, anyhow};
 
 use crate::audio::SPECTRUM_BINS;
+use crate::dancer::{self, DancerUniforms, SlotUniforms};
 use crate::gfx;
 use crate::palettes;
 use crate::render::{self, FrameRes, Renderer, SCENE_FORMAT, Uniforms};
@@ -234,6 +237,137 @@ pub fn run(args: &[String]) -> Result<()> {
     let common = std::fs::read_to_string(dir.join("common.wgsl"))?;
     let present = render::compile_pipeline(&device, &common, &dir.join("present.wgsl"), &pl, OUT, None)
         .map_err(|e| anyhow!("present: {e}"))?;
+
+    // `--snap-dancer <style>`: draw a dancer clip over every scene with the
+    // real dancer shader (same mask texture array + bind group as the app).
+    struct DancerSnap {
+        pipeline: wgpu::RenderPipeline,
+        bind_group: wgpu::BindGroup,
+        buf: wgpu::Buffer,
+        frames: f32,
+        duration: f32,
+        aspect: f32,
+        style: f32,
+    }
+    let dancer_snap: Option<DancerSnap> = match arg(args, "--snap-dancer") {
+        None => None,
+        Some(want) => {
+            let style = want
+                .parse::<usize>()
+                .ok()
+                .or_else(|| dancer::STYLES.iter().position(|n| *n == want))
+                .ok_or_else(|| anyhow!("unknown dancer style {want} (try {:?})", dancer::STYLES))?;
+            let clips_dir = dancer::find_dancer_dir().ok_or_else(|| anyhow!("no dancers/ folder"))?;
+            let entries = dancer::list_clips(&clips_dir);
+            let entry = match arg(args, "--snap-clip") {
+                Some(n) => entries.iter().find(|e| e.name == n),
+                None => entries.first(),
+            }
+            .ok_or_else(|| anyhow!("no such dancer clip"))?;
+            let clip = dancer::load_clip(&entry.path)?;
+            println!("dancer: {} ({} frames) style {}", clip.name, clip.frames.len(), dancer::STYLES[style]);
+            let size = wgpu::Extent3d { width: clip.width, height: clip.height, depth_or_array_layers: 1 };
+            let tex = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("snap dancer masks"),
+                size: wgpu::Extent3d { depth_or_array_layers: clip.frames.len() as u32, ..size },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            for (i, frame) in clip.frames.iter().enumerate() {
+                queue.write_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &tex,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d { x: 0, y: 0, z: i as u32 },
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    frame,
+                    wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(clip.width),
+                        rows_per_image: Some(clip.height),
+                    },
+                    size,
+                );
+            }
+            let view = tex.create_view(&wgpu::TextureViewDescriptor {
+                dimension: Some(wgpu::TextureViewDimension::D2Array),
+                ..Default::default()
+            });
+            let tex_entry = |binding: u32| wgpu::BindGroupLayoutEntry {
+                binding,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2Array,
+                    multisampled: false,
+                },
+                count: None,
+            };
+            let dl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("snap dancer"),
+                entries: &[
+                    tex_entry(0),
+                    tex_entry(1),
+                    tex_entry(2),
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+            let dpl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("snap dancer"),
+                bind_group_layouts: &[Some(&layout), Some(&dl)],
+                immediate_size: 0,
+            });
+            let pipeline = render::compile_pipeline(
+                &device,
+                &common,
+                &dir.join("dancer.wgsl"),
+                &dpl,
+                SCENE_FORMAT,
+                Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+            )
+            .map_err(|e| anyhow!("dancer: {e}"))?;
+            let buf = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("snap dancer uniforms"),
+                size: std::mem::size_of::<DancerUniforms>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("snap dancer"),
+                layout: &dl,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
+                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&view) },
+                    wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&view) },
+                    wgpu::BindGroupEntry { binding: 3, resource: buf.as_entire_binding() },
+                ],
+            });
+            Some(DancerSnap {
+                pipeline,
+                bind_group,
+                buf,
+                frames: clip.frames.len() as f32,
+                duration: clip.duration.max(0.1),
+                aspect: clip.width as f32 / clip.height as f32,
+                style: style as f32,
+            })
+        }
+    };
+
     let mut scenes: Vec<PathBuf> = std::fs::read_dir(dir.join("scenes"))?
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| p.extension().is_some_and(|e| e == "wgsl"))
@@ -307,6 +441,39 @@ pub fn run(args: &[String]) -> Result<()> {
                 });
                 pass.set_pipeline(&pipe);
                 pass.set_bind_group(0, &bgs[*cur], &[]);
+                pass.draw(0..3, 0..1);
+            }
+            if let Some(ds) = &dancer_snap {
+                let frame_f = (t / ds.duration).rem_euclid(1.0) * ds.frames;
+                let mut slots = [SlotUniforms::default(); dancer::SLOTS];
+                slots[0] = SlotUniforms { frame: frame_f, frames: ds.frames, aspect: ds.aspect, _pad: 0.0 };
+                let du = DancerUniforms {
+                    slots,
+                    opacity: 1.0,
+                    style: ds.style,
+                    count: 1.0,
+                    scale: 0.8,
+                    trail: 0.0,
+                    canon_fade: 0.0,
+                    _pad2: [0.0; 2],
+                };
+                queue.write_buffer(&ds.buf, 0, bytemuck::bytes_of(&du));
+                let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("dancer"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    ..Default::default()
+                });
+                pass.set_pipeline(&ds.pipeline);
+                pass.set_bind_group(0, &bgs[*cur], &[]);
+                pass.set_bind_group(1, &ds.bind_group, &[]);
                 pass.draw(0..3, 0..1);
             }
             if bloom_amt > 0.0 {

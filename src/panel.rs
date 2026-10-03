@@ -2771,11 +2771,16 @@ fn dancer_fx_tab(
             ui.add_space(4.0);
             ui.checkbox(&mut s.dancer_enabled, "Dancer layer on");
             ctl_row(ui, "Look", |ui| {
-                let mut opts: Vec<(Option<usize>, &str)> = vec![(None, "auto")];
-                for (i, name) in STYLES.iter().enumerate() {
-                    opts.push((Some(i), *name));
-                }
-                segmented(ui, &mut s.dancer_style, &opts);
+                // A dropdown: six segmented buttons overflow the card.
+                egui::ComboBox::from_id_salt("dancer_look")
+                    .width(110.0)
+                    .selected_text(s.dancer_style.map(|i| STYLES[i.min(STYLES.len() - 1)]).unwrap_or("auto"))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut s.dancer_style, None, "auto");
+                        for (i, name) in STYLES.iter().enumerate() {
+                            ui.selectable_value(&mut s.dancer_style, Some(i), *name);
+                        }
+                    });
             });
             ctl_row(ui, "Canon", |ui| {
                 segmented(
