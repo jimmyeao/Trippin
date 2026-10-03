@@ -30,6 +30,9 @@ targets:
       path: Sources/Info.plist
       properties:
         CFBundleDisplayName: Trippin Remote
+        # Plain ws:// only, no custom crypto: skips the export-compliance
+        # question on every TestFlight / App Store upload.
+        ITSAppUsesNonExemptEncryption: false
         UILaunchScreen:
           UIColorName: LaunchBackground
         UIRequiresFullScreen: false
