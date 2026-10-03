@@ -50,6 +50,12 @@ Shader "Trippin/Points"
                 o.q = q;
                 float speed = pd.w;
                 o.col = TPalette(h * 0.9 + speed * 0.02 + pd.y * 0.015) * (0.35 + speed * 0.06 + 1.5 * spark) * _Gain;
+                // Distance falloff so the far side of the cloud sinks back —
+                // without it every particle is the same brightness and the
+                // shape reads flat. Also fade the few cm nearest the lens so
+                // a mote crossing the camera plane doesn't pop as a blob.
+                float pdist = length(pd.xyz - _WorldSpaceCameraPos);
+                o.col *= exp(-pdist * 0.014) * smoothstep(0.15, 1.2, pdist);
                 return o;
             }
 

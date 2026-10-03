@@ -124,6 +124,8 @@ namespace TrippinStage.EditorTools
             cs.chromeMat = Mat("Trippin/Chrome", "Chrome");
             cs.chromeMat.enableInstancing = true;
             cs.sunMat = dir.sunMat;
+            cs.nebulaMat = Mat("Trippin/Nebula", "Nebula");
+            cs.pointsMat = Mat("Trippin/Points", "Points");
 
             var flowGo = new GameObject("unity_flow");
             flowGo.transform.SetParent(engine.transform, false);
@@ -132,6 +134,8 @@ namespace TrippinStage.EditorTools
             fs.flow = AssetDatabase.LoadAssetAtPath<ComputeShader>($"{Root}/Shaders/Flow.compute");
             if (fs.flow == null) throw new System.Exception("Flow.compute not found");
             fs.pointsMat = Mat("Trippin/Points", "Points");
+            fs.nebulaMat = Mat("Trippin/Nebula", "Nebula");
+            fs.glowMat = Mat("Trippin/Backglow", "Backglow");
 
             var levGo = new GameObject("unity_leviathan");
             levGo.transform.SetParent(engine.transform, false);
@@ -148,6 +152,11 @@ namespace TrippinStage.EditorTools
             var sc = sculptGo.AddComponent<SculptureShow>();
             sc.cam = cam;
             sc.sculptMat = Mat("Trippin/Sculpture", "Sculpture");
+            sc.skyMat = Mat("Trippin/Sky", "Sky");
+            sc.groundMat = Mat("Trippin/Ground", "Ground");
+            sc.hazeMat = Mat("Trippin/Haze", "Haze");
+            sc.glowMat = Mat("Trippin/Backglow", "Backglow");
+            sc.beamMat = dir.beamMat;
 
             var colGo = new GameObject("unity_colossus");
             colGo.transform.SetParent(engine.transform, false);
@@ -164,8 +173,24 @@ namespace TrippinStage.EditorTools
             co.beamMat = dir.beamMat;
             co.glowMat = Mat("Trippin/Backglow", "Backglow");
 
-            mgr.shows = new[] { stage, crystals, flowGo, levGo, sculptGo, colGo };
-            mgr.names = new[] { "unity_stage", "unity_crystals", "unity_flow", "unity_leviathan", "unity_sculpture", "unity_colossus" };
+            var tidalGo = new GameObject("unity_tidal_cathedral");
+            tidalGo.transform.SetParent(engine.transform, false);
+            var tidal = tidalGo.AddComponent<TidalCathedralShow>();
+            tidal.cam = cam;
+            tidal.sailMat = Mat("Trippin/TidalSail", "TidalSail");
+            tidal.seaMat = Mat("Trippin/TidalSea", "TidalSea");
+            tidal.skyMat = Mat("Trippin/TidalSky", "TidalSky");
+            tidal.glowMat = sc.glowMat;
+            tidal.coreMat = Mat("Trippin/TidalCore", "TidalCore");
+            var rose = AssetDatabase.LoadAssetAtPath<Texture2D>($"{Root}/Textures/TidalRose.png");
+            if (rose == null) throw new System.Exception("TidalRose.png not found");
+            tidal.coreMat.SetTexture("_RoseTex", rose);
+            tidal.frameMat = Mat("Trippin/TidalFrame", "TidalFrame");
+            tidal.hazeMat = Mat("Trippin/TidalMist", "TidalMist");
+            tidal.beamMat = dir.beamMat;
+
+            mgr.shows = new[] { stage, crystals, flowGo, levGo, sculptGo, colGo, tidalGo };
+            mgr.names = new[] { "unity_stage", "unity_crystals", "unity_flow", "unity_leviathan", "unity_sculpture", "unity_colossus", "unity_tidal_cathedral" };
 
             // Frames go to Trippin through the shared-memory file it passes
             // (FrameExporter) — no Spout/Syphon, the same on every platform.

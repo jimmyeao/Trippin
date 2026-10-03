@@ -52,9 +52,14 @@ Shader "Trippin/Chrome"
                          * smoothstep(-0.8, -0.3, r.y) * smoothstep(0.1, -0.2, r.y);
                 c += TPalette(az + _TFlow * 0.01) * s1 * (3.0 + 3.0 * _TLvl.y + 5.0 * _THits.w);
                 c += TPalette(az + 0.5 - _TFlow * 0.01) * s2 * (2.0 + 2.0 * _TLvl.z + 4.0 * _THits.z);
+                // The tunnel light far ahead, so the facets catch it.
+                c += TPalette(0.42) * pow(saturate(r.z), 6.0) * (1.6 + 2.5 * _TEnergy);
                 // Hot key light overhead, and a palette floor bounce.
                 c += float3(1.0, 0.97, 0.92) * pow(saturate(r.y), 8.0) * 5.0;
                 c += TPalette(0.15) * pow(saturate(-r.y), 2.0) * 0.6;
+                // A few stars reflected overhead.
+                float2 sc = floor(float2(az * 90.0, r.y * 110.0));
+                c += step(0.9965, THash(sc)) * saturate(r.y - 0.1) * 0.4;
                 return c;
             }
 
