@@ -746,7 +746,7 @@ impl Editor {
                                     }
                                 }
                                 t::section_label(ui, "palettes");
-                                for name in crate::palettes::names()
+                                for name in crate::palettes::all_names()
                                     .into_iter()
                                     .filter(|n| show(n))
                                 {

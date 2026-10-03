@@ -1243,7 +1243,7 @@ fn user_prompt(
             "name": r,
             "pace": pace_label(energies.get(i).copied().unwrap_or(0.5)),
         })).collect::<Vec<_>>(),
-        "palettes": crate::palettes::names().collect::<Vec<_>>(),
+        "palettes": crate::palettes::all_names().collect::<Vec<_>>(),
         "note": "flow/vocals are one char per bar: energy . - + * # and v for vocals. \
                  blocks are the ~4-bar phrases you plan against — every block needs an \
                  entry; a block's vocal is the share of its bars that are sung (0-1).",
@@ -2137,7 +2137,7 @@ fn expand_plan(
 
             // --- palette: latches like scene — emit only on change
             if let Some(n) = it["palette"].as_str() {
-                match crate::palettes::names().find(|p| p.eq_ignore_ascii_case(n)) {
+                match crate::palettes::all_names().find(|p| p.eq_ignore_ascii_case(n)) {
                     Some(p) if p != pal => {
                         pal = p.to_string();
                         cues.push(Cue {
@@ -2442,7 +2442,7 @@ fn raw_to_cue(item: &Value, clips: &[Clip], scenes: &[String], routines: &[Strin
         ),
         "fx_auto" | "auto_fx" => CueKind::FxAuto(on()),
         "palette" | "palette_change" => CueKind::Palette(
-            crate::palettes::names()
+            crate::palettes::all_names()
                 .find(|p| {
                     p.eq_ignore_ascii_case(
                         &get("name")

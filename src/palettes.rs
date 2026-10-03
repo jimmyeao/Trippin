@@ -5,8 +5,16 @@
 //! A palette is a list of `(position, [r,g,b])` stops, position in 0..1,
 //! interpolated linearly in sRGB. The shader ping-pong mirrors the index,
 //! so non-cyclic palettes don't need their first/last stops to match.
+//!
+//! `AUTO` is the pseudo-palette: the render loop feeds it through [`Auto`],
+//! which maps the music's mood to one of the named gradients.
+
+use crate::audio::Features;
 
 pub const LUT_SIZE: usize = 256;
+
+/// The "pick for me" palette — a `Settings.palette` value, not a gradient.
+pub const AUTO: &str = "auto";
 
 pub struct Palette {
     pub name: &'static str,
@@ -175,8 +183,106 @@ pub fn names() -> impl Iterator<Item = &'static str> {
     PALETTES.iter().map(|p| p.name)
 }
 
+/// Every selectable palette value — `AUTO` first, then the named gradients.
+/// For pickers and name validation; the render loop resolves `AUTO` itself.
+pub fn all_names() -> impl Iterator<Item = &'static str> {
+    std::iter::once(AUTO).chain(names())
+}
+
+/// `AUTO` or a named gradient.
+pub fn is_valid(name: &str) -> bool {
+    name == AUTO || names().any(|n| n == name)
+}
+
+/// Mood → palette lists for `AUTO`. Curated to stay show-safe — the niche
+/// looks (smoke, halloween, pastel, forest) are manual picks only.
+const MOODS: [&[&str]; 4] = [
+    // calm — drums out → cool and dark
+    &["ocean", "ice", "breeze", "rift"],
+    // steady groove → warm and broad
+    &["rainbow", "sunset", "coral", "gold"],
+    // driving or building → electric
+    &["cyber", "magenta", "party", "sunset"],
+    // drop / peak energy → hot
+    &["fire", "lava", "party", "autumn"],
+];
+
+/// The mood bucket for the current features: 0 breakdown, 1 groove,
+/// 2 driving, 3 peak. Ordered — calm wins over raw energy.
+fn bucket(f: &Features) -> usize {
+    if f.calm > 0.5 {
+        return 0;
+    }
+    if f.energy > 0.72 {
+        return 3;
+    }
+    if f.build > 0.2 || f.energy > 0.45 {
+        return 2;
+    }
+    1
+}
+
+/// `pick` state for `AUTO`: the live palette and the hysteresis that stops
+/// it flickering between moods — a LUT swap is a hard colour cut, so a new
+/// mood must hold for ~2 beats and each pick lasts at least 16 beats.
+pub struct Auto {
+    name: &'static str,
+    bucket: usize,
+    /// Rotation cursor per bucket — consecutive visits cycle its list.
+    idx: [usize; 4],
+    /// Beat clock when the live pick took effect.
+    since: f64,
+    /// Bucket the music has moved to, and the beat it appeared on.
+    cand: Option<(usize, f64)>,
+}
+
+impl Default for Auto {
+    fn default() -> Self {
+        Self {
+            name: "rainbow",
+            bucket: usize::MAX,
+            idx: [0; 4],
+            since: f64::MIN,
+            cand: None,
+        }
+    }
+}
+
+impl Auto {
+    /// The palette matching this frame's mood. `beat` is the running beat
+    /// clock (`f.beat_position(now)`) used for the hold/dwell windows.
+    pub fn pick(&mut self, f: &Features, beat: f64) -> &'static str {
+        const HOLD: f64 = 2.0;
+        const DWELL: f64 = 16.0;
+        let b = bucket(f);
+        if b == self.bucket {
+            self.cand = None;
+        } else if let Some((_, since)) = self.cand.filter(|(cb, _)| *cb == b) {
+            if beat - since >= HOLD && beat - self.since >= DWELL {
+                self.bucket = b;
+                self.idx[b] += 1;
+                self.name = MOODS[b][self.idx[b] % MOODS[b].len()];
+                self.since = beat;
+                self.cand = None;
+            }
+        } else {
+            self.cand = Some((b, beat));
+        }
+        self.name
+    }
+}
+
 /// 256×4 RGBA bytes for the named palette (falls back to `rainbow`).
 pub fn lut(name: &str) -> [u8; LUT_SIZE * 4] {
+    if name == AUTO {
+        // Display LUT for the `auto` chip — cool/warm/hot thirds so the
+        // swatch shows the moods it picks between.
+        let mut out = lut("ocean");
+        let t = LUT_SIZE / 3;
+        out[t * 4..t * 8].copy_from_slice(&lut("sunset")[t * 4..t * 8]);
+        out[t * 8..].copy_from_slice(&lut("fire")[t * 8..]);
+        return out;
+    }
     let pal = PALETTES
         .iter()
         .find(|p| p.name == name)
@@ -220,5 +326,58 @@ mod tests {
     #[test]
     fn unknown_name_falls_back_to_rainbow() {
         assert_eq!(lut("nope"), lut("rainbow"));
+    }
+
+    fn feats(calm: f32, energy: f32, build: f32) -> Features {
+        Features {
+            calm,
+            energy,
+            build,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn auto_is_a_valid_name_but_not_a_gradient() {
+        assert!(is_valid(AUTO));
+        assert!(all_names().any(|n| n == AUTO));
+        assert!(!names().any(|n| n == AUTO));
+    }
+
+    #[test]
+    fn auto_picks_cool_palettes_in_breakdowns() {
+        let mut a = Auto::default();
+        let f = feats(1.0, 0.4, 0.0);
+        a.pick(&f, 0.0); // mood appears
+        let p = a.pick(&f, 2.0); // held 2 beats → switch
+        assert!(MOODS[0].contains(&p), "breakdown picked {p}");
+    }
+
+    #[test]
+    fn auto_ignores_flickering_moods() {
+        let mut a = Auto::default();
+        let g = feats(0.0, 0.0, 0.0);
+        a.pick(&g, 0.0);
+        let settled = a.pick(&g, 2.0); // groove pick
+        // A one-beat energy spike is not a section change.
+        a.pick(&feats(0.0, 0.9, 0.0), 3.0);
+        a.pick(&g, 3.5);
+        a.pick(&feats(0.0, 0.9, 0.0), 4.0);
+        let p = a.pick(&feats(0.0, 0.9, 0.0), 5.0); // held only 1 beat
+        assert_eq!(p, settled);
+    }
+
+    #[test]
+    fn auto_respects_the_dwell() {
+        let mut a = Auto::default();
+        let g = feats(0.0, 0.0, 0.0);
+        a.pick(&g, 0.0);
+        a.pick(&g, 2.0); // groove pick lands at beat 2
+        let peak = feats(0.0, 0.9, 0.0);
+        a.pick(&peak, 3.0);
+        // Held long enough but only 4 beats since the last switch.
+        assert!(MOODS[1].contains(&a.pick(&peak, 6.0)));
+        // Past the 16-beat dwell the peak pick finally lands.
+        assert!(MOODS[3].contains(&a.pick(&peak, 20.0)));
     }
 }

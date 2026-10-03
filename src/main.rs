@@ -361,7 +361,7 @@ fn fire_cue(
         }
         CueKind::FxAuto(b) => s.fx_auto = *b,
         CueKind::Palette(n) => {
-            if crate::palettes::names().any(|p| p == n) {
+            if crate::palettes::is_valid(n) {
                 s.palette = n.clone();
             }
         }
@@ -530,6 +530,8 @@ fn render_loop(
     let mut clock_lvl = [0.0f32; 4];
     let mut blackout = false;
     let mut master = 1.0f32;
+    // `palette = "auto"` mood matcher (palettes::Auto).
+    let mut auto_pal = palettes::Auto::default();
     // The post effect showing now — the auto-pilot's pick when `fx_auto` is on.
     let mut fx_current = lock(&shared.settings).fx;
 
@@ -868,8 +870,11 @@ fn render_loop(
                 }
             }
         }
-        // Global palette — a no-op while the name is unchanged.
-        r.set_palette(&s.palette);
+        // Global palette — a no-op while the name is unchanged. `auto` is
+        // resolved against the live features below (they don't exist yet).
+        if s.palette != palettes::AUTO {
+            r.set_palette(&s.palette);
+        }
         // NDI output — a conf change rebuilds it; otherwise a cheap no-op.
         r.transparent = s.out_transparent;
         // Clip recorder: runs while the buffer is armed or a set is rolling.
@@ -1167,6 +1172,13 @@ fn render_loop(
         // Positive latency shows the beat earlier (compensating capture delay).
         let pos = f.beat_position(now) + s.latency_ms as f64 / 1000.0 * f.bpm as f64 / 60.0;
         let ev = dir.update(&f, pos, dt, &usable, &s);
+        // `palette = "auto"`: pick the gradient to match the music's mood.
+        let pal = if s.palette == palettes::AUTO {
+            auto_pal.pick(&f, pos)
+        } else {
+            s.palette.as_str()
+        };
+        r.set_palette(pal);
 
         // Dancer follows the settings; auto-pilot changes it on cuts and phrases.
         dancer.enabled = s.dancer_enabled;
@@ -1300,7 +1312,7 @@ fn render_loop(
                 link_out = link::Link::new(s.link_port).ok();
             }
             if let Some(l) = link_out.as_mut() {
-                l.send(&u, r.scene_name(dir.scene), &s.palette, f.calm < 0.5);
+                l.send(&u, r.scene_name(dir.scene), pal, f.calm < 0.5);
             }
             if engine.is_none() {
                 match engine::Engine::new(s.link_port) {
@@ -1413,6 +1425,7 @@ fn render_loop(
                 clip: dancer.loaded_name(),
                 blackout,
                 strobe: strobe_live,
+                palette_now: pal.to_string(),
                 // Published by the event thread — it owns the window state.
                 fullscreen: FULLSCREEN.load(Ordering::Relaxed),
                 fx: if s.fx_auto { fx_current } else { s.fx },
@@ -1807,7 +1820,7 @@ impl App {
                     match k {
                         // Unknown palettes fall back inside palettes::lut;
                         // validate anyway so a typo can't save a dead name.
-                        SetKey::Palette(p) if palettes::names().any(|n| n == p) => {
+                        SetKey::Palette(p) if palettes::is_valid(&p) => {
                             s.palette = p;
                         }
                         SetKey::Palette(_) => return,
@@ -1851,7 +1864,7 @@ impl App {
                     "scenes": meta_sh.scene_names,
                     "heavy": meta_sh.scene_heavy,
                     "clips": meta_sh.clip_names,
-                    "palettes": palettes::names().collect::<Vec<_>>(),
+                    "palettes": palettes::all_names().collect::<Vec<_>>(),
                     "actions": Action::ALL
                         .iter()
                         .map(|a| serde_json::json!({
@@ -1911,6 +1924,7 @@ impl App {
                     "dancer": s.dancer_enabled,
                     "dancer_style": s.dancer_style,
                     "palette": s.palette,
+                    "palette_now": st.palette_now,
                     "random_order": s.random_order,
                     "phrase_bars": s.phrase_bars,
                     "fx_amt": s.fx_amt,
