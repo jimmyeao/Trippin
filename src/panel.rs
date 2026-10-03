@@ -193,6 +193,8 @@ pub struct Status {
     pub fullscreen: bool,
     /// The post effect actually on screen (the auto-pilot's pick in auto mode).
     pub fx: Fx,
+    /// The palette actually on screen — the mood pick when `palette = "auto"`.
+    pub palette_now: String,
     /// External output status line (NDI receiver count / error) — Some while
     /// output is enabled.
     pub output: Option<String>,
@@ -1505,7 +1507,7 @@ fn inspector_body(
             resp.on_hover_text(format!("{} — click to pick a palette", s.palette));
             popup.show(|ui| {
                 ui.set_min_width(280.0);
-                let names: Vec<_> = crate::palettes::names().collect();
+                let names: Vec<_> = crate::palettes::all_names().collect();
                 for chunk in names.chunks(2) {
                     ui.horizontal(|ui| {
                         for name in chunk {
@@ -2097,7 +2099,7 @@ fn palette_column(ui: &mut egui::Ui, s: &mut Settings) {
         .horizontal_scroll_offset(0.0)
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 6.0;
-            for name in crate::palettes::names() {
+            for name in crate::palettes::all_names() {
                 let sel = s.palette == name;
                 let w = ui.available_width();
                 let (rect, resp) = ui.allocate_exact_size(
@@ -3428,7 +3430,7 @@ pub(crate) fn cue_param_ui(
             changed
         }
         CueKind::Palette(n) => {
-            let opts: Vec<String> = crate::palettes::names().map(String::from).collect();
+            let opts: Vec<String> = crate::palettes::all_names().map(String::from).collect();
             pick_str(ui, id.with("pal"), n, &opts)
         }
         CueKind::Text(spec) => {

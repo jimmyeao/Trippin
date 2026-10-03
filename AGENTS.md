@@ -257,6 +257,11 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   `midi_notes` are filtered and any other field that doesn't fit is
   skipped on its own. Dev builds run from the repo use the owner's real
   settings: run them from a scratch folder (§4).
+- `Settings.palette` can be `"auto"` — a pseudo-palette, not a gradient.
+  `render_loop` resolves it per frame through `palettes::Auto` (music mood →
+  a named palette, with hysteresis so the LUT can't strobe). Pickers and
+  validators must use `palettes::all_names()` / `is_valid()`, never
+  `names()` alone, or the option silently disappears.
 - `trippin.json` can carry a UTF-8 BOM (Notepad, PowerShell 5), and loading
   strips it. Do the same for any user-edited text files you read.
 - Anything that re-installs global taps (see `rec.rs`) must drop the old
