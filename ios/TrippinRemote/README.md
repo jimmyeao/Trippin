@@ -68,4 +68,6 @@ Builds appear under TestFlight after Apple finishes processing them.
 Internal testers can install straight away; external testers need Beta App
 Review, which can use the built-in demo mode.
 
-Uploaded so far: 0.1.0 (1) and 0.1.0 (2), both on 2026-10-03.
+Uploaded so far: 1.0 (1) and 1.0 (2), both on 2026-10-03. The
+first upload was meant to be 0.1.0, but the Info.plist ignored
+`MARKETING_VERSION` then, so the version stays at 1.0 to match App Store Connect.
