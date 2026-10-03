@@ -9,6 +9,9 @@
 //    path curves and swings direction on phrase-length sines; strands
 //    trail by simulation, swirled by the smoothed mids.
 //  - No beat flashes (it's a flight scene): glow rides the pulse envelope.
+// The body is a lit skin (LevSkin.shader) over the simulated lattice:
+// dark spotted back, pale belly with gill slits, water caustics from above,
+// glowing wing margins, and bioluminescent spots on the kick pulse.
 // The camera glides alongside, its orbit swinging with the phrase.
 
 using UnityEngine;
@@ -19,7 +22,7 @@ namespace TrippinStage
     {
         public Camera cam;
         public ComputeShader sim;
-        public Material filamentMat, pointsMat;
+        public Material filamentMat, pointsMat, skinMat;
 
         const int Spine = 96, RibPts = 33, Stringers = 16, StrandPts = 24, Strands = 1024;
         const float SegLen = 0.36f;
@@ -30,8 +33,10 @@ namespace TrippinStage
         readonly Vector4[] _spineD = new Vector4[Spine], _rightD = new Vector4[Spine], _upD = new Vector4[Spine];
         readonly Vector3[] _pts = new Vector3[Spine];
         Vector4[] _moteD;
-        Material _ribM, _strM, _strandM, _moteM;
-        RenderParams _ribRp, _strRp, _strandRp, _moteRp;
+        Material _skinM, _strandM, _moteM;
+        RenderParams _skinRp, _strandRp, _moteRp;
+        GraphicsBuffer _skinIdx;
+        int _skinCount;
         int _kBody, _kStrands;
 
         Vector3 _head = Vector3.zero, _fwd = Vector3.forward;
@@ -56,20 +61,34 @@ namespace TrippinStage
             _kBody = sim.FindKernel("Body");
             _kStrands = sim.FindKernel("Strands");
 
-            _ribM = Line(0, RibPts, 0.05f, 0.55f, 0.004f, 0.1f, 0f);
-            _strM = Line(Spine * RibPts, Spine, 0.045f, 0.6f, 0.03f, 0.3f, 0.6f);
+            // Skin: two triangles per lattice quad (ring i..i+1, point k..k+1;
+            // the last point of each ring repeats the first, closing it).
+            var idx = new System.Collections.Generic.List<int>((Spine - 1) * (RibPts - 1) * 6);
+            for (int r = 0; r < Spine - 1; r++)
+                for (int k = 0; k < RibPts - 1; k++)
+                {
+                    int a = r * RibPts + k, b = a + 1, c = a + RibPts, d = c + 1;
+                    idx.AddRange(new[] { a, c, b, b, c, d });
+                }
+            _skinCount = idx.Count;
+            _skinIdx = new GraphicsBuffer(GraphicsBuffer.Target.Index, _skinCount, 4);
+            _skinIdx.SetData(idx);
+            _skinM = new Material(skinMat);
+            _skinM.SetBuffer("_P", _body);
+            _skinM.SetBuffer("_Spine", _spine);
+            _skinM.SetInt("_Rings", Spine);
+            _skinM.SetInt("_RingPts", RibPts);
             _strandM = new Material(filamentMat);
             _strandM.SetBuffer("_P", _strand);
             _strandM.SetInt("_Base", 0);
             _strandM.SetInt("_LineLen", StrandPts);
-            _strandM.SetFloat("_Width", 0.03f);
+            _strandM.SetFloat("_Width", 0.022f);
             _strandM.SetFloat("_Hue", 0.15f);
-            _strandM.SetFloat("_HueLine", 0.00073f);
+            _strandM.SetFloat("_HueLine", 0.00012f);
             _strandM.SetFloat("_HueAlong", 0.25f);
             _strandM.SetFloat("_Taper", 0.85f);
             var big = new Bounds(Vector3.zero, Vector3.one * 2000f);
-            _ribRp = new RenderParams(_ribM) { worldBounds = big };
-            _strRp = new RenderParams(_strM) { worldBounds = big };
+            _skinRp = new RenderParams(_skinM) { worldBounds = big };
             _strandRp = new RenderParams(_strandM) { worldBounds = big };
 
             // Motes: plankton drifting in the void, wrapped around the camera.
@@ -84,25 +103,10 @@ namespace TrippinStage
             _moteRp = new RenderParams(_moteM) { worldBounds = big };
         }
 
-        Material Line(int baseIdx, int len, float width, float gain, float hueLine, float hueAlong, float taper)
-        {
-            var m = new Material(filamentMat);
-            m.SetBuffer("_P", _body);
-            m.SetInt("_Base", baseIdx);
-            m.SetInt("_LineLen", len);
-            m.SetFloat("_Width", width);
-            m.SetFloat("_Gain", gain);
-            m.SetFloat("_Hue", 0.55f);
-            m.SetFloat("_HueLine", hueLine);
-            m.SetFloat("_HueAlong", hueAlong);
-            m.SetFloat("_Taper", taper);
-            return m;
-        }
-
         void OnDestroy()
         {
             _spine?.Release(); _right?.Release(); _up?.Release(); _body?.Release();
-            _strand?.Release(); _strandPrev?.Release(); _motes?.Release();
+            _strand?.Release(); _strandPrev?.Release(); _motes?.Release(); _skinIdx?.Release();
         }
 
         void Update()
@@ -212,11 +216,10 @@ namespace TrippinStage
             sim.Dispatch(_kStrands, (Strands + 63) / 64, 1, 1);
 
             float gain = 0.5f + 0.3f * s.intensity;
-            _ribM.SetFloat("_Gain", gain * 0.8f);
-            _strM.SetFloat("_Gain", gain);
-            _strandM.SetFloat("_Gain", gain * (0.5f + 0.8f * _flare));
-            Graphics.RenderPrimitives(_ribRp, MeshTopology.Triangles, Spine * (RibPts - 1) * 6);
-            Graphics.RenderPrimitives(_strRp, MeshTopology.Triangles, Stringers * (Spine - 1) * 6);
+            _skinM.SetFloat("_Gain", gain);
+            _skinM.SetFloat("_Time2", s.flow * 0.15f + Time.time * 0.25f);
+            _strandM.SetFloat("_Gain", gain * (0.28f + 0.8f * _flare));
+            Graphics.RenderPrimitivesIndexed(_skinRp, MeshTopology.Triangles, _skinIdx, _skinCount);
             Graphics.RenderPrimitives(_strandRp, MeshTopology.Triangles, Strands * (StrandPts - 1) * 6);
 
             // --- camera: glide alongside, orbit swinging with the phrase.

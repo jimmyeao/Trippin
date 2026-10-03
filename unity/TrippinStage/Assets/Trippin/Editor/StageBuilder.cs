@@ -141,6 +141,7 @@ namespace TrippinStage.EditorTools
             if (lv.sim == null) throw new System.Exception("Leviathan.compute not found");
             lv.filamentMat = Mat("Trippin/Filament", "Filament");
             lv.pointsMat = fs.pointsMat;
+            lv.skinMat = Mat("Trippin/LevSkin", "LevSkin");
 
             var sculptGo = new GameObject("unity_sculpture");
             sculptGo.transform.SetParent(engine.transform, false);
