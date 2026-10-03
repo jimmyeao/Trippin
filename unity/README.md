@@ -7,6 +7,7 @@ A Unity engine of festival-grade shows, driven live by Trippin and shown in Trip
 | `unity_stage` | The festival main stage (below). |
 | `unity_crystals` | Screen content: a flight through a spiralling tunnel of faceted chrome crystals with a light at the end (`CrystalShow.cs`, `Chrome.shader`). Bass swells the crystals, the spiral swings with phrases, drops bloom it outward. |
 | `unity_flow` | Screen content: 262k GPU particles forming shapes (sphere, torus, helix, galaxy, gyroscope) that morph every 4 bars (`FlowShow.cs`, `Flow.compute`, `Points.shader`). Turbulence wobbles target slots (not a force field — fields with sinks clump particles into threads); drops scatter and re-form. |
+| `unity_lightstorm` | A light show where the rig is the subject: 48 moving heads (three overhead trusses plus a floor ring), each a wide haze cone plus a thin laser core, splashing on a wet floor (`LightstormShow.cs`, reusing `Beam`/`Backglow`/`Ground`/`Haze`). A new geometric formation every 4 bars (curtain, helix, fan, cathedral, crossing sheets, X-weave). Cone width follows slow bass presence; aim rides `clock4`; the camera orbit swings with phrases. |
 
 
 - **Trippin → Unity:** `src/link.rs` sends one JSON datagram per frame to 127.0.0.1:9137, with the audio vocabulary, beat/bar, palette and cut flag. `TrippinLink.cs` receives it and pushes shader globals (`_TBeat`, `_TLvl`, `_TPal`…). With no feed it runs a synthetic 126 BPM show.
@@ -19,6 +20,10 @@ A Unity engine of festival-grade shows, driven live by Trippin and shown in Trip
   - pyro, CO2 and fireworks on drops;
   - camera shots that change every 8 bars;
   - set pieces: a sun disc and ring behind the set (`Sun.shader`) that blooms on drops; god-ray sweeps strongest in breakdowns; a kinetic 6x8 LED tile rig rippling over the deck; instanced phone lights over the crowd in breakdowns (`Phones.shader`); confetti cannons plus an overhead confetti release on drops (`Confetti.shader`).
+
+## Build and drop (`DropDirector.cs`)
+
+`ShowManager` ticks a shared `DropDirector` every frame, so any show can read `Tension` (0..1 slow integrator: climbs through breakdowns and rising `build`, drains otherwise), `Impact` (1 at the drop, gone after ~6 beats) and `Dropped` (one frame). `build` from the audio is only a fast-vs-slow energy trend, not a riser detector, so the drop itself is still "drums return after >4 s out"; Tension provides the anticipation before it. `unity_stage` and `unity_lightstorm` pull their beams to one point, thicken the fog and creep the camera in on Tension, then flare on Impact. Flight/tunnel shows may use these for shape and motion only, never strobes.
 
 ## Following the music
 
