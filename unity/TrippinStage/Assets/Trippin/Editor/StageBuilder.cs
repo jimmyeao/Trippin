@@ -173,8 +173,24 @@ namespace TrippinStage.EditorTools
             co.beamMat = dir.beamMat;
             co.glowMat = Mat("Trippin/Backglow", "Backglow");
 
-            mgr.shows = new[] { stage, crystals, flowGo, levGo, sculptGo, colGo };
-            mgr.names = new[] { "unity_stage", "unity_crystals", "unity_flow", "unity_leviathan", "unity_sculpture", "unity_colossus" };
+            var tidalGo = new GameObject("unity_tidal_cathedral");
+            tidalGo.transform.SetParent(engine.transform, false);
+            var tidal = tidalGo.AddComponent<TidalCathedralShow>();
+            tidal.cam = cam;
+            tidal.sailMat = Mat("Trippin/TidalSail", "TidalSail");
+            tidal.seaMat = Mat("Trippin/TidalSea", "TidalSea");
+            tidal.skyMat = Mat("Trippin/TidalSky", "TidalSky");
+            tidal.glowMat = sc.glowMat;
+            tidal.coreMat = Mat("Trippin/TidalCore", "TidalCore");
+            var rose = AssetDatabase.LoadAssetAtPath<Texture2D>($"{Root}/Textures/TidalRose.png");
+            if (rose == null) throw new System.Exception("TidalRose.png not found");
+            tidal.coreMat.SetTexture("_RoseTex", rose);
+            tidal.frameMat = Mat("Trippin/TidalFrame", "TidalFrame");
+            tidal.hazeMat = Mat("Trippin/TidalMist", "TidalMist");
+            tidal.beamMat = dir.beamMat;
+
+            mgr.shows = new[] { stage, crystals, flowGo, levGo, sculptGo, colGo, tidalGo };
+            mgr.names = new[] { "unity_stage", "unity_crystals", "unity_flow", "unity_leviathan", "unity_sculpture", "unity_colossus", "unity_tidal_cathedral" };
 
             // Frames go to Trippin through the shared-memory file it passes
             // (FrameExporter) — no Spout/Syphon, the same on every platform.

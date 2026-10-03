@@ -10,7 +10,14 @@ A Unity engine of festival-grade shows, driven live by Trippin and shown in Trip
 | `unity_leviathan` | Screen content: a manta-like creature of light (`LeviathanShow.cs`, `Leviathan.compute`, `LevSkin`/`Filament` shaders) swimming a dark void of drifting motes. Kicks send a glow pulse head-to-tail; drops flare the strands. |
 | `unity_sculpture` | Screen content: a morphing monolith on a mirror flat at night (`SculptureShow.cs`, `Sculpture.shader`) — night sky, wet floor carrying its reflection, a searchlight ring raking the sky, ground mist and a horizon glow that blooms on drops. |
 | `unity_colossus` | Screen content: an armoured android (Alice mesh, 11-bone skinning) in a night city (`ColossusShow.cs`, `Android`/`AndroidHead`/`City`/`Sky`/`Ground` shaders) — lit towers, rooftop searchlights, a wet plaza floor. |
+| `unity_tidal_cathedral` | Screen content: four pairs of fixed pointed glass-vault ribs framing asymmetric moving membranes over a dark sea with broken light reflections and an Alice-generated stained-glass rose window at the far end (`TidalCathedralShow.cs`, `Textures/TidalRose.png`, `TidalFrame`/`TidalSail`/`TidalSea`/`TidalSky`/`TidalCore` shaders). Bass widens the membranes, mids send folds through them, highs sharpen the edge sheen, and the camera travels through the aisle on the flow clock. Eight fixed laser fixtures sweep through smoky 4-bar formations with smoothed energy, never beat flashes. |
 
+Future standalone show ideas (not yet built):
+- **Kinetic Garden:** metallic flowers open in layers by frequency band; smooth waves bend the stems, and seeds drift on drops. The ground stays fixed.
+- **Orbit Foundry:** a suspended ring machine shapes a central fluid-metal object over phrases; smoothed bass changes its volume and surface tension while the rings precess.
+- **Glass Ocean:** immense translucent swimming organisms whose bodies contract with bass and whose fins ripple with highs; no camera-rushing objects.
+- **Fabric Storm:** one iridescent sheet develops broad bass folds and fine high-frequency creases; drops pull it toward new configurations.
+- **Magnetic Desert:** a hovering abstract core morphs and draws dark sand into flowing field lines; the landscape remains fixed.
 
 - **Trippin → Unity:** `src/link.rs` sends one JSON datagram per frame to 127.0.0.1:9137, with the audio vocabulary, beat/bar, palette and cut flag. `TrippinLink.cs` receives it and pushes shader globals (`_TBeat`, `_TLvl`, `_TPal`…). With no feed it runs a synthetic 126 BPM show.
 - **Unity → Trippin:** KlakSpout sends the 1920x1080 output as Spout "Trippin Stage". `spout::Receiver` puts it into `ext_tex`, and `unity_stage.wgsl` undoes present's ACES so it passes through unchanged. Turn it on with Settings `unity_link` (Windows only; macOS would need NDI/Syphon).
