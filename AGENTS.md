@@ -404,6 +404,12 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   run (macOS Cmd-Q doesn't even return from `run_app`). Process-level
   cleanup (killing the Unity player: `engine::shutdown`) goes in
   `ApplicationHandler::exiting`, with state the event thread can reach.
+- **macOS: tag egui window layers sRGB** (`egui_win.rs::tag_srgb`, after
+  every `surface.configure`). wgpu leaves an sRGB surface's CAMetalLayer
+  untagged, and the window server flips untagged content between
+  pass-through and colour-matched every second or two — the control
+  window visibly "pulsed" during a set. wgpu resets the colorspace on each
+  configure, so re-tag after each one.
 - Panel scene thumbnails are rendered once and disk-cached, except
   `unity_*` tiles (`panel.rs::live_thumb`): they re-render about every
   0.5 s from the engine's current frame and are never cached.

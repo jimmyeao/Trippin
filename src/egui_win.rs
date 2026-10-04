@@ -12,6 +12,31 @@ use winit::window::{Icon, Window, WindowLevel};
 
 use crate::render::Gpu;
 
+/// Tag the panel's CAMetalLayer as sRGB (macOS). wgpu configures an sRGB
+/// surface with a nil colorspace (untagged), and the window server then
+/// flips between passing it through and colour-matching it to the monitor's
+/// profile every second or so — the whole control window "pulsed" by a
+/// couple of levels (measured 14 -> 16 on the background) during a set.
+/// A tagged layer is matched the same way every frame, as Chrome's are.
+/// wgpu resets the colorspace on every configure, so call this after each.
+#[cfg(target_os = "macos")]
+fn tag_srgb(surface: &wgpu::Surface) {
+    // SAFETY: the hal surface is only borrowed for this call, on the thread
+    // that owns the window; kCGColorSpaceSRGB is an immutable CF constant.
+    unsafe {
+        let Some(hal) = surface.as_hal::<wgpu::hal::api::Metal>() else {
+            return;
+        };
+        let cs = objc2_core_graphics::CGColorSpace::with_name(Some(
+            objc2_core_graphics::kCGColorSpaceSRGB,
+        ));
+        hal.render_layer().lock().setColorspace(cs.as_deref());
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn tag_srgb(_: &wgpu::Surface) {}
+
 /// A fully-tessellated egui frame, ready to be drawn without any locks held.
 pub struct Frame {
     prims: Vec<egui::ClippedPrimitive>,
@@ -91,6 +116,7 @@ impl EguiWin {
             // gate so its wait-for-idle can see an empty queue.
             let _g = gpu.submit_gate.lock().unwrap_or_else(|e| e.into_inner());
             surface.configure(&gpu.device, &config);
+            tag_srgb(&surface);
         }
 
         let ctx = egui::Context::default();
@@ -185,6 +211,7 @@ impl EguiWin {
                     .lock()
                     .unwrap_or_else(|e| e.into_inner());
                 self.surface.configure(&self.gpu.device, &self.config);
+                tag_srgb(&self.surface);
             }
             self.surface_ok = true;
         }
@@ -223,6 +250,7 @@ impl EguiWin {
                         .lock()
                         .unwrap_or_else(|e| e.into_inner());
                     self.surface.configure(&self.gpu.device, &self.config);
+                tag_srgb(&self.surface);
                 }
                 self.surface_ok = true;
             }
