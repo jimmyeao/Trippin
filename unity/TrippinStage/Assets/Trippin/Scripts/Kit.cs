@@ -24,6 +24,9 @@ namespace TrippinStage
         public float tension, impact, intensity;
         public bool dropped;
         public readonly float[] spec = new float[32]; // eased spectrum, 0..1 per bin
+        readonly Vector4[] _specVec = new Vector4[8];
+        static readonly int IdLvl = Shader.PropertyToID("_RxLvl"), IdMisc = Shader.PropertyToID("_RxMisc"),
+            IdClk = Shader.PropertyToID("_RxClk"), IdSpec = Shader.PropertyToID("_RxSpec");
 
         public void Reset()
         {
@@ -66,6 +69,21 @@ namespace TrippinStage
             float imp = DropDirector.Impact;
             impact = imp > impact ? impact + (imp - impact) * (1f - Mathf.Exp(-12f * dt)) : imp;
             dropped = DropDirector.Dropped;
+            PushGlobals();
+        }
+
+        /// The eased signals as shader globals, so a fullscreen / surface shader
+        /// reads the same smoothed vocabulary the C# shows do (TrippinCommon.hlsl:
+        /// _RxLvl bass/mid/mh/high, _RxMisc kick/lum/tension/impact, _RxClk
+        /// clk/clkHigh/phrase/calm, _RxSpec[8] = 32 spectrum bins).
+        void PushGlobals()
+        {
+            Shader.SetGlobalVector(IdLvl, new Vector4(bassFast, midFast, mhFast, highFast));
+            Shader.SetGlobalVector(IdMisc, new Vector4(kick, lum, tension, impact));
+            Shader.SetGlobalVector(IdClk, new Vector4(clk, clkHigh, phrase, calm));
+            for (int i = 0; i < 8; i++)
+                _specVec[i] = new Vector4(spec[i * 4], spec[i * 4 + 1], spec[i * 4 + 2], spec[i * 4 + 3]);
+            Shader.SetGlobalVectorArray(IdSpec, _specVec);
         }
 
         /// Energy clock `i` (0 mix, 1 bass, 2 mid, 3 high), in beats; the beat if missing.
@@ -160,6 +178,16 @@ namespace TrippinStage
             mesh.triangles = tris;
             mesh.bounds = new Bounds(Vector3.zero, Vector3.one * 1200f);
             return mesh;
+        }
+
+        /// A full-screen pass: a quad whose vertex shader writes clip space straight
+        /// from uv (so it covers the view whatever the camera does). Returns the
+        /// material instance. The shader should use ZTest Always and draw first.
+        public static Material Fullscreen(Transform parent, Material mat, string name)
+        {
+            var m = new Material(mat);
+            Part(parent, name, GridMesh(1, 1, name), m, Vector3.zero, Vector3.one);
+            return m;
         }
 
         public static GameObject Part(Transform parent, string name, Mesh mesh, Material mat, Vector3 pos, Vector3 scale)
@@ -295,6 +323,114 @@ namespace TrippinStage
         }
     }
 
+    /// A glowing tube along a polyline (the Tube shader): one mesh and one draw
+    /// call however many points it has, rebuilt each frame. Fill P / R / K / Hu
+    /// (position, radius, intensity, hue offset per point), then Apply(). For a
+    /// closed loop repeat the first point as the last. With `mirror`, a dimmer
+    /// reflection is drawn under the floor (y -> -y).
+    public sealed class TubeRibbon
+    {
+        public readonly int Points, Sides;
+        public readonly Vector3[] P;
+        public readonly float[] R, K, Hu;
+        public readonly Material Mat;
+        public float MirrorGain = 0.3f;
+        readonly Mesh _mesh;
+        readonly Vector3[] _v, _n;
+        readonly Vector2[] _uv0, _uv1;
+        readonly Renderer _r, _mr;
+        readonly MaterialPropertyBlock _mpb = new MaterialPropertyBlock();
+
+        public TubeRibbon(Transform parent, Material tube, int points, int sides, string name, bool mirror = false)
+        {
+            Points = points; Sides = sides;
+            P = new Vector3[points]; R = new float[points]; K = new float[points]; Hu = new float[points];
+            int ring = sides + 1;
+            _v = new Vector3[points * ring]; _n = new Vector3[points * ring];
+            _uv0 = new Vector2[points * ring]; _uv1 = new Vector2[points * ring];
+            var tris = new int[(points - 1) * sides * 6];
+            int t = 0;
+            for (int i = 0; i < points - 1; i++)
+                for (int j = 0; j < sides; j++)
+                {
+                    int a = i * ring + j, b = a + 1, c = a + ring, d = c + 1;
+                    tris[t++] = a; tris[t++] = c; tris[t++] = b;
+                    tris[t++] = b; tris[t++] = c; tris[t++] = d;
+                }
+            for (int i = 0; i < points; i++)
+                for (int j = 0; j < ring; j++)
+                    _uv0[i * ring + j] = new Vector2(i / (float)(points - 1), j / (float)sides);
+            _mesh = new Mesh { name = name, indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
+            _mesh.MarkDynamic();
+            _mesh.vertices = _v;
+            _mesh.triangles = tris;
+            _mesh.bounds = new Bounds(Vector3.zero, Vector3.one * 1200f);
+            Mat = new Material(tube);
+            _r = Make(parent, name, Vector3.one);
+            if (mirror) _mr = Make(parent, name + " reflection", new Vector3(1f, -1f, 1f));
+        }
+
+        Renderer Make(Transform parent, string name, Vector3 scale)
+        {
+            var g = new GameObject(name);
+            g.transform.SetParent(parent, false);
+            g.transform.localScale = scale;
+            g.AddComponent<MeshFilter>().sharedMesh = _mesh;
+            var mr = g.AddComponent<MeshRenderer>();
+            mr.sharedMaterial = Mat;
+            mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            return mr;
+        }
+
+        public void Show(bool on) { _r.enabled = on; if (_mr != null) _mr.enabled = on; }
+
+        /// Rebuild the mesh from P/R/K/Hu and set the luminance gain.
+        public void Apply(float gain)
+        {
+            int ring = Sides + 1;
+            Vector3 nrm = Vector3.zero;
+            for (int i = 0; i < Points; i++)
+            {
+                Vector3 a = P[Mathf.Max(i - 1, 0)], b = P[Mathf.Min(i + 1, Points - 1)];
+                Vector3 tg = (b - a).normalized;
+                if (tg.sqrMagnitude < 1e-8f) tg = Vector3.up;
+                if (i == 0 || nrm.sqrMagnitude < 1e-8f)
+                {
+                    Vector3 axis = Mathf.Abs(tg.y) < 0.9f ? Vector3.up : Vector3.right;
+                    nrm = Vector3.Cross(tg, axis).normalized;
+                }
+                else
+                {
+                    nrm = (nrm - tg * Vector3.Dot(nrm, tg)).normalized;
+                    if (nrm.sqrMagnitude < 1e-8f) nrm = Vector3.Cross(tg, Vector3.up).normalized;
+                }
+                Vector3 bin = Vector3.Cross(tg, nrm);
+                float r = Mathf.Max(R[i], 1e-3f);
+                for (int j = 0; j < ring; j++)
+                {
+                    float ang = j / (float)Sides * Mathf.PI * 2f;
+                    Vector3 dir = nrm * Mathf.Cos(ang) + bin * Mathf.Sin(ang);
+                    int k = i * ring + j;
+                    _v[k] = P[i] + dir * r;
+                    _n[k] = dir;
+                    _uv1[k] = new Vector2(K[i], Hu[i]);
+                }
+            }
+            _mesh.vertices = _v;
+            _mesh.normals = _n;
+            _mesh.uv = _uv0;
+            _mesh.uv2 = _uv1;
+            _mpb.Clear();
+            _mpb.SetFloat("_Gain", gain);
+            _r.SetPropertyBlock(_mpb);
+            if (_mr != null)
+            {
+                _mpb.SetFloat("_Gain", gain * MirrorGain);
+                _mr.SetPropertyBlock(_mpb);
+            }
+        }
+    }
+
     /// A fixed set of soft radial glows (the Backglow shader) that face the camera.
     public sealed class GlowPool
     {
@@ -411,6 +547,7 @@ namespace TrippinStage
     {
         public Camera cam;
         public Material beamMat, glowMat, groundMat, hazeMat, surfaceMat, tubeMat, orbMat, structMat, membraneMat;
+        public Material ribbonMat, deepMat, corridorMat, scopeMat, landMat, horizonMat;
 
         protected readonly Rx rx = new Rx();
         protected readonly CamRig rig = new CamRig();
