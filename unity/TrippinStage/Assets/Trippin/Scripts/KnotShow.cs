@@ -6,7 +6,7 @@
 //    brightness follow the band at each point), the tube swells with the
 //    eased bass and kick, the loop radius with the mids, and the highs ripple
 //    along the curve.
-//  - Motion: the comet runs round the knot on the smooth energy clock, the
+//  - Motion: the comet laps the knot once every four bars (locked to the beat), the
 //    beads stream at speeds that follow it, and the whole knot spins and
 //    swings direction with the phrase.
 //  - Luminance: the tail glows with the music's loudness; the comet head is
@@ -66,7 +66,7 @@ namespace TrippinStage
             Curve(_ga, Pq[(_prev + 1) % gp, 0], Pq[(_prev + 1) % gp, 1], -spin * 0.7f, 1.35f, 3.4f);
             Curve(_gb, Pq[(_cur + 1) % gp, 0], Pq[(_cur + 1) % gp, 1], -spin * 0.7f, 1.35f, 3.4f);
             float gain = rx.Gain();
-            float head = rx.clk * 0.02f - Mathf.Floor(rx.clk * 0.02f);
+            float head = rx.beatS / 16f - Mathf.Floor(rx.beatS / 16f);          // one lap per four bars
             for (int i = 0; i <= Segs; i++)
             {
                 float t = i / (float)Segs;

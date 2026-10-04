@@ -9,7 +9,9 @@
 //    (the record turns with the hand and reverses), riding the faders, both
 //    hands on the platters; on a drop both arms shoot up (eased) and pump on
 //    the energy clock; through a build one hand goes to the headphones.
-//    Platters turn on the energy clock; lasers swing with the phrase.
+//    All of it is locked to the beat (rx.beatS): scratch strokes, the nod, the
+//    arm pumps and the crossfader; a platter turns once every four beats. Lasers
+//    swing with the phrase.
 //  - Luminance: the rig, screen and visor follow the music's loudness.
 //  - Drops: a build dims and tightens the rig; the drop throws the arms up and
 //    flares the screen (eased).
@@ -29,7 +31,7 @@ namespace TrippinStage
         BeamPool _lasers, _shafts;
         // Eased routine weights: left hand {platter, mixer, air}, right hand {mixer, platter, air, phones}.
         readonly float[] _wl = new float[3], _wr = new float[4];
-        float _spinL, _spinR;
+        float _prevBeat = -1f, _angL, _angR;
 
         static readonly Quaternion Face = Quaternion.Euler(0f, 180f, 0f);
 
@@ -62,6 +64,9 @@ namespace TrippinStage
             _shafts = new BeamPool(root, beamMat, 6, "shaft", false, 0.12f, 0.004f, 8f, 0.7f, 0.4f, 0f);
         }
 
+        // The same angle (mod 2 pi) as `a`, within half a turn of `target`: the platter brakes the short way round.
+        static float Short(float a, float target) => target + Mathf.Repeat(a - target + Mathf.PI, Mathf.PI * 2f) - Mathf.PI;
+
         static float Ease(float cur, float target, float dt) => Eased.Follow(cur, target, 3f, 3f, dt);
 
         protected override void Frame(ShowState s, float dt)
@@ -81,25 +86,28 @@ namespace TrippinStage
             for (int i = 0; i < 4; i++) _wr[i] = Ease(_wr[i], i == 3 ? phones : tr[i] * (1f - air) * (1f - phones) + (i == 2 ? air : 0f), dt);
 
             // Body.
-            var P = new Vector3(0.25f * Mathf.Sin(rx.clk * 0.18f), 0.51f * H - 0.14f * kick, 4.9f);
-            Vector3 chestAng = new Vector3(20f + 5f * bass, 12f * Mathf.Sin(rx.phrase), 4f * Mathf.Sin(rx.clk * 0.3f));
+            var P = new Vector3(0.25f * Mathf.Sin(rx.beatS * Mathf.PI * 0.25f), 0.51f * H - 0.14f * kick - 0.05f * Mathf.Abs(Mathf.Cos(rx.beatS * Mathf.PI)), 4.9f);
+            Vector3 chestAng = new Vector3(20f + 5f * bass, 12f * Mathf.Sin(rx.phrase), 4f * Mathf.Sin(rx.beatS * Mathf.PI * 0.25f));
             Quaternion chestQ = Face * Quaternion.Euler(chestAng.x, chestAng.y, chestAng.z);
             Vector3 headPos = P + chestQ * new Vector3(0f, 0.4f * H, 0f);
 
             // Hand targets.
             // The android faces -z, so its left side is world +x.
             Vector3 cL = new Vector3(3.0f, 5.15f, 1.7f), cR = new Vector3(-3.0f, 5.15f, 1.7f);
-            float scrL = 0.55f * Mathf.Sin(rx.clk * 0.37f) * (0.6f + rx.midFast) + 0.25f * Mathf.Sin(rx.clk * 0.91f);
-            float scrR = 0.5f * Mathf.Sin(rx.clk * 0.41f + 1f) * (0.6f + rx.midFast) + 0.2f * Mathf.Sin(rx.clk * 0.77f);
+            // Scratches are strokes on the beat: a forward-back every two beats plus a flare on the half beats;
+            // the right hand answers a beat later.
+            float bt = rx.beatS * Mathf.PI;
+            float scrL = 0.55f * Mathf.Sin(bt) * (0.6f + rx.midFast) + 0.25f * Mathf.Sin(bt * 4f);
+            float scrR = 0.5f * Mathf.Sin(bt + Mathf.PI * 0.5f) * (0.6f + rx.midFast) + 0.2f * Mathf.Sin(bt * 2f);
             float phiL = 3.6f + scrL, phiR = -0.5f + scrR;
             Vector3 platL = cL + new Vector3(Mathf.Sin(phiL) * 0.75f, 0.08f + 0.06f * kick, Mathf.Cos(phiL) * 0.75f - 0.15f);
             Vector3 platR = cR + new Vector3(Mathf.Sin(phiR) * 0.75f, 0.08f + 0.06f * kick, Mathf.Cos(phiR) * 0.75f - 0.15f);
-            Vector3 mixL = new Vector3(0.85f + 0.2f * Mathf.Sin(rx.clk * 0.5f), 5.2f, 1.0f + 0.3f * Mathf.Sin(rx.clk * 0.33f));
-            float cross = Mathf.Sin(rx.clk * 0.31f) * 0.9f;
+            Vector3 mixL = new Vector3(0.85f + 0.2f * Mathf.Sin(rx.beatS * Mathf.PI * 0.5f), 5.2f, 1.0f + 0.3f * Mathf.Sin(rx.beatS * Mathf.PI * 0.25f));
+            float cross = Mathf.Sin(rx.beatS * Mathf.PI * 0.125f) * 0.9f;      // one slide per 16 beats
             Vector3 mixR = new Vector3(cross, 5.2f, 0.55f);
-            float pump = 0.5f + 0.5f * Mathf.Sin(rx.clk * 0.9f);
-            Vector3 airL = new Vector3(2.6f + 0.6f * Mathf.Sin(rx.clk * 0.45f), 10.4f + 1.4f * pump, 2.4f);
-            Vector3 airR = new Vector3(-2.6f + 0.6f * Mathf.Sin(rx.clk * 0.45f + 1f), 10.4f + 1.4f * (1f - pump), 2.4f);
+            float pump = 0.5f + 0.5f * Mathf.Sin(rx.beatS * Mathf.PI);          // up on a beat, down on the next
+            Vector3 airL = new Vector3(2.6f + 0.6f * Mathf.Sin(rx.beatS * Mathf.PI * 0.5f), 10.4f + 1.4f * pump, 2.4f);
+            Vector3 airR = new Vector3(-2.6f + 0.6f * Mathf.Sin(rx.beatS * Mathf.PI * 0.5f + Mathf.PI), 10.4f + 1.4f * (1f - pump), 2.4f);
             Vector3 phoneR = headPos + chestQ * new Vector3(0.62f, -0.15f, 0.05f);
             float sl = _wl[0] + _wl[1] + _wl[2] + 1e-4f, sr = _wr[0] + _wr[1] + _wr[2] + _wr[3] + 1e-4f;
             Vector3 handL = (platL * _wl[0] + mixL * _wl[1] + airL * _wl[2]) / sl;
@@ -110,7 +118,7 @@ namespace TrippinStage
                 pelvis = P,
                 yaw = 0f,
                 chest = chestAng,
-                head = new Vector3(8f * kick + 4f * Mathf.Sin(rx.clk * 0.6f) - 6f, 24f * Mathf.Sin(rx.phrase * 0.5f), 5f * Mathf.Sin(rx.clk * 0.21f)),
+                head = new Vector3(8f * kick + 4f * Mathf.Cos(rx.beatS * Mathf.PI * 2f) - 6f, 24f * Mathf.Sin(rx.phrase * 0.5f), 5f * Mathf.Sin(rx.beatS * Mathf.PI * 0.25f)),
                 handL = handL,
                 handR = handR,
                 footL = new Vector3(-0.55f, 0.36f, P.z + 0.1f),
@@ -137,8 +145,19 @@ namespace TrippinStage
 
             // Platters: they turn on the energy clock, and follow the hand while it scratches.
             
-            float angL = Mathf.Lerp(rx.clk * 1.2f, scrL * 2.2f, _wl[0]);
-            float angR = Mathf.Lerp(-rx.clk * 1.0f, scrR * 2.2f, _wr[1]);
+            // A platter turns once every four beats (about 31 rpm at 126 BPM, like a real deck).
+            // Integrated from the beat advance (continuous even across a tempo correction): it turns with the
+            // beat while the hand is off the record, and is pulled onto the hand's stroke while scratching.
+            float dBeat = _prevBeat < 0f ? 0f : Mathf.Clamp(rx.beatS - _prevBeat, 0f, 0.5f);
+            _prevBeat = rx.beatS;
+            float pull = 1f - Mathf.Exp(-12f * dt);
+            _angL += dBeat * Mathf.PI * 0.5f * (1f - _wl[0]);
+            _angL = Short(_angL, scrL * 2.2f);
+            _angL = Mathf.Lerp(_angL, scrL * 2.2f, _wl[0] * pull);
+            _angR -= dBeat * Mathf.PI * 0.5f * (1f - _wr[1]);
+            _angR = Short(_angR, scrR * 2.2f);
+            _angR = Mathf.Lerp(_angR, scrR * 2.2f, _wr[1] * pull);
+            float angL = _angL, angR = _angR;
             for (int d = 0; d < 2; d++)
             {
                 Vector3 c = d == 0 ? cL : cR;

@@ -19,6 +19,12 @@ namespace TrippinStage
     public sealed class Rx
     {
         public float beat, clk, clkBass, clkHigh, phrase;
+        /// Trippin's tracked beat count, continuous: where the tempo tracker jumps (a re-lock or a
+        /// downbeat-phase correction), the output carries on smoothly and eases onto the new grid
+        /// over ~0.4 s instead of stepping. Use this (never `clk`) for anything that has to land on
+        /// the beat: dance moves, pumps, scratches, a lap that returns every N bars.
+        public float beatS;
+        float _bPrev = -1f, _bRate = 2f, _bOff;
         public float bassSlow, midSlow, highSlow, calm;
         public float bassFast, midFast, mhFast, highFast, kick, lum;
         public float tension, impact, intensity;
@@ -31,6 +37,7 @@ namespace TrippinStage
         public void Reset()
         {
             impact = 0f;
+            _bPrev = -1f; _bOff = 0f;
             for (int i = 0; i < spec.Length; i++) spec[i] = 0f;
         }
 
@@ -38,6 +45,18 @@ namespace TrippinStage
         {
             DropDirector.Tick(s, dt);
             beat = s.beat;
+            if (_bPrev < 0f || dt <= 1e-4f) { _bOff = 0f; }
+            else
+            {
+                float delta = s.beat - _bPrev;
+                if (Mathf.Abs(delta - _bRate * dt) > 0.15f)      // the tracker jumped: keep the output continuous
+                    _bOff = (_bPrev + _bOff) + _bRate * dt - s.beat;
+                else
+                    _bRate += (Mathf.Clamp(delta / dt, 0.5f, 5f) - _bRate) * 0.1f;
+                _bOff *= Mathf.Exp(-2.5f * dt);
+            }
+            _bPrev = s.beat;
+            beatS = s.beat + _bOff;
             clk = s.clock4 != null && s.clock4.Length > 1 ? s.clock4[1] : beat;
             clkBass = s.clock4 != null && s.clock4.Length > 1 ? s.clock4[1] : beat;
             clkHigh = s.clock4 != null && s.clock4.Length > 3 ? s.clock4[3] : beat;
