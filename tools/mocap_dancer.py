@@ -195,6 +195,19 @@ TORSO = np.array([
     [1.00, 0.068, 0.043, 0.000],
 ])
 
+# Straighter profile for male figures: no bust, narrower hips, broader chest.
+TORSO_MALE = np.array([
+    [0.00, 0.086, 0.068, -0.008],
+    [0.10, 0.089, 0.071, -0.006],
+    [0.22, 0.084, 0.065, -0.002],
+    [0.38, 0.077, 0.057, 0.002],
+    [0.52, 0.076, 0.054, 0.002],
+    [0.66, 0.083, 0.060, 0.005],
+    [0.80, 0.089, 0.067, 0.002],
+    [0.92, 0.087, 0.052, 0.000],
+    [1.00, 0.070, 0.046, 0.000],
+])
+
 # Limb segments: (from, to, radius at start, radius at end), radii in body heights.
 # Names starting with "_" are derived points built per frame in `body_points`;
 # {S} is replaced by Left/Right and {s} by L/R.
@@ -348,6 +361,36 @@ def capsule(draw, a, b, ra, rb):
         draw.ellipse([c[0] - r, c[1] - r, c[0] + r, c[1] + r], fill=255)
 
 
+def guitar_items(q, proj, H):
+    """An electric guitar silhouetted from the hands: the neck runs along the
+    fret-hand axis past a headstock, the body sits behind the strum hand,
+    tilted like a real instrument slung low."""
+    aL, aR = proj(q["LeftHand"]), proj(q["RightHand"])
+    n = aL - aR
+    if np.linalg.norm(n) < 1e-6:
+        return []
+    n = n / np.linalg.norm(n)
+    head = aL + n * 0.14 * H
+    t = math.radians(-10)
+    u = np.array([n[0] * math.cos(t) - n[1] * math.sin(t),
+                  n[0] * math.sin(t) + n[1] * math.cos(t)])
+    v = np.array([-u[1], u[0]])
+    th = np.linspace(0, 2 * np.pi, 30, endpoint=False)
+    # Two bouts unioned by the render pass: a wider lower bout behind the
+    # strum hand and a narrower upper bout where the neck joins — the
+    # classic offset waist of a solid-body guitar.
+    lower = aR - n * 0.095 * H + v * 0.012 * H
+    upper = aR - n * 0.045 * H + v * 0.004 * H
+    body = np.concatenate([
+        lower + np.outer(np.cos(th) * 0.105 * H, u) + np.outer(np.sin(th) * 0.088 * H, v),
+        upper + np.outer(np.cos(th) * 0.085 * H, u) + np.outer(np.sin(th) * 0.072 * H, v),
+    ])
+    c = aR - n * 0.05 * H
+    return [("poly", convex_hull(body)),
+            ("cap", c + n * 0.03 * H, head, 0.014 * H, 0.012 * H),
+            ("cap", head, head + n * 0.05 * H, 0.012 * H, 0.024 * H)]
+
+
 def render(frames2d, size, blur):
     """frames2d: list of shape lists -> smooth-unioned mask image."""
     w, h = size
@@ -382,6 +425,9 @@ def main():
     ap.add_argument("--height", type=int, default=512)
     ap.add_argument("--fps", type=float, default=30.0)
     ap.add_argument("--hair", type=float, default=1.0, help="hair length multiplier (0 = none)")
+    ap.add_argument("--male", action="store_true", help="straight male torso profile")
+    ap.add_argument("--guitar", action="store_true",
+                    help="draw an electric guitar from the two hand positions")
     ap.add_argument("--energy", type=float, help="override the measured energy (0 calm .. 1 driving)")
     ap.add_argument("--whole", action="store_true",
                     help="the take already loops (e.g. from choreo.py): use all of it as --beats beats")
@@ -434,7 +480,8 @@ def main():
         Q[L - K + i] = (1 - w) * P[e - K + i] + w * P[s - K + i]
 
     centres, right, fwd, ups, ts = torso_frames(Q, J, H)
-    prof = np.stack([PchipInterpolator(TORSO[:, 0], TORSO[:, c])(ts) for c in (1, 2, 3)], 1) * H
+    torso = TORSO_MALE if args.male else TORSO
+    prof = np.stack([PchipInterpolator(torso[:, 0], torso[:, c])(ts) for c in (1, 2, 3)], 1) * H
 
     # Camera: look at the dancer's average facing, rotated by --view.
     f_avg = fwd[:, 5].mean(0)
@@ -488,6 +535,8 @@ def main():
         q = body_points({n: Q[i, J[n]] for n in names}, H)
         for a_, b_, ra, rb in LIMBS:
             items.append(("cap", proj(q[a_]), proj(q[b_]), ra * H, rb * H))
+        if args.guitar:
+            items += guitar_items(q, proj, H)
         head_c = Q[i, J["Head"]] + head_up[i] * 0.048 * H
         hp = [head_c + np.cos(t) * 0.050 * H * right[i, -1] + np.sin(t) * 0.066 * H * head_up[i] for t in theta]
         items.append(("poly", proj(np.array(hp))))
@@ -534,7 +583,7 @@ def main():
                 px.append(("poly", to_px(it[1])))
             else:
                 px.append(("cap", to_px(it[1]), to_px(it[2]), it[3] * scale, it[4] * scale))
-        img = render(px, size, blur=0.008 * H * scale)
+        img = render(px, size, blur=float(0.008 * H * scale))
         img.resize((out_w, out_h), Image.LANCZOS).save(out / "frames" / f"{fi:04d}.png")
     # Energy 0..1 from how fast the limbs move (for picking clips to suit the track).
     limbs = [J[n] for n in ("LeftHand", "RightHand", "LeftFoot", "RightFoot", "Head", "Hips")]

@@ -1,11 +1,10 @@
 {
   "name": "band_guitar",
-  "fps": 30,
-  "frames": 108,
+  "energy": 0.5,
+  "fps": 29.999,
+  "frames": 116,
   "beats": 8,
-  "width": 352,
+  "width": 468,
   "height": 512,
-  "energy": 0.6,
-  "source": "Pexels: https://www.pexels.com/video/people-performing-on-stage-6273838/",
-  "accent": 0.2963
+  "source": "procedural: tools/guitar_choreo.py + mocap_dancer.py --male --guitar (no external footage)"
 }
