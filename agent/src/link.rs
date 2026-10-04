@@ -102,13 +102,17 @@ fn connect_loop(
         let addr = if !host.is_empty() {
             host
         } else {
-            match link
+            // The guard must drop before the match: scrutinee temporaries
+            // live to the end of the match, so `set_status` in the None
+            // arm would re-lock `link` on the same thread — a deadlock
+            // that also froze the first eframe pass (no window/tray).
+            let first_rig = link
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .rigs
                 .first()
-                .map(|(_, a)| a.clone())
-            {
+                .map(|(_, a)| a.clone());
+            match first_rig {
                 Some(a) => a,
                 None => {
                     set_status(&link, "searching for a Trippin rig…");

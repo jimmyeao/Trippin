@@ -539,6 +539,13 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   release (the MIDI note-off lesson); `/set/*` and `/scene/goto|queue`
   read their arg verbatim.
 - First enable pops the Windows firewall prompt once — expected.
+- **trippin-agent:** never `match` on a `MutexGuard`'s contents
+  (`match link.lock()…rigs.first()` kept the guard alive through the
+  `None` arm, whose `set_status` re-locked it — self-deadlock; the first
+  `App::logic` pass then blocked on the same mutex, so on macOS the app
+  sat in `didFinishLaunching` with a Dock icon but no window and no tray
+  icon, no panic, nothing on stderr). Bind the locked value to a `let`
+  first, then `match`.
 - **The advertised address** (`remote::local_ip`, used for Bonjour and the
   Settings card) comes from the interface list, preferring 192.168/16,
   then 10/8 and 172.16/12, and skipping link-local 169.254 and Tailscale's
