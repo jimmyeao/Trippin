@@ -284,6 +284,7 @@ namespace TrippinStage.EditorTools
                 ("unity_robot_rave", typeof(RobotRaveShow)),
                 ("unity_assembly", typeof(AssemblyShow)),
                 ("unity_robot_club", typeof(RobotClubShow)),
+                ("unity_robot_band", typeof(RobotBandShow)),
                 ("unity_highlands", typeof(HighlandsShow)),
                 ("unity_coaster", typeof(CoasterShow)),
             };
