@@ -153,7 +153,9 @@ impl Editor {
     pub fn run_ui(
         &mut self,
         scenes: &[String],
+        scene_titles: &[String],
         routines: &[String],
+        clip_titles: &[String],
         tl_shared: &crate::timeline::Shared,
         settings: &Mutex<crate::config::Settings>,
         thumb_store: &Mutex<HashMap<String, (u32, u32, Vec<u8>)>>,
@@ -608,8 +610,8 @@ impl Editor {
                 .size_range(200.0..=400.0)
                 .show(ui, |ui| {
                     inspector(
-                        ui, doc_opt, scenes, routines, thumbs, *sel_cue, *sel_clip, *cursor_s,
-                        *snap, dirty, &mut cmd,
+                        ui, doc_opt, scenes, scene_titles, routines, clip_titles, thumbs,
+                        *sel_cue, *sel_clip, *cursor_s, *snap, dirty, &mut cmd,
                     );
                 });
 
@@ -1827,7 +1829,9 @@ fn inspector(
     ui: &mut egui::Ui,
     doc_opt: &mut Option<Timeline>,
     scenes: &[String],
+    scene_titles: &[String],
     routines: &[String],
+    clip_titles: &[String],
     thumbs: &HashMap<String, egui::TextureHandle>,
     sel_cue: Option<usize>,
     sel_clip: Option<usize>,
@@ -1934,7 +1938,15 @@ fn inspector(
                 });
 
                 let mut kind = cue.kind.clone();
-                if cue_param_ui(ui, &mut kind, scenes, routines, egui::Id::new(("insp", i))) {
+                if cue_param_ui(
+                    ui,
+                    &mut kind,
+                    scenes,
+                    scene_titles,
+                    routines,
+                    clip_titles,
+                    egui::Id::new(("insp", i)),
+                ) {
                     cue.kind = kind;
                     *dirty = true;
                 }

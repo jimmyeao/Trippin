@@ -50,6 +50,7 @@ mod spout;
 mod output;
 mod palettes;
 mod panel;
+mod perf;
 mod render;
 mod snap;
 mod song;
@@ -119,6 +120,13 @@ struct Shared {
     /// The GPU tier can run `@heavy` scenes (panel greys them otherwise).
     heavy_ok: bool,
     clip_names: Vec<String>,
+    /// Display titles parallel with `scene_names`/`clip_names` — pickers
+    /// and the remote show these; the ids stay the keys everywhere.
+    scene_titles: Arc<Vec<String>>,
+    clip_titles: Arc<Vec<String>>,
+    /// Last GPU baseline (`perf.json`): which scenes measured too slow —
+    /// the picker flags them and the check deselects them.
+    perf: Mutex<perf::Report>,
     /// Now playing: detector output, its live config, and a "show the card
     /// again" request from the hotkey.
     np: nowplaying::SharedNowPlaying,
@@ -172,6 +180,9 @@ enum Msg {
     Thumb(String),
     /// Fade out every live text overlay (editor closed / show tidied up).
     FadeText,
+    /// GPU baseline: step through @heavy + unity_* scenes, measure real
+    /// frame cost, deselect anything under 30 fps.
+    PerfCheck,
 }
 
 /// Lock even when poisoned: a panicking sibling thread shouldn't take the
@@ -615,6 +626,9 @@ fn render_loop(
     let mut set_on = false;
     // Live rig as it was before a timeline borrowed it — restored on show end.
     let mut pre_show: Option<ShowBaseline> = None;
+    // GPU baseline (Settings > performance check): steps @heavy + unity_*
+    // scenes, measures real frame cost, deselects <30 fps stragglers.
+    let mut check: Option<perf::Check> = None;
     // Global seconds up to which cues were already dispatched — one-shot.
     let mut fired_past = f64::MIN;
     let mut was_locked = false;
@@ -648,6 +662,14 @@ fn render_loop(
                 Msg::Resize(w, h) => r.note_size(w, h),
                 Msg::GoToScene(i) => dir.cut_to(i),
                 Msg::QueueNext(i) => dir.queue_next(i),
+                Msg::PerfCheck => {
+                    if let Some(chk) = check.take() {
+                        // Pressed again = cancel: hand the user's scene back.
+                        dir.cut_to(chk.home);
+                    } else {
+                        check = Some(perf::Check::new(&r, dir.scene));
+                    }
+                }
                 Msg::ShowClip(i) => {
                     dancer.pin(i);
                     dancer.showing = true;
@@ -896,7 +918,13 @@ fn render_loop(
         if dt > 0.0 {
             fps += (1.0 / dt - fps) * 0.05;
         }
-        let s = lock(&shared.settings).clone();
+        let mut s = lock(&shared.settings).clone();
+        // While the GPU check is on a `unity_*` scene the engine link is
+        // borrowed so its shows can be measured — this is the per-frame
+        // clone, so the saved setting is never touched.
+        if check.as_ref().is_some_and(|c| c.cur_is_unity()) {
+            s.unity_link = true;
+        }
         let usable = usable_scenes(&r, &s);
         {
             let mut c = lock(&shared.np_cfg);
@@ -1271,6 +1299,19 @@ fn render_loop(
         // Positive latency shows the beat earlier (compensating capture delay).
         let pos = f.beat_position(now) + s.latency_ms as f64 / 1000.0 * f.bpm as f64 / 60.0;
         let ev = dir.update(&f, pos, dt, &usable, &s);
+        // GPU baseline: pin the scene under test against the auto-pilot's
+        // own cuts. The measurement runs below, once the engine's frame
+        // counter for this frame is fresh.
+        if let Some(chk) = check.as_mut() {
+            if chk.cur.is_none() {
+                chk.advance();
+            }
+            if let Some(i) = chk.cur {
+                if dir.scene != i {
+                    dir.cut_to(i);
+                }
+            }
+        }
         // `palette = "auto"`: pick the gradient to match the music's mood.
         let pal = if s.palette == palettes::AUTO {
             auto_pal.pick(&f, pos)
@@ -1446,6 +1487,34 @@ fn render_loop(
             EXT_LIVE.store(false, Ordering::Relaxed);
             lock(&ENGINE_STATUS).clear();
         }
+        // GPU baseline: sample the pinned scene (wgpu = per-frame ms,
+        // unity_* = engine frames/sec), then step to the next or finish.
+        if let Some(mut chk) = check.take() {
+            if let Some(i) = chk.cur {
+                let done = if chk.is_unity(i) {
+                    chk.step_unity(ext_seq, EXT_LIVE.load(Ordering::Relaxed))
+                        .map(|fps| (true, fps))
+                } else {
+                    chk.step_wgpu(dt * 1000.0).map(|ms| (false, ms))
+                };
+                if let Some((unity, v)) = done {
+                    let name = chk.names[i].clone();
+                    if unity {
+                        chk.rep.fps.insert(name, v);
+                    } else {
+                        chk.rep.ms.insert(name, v);
+                    }
+                    chk.done += 1;
+                    chk.cur = None;
+                }
+            }
+            if chk.cur.is_none() && chk.queue.is_empty() {
+                dir.cut_to(chk.home);
+                finish_check(chk, r.size(), &shared);
+            } else {
+                check = Some(chk);
+            }
+        }
         // Text overlays: fade in over 0.35 s, out over 0.5 s; a faded-out
         // slot drops off (its texture stays bound but the shader skips it).
         let now_t = u.time;
@@ -1503,6 +1572,12 @@ fn render_loop(
                 let np = lock(&shared.np);
                 (np.track.as_ref().map(|t| t.line()), np.status.clone())
             };
+            let perf_slow = lock(&shared.perf).slow();
+            let clip_now = dancer.loaded_name();
+            let clip_title = clip_now
+                .as_ref()
+                .and_then(|n| shared.clip_names.iter().position(|c| c == n))
+                .and_then(|i| shared.clip_titles.get(i).cloned());
             *lock(&shared.status) = Status {
                 bpm: f.bpm,
                 confidence: f.tempo_confidence,
@@ -1524,7 +1599,8 @@ fn render_loop(
                 } else {
                     0
                 },
-                clip: dancer.loaded_name(),
+                clip: clip_now,
+                clip_title,
                 blackout,
                 strobe: strobe_live,
                 palette_now: pal.to_string(),
@@ -1538,6 +1614,10 @@ fn render_loop(
                 np_status,
                 rec: recorder.as_ref().map(|r| lock(&r.status).clone()),
                 rec_err: rec_err.clone(),
+                scene_titles: shared.scene_titles.clone(),
+                clip_titles: shared.clip_titles.clone(),
+                perf_prog: check.as_ref().map(|c| c.prog()),
+                perf_slow,
             };
         }
 
@@ -1555,6 +1635,39 @@ fn render_loop(
             }
         }
     }
+}
+
+/// Fold a finished GPU baseline into the rig: persist `perf.json`, publish
+/// it for the panel's "slow" flags, and deselect the sub-30 fps stragglers.
+/// Deselection lands in `disabled_scenes`, so anything the user wants back
+/// is one toggle away in the picker.
+fn finish_check(chk: perf::Check, size: (u32, u32), shared: &Shared) {
+    let mut rep = chk.rep;
+    rep.checked = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    rep.size = size;
+    rep.save();
+    let slow = rep.slow();
+    *lock(&shared.perf) = rep;
+    if !slow.is_empty() {
+        {
+            let mut s = lock(&shared.settings);
+            for n in &slow {
+                if !s.disabled_scenes.contains(n) {
+                    s.disabled_scenes.push(n.clone());
+                }
+            }
+        }
+        shared.dirty.store(true, Ordering::Relaxed);
+    }
+    println!(
+        "perf check: {} scenes measured, {} below 30 fps: {}",
+        chk.total,
+        slow.len(),
+        slow.join(", ")
+    );
 }
 
 /// An action that touches render-side state (scene, dancer, fx, sync).
@@ -1976,8 +2089,10 @@ impl App {
                     "ok": true,
                     "version": env!("CARGO_PKG_VERSION"),
                     "scenes": meta_sh.scene_names,
+                    "scene_titles": meta_sh.scene_titles.as_slice(),
                     "heavy": meta_sh.scene_heavy,
                     "clips": meta_sh.clip_names,
+                    "clip_titles": meta_sh.clip_titles.as_slice(),
                     "palettes": palettes::all_names().collect::<Vec<_>>(),
                     "actions": Action::ALL
                         .iter()
@@ -2018,8 +2133,10 @@ impl App {
                     "device": st.device,
                     "scene": st.scene,
                     "scene_name": state_sh.scene_names.get(st.scene),
+                    "scene_title": st.scene_titles.get(st.scene),
                     "next_scene": st.next_scene,
                     "next_scene_name": st.next_scene.and_then(|i| state_sh.scene_names.get(i)),
+                    "next_scene_title": st.next_scene.and_then(|i| st.scene_titles.get(i)),
                     "bar_in_scene": st.bar_in_scene,
                     "song": song,
                     "timeline_recording": tl_recording,
@@ -2027,6 +2144,7 @@ impl App {
                     "cut_on_drops": s.cut_on_drops,
                     "bars_total": st.bars_total,
                     "clip": st.clip,
+                    "clip_title": st.clip_title,
                     "blackout": st.blackout,
                     "fullscreen": st.fullscreen,
                     "fx": st.fx,
@@ -2186,6 +2304,7 @@ impl App {
             }
             UiCommand::Song(ctl) => self.send(Msg::Transport(ctl)),
             UiCommand::Thumb(name) => self.send(Msg::Thumb(name)),
+            UiCommand::PerfCheck => self.send(Msg::PerfCheck),
             UiCommand::SaveTimeline => {
                 let mut tl = lock(&shared.timeline);
                 if let Some(doc) = tl.doc.as_mut() {
@@ -2217,7 +2336,9 @@ impl App {
             }
             e.run_ui(
                 &shared.scene_names,
+                shared.scene_titles.as_slice(),
                 &shared.clip_names,
+                shared.clip_titles.as_slice(),
                 &shared.timeline,
                 &shared.settings,
                 &shared.thumbs,
@@ -2334,6 +2455,14 @@ impl ApplicationHandler<AppEvent> for App {
                 .as_ref()
                 .map(|d| d.clip_names())
                 .unwrap_or_default(),
+            scene_titles: Arc::new(r.scene_titles()),
+            clip_titles: Arc::new(
+                self.dancer
+                    .as_ref()
+                    .map(|d| d.clip_titles())
+                    .unwrap_or_default(),
+            ),
+            perf: Mutex::new(perf::Report::load()),
             thumbs: Mutex::new(std::collections::HashMap::new()),
             midi_status: Mutex::new((false, "off".into())),
             remote_status: Mutex::new((false, "off".into())),

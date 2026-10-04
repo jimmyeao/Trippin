@@ -561,6 +561,38 @@ pub fn data_dir() -> PathBuf {
     }
 }
 
+/// A `snake_case` id → a human display title (`laser_show` → "Laser
+/// Show"). Scene `// @title` headers and clip.json `title` fields
+/// override this; it's the fallback so ids stay stable while the UI
+/// reads like English. Acronyms get a fixed spelling rather than
+/// naive capitalisation.
+pub fn titleize(id: &str) -> String {
+    const FIXED: [(&str, &str); 19] = [
+        ("unity", "Unity"), ("vj", "VJ"), ("led", "LED"), ("rgb", "RGB"),
+        ("uv", "UV"), ("bpm", "BPM"), ("ndi", "NDI"), ("osc", "OSC"),
+        ("gpu", "GPU"), ("fx", "FX"), ("sdf", "SDF"), ("ascii", "ASCII"),
+        ("io", "IO"), ("xr", "XR"), ("ai", "AI"), ("eq", "EQ"),
+        ("vu", "VU"), ("kifs", "KIFS"), ("dj", "DJ"),
+    ];
+    id.split(['_', '-'])
+        .filter(|w| !w.is_empty())
+        .map(|w| {
+            FIXED
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case(w))
+                .map(|(_, v)| v.to_string())
+                .unwrap_or_else(|| {
+                    let mut c = w.chars();
+                    match c.next() {
+                        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                        None => String::new(),
+                    }
+                })
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// Where timeline `.json` docs live — a `timelines/` dir next to
 /// `trippin.json`.
 pub fn timelines_dir() -> PathBuf {
@@ -704,6 +736,19 @@ mod tests {
         assert_eq!(month_day(1_767_139_200), (12, 31)); // 2025-12-31
         assert_eq!(month_day(1_767_225_600), (1, 1)); // 2026-01-01
         assert_eq!(month_day(951_868_800), (3, 1)); // 2000-03-01
+    }
+
+    #[test]
+    fn titleize_makes_display_names() {
+        assert_eq!(titleize("laser_show"), "Laser Show");
+        assert_eq!(titleize("eq_bars"), "EQ Bars");
+        assert_eq!(titleize("vu"), "VU");
+        assert_eq!(titleize("unity_stage"), "Unity Stage");
+        assert_eq!(titleize("kifs_cathedral"), "KIFS Cathedral");
+        assert_eq!(titleize("led_wall"), "LED Wall");
+        // A single word capitalises; acronyms only match whole components.
+        assert_eq!(titleize("void"), "Void");
+        assert_eq!(titleize("clouds"), "Clouds");
     }
 
     #[test]

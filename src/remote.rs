@@ -16,8 +16,11 @@
 //!      pushed track is retracted when its socket drops.
 //! C→S  {"cmd":"thumb","scene":"laser_show"}
 //!
-//! S→C  {"type":"hello","ok":true,...} — scene/clip/palette/action lists
-//! S→C  {"type":"state",...}           — show state, ~10 Hz
+//! S→C  {"type":"hello","ok":true,...} — scene/clip/palette/action lists;
+//!      `scene_titles`/`clip_titles` are the display names parallel with
+//!      `scenes`/`clips` — the ids stay the keys for every command.
+//! S→C  {"type":"state",...}           — show state, ~10 Hz; `scene_name`
+//!      etc are ids, `scene_title`/`clip_title` the display names.
 //! S→C  {"type":"thumb","scene":...,"png_b64":...}
 //! S→C  {"type":"err","msg":...}
 //! ```
