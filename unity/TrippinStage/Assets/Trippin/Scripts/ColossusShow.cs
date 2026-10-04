@@ -168,9 +168,15 @@ namespace TrippinStage
             }
         }
 
+        // The camera starts where the previous show left it; easing from there on a straight line
+        // flew it through the giant's body for a second (camera inside the arm at every cut-in from
+        // the -z side). The first frame places it on the orbit instead.
+        bool _placeCam;
+
         void OnEnable()
         {
             if (cam != null) { _farWas = cam.farClipPlane; cam.farClipPlane = 1500f; }
+            _placeCam = true;
         }
 
         void OnDisable()
@@ -348,7 +354,8 @@ namespace TrippinStage
             if (Mathf.Abs(_orbit) > 0.8f) _orbit = Mathf.Sign(_orbit) * 0.8f;
             float dist = 21f + 6f * s.calm;
             var want = new Vector3(Mathf.Sin(a) * dist, 4f + 2f * Mathf.Sin(phrase * 0.25f), Mathf.Cos(a) * dist);
-            cam.transform.position = Vector3.Lerp(cam.transform.position, want, 1f - Mathf.Exp(-dt * 0.8f));
+            cam.transform.position = _placeCam ? want : Vector3.Lerp(cam.transform.position, want, 1f - Mathf.Exp(-dt * 0.8f));
+            _placeCam = false;
             cam.transform.LookAt(new Vector3(0, Height * 0.6f, 0));
 
             // Back glow: far behind the skyline, so the towers silhouette against it.

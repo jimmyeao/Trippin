@@ -37,6 +37,9 @@ namespace TrippinStage
         float _calmLong, _burst;
         bool _drumsWas = true;
 
+        bool _placeCam;
+        void OnEnable() { _placeCam = true; }
+
         void Awake()
         {
             var go = new GameObject("sculpture");
@@ -203,7 +206,9 @@ namespace TrippinStage
             _orbit += dt * (0.05f + 0.06f * s.intensity);
             float dist = 10.5f + 1.4f * s.calm;
             var p = new Vector3(Mathf.Sin(_orbit) * dist, 1.4f + 1.6f * Mathf.Sin(phrase * 0.5f + 1f), Mathf.Cos(_orbit) * dist);
-            cam.transform.position = Vector3.Lerp(cam.transform.position, p, 1f - Mathf.Exp(-dt * 1.5f));
+            // First frame after a cut-in: on the orbit, not eased in from the previous show's camera.
+            cam.transform.position = _placeCam ? p : Vector3.Lerp(cam.transform.position, p, 1f - Mathf.Exp(-dt * 1.5f));
+            _placeCam = false;
             cam.transform.LookAt(new Vector3(0, -0.6f, 0));
 
             // Horizon glow sits opposite the camera so the object reads

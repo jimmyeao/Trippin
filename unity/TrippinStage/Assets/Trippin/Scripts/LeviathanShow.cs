@@ -48,6 +48,10 @@ namespace TrippinStage
         Vector3 _camLook;
         bool _primed, _camSet;
 
+        // Re-armed at every cut-in, not just the first: the camera is placed on its path, not eased
+        // in from wherever the previous show left it.
+        void OnEnable() { _camSet = false; }
+
         void Awake()
         {
             _spine = new ComputeBuffer(Spine, 16);
