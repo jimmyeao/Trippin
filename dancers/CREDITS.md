@@ -43,3 +43,5 @@ upright stills are animated directly — no external footage):
 
 - `band_guitar`: upright session guitarist, `--rig guitarist`, 8-beat loop
 - `band_guitar_seat`: seated acoustic player on a stool, `--rig seat`, 8 beats
+- `band_sax`: side-profile tenor saxophonist, `--rig sax`, 8 beats — still via
+  `tools/alice_image.py` (Flux), head nod + horn dip around the mouthpiece

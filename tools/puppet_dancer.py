@@ -92,6 +92,17 @@ RIGS = {
         ],
         "sway": {"pivot": [480, 950], "amp": 0.7, "bob": 0.0},
     },
+    # 1072x1920 side-profile saxophonist (Alice/Flux): head nods, and the
+    # horn (sax + hands as one rigid part) dips around the mouthpiece —
+    # like a player leaning into the groove. Hands ride the horn so the
+    # fingers stay on the keys.
+    "sax": {
+        "parts": [
+            {"name": "head", "ell": [485, 225, 95, 140, 0],   "pivot": [480, 390], "motion": "nod",   "amp": 2.6},
+            {"name": "horn", "ell": [300, 620, 210, 390, -10], "pivot": [430, 285], "motion": "nod",   "amp": 1.8},
+        ],
+        "sway": {"pivot": [480, 1500], "amp": 1.0, "bob": 4.0},
+    },
 }
 
 
