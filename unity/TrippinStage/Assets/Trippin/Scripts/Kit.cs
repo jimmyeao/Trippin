@@ -22,9 +22,10 @@ namespace TrippinStage
         /// Trippin's tracked beat count, continuous: where the tempo tracker jumps (a re-lock or a
         /// downbeat-phase correction), the output carries on smoothly and eases onto the new grid
         /// over ~0.4 s instead of stepping. Use this (never `clk`) for anything that has to land on
-        /// the beat: dance moves, pumps, scratches, a lap that returns every N bars.
+        /// the beat: dance moves, pumps, scratches, a lap that returns every N bars. It is bar-aligned:
+        /// beatS mod 4 is 0 on the bar's "one" (Trippin's raw count is not, once the downbeat moves).
         public float beatS;
-        float _bPrev = -1f, _bRate = 2f, _bOff;
+        float _bPrev = -1f, _bRate = 2f, _bOff, _bShift;
         public float bassSlow, midSlow, highSlow, calm;
         public float bassFast, midFast, mhFast, highFast, kick, lum;
         public float tension, impact, intensity;
@@ -37,7 +38,7 @@ namespace TrippinStage
         public void Reset()
         {
             impact = 0f;
-            _bPrev = -1f; _bOff = 0f;
+            _bPrev = -1f; _bOff = 0f; _bShift = 0f;
             for (int i = 0; i < spec.Length; i++) spec[i] = 0f;
         }
 
@@ -45,25 +46,35 @@ namespace TrippinStage
         {
             DropDirector.Tick(s, dt);
             beat = s.beat;
+            // Bar-aligned: Trippin's count isn't 0 mod 4 on the bar's "one" once the downbeat check has
+            // moved the bar (1-3 beats off on two of five real tracks), so the snare on 2 and 4, the
+            // crash on the 4-bar line and every 16-beat lap would land a beat or three late. beat -
+            // 4 * bar_phase is the beat number of the bar's start; shift the count so that is 0 mod 4.
+            // A re-vote of the bar moves the shift the short way (3 -> 0 is one beat forward, not three
+            // back), then reads as a tracker jump below and eases like one.
+            float raw = Mathf.Repeat(Mathf.Round(s.beat - s.bar_phase * 4f), 4f);
+            float dShift = raw - Mathf.Repeat(_bShift, 4f);
+            _bShift += _bPrev < 0f ? dShift : dShift - 4f * Mathf.Round(dShift / 4f);
+            float bb = s.beat - _bShift;
             if (_bPrev < 0f || dt <= 1e-4f) { _bOff = 0f; }
             else
             {
-                float delta = s.beat - _bPrev;
+                float delta = bb - _bPrev;
                 // Trippin wraps the beat at 4096 (about every 34 min at 120 BPM): that is not a jump. Read
                 // as one, the eased offset swept beatS back through 4096 beats in ~2 s (every pose spun).
                 // Poses are periodic in 4096 beats, so beatS may wrap along with it.
                 if (delta < -2048f) delta += 4096f;
                 if (Mathf.Abs(delta - _bRate * dt) > 0.1f)      // the tracker jumped: keep the output continuous
                 {
-                    _bOff = (_bPrev + _bOff) + _bRate * dt - s.beat;
+                    _bOff = (_bPrev + _bOff) + _bRate * dt - bb;
                     _bOff -= 4096f * Mathf.Round(_bOff / 4096f);
                 }
                 else
                     _bRate += (Mathf.Clamp(delta / dt, 0.5f, 5f) - _bRate) * 0.1f;
                 _bOff *= Mathf.Exp(-2.5f * dt);
             }
-            _bPrev = s.beat;
-            beatS = s.beat + _bOff;
+            _bPrev = bb;
+            beatS = bb + _bOff;
             clk = s.clock4 != null && s.clock4.Length > 1 ? s.clock4[1] : beat;
             clkBass = s.clock4 != null && s.clock4.Length > 1 ? s.clock4[1] : beat;
             clkHigh = s.clock4 != null && s.clock4.Length > 3 ? s.clock4[3] : beat;
