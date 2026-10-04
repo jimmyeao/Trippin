@@ -244,8 +244,57 @@ namespace TrippinStage.EditorTools
             orbit.beamMat = dir.beamMat;
             orbit.pointsMat = Mat("Trippin/Points", "Points");
 
-            mgr.shows = new[] { stage, crystals, flowGo, levGo, sculptGo, colGo, tidalGo, stormGo, prismGo, auroraGo, bassGo, pillarsGo, orbitGo };
-            mgr.names = new[] { "unity_stage", "unity_crystals", "unity_flow", "unity_leviathan", "unity_sculpture", "unity_colossus", "unity_tidal_cathedral", "unity_lightstorm", "unity_prism", "unity_aurora", "unity_basscore", "unity_pillars", "unity_orbit_foundry" };
+            // Kit shows (KitShow subclasses): wired uniformly, one loop for all of them.
+            var kitSurface = Mat("Trippin/WireSurface", "WireSurface");
+            var kitTube = Mat("Trippin/WireTube", "WireTube");
+            var kitOrb = Mat("Trippin/Orb", "Orb");
+            var kitMembrane = Mat("Trippin/Membrane", "Membrane");
+            var kitShows = new (string name, System.Type type)[]
+            {
+                ("unity_helix", typeof(HelixShow)),
+                ("unity_tesseract", typeof(TesseractShow)),
+                ("unity_polyhedra", typeof(PolyhedraShow)),
+                ("unity_knot", typeof(KnotShow)),
+                ("unity_gyroscope", typeof(GyroscopeShow)),
+                ("unity_lattice", typeof(LatticeShow)),
+                ("unity_pendulum", typeof(PendulumShow)),
+                ("unity_spectrum", typeof(SpectrumShow)),
+                ("unity_eclipse", typeof(EclipseShow)),
+                ("unity_lightrain", typeof(LightRainShow)),
+                ("unity_warp", typeof(WarpShow)),
+                ("unity_ledwall", typeof(LedWallShow)),
+                ("unity_fountain", typeof(FountainShow)),
+                ("unity_galaxy", typeof(GalaxyShow)),
+                ("unity_nebula", typeof(NebulaShow)),
+                ("unity_terrain", typeof(TerrainShow)),
+                ("unity_ocean", typeof(OceanShow)),
+                ("unity_chladni", typeof(ChladniShow)),
+                ("unity_tunnel", typeof(TunnelShow)),
+                ("unity_orb", typeof(OrbShow)),
+                ("unity_radar", typeof(RadarShow)),
+            };
+            var showList = new System.Collections.Generic.List<GameObject> { stage, crystals, flowGo, levGo, sculptGo, colGo, tidalGo, stormGo, prismGo, auroraGo, bassGo, pillarsGo, orbitGo };
+            var nameList = new System.Collections.Generic.List<string> { "unity_stage", "unity_crystals", "unity_flow", "unity_leviathan", "unity_sculpture", "unity_colossus", "unity_tidal_cathedral", "unity_lightstorm", "unity_prism", "unity_aurora", "unity_basscore", "unity_pillars", "unity_orbit_foundry" };
+            foreach (var (kname, ktype) in kitShows)
+            {
+                var kgo = new GameObject(kname);
+                kgo.transform.SetParent(engine.transform, false);
+                var ks = (KitShow)kgo.AddComponent(ktype);
+                ks.cam = cam;
+                ks.beamMat = dir.beamMat;
+                ks.glowMat = co.glowMat;
+                ks.groundMat = co.groundMat;
+                ks.hazeMat = dir.hazeMat;
+                ks.structMat = dir.structMat;
+                ks.surfaceMat = kitSurface;
+                ks.tubeMat = kitTube;
+                ks.orbMat = kitOrb;
+                ks.membraneMat = kitMembrane;
+                showList.Add(kgo);
+                nameList.Add(kname);
+            }
+            mgr.shows = showList.ToArray();
+            mgr.names = nameList.ToArray();
 
             // Frames go to Trippin through the shared-memory file it passes
             // (FrameExporter) — no Spout/Syphon, the same on every platform.

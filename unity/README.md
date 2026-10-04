@@ -17,6 +17,27 @@ A Unity engine of festival-grade shows, driven live by Trippin and shown in Trip
 | `unity_basscore` | The bass-drop show: a big circular wire membrane (a sub-bass plate) over a reflective floor with 24 light shafts rising round it (`BasscoreShow.cs`, `Membrane.shader`: a polar grid displaced in the vertex shader, drawn as bright rings and spokes). Ripple depth follows slow bass; each kick launches a ring pulse that travels out across the plate; the ripple travels on `clock4` and reverses on phrases; builds gather and dim it, the drop sends three big staggered rings and flares the shafts. |
 | `unity_pillars` | A 15x15 field of light pillars (Beam shader only) whose heights ripple as a landscape: a radial wave plus a cross wave, depth on slow bass, both travelling on `clock4` and reversing on phrases (`PillarsShow.cs`). A build sinks the field to a dim carpet; the drop sends a tall ring front racing outward from the centre. |
 | `unity_orbit_foundry` | Screen content: a molten metal core suspended inside three precessing gimbal rings, welded by beams fired from four pods on a fixed outer gantry, over an etched foundry pad (`OrbitFoundryShow.cs`, `OrbitCore`/`OrbitRing`/`OrbitFloor` shaders). The core is a fixed sphere shaded as mirror-ball facets (flat `ddx`/`ddy` normals) with ember seams; it slowly tumbles while bass and kick breathe its radius, mids drive ring precession, highs steer the weld points and shed sparks, kicks compress the core and pull the beams to a common strike zone. The gantry and floor never move. |
+| `unity_helix` | Three light helix strands with rungs, reflected in a wet floor (`HelixShow.cs`). Radius swells with bass and kick and bulges where the spectrum is loud; spins on the energy clock, reversing with phrases; every segment glows with its own band. |
+| `unity_tesseract` | A rotating 4D hypercube (and a smaller one inside it) projected to 3D in thin lasers (`TesseractShow.cs`). Projection distance follows the bass; six rotation planes turn on the energy clock and swing with phrases. |
+| `unity_polyhedra` | An icosahedron, an octahedron and a cube nested and tumbling (`PolyhedraShow.cs`). Every vertex is pushed out by a spectrum band; edges glow with the corners they join. |
+| `unity_knot` | A torus knot of light with a comet head racing round it; a new (p, q) winding every 8 bars morphing over two beats (`KnotShow.cs`). Tube swells with bass and kick, ripples with highs. |
+| `unity_gyroscope` | Five concentric rings turning about different axes (`GyroscopeShow.cs`). Each ring breathes and glows with one band, turns on a band energy clock, tilt swings with phrases. |
+| `unity_lattice` | A 5x5x5 lattice of glowing nodes joined by thin lasers (`LatticeShow.cs`). Waves travel through it on the energy clock, depth follows bass, and shells push out with the spectrum from the core (lows) to the corners (highs). |
+| `unity_pendulum` | A pendulum wave: 28 pendulums, each swinging a few more times per cycle than the last (`PendulumShow.cs`). Amplitude follows bass and kick; phase runs on the energy clock. |
+| `unity_spectrum` | Three rings of vertical light bars, the live spectrum wrapped round a circle, with the outer rings showing it a fraction of a second ago (`SpectrumShow.cs`). |
+| `unity_eclipse` | A solar eclipse: a black disc, a soft halo and 96 corona streamers whose lengths follow the spectrum (`EclipseShow.cs`). The disc uses the stage's dark Structure material; verify it hides the halo. |
+| `unity_lightrain` | 240 streaks of light falling through haze with a wet-floor reflection (`LightRainShow.cs`). Fall is a function of the energy clock; length follows loudness and bass; the slant swings with phrases. |
+| `unity_warp` | A hyperspace flight of 320 light streaks (`WarpShow.cs`). A flight scene, so no beat flashes: speed is the energy clock, length follows loudness; camera rolls with phrases. |
+| `unity_ledwall` | A 36x20 LED wall showing spectrum bars, ripples, plasma and diamond waves, a new one every 4 bars (`LedWallShow.cs`). |
+| `unity_fountain` | Three fountains throwing 360 glowing drops in ballistic arcs (`FountainShow.cs`). Launch speed follows bass and mids when each drop leaves the nozzle; nozzles lean with phrases. |
+| `unity_galaxy` | A 700-star spiral galaxy with a glowing core, turning differentially (`GalaxyShow.cs`). Spiral winding follows the slow bass; stars swell with highs. |
+| `unity_nebula` | Twelve huge sheets of drifting smoke at different depths, each tied to a slice of the spectrum, plus distant stars (`NebulaShow.cs`). |
+| `unity_terrain` | A low flight over a neon wire landscape toward a huge sun (`TerrainShow.cs`, `WireSurface.shader` mode 0). Flight scene: no beat flashes. Hills follow the bass; flight speed is the energy clock. |
+| `unity_ocean` | A night sea of wire swells under a huge moon, with four sweeping searchlights (`OceanShow.cs`, `WireSurface.shader` mode 1). Swell height follows bass; wind direction turns with phrases. |
+| `unity_chladni` | A vibrating plate whose glowing lines are the nodal lines of a Chladni figure, a new mode every 4 bars (`ChladniShow.cs`, `WireSurface.shader` mode 2). |
+| `unity_tunnel` | A flight down a snaking wire tunnel toward a light (`TunnelShow.cs`, `WireTube.shader`). Flight scene: no beat flashes. Radius wobbles with bass; speed is the energy clock. |
+| `unity_orb` | A plasma orb over a reflective floor with two precessing light rings (`OrbShow.cs`, `Orb.shader`). Surface displacement follows bass, grain follows highs. |
+| `unity_radar` | A radar scope: a rotating sweep with a fading trail and 36 contacts lit by the spectrum as the sweep passes (`RadarShow.cs`, reuses `Membrane.shader`). |
 
 Future standalone show ideas (not yet built):
 - **Glass Ocean:** immense translucent swimming organisms whose bodies contract with bass and whose fins ripple with highs; no camera-rushing objects.
@@ -33,6 +54,10 @@ Future standalone show ideas (not yet built):
   - pyro, CO2 and fireworks on drops;
   - camera shots that change every 8 bars;
   - set pieces: a sun disc and ring behind the set (`Sun.shader`) that blooms on drops; god-ray sweeps strongest in breakdowns; a kinetic 6x8 LED tile rig rippling over the deck; instanced phone lights over the crowd in breakdowns (`Phones.shader`); confetti cannons plus an overhead confetti release on drops (`Confetti.shader`).
+
+## Kit shows (`Kit.cs`)
+
+`KitShow` is the base for the shows added in bulk: it ticks one `Rx` per show (the music as that show sees it) and owns the camera rig, floor and haze. `Rx` carries the eased fast signals every show must react to on real music (`bassFast`/`midFast`/`mhFast`/`highFast`, `kick`, the eased spectrum `Spec(x)`, overall loudness `lum`) alongside the slow ones (`*Slow`, `clk` energy clock, `phrase`) and the build/drop state (`tension`, `impact` already given its 0.25 s attack). `Rx.Gain()` is the shared luminance: it follows loudness, dips through a build and flares on the drop. `BeamPool`, `GlowPool` and `HazeSet` are fixed-count pools of the existing Beam/Backglow/Haze materials. New shaders: `WireSurface` (terrain, ocean, Chladni plate), `WireTube`, `Orb`. They're all registered by one loop in `StageBuilder`.
 
 ## Build and drop (`DropDirector.cs`)
 
@@ -62,7 +87,7 @@ Build from the CLI (Unity 6000.3.25f1):
 
     unity run . -- -executeMethod TrippinStage.EditorTools.StageBuilder.BuildPlayer [-stageOut Build2] [-stageMac]
 
-Run `Build/TrippinStage.exe`. `-record <dir> -recordSeconds 64` writes a fixed-30-fps JPEG sequence and quits (encode with ffmpeg).
+Run `Build/TrippinStage.exe`. With no Trippin feed it cycles every 16 bars; `-cycleBars N` changes that and `-tourShows a,b,c` cycles only the named shows, for a quick recorded tour (e.g. `-tourShows unity_helix,unity_warp -cycleBars 4 -record tour -recordSeconds 30`). `-uncapped` removes the 60 fps cap so the `[Stage] ms/frame` log shows the real cost. `-record <dir> -recordSeconds 64` writes a fixed-30-fps JPEG sequence and quits (encode with ffmpeg).
 
 ## Crowd meshes
 
