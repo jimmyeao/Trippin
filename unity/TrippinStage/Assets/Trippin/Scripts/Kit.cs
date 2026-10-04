@@ -49,8 +49,15 @@ namespace TrippinStage
             else
             {
                 float delta = s.beat - _bPrev;
+                // Trippin wraps the beat at 4096 (about every 34 min at 120 BPM): that is not a jump. Read
+                // as one, the eased offset swept beatS back through 4096 beats in ~2 s (every pose spun).
+                // Poses are periodic in 4096 beats, so beatS may wrap along with it.
+                if (delta < -2048f) delta += 4096f;
                 if (Mathf.Abs(delta - _bRate * dt) > 0.1f)      // the tracker jumped: keep the output continuous
+                {
                     _bOff = (_bPrev + _bOff) + _bRate * dt - s.beat;
+                    _bOff -= 4096f * Mathf.Round(_bOff / 4096f);
+                }
                 else
                     _bRate += (Mathf.Clamp(delta / dt, 0.5f, 5f) - _bRate) * 0.1f;
                 _bOff *= Mathf.Exp(-2.5f * dt);
