@@ -31,6 +31,11 @@ namespace TrippinStage
         public float tension, impact, intensity;
         public bool dropped;
         public readonly float[] spec = new float[32]; // eased spectrum, 0..1 per bin
+        // Per-bin slow peak for the auto-gain: music state, shared by every show and never reset, so a
+        // cut-in doesn't start from zero peaks (every bar at full height for the first frames).
+        static readonly float[] _specPk = InitPk();
+        static float[] InitPk() { var a = new float[32]; for (int i = 0; i < a.Length; i++) a[i] = 0.3f; return a; }
+        static int _specPkFrame = -1;
         readonly Vector4[] _specVec = new Vector4[8];
         static readonly int IdLvl = Shader.PropertyToID("_RxLvl"), IdMisc = Shader.PropertyToID("_RxMisc"),
             IdClk = Shader.PropertyToID("_RxClk"), IdSpec = Shader.PropertyToID("_RxSpec");
@@ -97,9 +102,27 @@ namespace TrippinStage
             float loud = 0.45f * Eased.Lvl(s, 0) + 0.3f * Eased.Lvl(s, 1) + 0.15f * Eased.Lvl(s, 2) + 0.1f * Eased.Lvl(s, 3);
             lum = Eased.Follow(lum, Mathf.Clamp01(loud * 1.4f), 6f, 1.5f, dt);
 
+            // Spectrum auto-gain. Trippin's real spectrum sits at p50 0.05-0.09, p90 0.22-0.31 (five
+            // real tracks); the synthetic groove the kit shows were tuned on sits at 0.4-1.0, so every
+            // spectrum-driven bar, wall and ray read at about a third of its height live. Each bin is
+            // divided by its own slowly decaying peak (~16 s, so a breakdown still reads quieter), with
+            // a floor tied to the loudest bin so a near-silent band isn't blown up to full.
             if (s.spectrum != null)
+            {
+                float decay = Mathf.Exp(-dt / 16f), all = 0f;
+                bool tick = _specPkFrame != Time.frameCount;      // once a frame, however many shows tick
+                _specPkFrame = Time.frameCount;
+                for (int i = 0; i < _specPk.Length && i < s.spectrum.Length; i++)
+                {
+                    if (tick) _specPk[i] = Mathf.Max(Mathf.Clamp01(s.spectrum[i]), _specPk[i] * decay);
+                    all = Mathf.Max(all, _specPk[i]);
+                }
                 for (int i = 0; i < spec.Length && i < s.spectrum.Length; i++)
-                    spec[i] = Eased.Follow(spec[i], Mathf.Clamp01(s.spectrum[i]), 16f, 5f, dt);
+                {
+                    float den = Mathf.Max(_specPk[i], 0.35f * all, 0.12f);
+                    spec[i] = Eased.Follow(spec[i], Mathf.Clamp01(s.spectrum[i] / den), 16f, 5f, dt);
+                }
+            }
 
             tension = Mathf.SmoothStep(0f, 1f, DropDirector.Tension);
             // DropDirector.Impact steps 0 -> 1 in one frame: give it a ~0.25 s attack.
