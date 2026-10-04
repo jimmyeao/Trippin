@@ -38,8 +38,8 @@ Musicians (`band_*`; `--matte bg`, looped at the footage's own tempo with
 - `band_guitar_seat`: https://mixkit.co/free-stock-video/silhouette-of-a-guitarist-playing-sitting-on-a-bench-44167/
 - `band_keys`: https://mixkit.co/free-stock-video/shadow-of-a-keyboardist-playing-on-a-blue-background-44148/
 
-Procedural (no external footage — `tools/guitar_choreo.py` writes the BVH,
-`tools/mocap_dancer.py --male --guitar` renders it; skeleton is the CMU
-mocap hierarchy):
+Generated via the Alice agent API (Flux still → `tools/puppet_dancer.py`
+warp; LTX-2.5 video takes all collapse into the same hunched pose, so the
+upright still is animated directly — no external footage):
 
-- `band_guitar`: rhythm guitarist, 8-beat loop
+- `band_guitar`: upright session guitarist, jazz-style, 8-beat loop

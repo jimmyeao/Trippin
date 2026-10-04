@@ -293,13 +293,22 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   `clean_masks.py --bg-weight 0 --static-max 1.0 --solid 1.0 --thresh 0.2`
   — raise every kept pixel to full opacity. Keep `--static-max 1.0` for
   seated/dwelling performers or the body is rejected as static backdrop.
-- **Procedural musicians:** when real footage won't matte cleanly,
-  `tools/guitar_choreo.py` writes a guitarist BVH (chord shifts, eighth-note
-  strums, an on-beat nod — no headbanging) and `mocap_dancer.py --whole
-  --male --guitar` renders it (`--guitar` draws the instrument from the hand
-  positions). Don't run `beat_align.py` on procedural clips: the strums
-  already land on every beat, and its single-peak accent rotation pushes
-  them off-grid — omit `accent` from clip.json.
+- **Alice API footage** (key in `alice.env`, docs `alice.md`, host
+  `https://alice.deviousweb.com/api`): POST /agent/{image,video}, poll
+  status_url; video returns MP4 bytes, image returns base64 JSON. urllib's
+  default UA is 403'd — use curl. **LTX-2.5 cannot render an upright
+  guitarist**: every t2v/i2v/fl2v take bends the figure into the same
+  hunched rock crouch regardless of prompt wording or pinned end-frames —
+  the motion prior is baked. For an upright musician, generate a still via
+  `/agent/image` (Flux obeys pose prompts fine) and animate it with
+  `tools/puppet_dancer.py` (soft-elliptical-region warp: head nod, strum
+  forearm, sway+bob; periodic so the loop wraps and strums land on beats —
+  omit `accent`, don't run beat_align). Flux silhouettes keep interior
+  white line detail (strings/f-holes) — `binary_fill_holes` in the tool
+  takes care of it.
+- **Procedural musicians:** `tools/guitar_choreo.py` + `mocap_dancer.py
+  --male --guitar` also exists but the rendered body reads as a cartoon —
+  prefer the Alice-still + puppet-warp route for humans-with-instruments.
 
 ## 7. Rust and app gotchas
 
