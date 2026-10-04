@@ -1,11 +1,10 @@
 {
   "name": "band_guitar_seat",
-  "fps": 30,
-  "frames": 239,
-  "beats": 16,
-  "width": 288,
+  "fps": 30.0,
+  "frames": 116,
+  "beats": 8,
+  "width": 300,
   "height": 512,
   "energy": 0.2,
-  "source": "Mixkit: https://mixkit.co/free-stock-video/silhouette-of-a-guitarist-playing-sitting-on-a-bench-44167/",
-  "accent": 0.7824
+  "source": "Alice/Flux generated still, puppet-warped (tools/puppet_dancer.py)"
 }

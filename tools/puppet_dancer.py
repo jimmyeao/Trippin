@@ -68,6 +68,32 @@ def wiggle(beat, amp):
 
 MOTIONS = {"nod": nod, "strum": strum, "wiggle": wiggle}
 
+# Named rigs for the stills we've generated. Ellipses are
+# [cx, cy, rx, ry, deg], pivots [x, y] — all in source-image pixels.
+RIGS = {
+    # 1072x1920 standing jazz guitarist (Alice/Flux): head nods on the beat,
+    # right (image-left) forearm strums at the elbow, fret hand wiggles.
+    "guitarist": {
+        "parts": [
+            {"name": "head",  "ell": [480, 200, 100, 145, 0],   "pivot": [480, 340], "motion": "nod",    "amp": 2.6},
+            {"name": "strum", "ell": [245, 940, 95, 215, 18],   "pivot": [190, 760], "motion": "strum",  "amp": 9.0},
+            {"name": "fret",  "ell": [710, 640, 75, 75, 0],     "pivot": [640, 660], "motion": "wiggle", "amp": 2.5},
+        ],
+        "sway": {"pivot": [480, 1846], "amp": 1.0, "bob": 4.0},
+    },
+    # 1072x1920 seated stool guitarist: same head/strum/fret, a rung foot
+    # taps, and the body rocks a touch about the seat instead of swaying.
+    "seat": {
+        "parts": [
+            {"name": "head",  "ell": [555, 215, 95, 115, 0],   "pivot": [560, 340],  "motion": "nod",    "amp": 2.6},
+            {"name": "strum", "ell": [310, 630, 115, 95, 0],   "pivot": [175, 500],  "motion": "strum",  "amp": 8.0},
+            {"name": "fret",  "ell": [755, 310, 60, 60, 0],    "pivot": [700, 320],  "motion": "wiggle", "amp": 2.5},
+            {"name": "foot",  "ell": [470, 1530, 95, 60, 0],   "pivot": [430, 1520], "motion": "wiggle", "amp": 3.5},
+        ],
+        "sway": {"pivot": [480, 950], "amp": 0.7, "bob": 0.0},
+    },
+}
+
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -78,20 +104,11 @@ def main():
     ap.add_argument("--height", type=int, default=512)
     ap.add_argument("--energy", type=float, default=0.5)
     ap.add_argument("--source", default="procedural: puppet-warped silhouette still")
-    ap.add_argument("--parts", type=Path, help="JSON rig override (default: built-in guitarist rig)")
+    ap.add_argument("--rig", choices=sorted(RIGS), default="guitarist")
+    ap.add_argument("--parts", type=Path, help="JSON rig override")
     args = ap.parse_args()
 
-    rig = json.loads(args.parts.read_text()) if args.parts else {
-        # Rig for the 1072x1920 front-facing jazz guitarist still:
-        # head nods, right (image-left) forearm strums at the elbow, the
-        # fret hand wiggles a touch on the neck.
-        "parts": [
-            {"name": "head",  "ell": [480, 200, 100, 145, 0],   "pivot": [480, 340], "motion": "nod",    "amp": 2.6},
-            {"name": "strum", "ell": [245, 940, 95, 215, 18],   "pivot": [190, 760], "motion": "strum",  "amp": 9.0},
-            {"name": "fret",  "ell": [710, 640, 75, 75, 0],     "pivot": [640, 660], "motion": "wiggle", "amp": 2.5},
-        ],
-        "sway": {"pivot": [480, 1846], "amp": 1.0, "bob": 4.0},
-    }
+    rig = json.loads(args.parts.read_text()) if args.parts else RIGS[args.rig]
 
     src = np.asarray(Image.open(args.image).convert("L"), np.float32) / 255.0
     mask = (src < 0.5).astype(np.float32)          # black figure on white

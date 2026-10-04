@@ -35,11 +35,11 @@ Musicians (`band_*`; `--matte bg`, looped at the footage's own tempo with
 
 - `band_drummer`: https://mixkit.co/free-stock-video/silhouette-of-a-drummer-playing-on-a-green-background-44129/
 - `band_drummer_side`: https://mixkit.co/free-stock-video/shadow-of-a-drummer-playing-on-a-green-background-44128/
-- `band_guitar_seat`: https://mixkit.co/free-stock-video/silhouette-of-a-guitarist-playing-sitting-on-a-bench-44167/
 - `band_keys`: https://mixkit.co/free-stock-video/shadow-of-a-keyboardist-playing-on-a-blue-background-44148/
 
 Generated via the Alice agent API (Flux still → `tools/puppet_dancer.py`
 warp; LTX-2.5 video takes all collapse into the same hunched pose, so the
-upright still is animated directly — no external footage):
+upright stills are animated directly — no external footage):
 
-- `band_guitar`: upright session guitarist, jazz-style, 8-beat loop
+- `band_guitar`: upright session guitarist, `--rig guitarist`, 8-beat loop
+- `band_guitar_seat`: seated acoustic player on a stool, `--rig seat`, 8 beats
