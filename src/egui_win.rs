@@ -6,7 +6,6 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Icon, Window, WindowLevel};
@@ -45,7 +44,10 @@ impl EguiWin {
         gpu: Gpu,
         icon: Option<Icon>,
         title: &str,
-        size: PhysicalSize<u32>,
+        // Logical (points), so the window is the same size on a Retina display
+        // (scale 2) as on a 100% Windows monitor; physical pixels opened it at a
+        // quarter of the area on Macs.
+        size: winit::dpi::LogicalSize<u32>,
         anchor: Option<&Window>,
         on_top: bool,
     ) -> anyhow::Result<Self> {

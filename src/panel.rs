@@ -302,13 +302,13 @@ impl Panel {
             gpu,
             icon,
             "Trippin — control",
-            winit::dpi::PhysicalSize::new(980, 640),
+            winit::dpi::LogicalSize::new(980, 640),
             anchor,
             true, // floats above a fullscreen visuals window
         )?;
         // Library grid + inspector need room; below this it gets cramped.
         win.window
-            .set_min_inner_size(Some(winit::dpi::PhysicalSize::new(720, 520)));
+            .set_min_inner_size(Some(winit::dpi::LogicalSize::new(720, 520)));
         let window = win.window.clone();
         Ok(Self {
             window,
