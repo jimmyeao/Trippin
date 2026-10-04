@@ -77,6 +77,19 @@ jobs:
       - name: Build (release, no console window)
         run: cargo build --release --locked --features gui
 
+      # The DJ-box agent: standalone crate, its own lockfile/target dir.
+      # Goes into the installer (installer/trippin.iss) and out as a zip
+      # so a DJ box can grab just the agent.
+      - name: Build trippin-agent
+        run: cargo build --release --locked --manifest-path agent/Cargo.toml
+
+      - name: Zip trippin-agent
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive agent\target\release\trippin-agent.exe `
+            "dist\TrippinAgent-Windows-${{ steps.version.outputs.version }}.zip" -Force
+
       - name: Install Inno Setup if missing
         shell: pwsh
         run: |
@@ -95,13 +108,17 @@ jobs:
         with:
           name: Trippin-Setup-${{ steps.version.outputs.version }}
           retention-days: 3
-          path: dist/*.exe
+          path: |
+            dist/*.exe
+            dist/TrippinAgent-Windows-*.zip
 
       - name: Publish release (tags and manual releases)
         if: ${{ startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release_version != '') }}
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.exe
+          files: |
+            dist/*.exe
+            dist/TrippinAgent-Windows-*.zip
           tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v{0}', inputs.release_version) }}
           prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease }}
           generate_release_notes: true
@@ -154,6 +171,18 @@ jobs:
             -output target/release/trippin
           lipo -info target/release/trippin
 
+      # The DJ-box agent: standalone crate (own lockfile/target dir under
+      # agent/), built universal like the app.
+      - name: Build trippin-agent (universal)
+        run: |
+          cargo build --release --locked --manifest-path agent/Cargo.toml --target aarch64-apple-darwin
+          cargo build --release --locked --manifest-path agent/Cargo.toml --target x86_64-apple-darwin
+          lipo -create \
+            agent/target/aarch64-apple-darwin/release/trippin-agent \
+            agent/target/x86_64-apple-darwin/release/trippin-agent \
+            -output agent/target/release/trippin-agent
+          lipo -info agent/target/release/trippin-agent
+
       - name: Bundle Trippin.app
         run: |
           APP="Trippin.app/Contents"
@@ -189,6 +218,36 @@ jobs:
           </plist>
           EOF
 
+      # The agent is a menu-bar app: LSUIElement keeps it out of the Dock,
+      # and NSAppleEventsUsageDescription is required or its AppleScript
+      # now-playing polls (Music/Spotify) get silently denied by TCC.
+      - name: Bundle Trippin Agent.app
+        run: |
+          APP="Trippin Agent.app/Contents"
+          mkdir -p "$APP/MacOS" "$APP/Resources"
+          cp agent/target/release/trippin-agent "$APP/MacOS/trippin-agent"
+          cp "Trippin.app/Contents/Resources/trippin.icns" "$APP/Resources/trippin.icns"
+
+          cat > "$APP/Info.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleName</key><string>Trippin Agent</string>
+            <key>CFBundleIdentifier</key><string>com.deviousweb.trippin-agent</string>
+            <key>CFBundleVersion</key><string>${{ steps.version.outputs.version }}</string>
+            <key>CFBundleShortVersionString</key><string>${{ steps.version.outputs.version }}</string>
+            <key>CFBundleExecutable</key><string>trippin-agent</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleIconFile</key><string>trippin.icns</string>
+            <key>NSHighResolutionCapable</key><true/>
+            <key>LSUIElement</key><true/>
+            <key>LSMinimumSystemVersion</key><string>12.0</string>
+            <key>NSAppleEventsUsageDescription</key><string>Trippin Agent reads the currently playing track from Music and Spotify.</string>
+          </dict>
+          </plist>
+          EOF
+
       - name: Import signing certificate
         if: env.HAS_CERT == 'true'
         env:
@@ -215,6 +274,15 @@ jobs:
             --sign "$APPLE_SIGNING_IDENTITY" Trippin.app
           codesign --verify --strict --verbose=2 Trippin.app
 
+      - name: Sign Trippin Agent.app (hardened runtime)
+        if: env.HAS_CERT == 'true'
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          codesign --force --options runtime --timestamp \
+            --sign "$APPLE_SIGNING_IDENTITY" "Trippin Agent.app"
+          codesign --verify --strict --verbose=2 "Trippin Agent.app"
+
       - name: Notarize and staple
         if: env.HAS_NOTARY == 'true'
         env:
@@ -232,8 +300,28 @@ jobs:
           xcrun stapler validate Trippin.app
           rm notarize.zip
 
+      - name: Notarize and staple agent
+        if: env.HAS_NOTARY == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          ditto -c -k --keepParent "Trippin Agent.app" notarize-agent.zip
+          xcrun notarytool submit notarize-agent.zip \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          xcrun stapler staple "Trippin Agent.app"
+          xcrun stapler validate "Trippin Agent.app"
+          rm notarize-agent.zip
+
       - name: Zip Trippin.app
         run: ditto -c -k --keepParent Trippin.app "Trippin-macOS-${{ steps.version.outputs.version }}.zip"
+
+      - name: Zip Trippin Agent.app
+        run: ditto -c -k --keepParent "Trippin Agent.app" "TrippinAgent-macOS-${{ steps.version.outputs.version }}.zip"
 
       - name: Import installer signing certificate
         if: env.HAS_INSTALLER_CERT == 'true'
@@ -319,6 +407,7 @@ jobs:
           path: |
             Trippin-macOS-*.pkg
             Trippin-macOS-*.zip
+            TrippinAgent-macOS-*.zip
 
       - name: Publish release (tags and manual releases)
         if: ${{ startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release_version != '') }}
@@ -327,6 +416,7 @@ jobs:
           files: |
             Trippin-macOS-*.pkg
             Trippin-macOS-*.zip
+            TrippinAgent-macOS-*.zip
           tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v{0}', inputs.release_version) }}
           prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease }}
           generate_release_notes: false

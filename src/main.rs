@@ -123,6 +123,9 @@ struct Shared {
     /// again" request from the hotkey.
     np: nowplaying::SharedNowPlaying,
     np_cfg: Arc<Mutex<nowplaying::NpConfig>>,
+    /// Track pushed by a LAN agent over the remote protocol; the
+    /// now-playing worker's `Remote` source polls it.
+    np_remote: nowplaying::RemoteNp,
     np_replay: AtomicBool,
     /// Clip recorder requests from hotkeys/panel, handled on the render thread.
     rec_clip: AtomicBool,
@@ -1910,6 +1913,18 @@ impl App {
                 }
             }
             R::Transport(ctl) => self.send(Msg::Transport(ctl)),
+            // A LAN agent's now-playing push; `None` retracts, but only
+            // the pushing client's own track.
+            R::NowPlaying { client, track } => {
+                let mut inbox = lock(&sh.np_remote);
+                match track {
+                    Some(t) => *inbox = Some((client, t)),
+                    None if inbox.as_ref().is_some_and(|(id, _)| *id == client) => {
+                        *inbox = None;
+                    }
+                    None => {}
+                }
+            }
             // The remote's pusher thread ships the PNG once the render
             // thread produces it ("scene:<name>" in shared.thumbs).
             R::Thumb(name) => self.send(Msg::Thumb(format!("scene:{name}"))),
@@ -2292,10 +2307,16 @@ impl ApplicationHandler<AppEvent> for App {
             delay_s: self.settings.np_delay_s,
             file: self.settings.np_file.clone(),
         }));
-        let np = nowplaying::start(np_cfg.clone(), config::data_dir().join("nowplaying.txt"));
+        let np_remote: nowplaying::RemoteNp = Default::default();
+        let np = nowplaying::start(
+            np_cfg.clone(),
+            config::data_dir().join("nowplaying.txt"),
+            np_remote.clone(),
+        );
         let shared = Arc::new(Shared {
             np,
             np_cfg,
+            np_remote,
             np_replay: AtomicBool::new(false),
             rec_clip: AtomicBool::new(false),
             rec_set: AtomicBool::new(false),

@@ -463,10 +463,20 @@ follows whichever source changed most recently. The sources are:
   Trippin decrypts it to read it.
 - **Mixxx**: the library's set log.
 - **A text file** kept up to date by any other tool.
+- **LAN agent**: `trippin-agent` (in `agent/`) runs the same detection on
+  another machine — the one running Serato — and pushes the track over the
+  LAN remote protocol. When its socket drops, the track is retracted. This
+  is the split-rig setup: DJ box plays music, a second machine runs
+  Trippin and sends the visuals back over NDI for OBS.
 
 The **delay** holds a new track back until it has stayed loaded for that long,
 which skips tracks you only cued in your headphones. **N** shows the card
 again. `trippin --nowplaying` prints what each source sees.
+
+The agent is a tray app: it finds rigs advertised over Bonjour (or takes a
+`host:port`), pairs with the same PIN as the iOS remote, and its window shows
+the connection status and the track it sees locally. Build it with
+`cargo build --release --manifest-path agent/Cargo.toml`.
 
 ### Branding and ticker
 

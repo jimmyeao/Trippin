@@ -55,11 +55,14 @@ pub enum NpSource {
     Mixxx,
     /// Any text file another tool keeps up to date ("Artist - Title").
     File,
+    /// Pushed over the LAN remote by the companion agent (`agent/`), which
+    /// runs this same detection on the DJ machine.
+    Remote,
     Off,
 }
 
 impl NpSource {
-    pub const ALL: [NpSource; 8] = [
+    pub const ALL: [NpSource; 9] = [
         Self::Auto,
         Self::MediaSession,
         Self::Serato,
@@ -67,6 +70,7 @@ impl NpSource {
         Self::Rekordbox,
         Self::Mixxx,
         Self::File,
+        Self::Remote,
         Self::Off,
     ];
     pub fn label(self) -> &'static str {
@@ -78,6 +82,7 @@ impl NpSource {
             Self::Rekordbox => "rekordbox",
             Self::Mixxx => "Mixxx",
             Self::File => "Text file",
+            Self::Remote => "LAN agent",
             Self::Off => "Off",
         }
     }
@@ -95,6 +100,11 @@ pub struct NowPlayingState {
 
 pub type SharedNowPlaying = Arc<Mutex<NowPlayingState>>;
 
+/// A track pushed over the LAN remote (`remote.rs` `now_playing`), tagged
+/// with the WebSocket client's id so its disconnect retracts only its own
+/// track. The `Remote` source below reads it like any other poll.
+pub type RemoteNp = Arc<Mutex<Option<(u64, Track)>>>;
+
 /// Start the detector thread. `mode` is re-read every poll, so the panel can
 /// switch sources live.
 /// Live settings for the detector (the panel edits these).
@@ -110,12 +120,16 @@ pub struct NpConfig {
     pub file: String,
 }
 
-pub fn start(mode: Arc<Mutex<NpConfig>>, txt_path: PathBuf) -> SharedNowPlaying {
+pub fn start(
+    mode: Arc<Mutex<NpConfig>>,
+    txt_path: PathBuf,
+    remote: RemoteNp,
+) -> SharedNowPlaying {
     let shared: SharedNowPlaying = Arc::new(Mutex::new(NowPlayingState::default()));
     let out = shared.clone();
     std::thread::Builder::new()
         .name("nowplaying".into())
-        .spawn(move || run(mode, out, txt_path))
+        .spawn(move || run(mode, out, txt_path, remote))
         .ok();
     shared
 }
@@ -125,7 +139,12 @@ struct Latest {
     changed: Instant,
 }
 
-fn run(mode: Arc<Mutex<NpConfig>>, shared: SharedNowPlaying, txt_path: PathBuf) {
+fn run(
+    mode: Arc<Mutex<NpConfig>>,
+    shared: SharedNowPlaying,
+    txt_path: PathBuf,
+    remote: RemoteNp,
+) {
     let mut sources: Vec<Box<dyn Source>> = vec![
         Box::new(media::MediaSession::new()),
         Box::new(Serato::default()),
@@ -133,6 +152,7 @@ fn run(mode: Arc<Mutex<NpConfig>>, shared: SharedNowPlaying, txt_path: PathBuf) 
         Box::new(Rekordbox::default()),
         Box::new(Mixxx::default()),
         Box::new(FileWatch::default()),
+        Box::new(Remote { inbox: remote }),
     ];
     let mut latest: Vec<Latest> = sources
         .iter()
@@ -277,6 +297,34 @@ impl Source for FileWatch {
 
 fn mtime(p: &Path) -> Option<SystemTime> {
     std::fs::metadata(p).and_then(|m| m.modified()).ok()
+}
+
+// ---- LAN agent ------------------------------------------------------------
+
+/// A companion agent (the `agent/` crate) running this same detection on
+/// the DJ machine pushes tracks over the WebSocket remote. The inbox is
+/// written by `remote_cmd`; this just reads it — the tag is the client's
+/// id, stripped here and used by the retract-on-disconnect logic.
+struct Remote {
+    inbox: RemoteNp,
+}
+
+impl Source for Remote {
+    fn kind(&self) -> NpSource {
+        NpSource::Remote
+    }
+    /// A pushed track is live now, same as the media session.
+    fn live_on_start(&self) -> bool {
+        true
+    }
+    fn poll(&mut self) -> Result<Option<Track>, String> {
+        Ok(self
+            .inbox
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+            .map(|(_, t)| t))
+    }
 }
 
 fn home() -> Option<PathBuf> {
@@ -834,7 +882,7 @@ mod media {
 pub fn monitor() -> anyhow::Result<()> {
     let mode = Arc::new(Mutex::new(NpConfig { source: NpSource::Auto, delay_s: 0.0, file: String::new() }));
     let txt = std::env::temp_dir().join("trippin-nowplaying.txt");
-    let np = start(mode, txt);
+    let np = start(mode, txt, RemoteNp::default());
     loop {
         std::thread::sleep(Duration::from_millis(1500));
         let st = np.lock().unwrap_or_else(|e| e.into_inner()).clone();

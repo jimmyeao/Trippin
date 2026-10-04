@@ -11,6 +11,9 @@
 //! C→S  {"cmd":"show_clip","clip":"hiphop_01"}
 //! C→S  {"cmd":"set","key":"palette","value":"sunset"}     — SetKey whitelist
 //! C→S  {"cmd":"transport","op":"toggle"|"stop"|"seek","pos":12.0}
+//! C→S  {"cmd":"now_playing","artist":"..","title":"..","source":"Serato"}
+//!      — the companion agent's push; empty strings clear it. A client's
+//!      pushed track is retracted when its socket drops.
 //! C→S  {"cmd":"thumb","scene":"laser_show"}
 //!
 //! S→C  {"type":"hello","ok":true,...} — scene/clip/palette/action lists
@@ -42,6 +45,7 @@ use serde_json::{json, Value};
 use tungstenite::{Message, WebSocket};
 
 use crate::config::{Action, Fx};
+use crate::nowplaying::Track;
 use crate::timeline::SongCtl;
 
 /// A scene by index or (case-insensitive) name.
@@ -92,6 +96,12 @@ pub enum RemoteCmd {
     ShowClip(String),
     Set(SetKey),
     Transport(SongCtl),
+    /// Now-playing push from a companion agent; `client` tags it so a
+    /// disconnect retracts only that client's track.
+    NowPlaying {
+        client: u64,
+        track: Option<Track>,
+    },
     /// Render + push a scene thumbnail to the asking client.
     Thumb(String),
 }
@@ -146,6 +156,14 @@ enum In {
         op: String,
         #[serde(default)]
         pos: Option<f64>,
+    },
+    NowPlaying {
+        #[serde(default)]
+        artist: Option<String>,
+        #[serde(default)]
+        title: Option<String>,
+        #[serde(default)]
+        source: Option<String>,
     },
     Thumb {
         scene: String,
@@ -473,7 +491,7 @@ fn client(
         return;
     }
     let _ = ws.get_mut().set_read_timeout(Some(Duration::from_millis(20)));
-    loop {
+    'read: loop {
         if stop.load(Ordering::Relaxed) {
             break;
         }
@@ -481,11 +499,11 @@ fn client(
             match out_rx.try_recv() {
                 Ok(m) => {
                     if ws.send(Message::Text(m.into())).is_err() {
-                        return;
+                        break 'read;
                     }
                 }
                 Err(mpsc::TryRecvError::Empty) => break,
-                Err(mpsc::TryRecvError::Disconnected) => return,
+                Err(mpsc::TryRecvError::Disconnected) => break 'read,
             }
         }
         match ws.read() {
@@ -493,7 +511,7 @@ fn client(
                 let _ = ws.flush();
                 if let Some(err) = handle(&t, id, &hooks, &pending) {
                     if ws.send(Message::Text(err.into())).is_err() {
-                        return;
+                        break 'read;
                     }
                 }
             }
@@ -510,6 +528,13 @@ fn client(
         }
     }
     let _ = ws.close(None);
+    // Retract this client's now-playing push, if it made one — a dead
+    // agent shouldn't leave a stale track on the overlay. The main loop
+    // ignores this when the inbox holds another client's track.
+    (hooks.cmd)(RemoteCmd::NowPlaying {
+        client: id,
+        track: None,
+    });
 }
 
 /// Peek at the request: if it's an HTTP GET that isn't a WebSocket
@@ -585,7 +610,7 @@ fn handle(text: &str, client: u64, hooks: &Hooks, pending: &Mutex<Vec<Pending>>)
         Ok(m) => m,
         Err(e) => return err(format!("bad frame: {e}")),
     };
-    match parse(msg) {
+    match parse(msg, client) {
         Ok(Some(RemoteCmd::Thumb(scene))) => {
             pending
                 .lock()
@@ -607,7 +632,7 @@ fn handle(text: &str, client: u64, hooks: &Hooks, pending: &Mutex<Vec<Pending>>)
     }
 }
 
-fn parse(msg: In) -> Result<Option<RemoteCmd>> {
+fn parse(msg: In, client: u64) -> Result<Option<RemoteCmd>> {
     Ok(match msg {
         In::Hello { .. } => None, // a second hello is a no-op
         In::Action { action } => Some(RemoteCmd::Act(action)),
@@ -627,6 +652,23 @@ fn parse(msg: In) -> Result<Option<RemoteCmd>> {
             "seek" => SongCtl::Seek(pos.ok_or_else(|| anyhow!("seek needs pos"))?),
             other => return Err(anyhow!("unknown transport op {other:?}")),
         })),
+        In::NowPlaying {
+            artist,
+            title,
+            source,
+        } => {
+            let (artist, title) = (
+                artist.unwrap_or_default().trim().to_string(),
+                title.unwrap_or_default().trim().to_string(),
+            );
+            // Both empty = a retract; otherwise it's the pushed track.
+            let track = (!artist.is_empty() || !title.is_empty()).then(|| Track {
+                artist,
+                title,
+                source: source.unwrap_or_default(),
+            });
+            Some(RemoteCmd::NowPlaying { client, track })
+        }
         In::Thumb { scene } => Some(RemoteCmd::Thumb(scene)),
     })
 }
@@ -758,6 +800,34 @@ mod tests {
         assert_eq!(thumb["type"], "thumb");
         assert_eq!(thumb["scene"], "comets");
         assert_eq!(thumb["png_b64"], "AQIDBA==");
+    }
+
+    #[test]
+    fn now_playing_push_and_disconnect_retract() {
+        let (tx, rx) = mpsc::channel();
+        let server = Server::start_on("127.0.0.1", 0, "1234", hooks(tx)).unwrap();
+        let mut ws = connect(server.port);
+        ws.send(Message::Text(r#"{"cmd":"hello","pin":"1234","name":"agent"}"#.into()))
+            .unwrap();
+        let _ = read_text(&mut ws); // hello reply
+
+        ws.send(Message::Text(
+            r#"{"cmd":"now_playing","artist":"A","title":"T","source":"Serato"}"#.into(),
+        ))
+        .unwrap();
+        assert!(matches!(
+            rx.recv_timeout(Duration::from_secs(2)).unwrap(),
+            RemoteCmd::NowPlaying { track: Some(t), .. }
+                if t.artist == "A" && t.title == "T" && t.source == "Serato"
+        ));
+
+        // Dropping the socket retracts the pushed track (client-tagged —
+        // the app only clears it if the inbox still holds this client's).
+        ws.close(None).unwrap();
+        assert!(matches!(
+            rx.recv_timeout(Duration::from_secs(2)).unwrap(),
+            RemoteCmd::NowPlaying { track: None, .. }
+        ));
     }
 
     #[test]
