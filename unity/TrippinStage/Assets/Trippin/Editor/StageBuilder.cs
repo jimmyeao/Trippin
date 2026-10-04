@@ -255,6 +255,8 @@ namespace TrippinStage.EditorTools
             var kitScope = Mat("Trippin/Scope", "Scope");
             var kitLand = Mat("Trippin/Land", "Land");
             var kitHorizon = Mat("Trippin/Horizon", "Horizon");
+            var kitRobot = Mat("Trippin/Robot", "Robot");
+            var kitScreen = Mat("Trippin/Screen", "Screen");
             var kitShows = new (string name, System.Type type)[]
             {
                 ("unity_helix", typeof(HelixShow)),
@@ -278,6 +280,9 @@ namespace TrippinStage.EditorTools
                 ("unity_tunnel", typeof(TunnelShow)),
                 ("unity_orb", typeof(OrbShow)),
                 ("unity_radar", typeof(RadarShow)),
+                ("unity_djbot", typeof(DjBotShow)),
+                ("unity_robot_rave", typeof(RobotRaveShow)),
+                ("unity_assembly", typeof(AssemblyShow)),
             };
             var showList = new System.Collections.Generic.List<GameObject> { stage, crystals, flowGo, levGo, sculptGo, colGo, tidalGo, stormGo, prismGo, auroraGo, bassGo, pillarsGo, orbitGo };
             var nameList = new System.Collections.Generic.List<string> { "unity_stage", "unity_crystals", "unity_flow", "unity_leviathan", "unity_sculpture", "unity_colossus", "unity_tidal_cathedral", "unity_lightstorm", "unity_prism", "unity_aurora", "unity_basscore", "unity_pillars", "unity_orbit_foundry" };
@@ -302,6 +307,8 @@ namespace TrippinStage.EditorTools
                 ks.scopeMat = kitScope;
                 ks.landMat = kitLand;
                 ks.horizonMat = kitHorizon;
+                ks.robotMat = kitRobot;
+                ks.screenMat = kitScreen;
                 showList.Add(kgo);
                 nameList.Add(kname);
             }

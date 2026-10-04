@@ -38,6 +38,9 @@ A Unity engine of festival-grade shows, driven live by Trippin and shown in Trip
 | `unity_tunnel` | A flight down a snaking sci-fi corridor of lit panels toward a light, a full-screen pass (`TunnelShow.cs`, `Corridor.shader`). Flight scene: no beat flashes. Ribs deepen with bass, the wall panels are a spectrum wrapped round the circumference; speed is the energy clock. |
 | `unity_orb` | A plasma orb over a reflective floor with two precessing light rings (`OrbShow.cs`, `Orb.shader`). Surface displacement follows bass, grain follows highs. |
 | `unity_radar` | A radar scope: a sweep with phosphor persistence, a polar spectrum plot the sweep lights up, contacts, kick rings and a 3D wall of light bars round the rim (`RadarShow.cs`, `Scope.shader`). |
+| `unity_djbot` | A chrome-and-ceramic android DJ behind two turntables and a mixer, in front of an LED wall and a laser fan (`DjBotShow.cs`, `RobotKit.cs`, `Robot.shader`, `Screen.shader`). The visor is a live spectrum, the faders ride the bands, the head nods on the kick; a routine changes every 4 bars (scratching, fader work, both platters), arms go up on a drop and a hand to the headphones on a build. |
+| `unity_robot_rave` | Seven androids dancing on an LED dance floor, each with its own routine (pumps, robot-dance snaps, waves, claps, pogo) and its own band (`RobotRaveShow.cs`, `RobotKit.cs`). Moves swell with the band level, run on the energy clock, reverse with phrases; arms go up on a drop. |
+| `unity_assembly` | Eight industrial robot arms ringed round a plasma core on a circular LED floor; the tool tips orbit the core, throw sparks on the kick and reach farther with the bass (`AssemblyShow.cs`, `RobotKit.cs`, `Orb.shader`). |
 
 Future standalone show ideas (not yet built):
 - **Glass Ocean:** immense translucent swimming organisms whose bodies contract with bass and whose fins ripple with highs; no camera-rushing objects.
@@ -58,6 +61,10 @@ Future standalone show ideas (not yet built):
 ## Kit shows (`Kit.cs`)
 
 `KitShow` is the base for the shows added in bulk: it ticks one `Rx` per show (the music as that show sees it) and owns the camera rig, floor and haze. `Rx` carries the eased fast signals every show must react to on real music (`bassFast`/`midFast`/`mhFast`/`highFast`, `kick`, the eased spectrum `Spec(x)`, overall loudness `lum`) alongside the slow ones (`*Slow`, `clk` energy clock, `phrase`) and the build/drop state (`tension`, `impact` already given its 0.25 s attack). `Rx.Gain()` is the shared luminance: it follows loudness, dips through a build and flares on the drop. `BeamPool`, `GlowPool` and `HazeSet` are fixed-count pools of the existing Beam/Backglow/Haze materials. New shaders: `WireSurface` (terrain, ocean, Chladni plate), `WireTube`, `Orb`. They're all registered by one loop in `StageBuilder`.
+
+## Robots (`RobotKit.cs`, `Robot.shader`)
+
+`Android` is a procedural humanoid made of primitives (balls, cylinders, boxes) placed every frame from an `AndroidPose` (pelvis, chest, head, hand and foot targets) with two-bone IK for arms and legs, so a show only supplies targets. `Robot.shader` lights it like a studio rig in the stage's own colours (white key softbox, palette side and back lights, reflections in the chrome). Parts are drawn twice, the second copy mirrored under the floor. `Screen.shader` is an LED wall / LED floor quad (mode 0 mirrored equaliser, mode 1 rings from the middle). The androids face -z (the camera looks +z): the robot's left is world +x.
 
 ## Build and drop (`DropDirector.cs`)
 
