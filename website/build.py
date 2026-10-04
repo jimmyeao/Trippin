@@ -3,7 +3,7 @@ Run: python build.py   — then deploy website/site/ to /var/www/trippin.club/""
 import pathlib, re, time
 VER = str(int(time.time()))  # cache-bust css/js behind Cloudflare
 root = pathlib.Path(__file__).parent
-NAV = [("features.html","Features"),("scenes.html","Scenes"),("remote.html","Remote app"),("download.html","Download")]
+NAV = [("features.html","Features"),("scenes.html","Scenes"),("whats-new.html","What's new"),("remote.html","Remote app"),("download.html","Download")]
 SHELL = """<!doctype html>
 <html lang="en">
 <head>
