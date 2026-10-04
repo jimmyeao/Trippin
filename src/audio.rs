@@ -517,6 +517,9 @@ struct Analyzer {
     phase: f32,  // 0..1
     beat_count: u64,
     pending_bpm: Option<(f32, u32)>,
+    /// A challenger that keeps winning but never by the margin — counted
+    /// separately so a real, sustained tempo change can't be locked out.
+    held_bpm: Option<(f32, u32)>,
     confidence: f32,
     downbeat_votes: [f32; 4],
     downbeat: u64,
@@ -610,6 +613,7 @@ impl Analyzer {
             phase: 0.0,
             beat_count: 0,
             pending_bpm: None,
+            held_bpm: None,
             confidence: 0.0,
             downbeat_votes: [0.0; 4],
             downbeat: 0,
@@ -1119,14 +1123,23 @@ impl Analyzer {
             .map(|l| if l >= min_lag - 1 { ac(l) } else { 0.0 })
             .collect();
         let zero = x.iter().map(|v| v * v).sum::<f32>() / x.len() as f32;
-        let mut best = (0usize, f32::MIN);
-        for lag in min_lag..=max_lag {
+        // Score of a candidate lag: reinforced by the double period (bar
+        // structure), penalised when a shorter lag at 2/3 explains the same
+        // periodicity — a bassline cycling every 1.5 beats otherwise peaks
+        // at the 1.5x shadow of the beat (127 -> 85, "Injected With a
+        // Poison"). All in units of autocorr before the tempo prior.
+        let score_of = |lag: usize| -> f32 {
             let bpm = 60.0 * self.fps / lag as f32;
             // Log-Gaussian tempo prior centred on 124 BPM.
             let prior = (-0.5 * ((bpm / 124.0).log2() / 0.5).powi(2)).exp();
-            // Reinforce with the double-period (bar-level structure).
             let dbl = acs.get(lag * 2).copied().unwrap_or(0.0);
-            let score = (acs[lag] + 0.5 * dbl.max(0.0)) * prior;
+            let tri = lag * 2 / 3;
+            let shadow = if tri >= min_lag { acs[tri].max(0.0) } else { 0.0 };
+            (acs[lag] + 0.5 * dbl.max(0.0) - 1.25 * shadow).max(0.0) * prior
+        };
+        let mut best = (0usize, f32::MIN);
+        for lag in min_lag..=max_lag {
+            let score = score_of(lag);
             if score > best.1 {
                 best = (lag, score);
             }
@@ -1153,7 +1166,63 @@ impl Analyzer {
         if rel < 0.04 {
             self.period += (period - self.period) * 0.25;
             self.pending_bpm = None;
+            self.held_bpm = None;
         } else {
+            // Inertia: once locked, a challenger must clearly beat the
+            // incumbent period's own autocorrelation — much harder when it
+            // sits on a simple harmonic of the locked tempo. A groove that
+            // repeats every 1.5 beats (the classic 3-against-4 bassline)
+            // otherwise wins a few windows and the readout flaps between
+            // the tempo and its 1.5x shadow (127 <-> 85).
+            let mut margin = 1.1f32;
+            if self.confidence > 0.25 {
+                let r = period / self.period;
+                let harmonic = [0.5f32, 0.6667, 0.75, 1.3333, 1.5, 2.0]
+                    .iter()
+                    .any(|&h| (r / h - 1.0).abs() < 0.03);
+                if harmonic {
+                    margin = 1.75;
+                }
+                let inc = (self.period.round() as usize).clamp(min_lag, max_lag);
+                let inc_bpm = 60.0 * self.fps / self.period;
+                let inc_prior =
+                    (-0.5 * ((inc_bpm / 124.0).log2() / 0.5).powi(2)).exp();
+                let inc_score = ((inc - 1).max(min_lag)..=(inc + 1).min(max_lag))
+                    .map(|l| score_of(l))
+                    .fold(0.0f32, f32::max);
+                if std::env::var("TRIPPIN_TEMPO_DEBUG").is_ok() {
+                    eprintln!(
+                        "tempo: cur={:.1} best={:.1}(lag {lag}) best={:.4} inc={:.4} margin={margin} zero={zero:.3}",
+                        60.0 * self.fps / self.period,
+                        60.0 * self.fps / period,
+                        best.1,
+                        inc_score
+                    );
+                }
+                if best.1 < inc_score * margin {
+                    // Suppressed — but a persistent disagreement (~6 s) is a
+                    // real change that started marginal. A harmonic shadow
+                    // may only escape toward the more plausible tempo, so
+                    // locking on the wrong side still recovers.
+                    let chal_bpm = 60.0 * self.fps / period;
+                    let chal_prior =
+                        (-0.5 * ((chal_bpm / 124.0).log2() / 0.5).powi(2)).exp();
+                    if !harmonic || chal_prior >= inc_prior {
+                        let held = match self.held_bpm {
+                            Some((p, n)) if (p - period).abs() / p < 0.04 => n + 1,
+                            _ => 1,
+                        };
+                        self.held_bpm = Some((period, held));
+                        if held >= 12 {
+                            self.period = period;
+                            self.pending_bpm = None;
+                            self.held_bpm = None;
+                        }
+                    }
+                    return;
+                }
+            }
+            self.held_bpm = None;
             // Require a few consistent estimates before jumping tempo.
             let votes = match self.pending_bpm {
                 Some((p, n)) if (p - period).abs() / p < 0.04 => n + 1,
@@ -1446,6 +1515,82 @@ mod tests {
             .fold(0.0f32, f32::max);
         println!("worst frame-to-frame deviation {worst:.3}");
         assert!(worst < 0.25, "trace jitters between frames: {worst}");
+    }
+
+    /// Build an onset envelope: weak kicks every beat, dominant stabs every
+    /// `stab_mult` beats — the 3-against-4 acid line that flapped 127 <-> 85
+    /// on "Injected With a Poison".
+    fn stab_env(fps: f32, bpm: f32, secs: f32, stab_mult: f32) -> VecDeque<f32> {
+        let period = 60.0 * fps / bpm;
+        let n = (fps * secs) as usize;
+        let mut env = vec![0.02f32; n];
+        let mut i = 0.0f32;
+        while (i as usize) < n {
+            env[i as usize] += 0.5;
+            i += period;
+        }
+        let mut i = 0.0f32;
+        while (i as usize) < n {
+            env[i as usize] += 1.0;
+            i += period * stab_mult;
+        }
+        env.into()
+    }
+
+    /// Locked at 127 BPM, the estimator must not jump to the autocorr peak at
+    /// 1.5x the beat period (85 BPM) even when the stab pattern dominates.
+    #[test]
+    fn tempo_inertia_holds_against_triplet_shadow() {
+        let (_tx, rx) = mpsc::channel();
+        let shared: SharedFeatures = Arc::new(Mutex::new(Features::default()));
+        let mut a = Analyzer::new(48000.0, shared, rx, None);
+        a.fps = 90.0;
+        let bpm = 127.0;
+        a.period = 60.0 * a.fps / bpm;
+        a.confidence = 0.6;
+        a.env = stab_env(a.fps, bpm, 6.0, 1.5);
+        for _ in 0..30 {
+            a.estimate_tempo();
+        }
+        let got = 60.0 * a.fps / a.period;
+        assert!((got - bpm).abs() < 6.0, "tempo flapped to {got}");
+    }
+
+    /// If the shadow won the initial lock (84.5 instead of 127), the more
+    /// plausible tempo is allowed to escape the suppression and take over.
+    #[test]
+    fn tempo_recovers_from_wrong_side_lock() {
+        let (_tx, rx) = mpsc::channel();
+        let shared: SharedFeatures = Arc::new(Mutex::new(Features::default()));
+        let mut a = Analyzer::new(48000.0, shared, rx, None);
+        a.fps = 90.0;
+        a.period = 60.0 * a.fps / 84.5;
+        a.confidence = 0.6;
+        a.env = stab_env(a.fps, 127.0, 6.0, 1.5);
+        for _ in 0..20 {
+            a.estimate_tempo();
+        }
+        let got = 60.0 * a.fps / a.period;
+        assert!((got - 127.0).abs() < 6.0, "stuck at {got}");
+    }
+
+    /// A real tempo change must still get through: locked at 140 while the
+    /// audio is genuinely 110 (not a harmonic), it follows within a few
+    /// windows.
+    #[test]
+    fn tempo_follows_genuine_change() {
+        let (_tx, rx) = mpsc::channel();
+        let shared: SharedFeatures = Arc::new(Mutex::new(Features::default()));
+        let mut a = Analyzer::new(48000.0, shared, rx, None);
+        a.fps = 90.0;
+        a.period = 60.0 * a.fps / 140.0;
+        a.confidence = 0.6;
+        a.env = stab_env(a.fps, 110.0, 6.0, 1.5);
+        for _ in 0..8 {
+            a.estimate_tempo();
+        }
+        let got = 60.0 * a.fps / a.period;
+        assert!((got - 110.0).abs() < 5.0, "tempo stuck at {got}");
     }
 
     const TAU_F: f32 = std::f32::consts::TAU;
