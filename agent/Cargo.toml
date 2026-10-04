@@ -1,0 +1,27 @@
+[package]
+name = "trippin-agent"
+version = "0.1.0"
+edition = "2021"
+description = "Tray agent for the DJ machine: detects the playing track locally and pushes it to a Trippin rig over the LAN remote protocol."
+publish = false
+
+[dependencies]
+anyhow = "1.0.104"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+tungstenite = "0.30.0"
+mdns-sd = "0.21.4"
+# The now-playing detection is literally ../src/nowplaying.rs (see
+# main.rs's #[path] include), so the agent needs its DJ-software deps.
+rusqlite = { version = "0.32", features = ["bundled"] }
+aes = "0.8"
+cbc = "0.1"
+pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
+sha2 = "0.10"
+# Tray icon + the small settings window.
+tray-icon = "0.21"
+eframe = "0.36"
+
+[target.'cfg(windows)'.dependencies]
+# SMTC media session (Spotify, Apple Music for Windows, browsers…).
+windows = { version = "0.62", features = ["Media_Control", "Foundation"] }

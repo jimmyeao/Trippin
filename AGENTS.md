@@ -194,7 +194,8 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
 | `src/dancer.rs`, `shaders/dancer.wgsl`, `dancers/` | Silhouette clips (PNG mask sequences), beat-locked. There's an energy cap for slow tempos. |
 | `src/text.rs`, `shaders/text.wgsl` | Timeline text cues (ab_glyph masks). |
 | `src/overlay.rs`, `shaders/overlay.wgsl` | Stream overlays: the now-playing card, branding and the ticker. They're drawn on the CPU into RGBA images when their content changes, and composited in the present pass. |
-| `src/nowplaying.rs` | Track detection, with a worker thread polling every 1 s. |
+| `src/nowplaying.rs` | Track detection, with a worker thread polling every 1 s. The `Remote` source reads a track pushed by the LAN agent over the remote protocol (id-tagged `RemoteNp` inbox in `Shared`). |
+| `agent/` | `trippin-agent`: standalone tray app (own Cargo.toml — build with `--manifest-path`) that runs `src/nowplaying.rs` via `#[path]` on the DJ machine and pushes tracks to a rig over the WS remote. Tray + egui settings window; Bonjour discovery + PIN. |
 | `src/output.rs` | The output tap. It re-runs present at the output size, reads it back asynchronously, and feeds the sinks (NDI, Spout, recorder). |
 | `src/ndi.rs`, `src/spout.rs` | NDI (runtime loaded dynamically), and a native Spout2 sender (D3D11 shared texture plus the Spout shared-memory registry). |
 | `src/rec.rs` | Clip recording: the ffmpeg replay buffer and set recording. |
@@ -516,9 +517,17 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   the first must be `{"cmd":"hello","pin":…}` — a wrong PIN earns an `err`
   frame, a 500 ms penalty, and a close. `hello` replies with scene/clip/
   palette/action lists. Commands (`action`, `goto_scene`, `queue_next`,
-  `show_clip`, `set`, `transport`, `thumb`) become `RemoteCmd`s posted to
+  `show_clip`, `set`, `transport`, `now_playing`, `thumb`) become
+  `RemoteCmd`s posted to
   `AppEvent::Remote` → `App::remote_cmd`, which runs `Action`s through
   `apply()` so remote presses record into an armed timeline like hotkeys.
+- **`now_playing`** is the companion agent's channel: it writes a
+  client-id-tagged track into `Shared.np_remote`, which the now-playing
+  worker's `Remote` source polls like any other source (so Auto mode, the
+  update delay and the status line all apply). When a client's socket
+  drops, `client()` posts a retract — the tag check means it can only
+  clear its own track. Clients must keep reading inbound frames (state
+  pushes at 10 Hz) or the bounded queue drops them.
 - **State pushes** run ~10 Hz from a pusher thread that serialises once
   and hands each client a copy over a bounded channel — a client whose
   queue stays full is dropped. `thumb` requests queue until
