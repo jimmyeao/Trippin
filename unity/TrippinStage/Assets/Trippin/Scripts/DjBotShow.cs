@@ -17,9 +17,10 @@ using UnityEngine;
 
 namespace TrippinStage
 {
-    public sealed class DjBotShow : KitShow
+    public class DjBotShow : KitShow
     {
         const float H = 9f;
+        protected Transform root;   // the booth, DJ and rig live under this (the club show moves it back and scales it)
         RobotMats _mats;
         Android _dj;
         PartPool _halo, _haloDisc;
@@ -32,29 +33,33 @@ namespace TrippinStage
 
         static readonly Quaternion Face = Quaternion.Euler(0f, 180f, 0f);
 
+        /// Where the DJ stage is built: the show's own transform, or (robot club) a child placed deeper in the scene.
+        protected virtual Transform MakeRoot() => transform;
+
         protected override void Build()
         {
             Env(160f, 0.06f);
+            root = MakeRoot();
             _mats = new RobotMats(robotMat);
-            _dj = new Android(transform, _mats, H, Face, true, "dj", true);
-            _halo = new PartPool(transform, _mats.glow, PartPool.Kind.Cylinder, 1, "halo", false);
-            _haloDisc = new PartPool(transform, _mats.dark, PartPool.Kind.Cylinder, 1, "halo disc", false);
-            _boxes = new PartPool(transform, _mats.dark, PartPool.Kind.Cube, 4, "booth", true);
-            _deckBox = new PartPool(transform, _mats.chrome, PartPool.Kind.Cube, 3, "deck", true);
-            _platter = new PartPool(transform, _mats.dark, PartPool.Kind.Cylinder, 2, "platter", true);
-            _rim = new PartPool(transform, _mats.glow, PartPool.Kind.Cylinder, 2, "platter rim", true);
-            _marker = new PartPool(transform, _mats.glow, PartPool.Kind.Cube, 4, "marker", true);
-            _fader = new PartPool(transform, _mats.glow, PartPool.Kind.Cube, 5, "fader", true);
-            _knob = new PartPool(transform, _mats.chrome, PartPool.Kind.Cylinder, 8, "knob", true);
-            _knobMark = new PartPool(transform, _mats.glow, PartPool.Kind.Cube, 8, "knob mark", true);
-            _led = new PartPool(transform, _mats.glow, PartPool.Kind.Cube, 18, "vu", true);
-            _wallM = Kit.Part(transform, "led wall", Kit.GridMesh(1, 1, "wall"), new Material(screenMat), new Vector3(0f, 11f, 14f), new Vector3(46f, 22f, 1f))
+            _dj = new Android(root, _mats, H, Face, true, "dj", true);
+            _halo = new PartPool(root, _mats.glow, PartPool.Kind.Cylinder, 1, "halo", false);
+            _haloDisc = new PartPool(root, _mats.dark, PartPool.Kind.Cylinder, 1, "halo disc", false);
+            _boxes = new PartPool(root, _mats.dark, PartPool.Kind.Cube, 4, "booth", true);
+            _deckBox = new PartPool(root, _mats.chrome, PartPool.Kind.Cube, 3, "deck", true);
+            _platter = new PartPool(root, _mats.dark, PartPool.Kind.Cylinder, 2, "platter", true);
+            _rim = new PartPool(root, _mats.glow, PartPool.Kind.Cylinder, 2, "platter rim", true);
+            _marker = new PartPool(root, _mats.glow, PartPool.Kind.Cube, 4, "marker", true);
+            _fader = new PartPool(root, _mats.glow, PartPool.Kind.Cube, 5, "fader", true);
+            _knob = new PartPool(root, _mats.chrome, PartPool.Kind.Cylinder, 8, "knob", true);
+            _knobMark = new PartPool(root, _mats.glow, PartPool.Kind.Cube, 8, "knob mark", true);
+            _led = new PartPool(root, _mats.glow, PartPool.Kind.Cube, 18, "vu", true);
+            _wallM = Kit.Part(root, "led wall", Kit.GridMesh(1, 1, "wall"), new Material(screenMat), new Vector3(0f, 11f, 14f), new Vector3(46f, 22f, 1f))
                 .GetComponent<Renderer>().sharedMaterial;
             _wallM.SetFloat("_Mode", 0f);
             _wallM.SetFloat("_Cols", 92f);
             _wallM.SetFloat("_Rows", 44f);
-            _lasers = new BeamPool(transform, beamMat, 14, "laser", false, 0.05f, 0f, 40f, 0.45f, 0.98f, 0.3f);
-            _shafts = new BeamPool(transform, beamMat, 6, "shaft", false, 0.12f, 0.004f, 8f, 0.7f, 0.4f, 0f);
+            _lasers = new BeamPool(root, beamMat, 14, "laser", false, 0.05f, 0f, 40f, 0.45f, 0.98f, 0.3f);
+            _shafts = new BeamPool(root, beamMat, 6, "shaft", false, 0.12f, 0.004f, 8f, 0.7f, 0.4f, 0f);
         }
 
         static float Ease(float cur, float target, float dt) => Eased.Follow(cur, target, 3f, 3f, dt);
@@ -210,9 +215,17 @@ namespace TrippinStage
             }
 
             // Camera: low in front, drifting, pushing in on a build.
+            Vector3 pos, look;
+            CameraPose(out pos, out look);
+            rig.Move(cam, pos, look, dt, 0.7f);
+        }
+
+        /// The camera's target pose (the club show shoots from behind the crowd).
+        protected virtual void CameraPose(out Vector3 pos, out Vector3 look)
+        {
             float sway = Mathf.Sin(rx.phrase * 0.5f);
-            rig.Move(cam, new Vector3(sway * 5f, 6.2f + 0.5f * Mathf.Sin(rx.phrase), -5.5f + 2f * rx.tension),
-                new Vector3(0f, 7.0f, 4f), dt, 0.7f);
+            pos = new Vector3(sway * 5f, 6.2f + 0.5f * Mathf.Sin(rx.phrase), -5.5f + 2f * rx.tension);
+            look = new Vector3(0f, 7.0f, 4f);
         }
     }
 }

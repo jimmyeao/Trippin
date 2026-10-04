@@ -283,6 +283,7 @@ namespace TrippinStage.EditorTools
                 ("unity_djbot", typeof(DjBotShow)),
                 ("unity_robot_rave", typeof(RobotRaveShow)),
                 ("unity_assembly", typeof(AssemblyShow)),
+                ("unity_robot_club", typeof(RobotClubShow)),
             };
             var showList = new System.Collections.Generic.List<GameObject> { stage, crystals, flowGo, levGo, sculptGo, colGo, tidalGo, stormGo, prismGo, auroraGo, bassGo, pillarsGo, orbitGo };
             var nameList = new System.Collections.Generic.List<string> { "unity_stage", "unity_crystals", "unity_flow", "unity_leviathan", "unity_sculpture", "unity_colossus", "unity_tidal_cathedral", "unity_lightstorm", "unity_prism", "unity_aurora", "unity_basscore", "unity_pillars", "unity_orbit_foundry" };
@@ -309,6 +310,7 @@ namespace TrippinStage.EditorTools
                 ks.horizonMat = kitHorizon;
                 ks.robotMat = kitRobot;
                 ks.screenMat = kitScreen;
+                ks.crowdMeshMat = dir.crowdMeshMat;
                 showList.Add(kgo);
                 nameList.Add(kname);
             }
