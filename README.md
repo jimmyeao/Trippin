@@ -24,15 +24,16 @@ scenes on phrase boundaries and drops.
 
 ## Install
 
-Download `Trippin-Setup-<version>.exe` from the GitHub **Releases** page (or
-from the artifacts of the latest *Build installer* workflow run) and run it.
+Download `Trippin-Setup-<version>.exe` from the GitHub **Releases** page and
+run it.
 Settings are saved to `%APPDATA%\Trippin\trippin.json`.
 
 To release a new version: **Actions → Build installer → Run workflow**, enter
 the version (e.g. `0.2.0`) — it bumps `Cargo.toml`, commits, tags `v<version>`,
 builds the installer and publishes the release. Or do it by hand: bump
 `version` in `Cargo.toml`, then `git tag v0.2.0 && git push origin v0.2.0`.
-Every push to `master` also builds an installer artifact.
+The workflow only runs for `v*` tags and manual runs (pushes and PRs don't
+build, to save Actions minutes); run it with a blank version for a test build.
 
 Build the installer locally (needs Inno Setup 6):
 

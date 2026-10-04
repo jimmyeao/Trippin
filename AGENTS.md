@@ -117,6 +117,9 @@ overlays.
   changed and why. Push when a piece works, so the other agent can see it.
 - **Merging to master:** `git merge --no-ff` with a `Merge feat/<x>: …`
   summary, or a PR. Only when the owner asks.
+- **CI costs the owner money.** `release.yml` runs only on `v*` tags and
+  manual dispatch; don't add push/PR triggers back. One release = one tag
+  push = one run.
 - **Releases:** bump `version` in `Cargo.toml` on master, commit
   "Bump version to X.Y.Z", then push an annotated tag `vX.Y.Z`. Pushing a
   `v*` tag triggers `.github/workflows/release.yml`, which builds the
