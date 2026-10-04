@@ -269,6 +269,56 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
 - Domain-repeated cities and facades: evaluate the current cell only, and
   clamp the march step.
 
+### Adding a dancer/musician clip
+
+- Sources are free stock silhouettes (credited in `dancers/CREDITS.md`).
+  `tools/stock_dancer.py` mattes, loop-searches, seam-crossfades and crops;
+  `tools/ai_dancer.py` (rembg) handles footage that isn't a silhouette.
+  Then `tools/beat_align.py` (accent on the downbeat), a contact sheet to
+  eyeball it, and `tools/mirror_clip.py` for the `_mir` variant.
+- **`--matte bg`** keys off the frame's median backdrop colour — use it for a
+  subject on saturated seamless paper (red/blue/green), where `dark`'s pure
+  luma test keys the backdrop itself.
+- **`--bpm auto`** measures the footage's own playing tempo from mask motion
+  and counts the loop in whole footage beats. Musicians need it: a clip
+  looped at 124 BPM while the drummer plays at 106 lands hits between the
+  live beats Trippin retimes to.
+- The auto `energy` measure undervalues clips with big props or small
+  movement (drum kit, seated strumming) — hand-set it in clip.json.
+- **Sourcing footage:** Mixkit pages expose `contentUrl` in JSON-LD and
+  `assets.mixkit.co/videos/<id>/<id>-720.mp4` serves any ID (probe ranges;
+  `<id>-thumb-720-0.jpg` is the preview). Pexels pages are Cloudflare-
+  blocked but `pexels.com/download/video/<id>/` 302s to the file, and
+  `videos.pexels.com/video-files/<id>/<id>-sd_<w>_<h>_<fps>fps.mp4` guesses
+  smaller renditions; `images.pexels.com/videos/<id>/pictures/preview-0.jpg`
+  thumbs IDs cheaply. Pixabay is fully blocked.
+- **AI-matte props:** `u2net_human_seg` erodes held instruments entirely (a
+  guitar becomes part of the body blob); `isnet-general-use` keeps them but
+  also mattes person-adjacent *equipment* on cluttered stages — drum kits,
+  monitor wedges, cables end up fused to the silhouette and can't be
+  separated by component or alpha cuts.
+- **Mid-alpha mattes:** a `--matte bg` clip that renders see-through
+  (guitar bodies, clothing in the key colour) is fixed by
+  `clean_masks.py --bg-weight 0 --static-max 1.0 --solid 1.0 --thresh 0.2`
+  — raise every kept pixel to full opacity. Keep `--static-max 1.0` for
+  seated/dwelling performers or the body is rejected as static backdrop.
+- **Alice API footage** (key in `alice.env`, docs `alice.md`, host
+  `https://alice.deviousweb.com/api`): POST /agent/{image,video}, poll
+  status_url; video returns MP4 bytes, image returns base64 JSON. urllib's
+  default UA is 403'd — use curl. **LTX-2.5 cannot render an upright
+  guitarist**: every t2v/i2v/fl2v take bends the figure into the same
+  hunched rock crouch regardless of prompt wording or pinned end-frames —
+  the motion prior is baked. For an upright musician, generate a still via
+  `/agent/image` (Flux obeys pose prompts fine) and animate it with
+  `tools/puppet_dancer.py` (soft-elliptical-region warp: head nod, strum
+  forearm, sway+bob; periodic so the loop wraps and strums land on beats —
+  omit `accent`, don't run beat_align). Flux silhouettes keep interior
+  white line detail (strings/f-holes) — `binary_fill_holes` in the tool
+  takes care of it.
+- **Procedural musicians:** `tools/guitar_choreo.py` + `mocap_dancer.py
+  --male --guitar` also exists but the rendered body reads as a cartoon —
+  prefer the Alice-still + puppet-warp route for humans-with-instruments.
+
 ## 7. Rust and app gotchas
 
 - **Never take the same `Mutex` twice in one statement.** Temporaries live

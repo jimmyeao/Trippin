@@ -1,0 +1,10 @@
+{
+  "name": "band_guitar",
+  "fps": 30.0,
+  "frames": 116,
+  "beats": 8,
+  "width": 264,
+  "height": 512,
+  "energy": 0.5,
+  "source": "Alice/Flux generated still, puppet-warped (tools/puppet_dancer.py)"
+}

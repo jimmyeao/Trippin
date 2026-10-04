@@ -61,6 +61,9 @@ def main():
     ap.add_argument("--start", type=float, default=0.0, help="seconds into the clip to start scanning")
     ap.add_argument("--len", dest="seconds", type=float, default=14.0, help="scan window length")
     ap.add_argument("--beats", type=int, nargs="+", default=[16, 12, 8])
+    ap.add_argument("--bpm", default=str(sd.REF_BPM),
+                    help="tempo the loop beats are counted at: a number, or 'auto' "
+                         "to measure the footage's own playing tempo")
     ap.add_argument("--energy", type=float)
     ap.add_argument("--source", default="", help="credit / origin, stored in clip.json")
     ap.add_argument("--model", default="u2net_human_seg",
@@ -93,15 +96,30 @@ def main():
     clipped = sum(int(edge_hit(m)) for m in masks if m.max() > 0.5)
     print(f"{clipped}/{len(masks)} scan frames have the subject touching the source edge")
 
+    ref_bpm = sd.REF_BPM
+    if args.bpm == "auto":
+        beat_sec = sd.measure_beat_seconds(masks)
+        if beat_sec is not None:
+            ref_bpm = 60.0 / beat_sec
+            while ref_bpm > 190.0:
+                ref_bpm /= 2.0
+            while ref_bpm < 66.0:
+                ref_bpm *= 2.0
+            print(f"measured footage tempo: {ref_bpm:.1f} BPM")
+        else:
+            print(f"no clear tempo in the footage; keeping {sd.REF_BPM:.0f} BPM")
+    else:
+        ref_bpm = float(args.bpm)
+
     blend = 8
-    lengths = sorted({int(round(b * 60 / sd.REF_BPM * FPS * k))
+    lengths = sorted({int(round(b * 60 / ref_bpm * FPS * k))
                       for b in args.beats for k in np.linspace(0.96, 1.04, 9)})
     lengths = [L for L in lengths if L + blend + 2 < len(masks) and L <= MAX_FRAMES]
     if not lengths:
         raise SystemExit("scan window too short for any loop length — raise --len")
     s, L, cost, motion = sd.find_loop(masks, lengths, blend)
-    beats = min(args.beats, key=lambda b: abs(b * 60 / sd.REF_BPM * FPS - L))
-    print(f"loop: {s / FPS:.2f}s + {L / FPS:.2f}s ({beats} beats), seam cost {cost:.3f}")
+    beats = min(args.beats, key=lambda b: abs(b * 60 / ref_bpm * FPS - L))
+    print(f"loop: {s / FPS:.2f}s + {L / FPS:.2f}s ({beats} beats at {ref_bpm:.0f} BPM), seam cost {cost:.3f}")
 
     loop = masks[s:s + L].copy()
     loop_edge = sum(int(edge_hit(m)) for m in loop)
