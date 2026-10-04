@@ -449,6 +449,19 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   `TRIPPIN_NO_NN=1` compares without the check, `TRIPPIN_NN_DEBUG=1` logs
   each window. `main` caps rten at 2 threads (`RTEN_NUM_THREADS`); it
   barely scales past 4 and would otherwise take every core.
+- **Tempo shadows** (`audio.rs` `estimate_tempo`): autocorrelation peaks at
+  the *pattern* period, not the beat — a bassline cycling every 1.5 beats
+  ("Injected With a Poison") makes the raw max sit at the 1.5x shadow
+  (127 -> 84.5, the reported 127 <-> 85 flap). Two defences: `score_of`
+  subtracts `acs[2*lag/3]` so a lag explained by a faster pulse loses the
+  pick, and once `confidence > 0.25` a challenger must beat the incumbent
+  lag's own score by a margin (1.75x on a simple-harmonic ratio — 1/2, 2/3,
+  3/4, 4/3, 3/2, 2x — else 1.1x). A persistent suppressed challenger can
+  still escape after ~6 s, but a harmonic shadow only toward the
+  higher-prior tempo, so a wrong-side lock self-heals while the true lock
+  can't be usurped. `TRIPPIN_TEMPO_DEBUG=1` prints cur/best/inc scores.
+  Regression tests: `tempo_inertia_holds_against_triplet_shadow`,
+  `tempo_recovers_from_wrong_side_lock`, `tempo_follows_genuine_change`.
 - `song::load` uses the Beat This! grid when `beats::ready()` (downloaded and
   `Settings::beat_model` on); downbeat agreement < 50% keeps its tempo but
   picks the bar by bass vote. `ai::build_show` returns re-detected grids
