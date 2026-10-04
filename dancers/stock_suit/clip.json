@@ -1,5 +1,6 @@
 {
   "name": "stock_suit",
+  "title": "Suit",
   "fps": 30,
   "frames": 60,
   "beats": 4,

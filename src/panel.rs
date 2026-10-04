@@ -169,6 +169,9 @@ pub enum UiCommand {
     Song(SongCtl),
     /// Ask the render thread to produce a scene thumbnail.
     Thumb(String),
+    /// Start (or cancel) the GPU baseline — heavy + unity scenes are
+    /// stepped through and sub-30 fps ones deselected.
+    PerfCheck,
 }
 
 /// Live state shown in the panel's status area, written by the render thread.
@@ -187,6 +190,8 @@ pub struct Status {
     pub bar_in_scene: u32,
     pub bars_total: u32,
     pub clip: Option<String>,
+    /// Display title for `clip` (same index-space as `clip_titles`).
+    pub clip_title: Option<String>,
     pub blackout: bool,
     /// Live strobe gate (the Z key / timeline cue share it).
     pub strobe: bool,
@@ -207,6 +212,15 @@ pub struct Status {
     /// Clip recorder state (None = not running) / why it can't run.
     pub rec: Option<crate::rec::Status>,
     pub rec_err: Option<String>,
+    /// Display titles parallel with the shared scene/clip lists (Arc so the
+    /// ~20 Hz status rebuild is a refcount bump). Ids stay the keys.
+    pub scene_titles: std::sync::Arc<Vec<String>>,
+    pub clip_titles: std::sync::Arc<Vec<String>>,
+    /// GPU baseline progress: (done, total, scene under test) while it runs.
+    pub perf_prog: Option<(u32, u32, String)>,
+    /// Scenes the last baseline measured under 30 fps — the picker flags
+    /// them and the check deselects them.
+    pub perf_slow: Vec<String>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -750,8 +764,11 @@ fn perform_tab(
     let shown: Vec<usize> = (0..scenes.len())
         .filter(|&i| {
             let n = &scenes[i];
-            if !q.is_empty() && !n.to_lowercase().contains(&q) {
-                return false;
+            if !q.is_empty() {
+                let t = st.scene_titles.get(i).map(String::as_str).unwrap_or(n);
+                if !n.to_lowercase().contains(&q) && !t.to_lowercase().contains(&q) {
+                    return false;
+                }
             }
             let is_heavy = heavy.get(i).copied().unwrap_or(false);
             match *chip {
@@ -926,6 +943,10 @@ fn perform_tab(
                             st,
                             i,
                             scenes[i].as_str(),
+                            st.scene_titles
+                                .get(i)
+                                .map(String::as_str)
+                                .unwrap_or(&scenes[i]),
                             heavy.get(i).copied().unwrap_or(false),
                             heavy_on,
                             date,
@@ -1072,6 +1093,7 @@ fn scene_tile(
     st: &Status,
     i: usize,
     name: &str,
+    title: &str,
     is_heavy: bool,
     heavy_on: bool,
     date: (u32, u32),
@@ -1119,9 +1141,27 @@ fn scene_tile(
         tag_r.center(),
         egui::Align2::CENTER_CENTER,
         tag,
-        tag_font,
+        tag_font.clone(),
         if seasonal { LANE_FX } else { MUTED },
     );
+    // The GPU baseline measured this one under 30 fps on this machine —
+    // say so on the tile (the check already switched it out of rotation).
+    let slow = st.perf_slow.iter().any(|n| n == name);
+    if slow {
+        let sw = text_w(p, "slow", &tag_font) + 8.0;
+        let slow_r = egui::Rect::from_min_size(
+            egui::pos2(tag_r.max.x + 4.0, tag_r.min.y),
+            egui::vec2(sw, 13.0),
+        );
+        p.rect_filled(slow_r, 3.0, WARN.gamma_multiply(0.25));
+        p.text(
+            slow_r.center(),
+            egui::Align2::CENTER_CENTER,
+            "slow",
+            tag_font,
+            WARN,
+        );
+    }
 
     // Favourite star, left of the checkbox — drawn, not a glyph (the
     // bundled font has no ★). Filled amber when starred.
@@ -1192,7 +1232,7 @@ fn scene_tile(
     } else {
         0.0
     };
-    let shown = ellipsize(p, name, &name_font, w - 12.0 - live_w);
+    let shown = ellipsize(p, title, &name_font, w - 12.0 - live_w);
     p.text(
         egui::pos2(rect.min.x + 6.0, img_r.max.y + 9.0),
         egui::Align2::LEFT_TOP,
@@ -1244,9 +1284,11 @@ fn scene_tile(
         cmd.push(UiCommand::GoToScene(i));
     }
     resp.on_hover_text(if blocked {
-        format!("{name} — out of rotation (scene set off)")
+        format!("{title} ({name}) — out of rotation (scene set off)")
+    } else if slow {
+        format!("{title} ({name}) — under 30 fps in the GPU check · click to cut anyway")
     } else {
-        format!("{name} — click to cut · right-click to play next")
+        format!("{title} ({name}) — click to cut · right-click to play next")
     });
 }
 
@@ -1318,6 +1360,11 @@ fn inspector_body(
     // Live preview with the accent frame + a "live output" caption baked
     // into its lower-left corner (mockup 1b).
     let name = scenes.get(st.scene).cloned().unwrap_or_default();
+    let title = st
+        .scene_titles
+        .get(st.scene)
+        .cloned()
+        .unwrap_or_else(|| name.clone());
     let w = ui.available_width();
     let (rect, _) =
         ui.allocate_exact_size(egui::vec2(w, w * 9.0 / 16.0), egui::Sense::hover());
@@ -1343,7 +1390,8 @@ fn inspector_body(
     // Name left, "bar N of M" right — then the thin cut-progress bar.
     ui.add_space(4.0);
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new(&name).monospace().size(16.0).strong());
+        ui.label(egui::RichText::new(&title).monospace().size(16.0).strong())
+            .on_hover_text(&name);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if st.bars_total > 0 {
                 ui.label(
@@ -1384,7 +1432,13 @@ fn inspector_body(
     ui.add_space(2.0);
     ui.horizontal(|ui| {
         if let Some(nx) = st.next_scene {
-            let raw = format!("next → {}", scenes.get(nx).map(String::as_str).unwrap_or("?"));
+            let nx_title = st
+                .scene_titles
+                .get(nx)
+                .map(String::as_str)
+                .or_else(|| scenes.get(nx).map(String::as_str))
+                .unwrap_or("?");
+            let raw = format!("next → {nx_title}");
             let font = egui::FontId::monospace(11.0);
             let shown = ellipsize(ui.painter(), &raw, &font, ui.available_width() - 60.0);
             ui.label(egui::RichText::new(shown).size(11.0).color(ACCENT).monospace())
@@ -1451,9 +1505,9 @@ fn inspector_body(
                 egui::Layout::left_to_right(egui::Align::Center),
                 |ui| {
                     let look = s.dancer_style.map(|i| STYLES[i]).unwrap_or("auto");
+                    let clip_disp = st.clip_title.as_deref().or(st.clip.as_deref()).unwrap_or("off");
                     let val = format!(
-                        "{} · {look} · {:.0}%",
-                        st.clip.as_deref().unwrap_or("off"),
+                        "{clip_disp} · {look} · {:.0}%",
                         st.confidence * 100.0
                     );
                     let shown = ellipsize(
@@ -1691,13 +1745,24 @@ fn pads_view(
     let preview_w = (ui.available_width() - 10.0) / 2.0;
     ui.horizontal(|ui| {
         let w = preview_w;
-        pad_preview(ui, thumbs, want, cmd, w, preview_h, "NOW", scenes.get(st.scene), {
-            if st.bars_total > 0 {
-                bar_progress_line(st)
-            } else {
-                String::new()
-            }
-        });
+        pad_preview(
+            ui,
+            thumbs,
+            want,
+            cmd,
+            w,
+            preview_h,
+            "NOW",
+            scenes.get(st.scene),
+            st.scene_titles.get(st.scene).map(String::as_str),
+            {
+                if st.bars_total > 0 {
+                    bar_progress_line(st)
+                } else {
+                    String::new()
+                }
+            },
+        );
         pad_preview(
             ui,
             thumbs,
@@ -1707,6 +1772,9 @@ fn pads_view(
             preview_h,
             "UP NEXT",
             st.next_scene.and_then(|i| scenes.get(i)),
+            st.next_scene
+                .and_then(|i| st.scene_titles.get(i))
+                .map(String::as_str),
             String::new(),
         );
     });
@@ -1735,7 +1803,7 @@ fn pads_view(
             Action::NextScene,
             "next scene",
             st.next_scene
-                .and_then(|i| scenes.get(i))
+                .and_then(|i| st.scene_titles.get(i).or_else(|| scenes.get(i)))
                 .map_or("cut now".to_string(), |n| n.clone()),
             PadKind::Go,
             false,
@@ -2020,6 +2088,7 @@ fn pad_preview(
     h: f32,
     title: &str,
     scene: Option<&String>,
+    disp: Option<&str>,
     line: String,
 ) {
     use crate::ui_theme::*;
@@ -2068,11 +2137,12 @@ fn pad_preview(
             egui::StrokeKind::Inside,
         );
     }
-    // Name + timing caption inside the frame, lower-left.
-    let caption = match scene {
-        Some(n) if line.is_empty() => n.clone(),
-        Some(n) => format!("{n} · {line}"),
-        None => "—".to_string(),
+    // Name + timing caption inside the frame, lower-left — the display
+    // title, while `scene` (the id) stays the thumbnail key.
+    let caption = match (scene, disp) {
+        (Some(n), _) if line.is_empty() => disp.unwrap_or(n).to_string(),
+        (Some(n), _) => format!("{} · {line}", disp.unwrap_or(n)),
+        (None, _) => "—".to_string(),
     };
     let cf = egui::FontId::monospace(11.0);
     let cw = text_w(p, &caption, &cf) + 14.0;
@@ -2866,7 +2936,8 @@ fn dancer_fx_tab(
                 for &i in chunk {
                     let name = &clips[i];
                     let has_mir = clips.iter().any(|c| c == &format!("{name}_mir"));
-                    clip_tile(ui, s, st, i, name, has_mir, clip_thumbs, cmd);
+                    let title = st.clip_titles.get(i).map(String::as_str).unwrap_or(name);
+                    clip_tile(ui, s, st, i, name, title, has_mir, clip_thumbs, cmd);
                 }
             });
         }
@@ -2882,6 +2953,7 @@ fn clip_tile(
     st: &Status,
     i: usize,
     name: &str,
+    title: &str,
     has_mir: bool,
     clip_thumbs: &mut HashMap<String, Option<egui::TextureHandle>>,
     cmd: &mut Vec<UiCommand>,
@@ -2989,7 +3061,7 @@ fn clip_tile(
     // Middle-elide: suffixes (like _mir) carry meaning, don't truncate them.
     let shown = elide_mid(
         p,
-        name,
+        title,
         &egui::FontId::monospace(10.0),
         TW - 12.0,
     );
@@ -3012,7 +3084,7 @@ fn clip_tile(
     if resp.clicked() && !cb_clicked {
         cmd.push(UiCommand::ShowClip(i));
     }
-    resp.on_hover_text(name);
+    resp.on_hover_text(format!("{title} ({name})"));
 }
 
 /// Mid-frame texture for a dancer clip, decoded once and cached.
@@ -3369,6 +3441,34 @@ pub(crate) fn cue_color(k: &CueKind) -> egui::Color32 {
     }
 }
 
+/// Like `pick_str` but the menu shows display titles — `cur` and the
+/// stored cue value stay the stable id.
+fn pick_named(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    cur: &mut String,
+    ids: &[String],
+    titles: &[String],
+) -> bool {
+    let mut changed = false;
+    let cur_disp = ids
+        .iter()
+        .position(|n| n == cur)
+        .and_then(|i| titles.get(i))
+        .map(String::as_str)
+        .unwrap_or(cur.as_str());
+    egui::ComboBox::from_id_salt(id)
+        .width(110.0)
+        .selected_text(if cur.is_empty() { "pick…" } else { cur_disp })
+        .show_ui(ui, |ui| {
+            for (i, o) in ids.iter().enumerate() {
+                let label = titles.get(i).map(String::as_str).unwrap_or(o);
+                changed |= ui.selectable_value(cur, o.clone(), label).changed();
+            }
+        });
+    changed
+}
+
 /// Pick a string from `opts` — returns true when the value changed.
 fn pick_str(ui: &mut egui::Ui, id: egui::Id, cur: &mut String, opts: &[String]) -> bool {
     let mut changed = false;
@@ -3392,12 +3492,14 @@ pub(crate) fn cue_param_ui(
     ui: &mut egui::Ui,
     kind: &mut CueKind,
     scenes: &[String],
+    scene_titles: &[String],
     clips: &[String],
+    clip_titles: &[String],
     id: egui::Id,
 ) -> bool {
     match kind {
-        CueKind::Scene(n) => pick_str(ui, id.with("sc"), n, scenes),
-        CueKind::Clip(n) => pick_str(ui, id.with("cl"), n, clips),
+        CueKind::Scene(n) => pick_named(ui, id.with("sc"), n, scenes, scene_titles),
+        CueKind::Clip(n) => pick_named(ui, id.with("cl"), n, clips, clip_titles),
         CueKind::Mode(m) => {
             ui.selectable_value(m, Mode::Auto, "auto").changed()
                 | ui.selectable_value(m, Mode::Static, "static").changed()
@@ -3676,6 +3778,50 @@ fn settings_tab(
                 } else {
                     format!("Unity engine: {st}")
                 });
+            }
+        });
+        ui.add_space(12.0);
+        card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            section_label(ui, "gpu baseline");
+            if let Some((done, total, cur)) = &st.perf_prog {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(format!("checking {cur} — {done} of {total}"));
+                });
+                let frac = *done as f32 / (*total).max(1) as f32;
+                let (r, _) =
+                    ui.allocate_exact_size(egui::vec2(ui.available_width(), 6.0), egui::Sense::hover());
+                let pp = ui.painter();
+                pp.rect_filled(r, 3.0, INSET);
+                pp.rect_filled(
+                    egui::Rect::from_min_size(r.min, egui::vec2(r.width() * frac, r.height())),
+                    3.0,
+                    ACCENT,
+                );
+                if ui.button("Cancel").clicked() {
+                    cmd.push(UiCommand::PerfCheck);
+                }
+            } else {
+                ui.small(
+                    "Steps through the 3D and Unity scenes on the live output, \
+                     and switches any that can't hold 30 fps out of rotation \
+                     (they get a \"slow\" tag — re-tick them to force them back in).",
+                );
+                if ui.button("Run the performance check").clicked() {
+                    cmd.push(UiCommand::PerfCheck);
+                }
+                if !st.perf_slow.is_empty() {
+                    ui.small(
+                        egui::RichText::new(format!(
+                            "Last check: {} scene{} measured too slow.",
+                            st.perf_slow.len(),
+                            if st.perf_slow.len() == 1 { "" } else { "s" }
+                        ))
+                        .color(WARN),
+                    )
+                    .on_hover_text(st.perf_slow.join(", "));
+                }
             }
         });
         ui.min_rect().height()

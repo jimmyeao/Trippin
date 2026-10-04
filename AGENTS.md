@@ -202,7 +202,8 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
 | `src/rec.rs` | Clip recording: the ffmpeg replay buffer and set recording. |
 | `src/timeline.rs`, `src/song.rs`, `src/editor.rs`, `src/ai.rs` | The timeline show editor (F2), song playback, and the AI show builder (local analysis → prompt → plan → `expand_plan` rules → cues). |
 | `src/panel.rs` | The egui control panel. Tabs: Perform, Dancer & FX, Stream, Timeline, Keys, Settings. App-wide preferences (audio in, latency, director rules, AI provider/key) live on **Settings** (`settings_tab`), not in collapsibles on other pages or in the timeline editor. |
-| `src/config.rs` | `Settings` (serde, `#[serde(default)]`), actions and hotkeys, and `data_dir()`. |
+| `src/config.rs` | `Settings` (serde, `#[serde(default)]`), actions and hotkeys, `titleize` (id → display name), and `data_dir()`. |
+| `src/perf.rs` | The per-machine GPU baseline (`perf.json`) and the Settings-button check that measures `@heavy`/`unity_*` scenes and deselects sub-30 fps ones. |
 | `src/midi.rs` | MIDI input (midir): one port, note-ons become `Action`s. |
 | `src/remote.rs` | LAN remote for the iOS companion app: a WebSocket JSON server (TCP 9138, Bonjour `_trippin._tcp`, PIN-gated) — protocol at the top of the file, details in §8. |
 | `ios/TrippinRemote/` | The iOS/iPadOS remote app (SwiftUI, iOS 17+): Bonjour discovery, PIN pairing in the Keychain, pads, scene grid with thumbnails, look/FX, dancer and transport pages, plus a built-in `DemoServer` for use without a rig (and for App Review). The `.xcodeproj` is generated: run `xcodegen` in that folder (it's git-ignored). Speaks the `remote.rs` protocol; UI tests in `UITests/`. See its README. |
@@ -216,8 +217,14 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
 - **The entry point:** `shaders/scenes/<name>.wgsl` with
   `@fragment fn fs_main(in: VsOut) -> @location(0) vec4<f32>`. The output is
   HDR, and present tonemaps it.
-- **Header tags** go in the first 8 lines: `// @heavy`, `// @bloom 0.7` and
-  `// @tonemap agx`.
+- **Header tags** go in the first 8 lines: `// @heavy`, `// @bloom 0.7`,
+  `// @tonemap agx` and `// @title Display Name`. `@title` is the scene's
+  human name in pickers/remotes — the file stem stays the id; without it
+  the id is title-cased (`config::titleize`, acronym-aware).
+- **Display names vs ids:** settings, timelines, remote commands and
+  `disabled_scenes`/`favourite_scenes` all key on the id — never store or
+  match a title. Dancer clips carry `"title"` in `clip.json` the same way
+  (`dancer::clip_titles`).
 - **The audio vocabulary** (see `common.wgsl`):
   - `u.lvl4`, `u.hits4` and `u.pres4` are loudness, transients and slow
     presence, per band: bass, mid, mid-high and high.
@@ -359,6 +366,14 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   strips it. Do the same for any user-edited text files you read.
 - Anything that re-installs global taps (see `rec.rs`) must drop the old
   instance **before** starting the new one.
+- **The GPU baseline** (`perf.rs`, Settings → "Run the performance check")
+  steps every `@heavy` + `unity_*` scene live on the render thread and
+  writes `perf.json`. wgpu scenes are timed by real frame ms; `unity_*`
+  shows by the engine's `seq` counter (the scene itself is a blit, and the
+  check borrows the link even when `unity_link` is off — via the per-frame
+  settings clone, never persisted). Under-30 fps scenes land in
+  `disabled_scenes` and get a "slow" tile tag, but stay manually
+  re-enableable. Pressing the button again cancels and restores the scene.
 - egui 0.36: `TexturesDelta` must be drained, not iterated. The text-field
   key sets live in both `panel.rs` and `editor.rs`.
 - The Windows GUI build uses the `gui` feature for no console window. Don't

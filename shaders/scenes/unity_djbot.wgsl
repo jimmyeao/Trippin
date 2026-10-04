@@ -1,3 +1,4 @@
+// @title Unity DJ Bot
 // Unity djbot: a chrome android DJ at a pair of turntables and a mixer, in front of an LED wall and lasers. A screen-content show from the external Unity engine (Spout sender "Trippin Stage", see
 // unity/README.md), driven live by Trippin's show-state feed. Only in rotation while frames
 // are arriving. The frame is already tonemapped, so this undoes present's exposure + ACES

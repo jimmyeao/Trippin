@@ -1,3 +1,4 @@
+// @title Moiré
 // Two ring gratings sliding against each other — classic moiré
 // interference. The centres breathe apart with the bass and the whole
 // interference figure rotates slowly.

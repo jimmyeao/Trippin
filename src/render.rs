@@ -113,6 +113,19 @@ struct Scene {
     bloom: f32,
     /// `// @tonemap agx` → 1.0, else ACES (0.0).
     tonemap: f32,
+    /// `// @title <display name>` — human label for pickers; the id (file
+    /// stem) stays the key everywhere else.
+    title: Option<String>,
+}
+
+/// Parse `// @title <rest of line>` — the display-name header directive.
+/// Unlike the `value` tags it's the whole line tail, not one token.
+pub fn header_title(body: &str) -> Option<String> {
+    body.lines().take(8).find_map(|l| {
+        let i = l.find("@title")?;
+        let t = l[i + "@title".len()..].trim();
+        (!t.is_empty()).then(|| t.to_string())
+    })
 }
 
 /// Parse the `// @tag value` header directives of a scene file.
@@ -998,6 +1011,16 @@ impl Renderer {
         self.scenes.iter().map(|s| s.heavy).collect()
     }
 
+    /// Display titles, parallel with `scene_names`: the `// @title` header
+    /// when set, else the id title-cased. For pickers and the remote —
+    /// `scene_names` stays the stable key everywhere.
+    pub fn scene_titles(&self) -> Vec<String> {
+        self.scenes
+            .iter()
+            .map(|s| s.title.clone().unwrap_or_else(|| crate::config::titleize(&s.name)))
+            .collect()
+    }
+
     /// Recompile anything whose file changed (or everything if `force`).
     pub fn reload_shaders(&mut self, force: bool) {
         let common_path = self.shader_dir.join("common.wgsl");
@@ -1044,6 +1067,7 @@ impl Renderer {
             // `@bloom` / `@tonemap` pick its post settings.
             if let Ok(body) = std::fs::read_to_string(&s.path) {
                 (s.heavy, s.bloom, s.tonemap) = header_tags(&body);
+                s.title = header_title(&body);
             }
             match self.compile(&common, &s.path, s.kind) {
                 Ok(p) => {
@@ -1950,4 +1974,31 @@ device: &wgpu::Device,
         return Err(anyhow!("{e}"));
     }
     Ok(pipeline)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `// @title` in the first eight lines wins the display name; the rest
+    /// of the header tags still parse alongside it.
+    #[test]
+    fn header_title_parses_with_other_tags() {
+        let body = "// @title Neon Alley\n// @heavy\n// @bloom 0.7\n// @tonemap agx\n\n@fragment\n";
+        assert_eq!(header_title(body).as_deref(), Some("Neon Alley"));
+        let (heavy, bloom, tonemap) = header_tags(body);
+        assert!(heavy);
+        assert!((bloom - 0.7).abs() < 1e-6);
+        assert!((tonemap - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn header_title_ignored_past_the_header() {
+        // Only the first eight lines count — a stray mention deeper in the
+        // file must not become the scene's name.
+        let mut body = String::from("// comment\n\n\n\n\n\n\n\n\nfn f() {}\n");
+        body.push_str("// @title Not A Title\n");
+        assert_eq!(header_title(&body), None);
+        assert_eq!(header_title("// @title\n// nothing after the tag\n"), None);
+    }
 }

@@ -33,6 +33,10 @@ struct ClipMeta {
     /// tools/beat_align.py; 0 = accent already at loop start.
     #[serde(default)]
     accent: f32,
+    /// Display name for pickers ("Saxophonist"); missing = the dir name
+    /// title-cased.
+    #[serde(default)]
+    title: Option<String>,
 }
 
 fn default_energy() -> f32 {
@@ -41,6 +45,8 @@ fn default_energy() -> f32 {
 
 pub struct ClipEntry {
     pub name: String,
+    /// Display title from clip.json (or the id title-cased).
+    pub title: String,
     pub path: PathBuf,
     pub energy: f32,
 }
@@ -119,6 +125,10 @@ pub fn list_clips(dir: &Path) -> Vec<ClipEntry> {
                     .ok()?;
             let name = path.file_name()?.to_string_lossy().into_owned();
             Some(ClipEntry {
+                title: meta
+                    .title
+                    .clone()
+                    .unwrap_or_else(|| crate::config::titleize(&name)),
                 name,
                 path,
                 energy: meta.energy,
@@ -372,6 +382,12 @@ impl DancerLayer {
 
     pub fn clip_names(&self) -> Vec<String> {
         self.clips.iter().map(|c| c.name.clone()).collect()
+    }
+
+    /// Display titles, parallel with `clip_names` (clip.json `title`, else
+    /// the id title-cased).
+    pub fn clip_titles(&self) -> Vec<String> {
+        self.clips.iter().map(|c| c.title.clone()).collect()
     }
 
     /// Give each canon companion a routine that differs from the main dancer

@@ -1,3 +1,4 @@
+// @title Unity Bass Core
 // Unity basscore: a screen-content show from the external Unity engine (Spout sender "Trippin Stage", see
 // unity/README.md), driven live by Trippin's show-state feed. Only in rotation while frames
 // are arriving. The frame is already tonemapped, so this undoes present's exposure + ACES

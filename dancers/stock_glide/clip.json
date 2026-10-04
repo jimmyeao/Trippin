@@ -1,5 +1,6 @@
 {
   "name": "stock_glide",
+  "title": "Glide",
   "fps": 30,
   "frames": 176,
   "beats": 12,

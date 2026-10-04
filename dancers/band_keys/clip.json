@@ -1,5 +1,6 @@
 {
   "name": "band_keys",
+  "title": "Keyboard Player",
   "fps": 30,
   "frames": 120,
   "beats": 8,
