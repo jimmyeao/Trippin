@@ -167,17 +167,18 @@ mod ui {
         );
     }
 
-    struct Agent {
-        args: Args,
-        edit: Cfg,
-        _tray: tray_icon::TrayIcon,
+    /// The tray icon and its menu ids. Built lazily on the first `logic`
+    /// pass: on macOS `TrayIconBuilder` must run while the event loop is
+    /// already pumping — inside `App::new` the status item never appears.
+    struct Tray {
+        _icon: tray_icon::TrayIcon,
         status_item: tray_icon::menu::MenuItem,
         open_id: tray_icon::menu::MenuId,
         quit_id: tray_icon::menu::MenuId,
     }
 
-    impl Agent {
-        fn new(_cc: &eframe::CreationContext, args: Args) -> Self {
+    impl Tray {
+        fn new() -> tray_icon::Result<Self> {
             use tray_icon::menu::{Menu, MenuItem};
             let status_item = MenuItem::new("starting…", false, None);
             let open = MenuItem::new("Settings…", true, None);
@@ -190,20 +191,35 @@ mod ui {
             let _ = menu.append(&open);
             let _ = menu.append(&tray_icon::menu::PredefinedMenuItem::separator());
             let _ = menu.append(&quit);
-            let tray = tray_icon::TrayIconBuilder::new()
+            let icon = tray_icon::TrayIconBuilder::new()
                 .with_menu(Box::new(menu))
                 .with_tooltip("Trippin agent — now playing relay")
                 .with_icon(icon())
-                .build()
-                .expect("tray icon");
+                .build()?;
+            Ok(Self {
+                _icon: icon,
+                status_item,
+                open_id,
+                quit_id,
+            })
+        }
+    }
+
+    struct Agent {
+        args: Args,
+        edit: Cfg,
+        tray: Option<Tray>,
+        first: bool,
+    }
+
+    impl Agent {
+        fn new(_cc: &eframe::CreationContext, args: Args) -> Self {
             let edit = args.cfg.lock().unwrap().clone();
             Self {
                 args,
                 edit,
-                _tray: tray,
-                status_item,
-                open_id,
-                quit_id,
+                tray: None,
+                first: true,
             }
         }
     }
@@ -211,25 +227,45 @@ mod ui {
     impl eframe::App for Agent {
         /// Runs before each `ui` — and keeps running while the window is
         /// hidden (each `request_repaint_after` re-arms the next pass), so
-        /// this is where the tray menu gets polled.
+        /// this is where the tray icon is built and its menu polled.
         fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-            while let Ok(ev) = tray_icon::menu::MenuEvent::receiver().try_recv() {
-                if ev.id == self.open_id {
+            if self.first {
+                self.first = false;
+                // First pass = event loop running — safe for TrayIcon on
+                // every platform. If the tray can't be built the window
+                // becomes the only UI, so always show it then.
+                match Tray::new() {
+                    Ok(t) => self.tray = Some(t),
+                    Err(e) => {
+                        eprintln!("tray icon: {e}");
+                        self.args.show = true;
+                    }
+                }
+                // Also nudge the window up on first run: an unbundled
+                // macOS exe can open off the active space.
+                if self.args.show {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
                     ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-                } else if ev.id == self.quit_id {
-                    // The socket dies with the process — the rig retracts
-                    // the pushed track on disconnect.
-                    std::process::exit(0);
                 }
             }
-            // Keep the tray status line current.
-            let status = self.args.link.lock().unwrap().status.clone();
-            let want = format!(
-                "Status: {}",
-                if status.is_empty() { "starting…" } else { &status }
-            );
-            self.status_item.set_text(want);
+            if let Some(tray) = &self.tray {
+                while let Ok(ev) = tray_icon::menu::MenuEvent::receiver().try_recv() {
+                    if ev.id == tray.open_id {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                    } else if ev.id == tray.quit_id {
+                        // The socket dies with the process — the rig retracts
+                        // the pushed track on disconnect.
+                        std::process::exit(0);
+                    }
+                }
+                // Keep the tray status line current.
+                let status = self.args.link.lock().unwrap().status.clone();
+                tray.status_item.set_text(format!(
+                    "Status: {}",
+                    if status.is_empty() { "starting…" } else { &status }
+                ));
+            }
             ctx.request_repaint_after(std::time::Duration::from_millis(500));
         }
 
