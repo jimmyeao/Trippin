@@ -8,7 +8,6 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Icon, Window};
@@ -100,7 +99,7 @@ impl Editor {
             gpu,
             icon,
             "Trippin — timeline editor",
-            PhysicalSize::new(1180, 640),
+            winit::dpi::LogicalSize::new(1180, 640),
             anchor,
             false,
         )?;
