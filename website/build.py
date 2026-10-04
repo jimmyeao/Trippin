@@ -3,7 +3,7 @@ Run: python build.py   — then deploy website/site/ to /var/www/trippin.club/""
 import pathlib, re, time
 VER = str(int(time.time()))  # cache-bust css/js behind Cloudflare
 root = pathlib.Path(__file__).parent
-NAV = [("features.html","Features"),("scenes.html","Scenes"),("whats-new.html","What's new"),("remote.html","Remote app"),("download.html","Download")]
+NAV = [("start.html","Get started"),("features.html","Features"),("scenes.html","Scenes"),("whats-new.html","What's new"),("remote.html","Remote app"),("download.html","Download")]
 SHELL = """<!doctype html>
 <html lang="en">
 <head>
@@ -35,7 +35,7 @@ SHELL = """<!doctype html>
 <footer>
   <div class="wrap">
     <span>© <span id="yr">2026</span> Trippin · trippin.club</span>
-    <span><a href="remote.html">Remote app</a> · <a href="privacy.html">Privacy</a> · <a href="https://github.com/jimmyeao/Trippin">GitHub</a> · <a href="https://github.com/jimmyeao/Trippin/issues">Support</a></span>
+    <span><a href="start.html">Get started</a> · <a href="remote.html">Remote app</a> · <a href="privacy.html">Privacy</a> · <a href="https://github.com/jimmyeao/Trippin">GitHub</a> · <a href="https://github.com/jimmyeao/Trippin/issues">Support</a></span>
   </div>
 </footer>
 <script src="site.js?v={ver}"></script>
