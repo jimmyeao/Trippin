@@ -49,11 +49,12 @@ def members(src):
                     yield Path(n).stem, z.read(n)
 
 
-def prepare(glb, faces):
+def prepare(glb, faces, loose=False):
     m = trimesh.load(io.BytesIO(glb), file_type="glb", force="mesh")
     e = m.extents
     # Height is the longest axis (y) for a standing person: reject the rest.
-    if e[1] < 0.9 * e.max() or not (1.8 < e[1] / e[0] < 5.0) or e[2] < 0.12 * e[1]:
+    lo_ratio = 1.1 if loose else 1.8
+    if e[1] < 0.9 * e.max() or not (lo_ratio < e[1] / e[0] < 5.0) or e[2] < 0.12 * e[1]:
         return None, f"rejected (extents {np.round(e, 2).tolist()})"
     col = np.asarray(m.visual.to_color().vertex_colors, dtype=np.uint8)
 
@@ -92,21 +93,24 @@ def main():
     ap.add_argument("sources", nargs="+", help="crowd zips from Alice, or unpacked dirs")
     ap.add_argument("--faces", type=int, default=2500)
     ap.add_argument("--prefix", default="", help="name prefix, so batches don't collide")
+    ap.add_argument("--out", default=None, help="output folder under Resources (default Crowd; robots use Robots)")
+    ap.add_argument("--loose", action="store_true", help="accept wider bodies (robots with arms out)")
     a = ap.parse_args()
-    OUT.mkdir(parents=True, exist_ok=True)
+    out_dir = OUT.parent / a.out if a.out else OUT
+    out_dir.mkdir(parents=True, exist_ok=True)
     kept = 0
     for src in a.sources:
         tag = a.prefix or Path(src).stem
         for name, glb in members(src):
-            mesh, msg = prepare(glb, a.faces)
+            mesh, msg = prepare(glb, a.faces, a.loose)
             print(f"{tag}/{name}: {msg}")
             if mesh is not None:
                 if len(mesh.vertices) > 65535:
                     print("  too many vertices for u16 indices, skipped")
                     continue
-                write(mesh, OUT / f"{tag}_{name}.bytes")
+                write(mesh, out_dir / f"{tag}_{name}.bytes")
                 kept += 1
-    print(f"{kept} crowd members in {OUT}")
+    print(f"{kept} members in {out_dir}")
     return 0 if kept else 1
 
 
