@@ -167,7 +167,7 @@ Shader "Trippin/Land"
                     col = body * (1.0 - F) + sky * F + lerp(float3(1, 1, 1), SkyPal(_SkyHue + 0.2), 0.5) * foam * 0.25;
                 }
                 col *= _Gain;
-                float fog = max(1.0 - exp(-pow(dist / _Fade, 1.5)), i.fe);
+                float fog = max(1.0 - exp(-pow(abs(dist / _Fade), 1.5)), i.fe);
                 float3 fogc = SkyCol(normalize(float3(-vv.x, 0.015, -vv.z)));
                 col = lerp(col, fogc, fog);
                 col = col / (1.0 + 0.3 * col);
