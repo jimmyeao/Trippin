@@ -67,7 +67,8 @@ namespace TrippinStage
             _m.SetVector("_RingK", new Vector4(_ringK[0], _ringK[1], _ringK[2], _ringK[3]));
             _m.SetFloat("_Gain", gain * 1.2f);
             _m.SetFloat("_Hue", 0.4f + 0.08f * Mathf.Sin(rx.phrase));
-            _m.SetFloat("_Sweep", rx.beatS * (Mathf.PI * 2f / 16f));   // one revolution per four bars, back at north on the downbeat
+            // One revolution per four bars, at north on the downbeat (Scope.shader measures the angle from east, atan2(y, x)).
+            _m.SetFloat("_Sweep", rx.beatS * (Mathf.PI * 2f / 16f) + Mathf.PI * 0.5f);
             _m.SetFloat("_Drift", rx.clk);
 
             // A wall of light bars round the rim: the same 96-bin plot, in 3D.
