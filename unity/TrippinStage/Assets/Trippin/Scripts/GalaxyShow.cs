@@ -25,7 +25,7 @@ namespace TrippinStage
 
         protected override void Frame(ShowState s, float dt)
         {
-            float gain = rx.Gain(0.5f, 1.35f);
+            float gain = rx.Gain(0.8f, 2.2f) /* was 0.5-1.35: luma ~3 */;
             Quaternion face = cam.transform.rotation;
             float tight = 0.18f + 0.1f * rx.bassSlow;
             float open = (1f - 0.3f * rx.tension) * (1f + 0.35f * rx.impact);

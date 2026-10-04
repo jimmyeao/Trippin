@@ -20,6 +20,10 @@ namespace TrippinStage
         Transform[] _t;
         GlowPool _stars;
         readonly float[] _base = new float[Layers];
+        // Eased per-layer density: the product below multiplies several fast
+        // signals, and 12 additive sheets stepped the whole sky in one frame on
+        // the drop (M2: frame change 45 vs a 0.4 median, luma 26 -> 71 in 0.1 s).
+        readonly float[] _dens = new float[Layers];
 
         protected override void Build()
         {
@@ -48,8 +52,9 @@ namespace TrippinStage
             {
                 float bin = i / (Layers - 1f);
                 float dens = _base[i] * (0.6f + 1.3f * rx.lum + 0.4f * rx.midFast) * (0.6f + 0.9f * rx.Spec(bin))
-                             * (1f + 0.6f * rx.tension + 0.9f * rx.impact);
-                _m[i].SetFloat("_Density", dens * gain);
+                             * (1f + 0.6f * rx.tension + 0.5f * rx.impact);
+                _dens[i] = Eased.Follow(_dens[i], dens * gain, 4f, 2f, dt);
+                _m[i].SetFloat("_Density", _dens[i]);
                 if (_t[i] != null)
                 {
                     float x = Mathf.Sin(rx.clk * 0.01f * (0.5f + i * 0.1f) + i * 2f) * 12f;

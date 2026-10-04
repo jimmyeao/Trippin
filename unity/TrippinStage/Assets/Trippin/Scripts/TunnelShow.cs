@@ -28,7 +28,7 @@ namespace TrippinStage
 
         protected override void Frame(ShowState s, float dt)
         {
-            float gain = rx.Gain(0.35f, 1.6f);
+            float gain = rx.Gain(0.6f, 2.6f) /* was 0.35-1.6: luma ~3, nearly black on the M2 */;
             _m.SetFloat("_Radius", 9f * (1f - 0.3f * rx.tension) * (1f + 0.35f * rx.impact));
             _m.SetFloat("_Scroll", rx.clk * 5f);
             _m.SetFloat("_Phase", rx.clk * 0.4f);
