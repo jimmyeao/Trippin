@@ -49,7 +49,7 @@ namespace TrippinStage
             else
             {
                 float delta = s.beat - _bPrev;
-                if (Mathf.Abs(delta - _bRate * dt) > 0.15f)      // the tracker jumped: keep the output continuous
+                if (Mathf.Abs(delta - _bRate * dt) > 0.1f)      // the tracker jumped: keep the output continuous
                     _bOff = (_bPrev + _bOff) + _bRate * dt - s.beat;
                 else
                     _bRate += (Mathf.Clamp(delta / dt, 0.5f, 5f) - _bRate) * 0.1f;

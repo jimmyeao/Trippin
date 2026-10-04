@@ -1393,6 +1393,91 @@ pub fn groove_test(path: &std::path::Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// `--dump-feed track.flac out.jsonl [palette]`: run a file through the real
+/// analyser (the same tempo tracker, neural downbeat check, groove and
+/// breakdown detector the live app uses) and write the show-state feed it would
+/// have sent the Unity engine, one JSON line per 60 fps frame. The engine
+/// replays it with `-replayFeed out.jsonl`, so Unity shows can be tested on
+/// real music without audio capture. Intensity is a proxy (the director's
+/// own value needs the whole settings machinery).
+pub fn dump_feed(path: &std::path::Path, out: &std::path::Path, palette: &str) -> anyhow::Result<()> {
+    use std::io::Write;
+    let song = crate::song::load(path)?;
+    let (_tx, rx) = mpsc::channel();
+    let shared: SharedFeatures = Arc::new(Mutex::new(Features::default()));
+    let mut a = Analyzer::new(song.sr as f32, shared, rx, None);
+    a.nn_sync = true;
+    let pal = crate::link::palette_colours(palette);
+    let mut w = std::io::BufWriter::new(std::fs::File::create(out)?);
+    let dt = 1.0f32 / 60.0;
+    let mut next_t = 0.0f32;
+    let mut frames = 0usize;
+    // Same smoothing / clock maths as the render loop (main.rs).
+    let mut flow = 0.0f64;
+    let mut flow_bpm = 120.0f32;
+    let mut flow_speed = 1.0f32;
+    let mut clock4 = [0.0f64; 4];
+    let mut clock_lvl = [0.0f32; 4];
+    let mut intensity = 0.5f32;
+    for (i, &s) in song.mono.iter().enumerate() {
+        if !a.push(s) {
+            continue;
+        }
+        let t = i as f32 / song.sr as f32;
+        while next_t <= t {
+            let f = &a.f;
+            flow_bpm += (f.bpm - flow_bpm) * (dt * 1.5).min(1.0);
+            flow_speed += ((1.0 - 0.45 * f.calm) - flow_speed) * (dt * 0.8).min(1.0);
+            flow = (flow + dt as f64 * flow_bpm as f64 / 60.0 * flow_speed as f64) % 4096.0;
+            let whole = (f.lvl4[0] * 0.45 + f.lvl4[1] * 0.3 + f.lvl4[2] * 0.15 + f.lvl4[3] * 0.1).min(1.0);
+            let src = [whole, f.lvl4[0], f.lvl4[1], f.lvl4[2].max(f.lvl4[3])];
+            let k = (dt / 0.35).min(1.0);
+            for c in 0..4 {
+                let target = if f.silent { 0.0 } else { src[c] };
+                clock_lvl[c] += (target - clock_lvl[c]) * k;
+                let rate = 0.3 + 2.4 * clock_lvl[c].powf(1.6);
+                clock4[c] = (clock4[c] + dt as f64 * flow_bpm as f64 / 60.0 * rate as f64) % 4096.0;
+            }
+            intensity += ((0.3 + 0.7 * f.energy.min(1.0)) - intensity) * (dt * 0.6).min(1.0);
+            let pos = a.beat_count as f64 + a.phase as f64;
+            let beat_in_bar = ((pos.floor() as i64 - a.downbeat as i64).rem_euclid(4)) as f32;
+            let mut spectrum = [0.0f32; SPECTRUM_BINS];
+            spectrum.copy_from_slice(&f.spectrum);
+            let u = crate::render::Uniforms {
+                time: next_t,
+                dt,
+                bass: f.bass,
+                mid: f.mid,
+                high: f.high,
+                energy: f.energy,
+                onset: f.onset * (1.0 - 0.6 * f.calm),
+                kick: f.kick,
+                beat: (pos % 4096.0) as f32,
+                beat_phase: pos.fract() as f32,
+                bar_phase: (beat_in_bar + pos.fract() as f32) / 4.0,
+                bpm: f.bpm,
+                build: f.build,
+                intensity,
+                flow: flow as f32,
+                master: 1.0,
+                spectrum,
+                calm: f.calm,
+                lvl4: f.lvl4,
+                hits4: f.hits4,
+                pres4: f.pres4,
+                clock4: clock4.map(|c| c as f32),
+                ..Default::default()
+            };
+            writeln!(w, "{}", crate::link::frame_json(&u, "", &pal, false, f.calm < 0.5))?;
+            frames += 1;
+            next_t += dt;
+        }
+    }
+    w.flush()?;
+    println!("{}: {} frames ({:.1} s) -> {}", song.name, frames, frames as f32 * dt, out.display());
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

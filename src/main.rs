@@ -3047,6 +3047,15 @@ fn main() -> Result<()> {
     if args.iter().any(|a| a == "--nowplaying") {
         return nowplaying::monitor();
     }
+    // `--dump-feed track.flac out.jsonl [palette]`: the Unity feed a track
+    // would produce (see audio::dump_feed); the engine replays it.
+    if let Some(i) = args.iter().position(|a| a == "--dump-feed") {
+        let (Some(track), Some(out)) = (args.get(i + 1), args.get(i + 2)) else {
+            anyhow::bail!("usage: --dump-feed track.flac out.jsonl [palette]");
+        };
+        let pal = args.get(i + 3).filter(|p| !p.starts_with("--")).map(String::as_str).unwrap_or("sunset");
+        return audio::dump_feed(std::path::Path::new(track), std::path::Path::new(out), pal);
+    }
     if let Some(p) = arg_value(&args, "--groove-test") {
         return audio::groove_test(std::path::Path::new(&p));
     }

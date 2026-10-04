@@ -67,6 +67,12 @@ namespace TrippinStage
         bool _managed;
         float _heard;
 
+        // `-replayFeed feed.jsonl [-replayFrom seconds]`: play a feed recorded from a real track
+        // (`trippin --dump-feed track.flac feed.jsonl`) instead of the live link or the synthetic
+        // groove, looping, at 60 frames a second. For testing shows on real music, headless.
+        string[] _replay;
+        float _replayT;
+
         void OnEnable()
         {
             var a = System.Environment.GetCommandLineArgs();
@@ -74,6 +80,13 @@ namespace TrippinStage
             {
                 if (a[i] == "-trippinPort" && int.TryParse(a[i + 1], out var p)) port = p;
                 if (a[i] == "-trippinFrame") _managed = true;
+                if (a[i] == "-replayFeed")
+                {
+                    try { _replay = System.IO.File.ReadAllLines(a[i + 1]); }
+                    catch (Exception e) { Debug.LogError($"[TrippinLink] can't read replay feed {a[i + 1]}: {e.Message}"); }
+                    if (_replay != null) Debug.Log($"[TrippinLink] replaying {_replay.Length} frames ({_replay.Length / 60f:F0} s) from {a[i + 1]}");
+                }
+                if (a[i] == "-replayFrom" && float.TryParse(a[i + 1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var from)) _replayT = from;
             }
             _heard = Time.realtimeSinceStartup;
             try
@@ -114,6 +127,15 @@ namespace TrippinStage
 
         void Update()
         {
+            if (_replay != null && _replay.Length > 0)
+            {
+                _replayT += Time.deltaTime;
+                int idx = ((int)(_replayT * 60f)) % _replay.Length;
+                try { State = JsonUtility.FromJson<ShowState>(_replay[idx]); } catch (Exception) { }
+                Live = false;   // the show manager cycles on the beat, as it does with no feed
+                PushGlobals(State);
+                return;
+            }
             string json;
             lock (_lock) { json = _pending; _pending = null; }
             if (json != null)
