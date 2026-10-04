@@ -16,3 +16,7 @@ Website/sshkey/theiaweb_key.pem
 
 /website/sshkey/
 /website/reel_work/
+
+# Alice generation server credentials and API notes (never commit)
+alice.env
+aliceapi.md
