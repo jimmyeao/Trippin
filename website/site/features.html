@@ -14,13 +14,13 @@
 <meta name="twitter:card" content="summary_large_image">
 <link rel="canonical" href="https://trippin.club/features.html">
 <link rel="icon" href="img/logo.png">
-<link rel="stylesheet" href="style.css?v=1791041005">
+<link rel="stylesheet" href="style.css?v=1791146448">
 </head>
 <body>
 <nav id="nav">
   <div class="wrap">
     <a class="brand" href="./"><img src="img/logo.png" alt="">Trippin</a>
-    <ul><li><a href="features.html" class=on>Features</a></li><li><a href="scenes.html">Scenes</a></li><li><a href="remote.html">Remote app</a></li><li><a href="download.html">Download</a></li></ul>
+    <ul><li><a href="start.html">Get started</a></li><li><a href="features.html" class=on>Features</a></li><li><a href="scenes.html">Scenes</a></li><li><a href="whats-new.html">What's new</a></li><li><a href="remote.html">Remote app</a></li><li><a href="download.html">Download</a></li></ul>
     <a class="btn primary" href="download.html">Download</a>
     <button class="menu" aria-label="Menu" onclick="document.getElementById('nav').classList.toggle('open')"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
   </div>
@@ -141,15 +141,78 @@
   </div>
 </section>
 
+<section id="agent" class="dive" style="background:var(--bg2)">
+  <div class="wrap">
+    <div class="head reveal">
+      <span class="tag">Trippin Agent · new</span>
+      <h2>Serato on one machine, the visuals on another</h2>
+      <p class="sec-lead">Run your DJ software on one computer and Trippin on a second. A small tray app on the DJ machine works out what's playing and sends it across your network, so the now-playing card and ticker stay right while the visuals return to OBS over NDI.</p>
+    </div>
+    <div class="diagram reveal">
+      <div class="route">
+        <div class="node hot">DJ machine<br><small style="color:#fff;opacity:.9;font-weight:500">Serato · rekordbox · VirtualDJ · Mixxx · Spotify<br>+ Trippin Agent in the tray</small></div>
+        <div class="stack">
+          <div class="lane"><b>Track info</b><small>sent over your network on every track change</small></div>
+          <div class="lane"><b>Visuals</b><small>returned to OBS over NDI</small></div>
+        </div>
+        <div class="node"><b>Trippin rig</b><small>renders the visuals, shows the now-playing card, sends clean video out</small></div>
+      </div>
+    </div>
+    <div class="grid g3" style="margin-top:22px">
+      <div class="card reveal"><h3>The same detection as the app</h3><p>It reuses Trippin's own track detection, so Serato, rekordbox, VirtualDJ, Mixxx, the OS media session and a text file all work the same way as on a single machine.</p></div>
+      <div class="card reveal"><h3>Finds your rig by itself</h3><p>It discovers Trippin on your network, or you can type a <code>host:port</code>. It pairs with the same PIN as the iPhone remote, reconnects on its own, and re-sends the current track when it does.</p></div>
+      <div class="card reveal"><h3>Cleans up after itself</h3><p>If the agent quits or the connection drops, its track is withdrawn and Trippin falls back to its own detection. It also writes <code>nowplaying.txt</code> on the DJ machine for an OBS text source.</p></div>
+    </div>
+    <p class="sub reveal" style="text-align:center;margin-top:22px">Windows and macOS. Turn on the remote in Trippin's Settings first, then <a href="download.html#agent" style="text-decoration:underline">download the agent</a>.</p>
+  </div>
+</section>
+
+<section id="perf" class="dive">
+  <div class="wrap split">
+    <div class="reveal">
+      <span class="tag">Performance check · new</span>
+      <h2>Know what your machine can run</h2>
+      <p class="sec-lead">One button in Settings steps through every heavy 3D scene and every Unity show, live, and measures how it really runs on your GPU. Anything that can't hold 30 fps drops out of rotation, so the auto-pilot stops picking it.</p>
+      <ul class="ticks">
+        <li><span><b>Measured, not guessed.</b> 3D scenes by real frame time, Unity shows by the engine's own frame counter.</span></li>
+        <li><span><b>Nothing is deleted.</b> A slow scene gets a "slow" tag and can be ticked back into rotation any time.</span></li>
+        <li><span><b>Remembered.</b> The result is saved for your machine, and the scene picker flags the slow ones.</span></li>
+        <li><span><b>Cancel any time.</b> Press the button again and your scene is restored.</span></li>
+      </ul>
+    </div>
+    <div class="reveal"><div class="frame" style="max-width:526px;margin:0 auto"><img loading="lazy" src="img/new/gpu-baseline.webp" alt="The Settings page: the Director card and the GPU baseline card with its Run the performance check button" width="526" height="287"></div>
+      <p class="sub" style="text-align:center;margin-top:12px">The Director and GPU baseline cards on the Settings tab.</p></div>
+  </div>
+</section>
+
+<section id="performers" class="dive" style="background:var(--bg2)">
+  <div class="wrap">
+    <div class="head center reveal">
+      <span class="tag">Performers · new</span>
+      <h2>A band on your stage</h2>
+      <p class="sec-lead">Besides the dancers, Trippin now has a drummer (front and side views), guitarists (standing and seated), a keyboardist and a sax player. They play on the beat over any scene, in five looks: shadow, neon, strobe, comic and wire.</p>
+    </div>
+    <div class="gal three reveal">
+      <figure><img loading="lazy" src="img/new/perf-drummer.webp" alt="A drummer in neon outline in front of the stage rig" width="960" height="540"><figcaption>Drummer · neon</figcaption></figure>
+      <figure><img loading="lazy" src="img/new/perf-guitar.webp" alt="A guitarist in neon outline in a fan of lasers" width="960" height="540"><figcaption>Guitarist · neon</figcaption></figure>
+      <figure><img loading="lazy" src="img/new/perf-keys.webp" alt="A keyboardist in neon outline over a rooftop city" width="960" height="540"><figcaption>Keyboardist · neon</figcaption></figure>
+      <figure><img loading="lazy" src="img/new/perf-sax.webp" alt="A saxophonist in neon outline in a rainy alley" width="960" height="540"><figcaption>Sax player · neon</figcaption></figure>
+      <figure><img loading="lazy" src="img/new/look-comic.webp" alt="A dancer in the comic look with halftone dots and speed lines" width="960" height="540"><figcaption>Dancer · comic look</figcaption></figure>
+      <figure><img loading="lazy" src="img/new/look-wire.webp" alt="A dancer in the wire look with a chromatic split" width="960" height="540"><figcaption>Dancer · wire look</figcaption></figure>
+    </div>
+    <p class="sub reveal" style="text-align:center;margin-top:14px">Real renders from Trippin. Click any image to enlarge.</p>
+  </div>
+</section>
+
 <section>
   <div class="wrap">
     <div class="head center reveal"><div class="eyebrow">Everything else</div><h2>The whole toolkit</h2></div>
     <div class="grid g3">
       <div class="card reveal"><h3>Auto-pilot</h3><p>Cuts on phrase boundaries and drops, picks scenes by energy, and never strobes a tunnel. Or run it manually, or lock a single scene.</p></div>
-      <div class="card reveal"><h3>Beat-locked dancer</h3><p>Silhouette clips dance on the beat over any scene, with glow and trails, and re-anchor to the bar so routines start cleanly on a phrase.</p></div>
+      <div class="card reveal"><h3>Beat-locked performers</h3><p>Dancers, a drummer, guitarists, a keyboardist and a sax player, all on the beat, with glow and trails. Routines re-anchor to the bar so they start cleanly on a phrase.</p></div>
       <div class="card reveal"><h3>Timeline &amp; AI show builder</h3><p>Script a full set cue by cue, or let the AI builder analyse a track and lay out scenes, text, fills and strobes for you to tweak.</p></div>
       <div class="card reveal"><h3>Text &amp; effects</h3><p>Timeline text cues with punch, shake, strobe, bounce and shatter. Mirror and kaleidoscope effects on top of any scene.</p></div>
-      <div class="card reveal"><h3>Palettes</h3><p>One global palette recolours every scene, the dancer glow and the text, so your whole set matches your brand.</p></div>
+      <div class="card reveal"><h3>Palettes</h3><p>One global palette recolours every scene, the dancer glow and the text, so your whole set matches your brand. Or pick <b>auto</b> and the colours follow the mood of the music.</p></div>
       <div class="card reveal"><h3>Hotkeys &amp; MIDI</h3><p>Every action has a key, and MIDI pad controllers can be mapped with one-click learn. Pad presses record into your timeline.</p></div>
     </div>
   </div>
@@ -173,9 +236,9 @@
 <footer>
   <div class="wrap">
     <span>© <span id="yr">2026</span> Trippin · trippin.club</span>
-    <span><a href="remote.html">Remote app</a> · <a href="privacy.html">Privacy</a> · <a href="https://github.com/jimmyeao/Trippin">GitHub</a> · <a href="https://github.com/jimmyeao/Trippin/issues">Support</a></span>
+    <span><a href="start.html">Get started</a> · <a href="remote.html">Remote app</a> · <a href="privacy.html">Privacy</a> · <a href="https://github.com/jimmyeao/Trippin">GitHub</a> · <a href="https://github.com/jimmyeao/Trippin/issues">Support</a></span>
   </div>
 </footer>
-<script src="site.js?v=1791041005"></script>
+<script src="site.js?v=1791146448"></script>
 </body>
 </html>

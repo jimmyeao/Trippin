@@ -3,7 +3,8 @@ fetch("https://api.github.com/repos/jimmyeao/Trippin/releases/latest").then(r=>r
   if(!j) return;
   const f=re=>(j.assets||[]).find(a=>re.test(a.name));
   const set=(sel,a)=>{ if(a) document.querySelectorAll(sel).forEach(e=>e.href=a.browser_download_url) };
-  set(".dl-win",f(/\.exe$/i)); set(".dl-mac",f(/\.pkg$/i)); set(".dl-mac-zip",f(/\.zip$/i));
+  set(".dl-win",f(/^Trippin-Setup-.*\.exe$/i)); set(".dl-mac",f(/^Trippin-macOS-.*\.pkg$/i)); set(".dl-mac-zip",f(/^Trippin-macOS-.*\.zip$/i));
+  set(".dl-agent-win",f(/^TrippinAgent-Windows-.*\.zip$/i)); set(".dl-agent-mac",f(/^TrippinAgent-macOS-.*\.zip$/i));
   const v=j.tag_name.replace(/^v/,""), d=new Date(j.published_at).toLocaleDateString(undefined,{year:"numeric",month:"short",day:"numeric"});
   document.querySelectorAll(".ver").forEach(e=>e.textContent="Version "+v+" · "+d);
 }).catch(()=>{});
@@ -30,7 +31,7 @@ document.querySelectorAll("video").forEach(v=>vio.observe(v));
 })();
 // Click a screenshot to enlarge it; click it again for 1:1 pixels (scroll to pan). Esc or a click outside closes.
 (function(){
-  const sel=".frame img,.tablet img,.phones .phone img";
+  const sel=".frame img,.tablet img,.phones .phone img,.gal img";
   let ov=null;
   const close=()=>{ if(ov){ ov.remove(); ov=null; document.documentElement.style.overflow=""; } };
   const open=im=>{

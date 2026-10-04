@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Get started with Trippin — install, first run, the editor and FAQ</title>
+<meta name="description" content="A step-by-step guide for new Trippin users: install on Windows or macOS, play your first set, run the performance check, send video to OBS, use the timeline editor, and answers to common questions.">
+<meta name="theme-color" content="#07060d">
+<meta property="og:title" content="Get started with Trippin — install, first run, the editor and FAQ">
+<meta property="og:description" content="A step-by-step guide for new Trippin users: install on Windows or macOS, play your first set, run the performance check, send video to OBS, use the timeline editor, and answers to common questions.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://trippin.club/start.html">
+<meta property="og:image" content="https://trippin.club/img/hero.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="canonical" href="https://trippin.club/start.html">
+<link rel="icon" href="img/logo.png">
+<link rel="stylesheet" href="style.css?v=1791146448">
+</head>
+<body>
+<nav id="nav">
+  <div class="wrap">
+    <a class="brand" href="./"><img src="img/logo.png" alt="">Trippin</a>
+    <ul><li><a href="start.html" class=on>Get started</a></li><li><a href="features.html">Features</a></li><li><a href="scenes.html">Scenes</a></li><li><a href="whats-new.html">What's new</a></li><li><a href="remote.html">Remote app</a></li><li><a href="download.html">Download</a></li></ul>
+    <a class="btn primary" href="download.html">Download</a>
+    <button class="menu" aria-label="Menu" onclick="document.getElementById('nav').classList.toggle('open')"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</nav>
+<header class="page-hero"><div class="wrap"><span class="pill">Getting started</span><h1>From download to <span class="grad">your first show</span></h1><p class="lead">Install it, play some music, and Trippin does the rest. Here is everything a new user needs, with answers to the common questions at the end.</p>
+<div class="toc" role="navigation" aria-label="On this page"><a href="#install">Install</a><a href="#first-run">First run</a><a href="#performance-check">Performance check</a><a href="#go-live">Go live in OBS</a><a href="#editor">Timeline editor</a><a href="#faq">FAQ</a></div></div></header>
+
+<section style="padding-top:40px">
+  <div class="wrap">
+    <div class="steps">
+      <div class="card reveal"><h3>Install</h3><p>Run the installer for Windows, or the package for macOS. <a href="#install" style="text-decoration:underline">Details</a></p></div>
+      <div class="card reveal"><h3>Play some music</h3><p>Start your DJ software or Spotify. Trippin listens to your computer's audio and starts moving. <a href="#first-run" style="text-decoration:underline">Details</a></p></div>
+      <div class="card reveal"><h3>Go full screen</h3><p>Drag the visuals window to your projector or stream, and press <kbd>F</kbd>. <a href="#first-run" style="text-decoration:underline">Details</a></p></div>
+    </div>
+  </div>
+</section>
+
+<section id="install" class="sect" style="background:var(--bg2)">
+  <div class="wrap">
+    <div class="head reveal"><div class="eyebrow">1 · Install</div><h2>Install Trippin</h2><p class="sec-lead">Download the latest version from the <a href="download.html" style="text-decoration:underline">download page</a>.</p></div>
+    <div class="dlgrid">
+      <div class="card dlcard reveal"><h3>Windows</h3>
+        <ul><li>Download <b>Trippin-Setup</b> (the <code>.exe</code>) and run it.</li><li>Your settings are saved to <code>%APPDATA%\Trippin\trippin.json</code>.</li><li>To update, run the newer installer.</li></ul></div>
+      <div class="card dlcard reveal"><h3>macOS</h3>
+        <ul><li>Download <b>Trippin-macOS</b> (the <code>.pkg</code>) and run it. It installs to Applications, and a newer package upgrades it in place.</li><li>Your settings, timelines and the downloaded engine are kept in <code>~/Library/Application Support/Trippin</code>.</li><li>If macOS blocks it, try to open it once, then allow it in <b>System Settings → Privacy &amp; Security → Open Anyway</b>.</li><li>The first time you run it, macOS asks once for <b>screen / system-audio recording</b> permission (macOS 13 or later). Allow it, because that is how Trippin hears your music.</li></ul></div>
+    </div>
+    <p class="sub reveal" style="margin-top:18px">Trippin is built to hold 60 fps on an RTX 3060 or an Apple M2. On weaker graphics some of the heavy 3D scenes are switched off for you, and the <a href="#performance-check" style="text-decoration:underline">performance check</a> works out which.</p>
+  </div>
+</section>
+
+<section id="first-run" class="sect">
+  <div class="wrap split">
+    <div class="reveal">
+      <div class="eyebrow">2 · First run</div>
+      <h2>Play music, go full screen</h2>
+      <p class="sec-lead">Trippin opens two windows: the <b>visuals</b>, and a <b>control panel</b> beside them.</p>
+      <ul class="ticks">
+        <li><span><b>Play something.</b> Trippin captures whatever your computer is playing (Windows system audio, or the macOS system output mix), so no cables or setup are needed. The panel shows the tempo and the beat as soon as it hears music. A <b>no signal</b> tag means it hears nothing.</span></li>
+        <li><span><b>Go full screen.</b> Drag the visuals window to your projector, LED wall or capture display, then press <kbd>F</kbd>. <kbd>Esc</kbd> leaves full screen, and closing the window quits. <kbd>F1</kbd> hides or shows the control panel.</span></li>
+        <li><span><b>Pick a mode.</b> <b>Auto</b> cuts scenes every phrase and early on drops. <b>Static</b> holds the current scene while the dancer still changes. <b>Manual</b> changes nothing by itself.</span></li>
+        <li><span><b>Browse the library.</b> On the Perform tab, click a scene to preview it, star favourites, and tick scenes in or out of the auto-pilot's rotation.</span></li>
+      </ul>
+      <div class="callout"><b>DJ software going straight to a controller?</b> If Serato or similar sends audio directly to your controller's own USB interface, it never reaches the system audio. Open <b>Settings → Audio in</b> and pick the controller's input instead.</div>
+    </div>
+    <div class="reveal"><div class="frame" style="max-width:475px;margin:0 auto"><img loading="lazy" src="img/new/panel-live.webp" alt="The control panel while a track plays, showing tempo, the live scene, the next scene and the Auto mode controls" width="475" height="655"></div>
+      <p class="sub" style="text-align:center;margin-top:12px">The Perform tab while a track plays.</p></div>
+  </div>
+</section>
+
+<section class="sect" style="background:var(--bg2)">
+  <div class="wrap">
+    <div class="head reveal"><div class="eyebrow">Handy keys</div><h2>The keys worth learning first</h2><p class="sec-lead">Every key can be changed on the <b>Keys</b> tab. Click <b>rebind</b>, then press a key.</p></div>
+    <div class="frame reveal" style="padding:10px 18px;max-width:760px;margin:0 auto;cursor:default">
+      <table class="keys">
+        <tr><td><kbd>→</kbd> <kbd>←</kbd></td><td>Next / previous scene</td></tr>
+        <tr><td><kbd>A</kbd> <kbd>H</kbd> <kbd>M</kbd></td><td>Mode: auto / static (hold) / manual</td></tr>
+        <tr><td><kbd>D</kbd></td><td>Dancer on / off</td></tr>
+        <tr><td><kbd>B</kbd></td><td>Blackout: fade to black and back</td></tr>
+        <tr><td><kbd>Z</kbd></td><td>Strobe on / off. It flashes on the live drum hits.</td></tr>
+        <tr><td><kbd>F</kbd></td><td>Full screen on / off</td></tr>
+        <tr><td><kbd>Space</kbd></td><td>Mark this beat as the downbeat, if the bar's "one" is in the wrong place</td></tr>
+        <tr><td><kbd>[</kbd> <kbd>]</kbd></td><td>Latency −5 ms / +5 ms, if the visuals land early or late</td></tr>
+        <tr><td><kbd>K</kbd> · <kbd>J</kbd></td><td>Save a clip of the last moments · record the whole set</td></tr>
+        <tr><td><kbd>T</kbd> · <kbd>G</kbd></td><td>Timeline play / pause · timeline record on / off</td></tr>
+        <tr><td><kbd>N</kbd></td><td>Show the now-playing card again</td></tr>
+      </table>
+    </div>
+    <p class="sub reveal" style="text-align:center;margin-top:14px">Any action can also sit on a MIDI pad. See <a href="features.html#midi" style="text-decoration:underline">MIDI mapping</a>.</p>
+  </div>
+</section>
+
+<section id="performance-check" class="sect">
+  <div class="wrap split">
+    <div class="reveal">
+      <div class="eyebrow">3 · Performance check</div>
+      <h2>Check what your machine can run</h2>
+      <p class="sec-lead">Do this once, before your first show. It finds the scenes your GPU can't keep smooth, so the auto-pilot stops picking them.</p>
+      <ol class="ticks" style="list-style:none">
+        <li><span>Open the <b>Settings</b> tab.</span></li>
+        <li><span>Find the <b>GPU baseline</b> card and press <b>Run the performance check</b>.</span></li>
+        <li><span>Wait while it steps through the heavy 3D scenes. It runs on the live output, so the visuals will cycle through scenes. <b>Run it before you go live</b>, not during a set.</span></li>
+        <li><span>Anything that can't hold <b>30 fps</b> is taken out of rotation and tagged <b>slow</b>. To force one back in, tick it again in the library.</span></li>
+      </ol>
+      <div class="callout"><b>Using the Unity engine shows?</b> Switch on <b>Unity engine link</b> in Settings (the Director card) first, so they can be measured too. Press the button again at any time to cancel, and your scene is restored. The result is saved for your machine, so you only need to repeat it after changing GPU or drivers.</div>
+    </div>
+    <div class="reveal"><div class="frame" style="max-width:526px;margin:0 auto"><img loading="lazy" src="img/new/gpu-baseline.webp" alt="The Settings tab: the Director card and the GPU baseline card with the Run the performance check button" width="526" height="287"></div></div>
+  </div>
+</section>
+
+<section id="go-live" class="sect" style="background:var(--bg2)">
+  <div class="wrap split rev">
+    <div class="reveal"><div class="frame" style="max-width:528px;margin:0 auto"><img loading="lazy" src="img/features/video-output-v2.webp" alt="The Video output card: Spout and NDI, scenes or transparent background, 720p to 2160p, 30 or 60 fps" width="528" height="228"></div>
+      <p class="sub" style="text-align:center;margin-top:12px">The Video output card on the <b>Stream</b> tab.</p></div>
+    <div class="reveal">
+      <div class="eyebrow">4 · Go live</div>
+      <h2>Send it to OBS</h2>
+      <p class="sec-lead">Streaming? Send Trippin's picture to OBS as a video source.</p>
+      <ol class="ticks" style="list-style:none">
+        <li><span>On the <b>Stream</b> tab, find <b>Video output</b> and tick <b>Spout</b> (Windows, same PC) or <b>NDI</b> (over the network, and the choice on macOS).</span></li>
+        <li><span>Pick a size (720p to 2160p) and 30 or 60 fps.</span></li>
+        <li><span>In OBS, add a <b>Spout2 Capture</b> source (it comes from the free Spout2 plugin) or an <b>NDI Source</b>.</span></li>
+      </ol>
+      <div class="callout"><b>NDI needs its free runtime.</b> On Windows, run <code>winget install NDI.NDIRuntime</code>. On a Mac, install NDI Tools. Trippin works without it, but NDI output won't. For a <b>transparent</b> background, to layer the dancer over your camera, choose <b>Transparent</b> under Background.</div>
+    </div>
+  </div>
+</section>
+
+<section id="editor" class="sect">
+  <div class="wrap">
+    <div class="head reveal"><div class="eyebrow">5 · Timeline editor</div><h2>Script a whole set</h2><p class="sec-lead">Load a track, lay out the show, and let it play itself. You can build it by hand, record it live, or have an AI draft it.</p></div>
+    <div class="grid g3">
+      <div class="card reveal"><h3>1 · Open it</h3><p>Go to the <b>Timeline</b> tab and press <b>Open timeline editor</b>, or press <kbd>F2</kbd>. Saved shows are listed on that tab; click one to load it.</p></div>
+      <div class="card reveal"><h3>2 · Load a song</h3><p>Use <b>File → Add song…</b> in the editor, or drag an mp3, flac, wav, m4a or ogg onto either window. Trippin analyses it and draws the waveform, a beat and bar grid, and a playhead.</p></div>
+      <div class="card reveal"><h3>3 · Add cues</h3><p>Drag scenes, dancer routines, effects and text from the library on the left onto the strip. They snap to the beat. Click a block to edit it, drag its edges to resize, right-click to delete. <b>Ctrl</b>+scroll zooms and the wheel pans.</p></div>
+      <div class="card reveal"><h3>4 · Play it</h3><p>Press <kbd>T</kbd> or the play button. The track plays through your speakers <i>and</i> through Trippin, so the visuals react to it. Click empty space on the strip to move the playhead.</p></div>
+      <div class="card reveal"><h3>5 · Or record it</h3><p>Press <kbd>G</kbd> to arm recording, play the track, and perform with your hotkeys or pads. Every move lands on the strip as a cue. Then tweak it.</p></div>
+      <div class="card reveal"><h3>6 · Save it</h3><p>Press <b>Save</b>. Your show is stored in a <code>timelines</code> folder next to your settings, and drops back in when you load it.</p></div>
+    </div>
+    <div class="frame reveal" style="margin-top:26px"><img loading="lazy" src="img/features/timeline-editor-v2.webp" alt="The timeline editor showing a whole show: audio waveform, scene thumbnails, and lanes for dancer, effects, show cues and text" width="2300" height="570"></div>
+    <p class="sub reveal" style="text-align:center;margin-top:12px">A whole show in the editor. Click the image to zoom in.</p>
+    <div class="split" style="margin-top:46px">
+      <div class="reveal">
+        <h3 style="font-size:24px;margin-bottom:10px">Let an AI draft it</h3>
+        <p class="sec-lead" style="font-size:16px">The <b>AI show…</b> button in the editor writes the cue list for you from the real structure of your track. You supply your own key, and you can always edit the result.</p>
+        <ol class="ticks" style="list-style:none">
+          <li><span>Open <b>Settings → AI show builder</b>. Pick a provider (Anthropic, OpenAI, Gemini, or any OpenAI-compatible service including a local Ollama), a model, and paste your API key. Or leave the key blank and set the provider's usual environment variable.</span></li>
+          <li><span>Load your song in the editor, then press <b>AI show…</b>.</span></li>
+          <li><span>Review what it built and adjust it. The result is ordinary cues.</span></li>
+        </ol>
+      </div>
+      <div class="reveal">
+        <h3 style="font-size:24px;margin-bottom:10px">Follow live</h3>
+        <p class="sec-lead" style="font-size:16px">Playing the same song through your DJ software? Turn on <b>follow live</b> in the editor. Trippin matches the live audio against the loaded track and fires your show in step with the deck.</p>
+        <p class="sub">It needs the same song to be playing. If the playhead jumps around, check that the track in the editor is the one you're actually playing.</p>
+      </div>
+    </div>
+    <p class="sub reveal" style="text-align:center;margin-top:26px">More on the editor and the AI builder on the <a href="features.html#timeline" style="text-decoration:underline">features page</a>.</p>
+  </div>
+</section>
+
+<section id="faq" class="sect" style="background:var(--bg2)">
+  <div class="wrap" style="max-width:860px">
+    <div class="head center reveal"><div class="eyebrow">FAQ</div><h2>Common questions</h2></div>
+
+    <details class="qa reveal"><summary>It says "no signal". What do I do?</summary>
+      <ul>
+        <li>Make sure something is actually playing, and not muted.</li>
+        <li>If your DJ software sends audio straight to a controller's USB interface, pick that controller under <b>Settings → Audio in</b>.</li>
+        <li>On a Mac, check you allowed the screen / system-audio recording permission when macOS asked. You can change it in <b>System Settings → Privacy &amp; Security</b>.</li>
+      </ul></details>
+
+    <details class="qa reveal"><summary>The visuals are choppy or the app feels slow.</summary>
+      <p>Run the <a href="#performance-check" style="text-decoration:underline">performance check</a> in Settings. It switches off the scenes your GPU can't hold at 30 fps. You can also untick heavy 3D scenes in the library by hand (filter by <b>3D</b>). Closing other apps that use the GPU helps too.</p></details>
+
+    <details class="qa reveal"><summary>The beat or the bar's "one" looks wrong.</summary>
+      <ul>
+        <li>Tap <kbd>Space</kbd> on the first beat of a bar to mark the downbeat.</li>
+        <li>If the visuals land slightly early or late, nudge the latency with <kbd>[</kbd> and <kbd>]</kbd> (5 ms each press), or use the slider in Settings.</li>
+        <li>Keep <b>Neural beat tracking</b> on in Settings (it is on by default). It downloads a model of about 80 MB once, in the background, and finds tempo and the bar's "one" far more reliably.</li>
+      </ul></details>
+
+    <details class="qa reveal"><summary>The visuals go calm and stop flashing in the middle of a song.</summary>
+      <p>That is <b>breakdown mode</b>, and it is on purpose. When the drums drop out for a moment, the flashes melt into a glow and the camera slows. When the kicks come back, so do the beats, and the drums slamming back in count as a drop. You can turn breakdown detection off in <b>Settings → Director</b>.</p></details>
+
+    <details class="qa reveal"><summary>Which DJ software does it work with?</summary>
+      <p>All of it, for the visuals. Trippin listens to your computer's audio, so it doesn't matter what is playing.</p>
+      <p>For the <b>now-playing card</b>, which shows the track name, Trippin reads Serato, VirtualDJ, rekordbox, Mixxx, and anything that reports to the operating system's media controls (Spotify, Apple Music, a browser, most media players). Any other tool can feed a text file. Traktor's track names aren't read directly yet.</p></details>
+
+    <details class="qa reveal"><summary>Can I run Trippin on a different computer from my DJ software?</summary>
+      <p>Yes. Install the <a href="features.html#agent" style="text-decoration:underline">Trippin Agent</a> on the DJ computer. It tells your Trippin machine what's playing, and the visuals come back to OBS over NDI. Turn on the remote in Trippin's Settings first.</p></details>
+
+    <details class="qa reveal"><summary>Can I control it from my phone?</summary>
+      <p>Yes. Turn on <b>iOS app remote</b> in Settings, then use the <a href="remote.html" style="text-decoration:underline">Trippin Remote</a> app on an iPhone or iPad on the same network, or browse to <code>http://&lt;your-computer's-ip&gt;:9138</code> from any device. OSC controllers such as TouchOSC work too.</p></details>
+
+    <details class="qa reveal"><summary>How do I save a clip for social media?</summary>
+      <p>Install <b>ffmpeg</b> (<code>winget install ffmpeg</code> on Windows, <code>brew install ffmpeg</code> on a Mac), then press <kbd>K</kbd> to save the last minute, or <kbd>J</kbd> to record your whole set. Clips can be 16:9 or vertical 9:16, and go to your Videos folder (Movies on a Mac) in a <b>Trippin</b> folder.</p></details>
+
+    <details class="qa reveal"><summary>What are the Unity engine shows?</summary>
+      <p>An optional set of 40 extra shows with real-time lighting and geometry. Switch on <b>Unity engine link</b> in Settings and Trippin downloads the engine the first time (about 40 MB). After that it runs in the background and closes when Trippin does. See the <a href="scenes.html" style="text-decoration:underline">scenes page</a>.</p></details>
+
+    <details class="qa reveal"><summary>Is my music uploaded anywhere?</summary>
+      <p>No. Audio is analysed on your computer. The AI show builder is optional, uses your own key, and sends only a numeric summary of the track and its title, never the audio.</p></details>
+
+    <details class="qa reveal"><summary>Where are my settings, shows and clips?</summary>
+      <ul>
+        <li><b>Windows:</b> settings in <code>%APPDATA%\Trippin\trippin.json</code>, with your saved shows in a <code>timelines</code> folder beside it.</li>
+        <li><b>macOS:</b> <code>~/Library/Application Support/Trippin</code>.</li>
+        <li><b>Clips and recordings:</b> <code>Videos/Trippin</code> (<code>Movies/Trippin</code> on a Mac).</li>
+      </ul></details>
+
+    <details class="qa reveal"><summary>How do I update, and where do I report a problem?</summary>
+      <p>Run the newer installer or package. Your settings and shows are kept. Read what changed on the <a href="whats-new.html" style="text-decoration:underline">what's new</a> page. For problems or ideas, open an issue on <a href="https://github.com/jimmyeao/Trippin/issues" style="text-decoration:underline">GitHub</a>.</p></details>
+
+    <p class="reveal" style="text-align:center;margin-top:34px"><a class="btn primary" href="download.html">Download Trippin</a></p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>© <span id="yr">2026</span> Trippin · trippin.club</span>
+    <span><a href="start.html">Get started</a> · <a href="remote.html">Remote app</a> · <a href="privacy.html">Privacy</a> · <a href="https://github.com/jimmyeao/Trippin">GitHub</a> · <a href="https://github.com/jimmyeao/Trippin/issues">Support</a></span>
+  </div>
+</footer>
+<script src="site.js?v=1791146448"></script>
+</body>
+</html>
