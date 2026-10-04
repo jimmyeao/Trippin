@@ -69,6 +69,9 @@ namespace TrippinStage
         }
 
         // 0 on the beat (a strike lands), 1 half a period later: a hand or foot height factor.
+        static float FormAng(int form, float u, int i, float phrase) =>
+            form == 0 ? u * 0.8f + 0.5f * Mathf.Sin(phrase) : (form == 1 ? -u * 0.6f + 0.4f * Mathf.Sin(phrase + i * 0.4f) : 0.45f * Mathf.Sin(phrase * 2f + i * 0.9f));
+
         static float Strike(float beat, float period, float offset = 0f) =>
             0.5f - 0.5f * Mathf.Cos(2f * Mathf.PI * (beat - offset) / period);
 
@@ -99,12 +102,15 @@ namespace TrippinStage
             // The wall, the floor and the lasers.
             _wallM.SetFloat("_Hue", hue + 0.05f); _wallM.SetFloat("_Gain", gain * 0.9f); _wallM.SetFloat("_Clk", rx.clk);
             _floorM.SetFloat("_Hue", hue); _floorM.SetFloat("_Gain", gain); _floorM.SetFloat("_Clk", rx.clk);
-            int form = ((int)(b / 16f)) % 3;
+            // A new laser formation every 16 beats, morphing in over the first beat.
+            int blk = Mathf.FloorToInt(b / 16f);
+            int form = ((blk % 3) + 3) % 3, prevForm = (form + 2) % 3;
+            float morph = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(b - blk * 16f));
             for (int i = 0; i < 12; i++)
             {
                 float u = (i - 5.5f) / 5.5f;
                 var from = new Vector3(u * 20f * tight, 0.4f, 20f);
-                float ang = form == 0 ? u * 0.8f + 0.5f * Mathf.Sin(rx.phrase) : (form == 1 ? -u * 0.6f + 0.4f * Mathf.Sin(rx.phrase + i * 0.4f) : 0.45f * Mathf.Sin(rx.phrase * 2f + i * 0.9f));
+                float ang = Mathf.Lerp(FormAng(prevForm, u, i, rx.phrase), FormAng(form, u, i, rx.phrase), morph);
                 _lasers.Set(i, from, from + new Vector3(Mathf.Sin(ang) * 22f, 26f, -6f * Mathf.Cos(ang)), Kit.Hue(hue + 0.06f * (i % 5)), gain * (0.25f + 0.6f * rx.midFast + 0.4f * rx.impact) * (0.4f + 0.6f * play));
             }
 

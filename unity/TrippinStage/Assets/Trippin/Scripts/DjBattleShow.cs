@@ -52,6 +52,9 @@ namespace TrippinStage
             _spots = new BeamPool(transform, beamMat, 2, "spot", false, 0.16f, 0.014f, 8f, 0.65f, 0.55f, 0f);
         }
 
+        static float FormAng(int form, float u, int i, float phrase) =>
+            form == 0 ? u * 0.9f + 0.5f * Mathf.Sin(phrase) : (form == 1 ? -u * 0.7f + 0.4f * Mathf.Sin(phrase + i * 0.4f) : 0.45f * Mathf.Sin(phrase * 2f + i * 0.9f));
+
         protected override void Frame(ShowState s, float dt)
         {
             float gain = rx.Gain(0.6f, 1.45f);
@@ -85,12 +88,16 @@ namespace TrippinStage
             _wallM.SetFloat("_Hue", hue + 0.1f);
             _wallM.SetFloat("_Gain", gain * 0.9f);
             _wallM.SetFloat("_Clk", rx.clk);
-            int form = ((int)(rx.beatS / 16f)) % 3;
+            // A new laser formation every 16 beats, morphing in over the first beat (a hard switch
+            // read as a pop at every hand-over).
+            int blk = Mathf.FloorToInt(rx.beatS / 16f);
+            int form = ((blk % 3) + 3) % 3, prevForm = (form + 2) % 3;
+            float morph = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(rx.beatS - blk * 16f));
             for (int i = 0; i < 14; i++)
             {
                 float u = (i - 6.5f) / 6.5f;
                 var from = new Vector3(u * 24f, 0.4f, 12f);
-                float ang = form == 0 ? u * 0.9f + 0.5f * Mathf.Sin(rx.phrase) : (form == 1 ? -u * 0.7f + 0.4f * Mathf.Sin(rx.phrase + i * 0.4f) : 0.45f * Mathf.Sin(rx.phrase * 2f + i * 0.9f));
+                float ang = Mathf.Lerp(FormAng(prevForm, u, i, rx.phrase), FormAng(form, u, i, rx.phrase), morph);
                 _lasers.Set(i, from, from + new Vector3(Mathf.Sin(ang) * 22f, 28f, 8f * Mathf.Cos(ang)), Kit.Hue(hue + 0.06f * (i % 5) + (u > 0f ? 0.18f : 0f)), gain * (0.3f + 0.7f * rx.midFast + 0.4f * rx.impact));
             }
 
