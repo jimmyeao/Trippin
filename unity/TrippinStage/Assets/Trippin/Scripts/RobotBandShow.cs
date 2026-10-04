@@ -127,10 +127,12 @@ namespace TrippinStage
             float wc = (1f - Mathf.Clamp01(d / 0.8f)) * play;
             Vector3 crashHit = Crash + new Vector3(0.5f, 0.2f + 0.7f * Mathf.Clamp01(d / 0.4f), -0.5f);
             hLeft = Vector3.Lerp(hLeft, crashHit, wc);
-            // Feet: the kick pedal on every beat; the hi-hat pedal on 2 and 4.
+            // Feet, on the pedals behind the kick drum: the left foot (world +x: the android faces -z)
+            // on the kick pedal every beat, the right foot on the hi-hat pedal (the hi-hat is on this
+            // kit's right) on 2 and 4. Planted just under the knees, so the shins stay clear of the shell.
             float kp = Strike(b, 1f);
-            var footR = new Vector3(0.9f, 0.3f + 0.45f * kp * amp, P.z - 2.4f);
-            var footL = new Vector3(-1.1f, 0.3f + 0.3f * Strike(b, 2f, 1f), P.z - 2.2f);
+            var footL = new Vector3(0.35f, 0.3f + 0.45f * kp * amp, P.z - 1.85f);
+            var footR = new Vector3(-1.5f, 0.3f + 0.3f * Strike(b, 2f, 1f), P.z - 1.7f);
             var pose = new AndroidPose
             {
                 pelvis = P, yaw = 0f,
@@ -146,8 +148,10 @@ namespace TrippinStage
             float tomHit = Hit(b, 4f, 3.5f) * play * (0.4f + 0.6f * rx.Band(1));
             float crashHitE = Hit(b, 16f, 0f, 3f) * play;
             // Kick drum (horizontal, facing the camera).
-            _shell.Cyl(0, new Vector3(0f, 2.1f, 12.6f), new Vector3(0f, 2.1f, 13.7f), 1.75f);
-            _skin.Cyl(0, new Vector3(0f, 2.1f, 12.58f), new Vector3(0f, 2.1f, 12.62f), 1.6f); _skin.Glow(0, hue, 0.3f + 3.0f * kickHit);
+            // It stands in front of the drummer's knees (back head at z 11.55, knees at ~12.1), low
+            // enough to clear the snare above it.
+            _shell.Cyl(0, new Vector3(0f, 1.85f, 10.45f), new Vector3(0f, 1.85f, 11.55f), 1.5f);
+            _skin.Cyl(0, new Vector3(0f, 1.85f, 10.43f), new Vector3(0f, 1.85f, 10.47f), 1.37f); _skin.Glow(0, hue, 0.3f + 3.0f * kickHit);
             _shell.Cyl(1, new Vector3(Snare.x, Snare.y - 0.35f, Snare.z), new Vector3(Snare.x, Snare.y, Snare.z), 1.0f);
             _skin.Cyl(1, new Vector3(Snare.x, Snare.y, Snare.z), new Vector3(Snare.x, Snare.y + 0.04f, Snare.z), 0.92f); _skin.Glow(1, hue + 0.12f, 0.3f + 3.2f * snareHit);
             _shell.Cyl(2, TomA + new Vector3(0f, -0.5f, 0f), TomA, 0.8f);
