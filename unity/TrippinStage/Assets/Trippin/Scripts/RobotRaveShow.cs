@@ -6,9 +6,11 @@
 //    mids, mid-highs, highs): its arms reach higher and its sway widens; its
 //    visor is a live spectrum and its chest core and spotlight follow its band;
 //    the floor lights up in rings from the bass and the spectrum round its edge.
-//  - Motion: all of them dance on the smooth energy clock (so they speed up with
-//    the track and surge on a drop), bounce on the eased kick, and reverse their
-//    sway on a phrase-length sine; the spotlights sweep and the camera drifts.
+//  - Motion: all of them dance on the beat (Trippin's tracked beat count, so
+//    every dip lands on a beat and every routine stays in time), bounce on the
+//    eased kick, and reverse their sway on a phrase-length sine; the spotlights
+//    sweep and the camera drifts. (The energy clock drifted off the beat, so
+//    the dancing didn't read as in time with the music.)
 //  - Luminance: robots, floor, wall and lights follow the music's loudness.
 //  - Drops: a build tightens the line and dims it; the drop throws every android's
 //    arms up and flares the floor (eased).
@@ -78,10 +80,13 @@ namespace TrippinStage
             {
                 int band = i & 3;
                 float amp = 0.45f + 0.7f * rx.Band(band);
-                float ph = i * 0.9f;
-                float t = rx.clk;
+                // Offsets in whole beats only (pi/2 in the half-speed terms, a half beat
+                // in the full-speed ones), so the routines differ but stay on the grid.
+                float ph = (i % 4) * Mathf.PI * 0.5f;
+                float t = rx.beat;
                 Vector3 baseP = new Vector3(Spots[i].x * tight, 0f, Spots[i].z);
-                float bob = Mathf.Abs(Mathf.Sin(t * Mathf.PI * 0.5f + ph));
+                // Lowest on every beat, for everyone: the knee dip is the pulse.
+                float bob = Mathf.Abs(Mathf.Cos(t * Mathf.PI));
                 float jump = (i % 5 == 4) ? Mathf.Max(0f, Mathf.Sin(t * Mathf.PI + ph)) * 0.14f * H * amp : 0f;
                 Vector3 pel = baseP + new Vector3(0.4f * Mathf.Sin(t * 0.5f + ph) * dir, 0.51f * H - 0.045f * H * kick * amp - 0.035f * H * bob + jump, 0f);
 
