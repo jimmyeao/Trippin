@@ -35,6 +35,10 @@ Musicians (`band_*`; `--matte bg`, looped at the footage's own tempo with
 
 - `band_drummer`: https://mixkit.co/free-stock-video/silhouette-of-a-drummer-playing-on-a-green-background-44129/
 - `band_drummer_side`: https://mixkit.co/free-stock-video/shadow-of-a-drummer-playing-on-a-green-background-44128/
-- `band_guitar`: https://mixkit.co/free-stock-video/silhouette-of-a-rock-musician-playing-on-a-red-background-44154/
 - `band_guitar_seat`: https://mixkit.co/free-stock-video/silhouette-of-a-guitarist-playing-sitting-on-a-bench-44167/
 - `band_keys`: https://mixkit.co/free-stock-video/shadow-of-a-keyboardist-playing-on-a-blue-background-44148/
+
+Pexels (Pexels License — free to use, AI-matted via `tools/ai_dancer.py`,
+isnet-general-use model; floor reflection faded to a soft shadow):
+
+- `band_guitar`: https://www.pexels.com/video/people-performing-on-stage-6273838/

@@ -276,6 +276,17 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   live beats Trippin retimes to.
 - The auto `energy` measure undervalues clips with big props or small
   movement (drum kit, seated strumming) — hand-set it in clip.json.
+- **Sourcing footage:** Mixkit pages expose `contentUrl` in JSON-LD and
+  `assets.mixkit.co/videos/<id>/<id>-720.mp4` serves any ID (probe ranges;
+  `<id>-thumb-720-0.jpg` is the preview). Pexels pages are Cloudflare-
+  blocked but `pexels.com/download/video/<id>/` 302s to the file, and
+  `videos.pexels.com/video-files/<id>/<id>-sd_<w>_<h>_<fps>fps.mp4` guesses
+  smaller renditions; `images.pexels.com/videos/<id>/pictures/preview-0.jpg`
+  thumbs IDs cheaply. Pixabay is fully blocked.
+- **AI-matte props:** `u2net_human_seg` erodes held instruments (a guitar
+  becomes a blob) — use `isnet-general-use`. It also keeps near-opaque floor
+  reflections fused to the feet: fade the below-ankle region into a soft
+  elliptical shadow rather than trying to cut it.
 
 ## 7. Rust and app gotchas
 
