@@ -119,7 +119,7 @@ NavMeshSettings:
     debug:
       m_Flags: 0
   m_NavMeshData: {fileID: 0}
---- !u!1 &261141364
+--- !u!1 &202407605
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -127,9 +127,1292 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 261141367}
-  - component: {fileID: 261141365}
-  - component: {fileID: 261141366}
+  - component: {fileID: 202407607}
+  - component: {fileID: 202407606}
+  m_Layer: 0
+  m_Name: unity_flow
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &202407606
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 202407605}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e6fd509dc36f347429e70f0d476ae273, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.FlowShow
+  cam: {fileID: 1163271234}
+  flow: {fileID: 7200000, guid: 75b7d91d0c12d4c4ba9c4840dcbb8502, type: 3}
+  pointsMat: {fileID: 2100000, guid: 4383535c54737134bb9b6dc1251e50bb, type: 2}
+  nebulaMat: {fileID: 2100000, guid: 575a49663c3cc83499e08f3993cc7280, type: 2}
+  glowMat: {fileID: 2100000, guid: a9752ab407b83b342ac48eb727646460, type: 2}
+--- !u!4 &202407607
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 202407605}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1813562876}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &206004383
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 206004385}
+  - component: {fileID: 206004384}
+  m_Layer: 0
+  m_Name: unity_tunnel
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &206004384
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 206004383}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 844333261a767872bb2d331fd394d8d4, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.TunnelShow
+  cam: {fileID: 1163271234}
+  beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
+  glowMat: {fileID: 2100000, guid: a9752ab407b83b342ac48eb727646460, type: 2}
+  groundMat: {fileID: 2100000, guid: 3b50b03dcf3f6304cbd594ed2c5f284f, type: 2}
+  hazeMat: {fileID: 2100000, guid: c1fc308b1272eee408c68fe96ade1f7f, type: 2}
+  surfaceMat: {fileID: 2100000, guid: 2d329defadec31841905655c0aeb9693, type: 2}
+  tubeMat: {fileID: 2100000, guid: 501252de1e91cb94098fb4c1d1a94cbd, type: 2}
+  orbMat: {fileID: 2100000, guid: 73a4c051c446f2b4e9afe7b67ba84bd3, type: 2}
+  structMat: {fileID: 2100000, guid: 35cd406b2714c9a4aae393ce416d16d5, type: 2}
+  membraneMat: {fileID: 2100000, guid: de756b3a3fb71874fb5b1830d2b1fcaa, type: 2}
+  ribbonMat: {fileID: 2100000, guid: 59221eb3395699242a69e5e98cec75d6, type: 2}
+  deepMat: {fileID: 2100000, guid: a67ec944e36e5a34ea77187036027883, type: 2}
+  corridorMat: {fileID: 2100000, guid: 78be81d9b641350418fc2ef75a655ac3, type: 2}
+  scopeMat: {fileID: 2100000, guid: 4708241de878d0446ac6148d296c2d8e, type: 2}
+  landMat: {fileID: 2100000, guid: b7f73f8725254064886ab4198c60fd88, type: 2}
+  horizonMat: {fileID: 2100000, guid: 6124a2002bd6c2343b00fa097608c0f2, type: 2}
+  robotMat: {fileID: 2100000, guid: 757fd7ea4cfe30f4fac4141420466f6d, type: 2}
+  screenMat: {fileID: 2100000, guid: e73b4cf8cee7aa04eb4c1d9d4236020f, type: 2}
+  crowdMeshMat: {fileID: 2100000, guid: b1c69f847734ef34a821a76e25c3d08f, type: 2}
+--- !u!4 &206004385
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 206004383}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1813562876}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &228682009
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 228682011}
+  - component: {fileID: 228682010}
+  m_Layer: 0
+  m_Name: unity_lightstorm
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &228682010
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 228682009}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3e9b0c14a7d54f62b81a5d6c0e2f7a93, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.LightstormShow
+  cam: {fileID: 1163271234}
+  beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
+  glowMat: {fileID: 2100000, guid: a9752ab407b83b342ac48eb727646460, type: 2}
+  groundMat: {fileID: 2100000, guid: 3b50b03dcf3f6304cbd594ed2c5f284f, type: 2}
+  hazeMat: {fileID: 2100000, guid: c1fc308b1272eee408c68fe96ade1f7f, type: 2}
+--- !u!4 &228682011
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 228682009}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1813562876}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &391682585
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 391682587}
+  - component: {fileID: 391682586}
+  m_Layer: 0
+  m_Name: unity_nebula
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &391682586
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 391682585}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ada380067aaf5ea93a428f421d740972, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.NebulaShow
+  cam: {fileID: 1163271234}
+  beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
+  glowMat: {fileID: 2100000, guid: a9752ab407b83b342ac48eb727646460, type: 2}
+  groundMat: {fileID: 2100000, guid: 3b50b03dcf3f6304cbd594ed2c5f284f, type: 2}
+  hazeMat: {fileID: 2100000, guid: c1fc308b1272eee408c68fe96ade1f7f, type: 2}
+  surfaceMat: {fileID: 2100000, guid: 2d329defadec31841905655c0aeb9693, type: 2}
+  tubeMat: {fileID: 2100000, guid: 501252de1e91cb94098fb4c1d1a94cbd, type: 2}
+  orbMat: {fileID: 2100000, guid: 73a4c051c446f2b4e9afe7b67ba84bd3, type: 2}
+  structMat: {fileID: 2100000, guid: 35cd406b2714c9a4aae393ce416d16d5, type: 2}
+  membraneMat: {fileID: 2100000, guid: de756b3a3fb71874fb5b1830d2b1fcaa, type: 2}
+  ribbonMat: {fileID: 2100000, guid: 59221eb3395699242a69e5e98cec75d6, type: 2}
+  deepMat: {fileID: 2100000, guid: a67ec944e36e5a34ea77187036027883, type: 2}
+  corridorMat: {fileID: 2100000, guid: 78be81d9b641350418fc2ef75a655ac3, type: 2}
+  scopeMat: {fileID: 2100000, guid: 4708241de878d0446ac6148d296c2d8e, type: 2}
+  landMat: {fileID: 2100000, guid: b7f73f8725254064886ab4198c60fd88, type: 2}
+  horizonMat: {fileID: 2100000, guid: 6124a2002bd6c2343b00fa097608c0f2, type: 2}
+  robotMat: {fileID: 2100000, guid: 757fd7ea4cfe30f4fac4141420466f6d, type: 2}
+  screenMat: {fileID: 2100000, guid: e73b4cf8cee7aa04eb4c1d9d4236020f, type: 2}
+  crowdMeshMat: {fileID: 2100000, guid: b1c69f847734ef34a821a76e25c3d08f, type: 2}
+--- !u!4 &391682587
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 391682585}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1813562876}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &429038298
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 429038300}
+  - component: {fileID: 429038299}
+  m_Layer: 0
+  m_Name: unity_robot_club
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &429038299
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 429038298}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 420c647617434c2e83c184b116c8e98d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.RobotClubShow
+  cam: {fileID: 1163271234}
+  beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
+  glowMat: {fileID: 2100000, guid: a9752ab407b83b342ac48eb727646460, type: 2}
+  groundMat: {fileID: 2100000, guid: 3b50b03dcf3f6304cbd594ed2c5f284f, type: 2}
+  hazeMat: {fileID: 2100000, guid: c1fc308b1272eee408c68fe96ade1f7f, type: 2}
+  surfaceMat: {fileID: 2100000, guid: 2d329defadec31841905655c0aeb9693, type: 2}
+  tubeMat: {fileID: 2100000, guid: 501252de1e91cb94098fb4c1d1a94cbd, type: 2}
+  orbMat: {fileID: 2100000, guid: 73a4c051c446f2b4e9afe7b67ba84bd3, type: 2}
+  structMat: {fileID: 2100000, guid: 35cd406b2714c9a4aae393ce416d16d5, type: 2}
+  membraneMat: {fileID: 2100000, guid: de756b3a3fb71874fb5b1830d2b1fcaa, type: 2}
+  ribbonMat: {fileID: 2100000, guid: 59221eb3395699242a69e5e98cec75d6, type: 2}
+  deepMat: {fileID: 2100000, guid: a67ec944e36e5a34ea77187036027883, type: 2}
+  corridorMat: {fileID: 2100000, guid: 78be81d9b641350418fc2ef75a655ac3, type: 2}
+  scopeMat: {fileID: 2100000, guid: 4708241de878d0446ac6148d296c2d8e, type: 2}
+  landMat: {fileID: 2100000, guid: b7f73f8725254064886ab4198c60fd88, type: 2}
+  horizonMat: {fileID: 2100000, guid: 6124a2002bd6c2343b00fa097608c0f2, type: 2}
+  robotMat: {fileID: 2100000, guid: 757fd7ea4cfe30f4fac4141420466f6d, type: 2}
+  screenMat: {fileID: 2100000, guid: e73b4cf8cee7aa04eb4c1d9d4236020f, type: 2}
+  crowdMeshMat: {fileID: 2100000, guid: b1c69f847734ef34a821a76e25c3d08f, type: 2}
+--- !u!4 &429038300
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 429038298}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1813562876}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &483962808
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 483962810}
+  - component: {fileID: 483962809}
+  m_Layer: 0
+  m_Name: unity_prism
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &483962809
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 483962808}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a4d27c0e91b34e58b6f3c8e1d05a7b62, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.PrismShow
+  cam: {fileID: 1163271234}
+  beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
+  groundMat: {fileID: 2100000, guid: 3b50b03dcf3f6304cbd594ed2c5f284f, type: 2}
+  hazeMat: {fileID: 2100000, guid: c1fc308b1272eee408c68fe96ade1f7f, type: 2}
+--- !u!4 &483962810
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 483962808}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1813562876}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &518440441
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 518440443}
+  - component: {fileID: 518440442}
+  m_Layer: 0
+  m_Name: unity_crystals
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &518440442
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 518440441}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3839aea14f4900742b6526312739e2db, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.CrystalShow
+  cam: {fileID: 1163271234}
+  chromeMat: {fileID: 2100000, guid: e039a798edaeed842850fb12d899a109, type: 2}
+  sunMat: {fileID: 2100000, guid: 7ea4bc34eb0062144a1ecf6b87640e88, type: 2}
+  nebulaMat: {fileID: 2100000, guid: 575a49663c3cc83499e08f3993cc7280, type: 2}
+  pointsMat: {fileID: 2100000, guid: 4383535c54737134bb9b6dc1251e50bb, type: 2}
+--- !u!4 &518440443
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 518440441}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1813562876}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &539772187
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 539772189}
+  - component: {fileID: 539772188}
+  m_Layer: 0
+  m_Name: unity_terrain
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &539772188
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 539772187}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0a1bcd08e0d5101c6847fc74c18452fa, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.TerrainShow
+  cam: {fileID: 1163271234}
+  beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
+  glowMat: {fileID: 2100000, guid: a9752ab407b83b342ac48eb727646460, type: 2}
+  groundMat: {fileID: 2100000, guid: 3b50b03dcf3f6304cbd594ed2c5f284f, type: 2}
+  hazeMat: {fileID: 2100000, guid: c1fc308b1272eee408c68fe96ade1f7f, type: 2}
+  surfaceMat: {fileID: 2100000, guid: 2d329defadec31841905655c0aeb9693, type: 2}
+  tubeMat: {fileID: 2100000, guid: 501252de1e91cb94098fb4c1d1a94cbd, type: 2}
+  orbMat: {fileID: 2100000, guid: 73a4c051c446f2b4e9afe7b67ba84bd3, type: 2}
+  structMat: {fileID: 2100000, guid: 35cd406b2714c9a4aae393ce416d16d5, type: 2}
+  membraneMat: {fileID: 2100000, guid: de756b3a3fb71874fb5b1830d2b1fcaa, type: 2}
+  ribbonMat: {fileID: 2100000, guid: 59221eb3395699242a69e5e98cec75d6, type: 2}
+  deepMat: {fileID: 2100000, guid: a67ec944e36e5a34ea77187036027883, type: 2}
+  corridorMat: {fileID: 2100000, guid: 78be81d9b641350418fc2ef75a655ac3, type: 2}
+  scopeMat: {fileID: 2100000, guid: 4708241de878d0446ac6148d296c2d8e, type: 2}
+  landMat: {fileID: 2100000, guid: b7f73f8725254064886ab4198c60fd88, type: 2}
+  horizonMat: {fileID: 2100000, guid: 6124a2002bd6c2343b00fa097608c0f2, type: 2}
+  robotMat: {fileID: 2100000, guid: 757fd7ea4cfe30f4fac4141420466f6d, type: 2}
+  screenMat: {fileID: 2100000, guid: e73b4cf8cee7aa04eb4c1d9d4236020f, type: 2}
+  crowdMeshMat: {fileID: 2100000, guid: b1c69f847734ef34a821a76e25c3d08f, type: 2}
+--- !u!4 &539772189
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 539772187}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1813562876}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &615563420
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 615563422}
+  - component: {fileID: 615563421}
+  m_Layer: 0
+  m_Name: unity_chladni
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &615563421
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 615563420}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1638adc8a6a03bfa25c5f62677a4ba77, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.ChladniShow
+  cam: {fileID: 1163271234}
+  beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
+  glowMat: {fileID: 2100000, guid: a9752ab407b83b342ac48eb727646460, type: 2}
+  groundMat: {fileID: 2100000, guid: 3b50b03dcf3f6304cbd594ed2c5f284f, type: 2}
+  hazeMat: {fileID: 2100000, guid: c1fc308b1272eee408c68fe96ade1f7f, type: 2}
+  surfaceMat: {fileID: 2100000, guid: 2d329defadec31841905655c0aeb9693, type: 2}
+  tubeMat: {fileID: 2100000, guid: 501252de1e91cb94098fb4c1d1a94cbd, type: 2}
+  orbMat: {fileID: 2100000, guid: 73a4c051c446f2b4e9afe7b67ba84bd3, type: 2}
+  structMat: {fileID: 2100000, guid: 35cd406b2714c9a4aae393ce416d16d5, type: 2}
+  membraneMat: {fileID: 2100000, guid: de756b3a3fb71874fb5b1830d2b1fcaa, type: 2}
+  ribbonMat: {fileID: 2100000, guid: 59221eb3395699242a69e5e98cec75d6, type: 2}
+  deepMat: {fileID: 2100000, guid: a67ec944e36e5a34ea77187036027883, type: 2}
+  corridorMat: {fileID: 2100000, guid: 78be81d9b641350418fc2ef75a655ac3, type: 2}
+  scopeMat: {fileID: 2100000, guid: 4708241de878d0446ac6148d296c2d8e, type: 2}
+  landMat: {fileID: 2100000, guid: b7f73f8725254064886ab4198c60fd88, type: 2}
+  horizonMat: {fileID: 2100000, guid: 6124a2002bd6c2343b00fa097608c0f2, type: 2}
+  robotMat: {fileID: 2100000, guid: 757fd7ea4cfe30f4fac4141420466f6d, type: 2}
+  screenMat: {fileID: 2100000, guid: e73b4cf8cee7aa04eb4c1d9d4236020f, type: 2}
+  crowdMeshMat: {fileID: 2100000, guid: b1c69f847734ef34a821a76e25c3d08f, type: 2}
+--- !u!4 &615563422
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 615563420}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1813562876}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &636837535
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 636837537}
+  - component: {fileID: 636837536}
+  m_Layer: 0
+  m_Name: unity_knot
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &636837536
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 636837535}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ed1b61168449336fa166aa3d414b9568, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.KnotShow
+  cam: {fileID: 1163271234}
+  beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
+  glowMat: {fileID: 2100000, guid: a9752ab407b83b342ac48eb727646460, type: 2}
+  groundMat: {fileID: 2100000, guid: 3b50b03dcf3f6304cbd594ed2c5f284f, type: 2}
+  hazeMat: {fileID: 2100000, guid: c1fc308b1272eee408c68fe96ade1f7f, type: 2}
+  surfaceMat: {fileID: 2100000, guid: 2d329defadec31841905655c0aeb9693, type: 2}
+  tubeMat: {fileID: 2100000, guid: 501252de1e91cb94098fb4c1d1a94cbd, type: 2}
+  orbMat: {fileID: 2100000, guid: 73a4c051c446f2b4e9afe7b67ba84bd3, type: 2}
+  structMat: {fileID: 2100000, guid: 35cd406b2714c9a4aae393ce416d16d5, type: 2}
+  membraneMat: {fileID: 2100000, guid: de756b3a3fb71874fb5b1830d2b1fcaa, type: 2}
+  ribbonMat: {fileID: 2100000, guid: 59221eb3395699242a69e5e98cec75d6, type: 2}
+  deepMat: {fileID: 2100000, guid: a67ec944e36e5a34ea77187036027883, type: 2}
+  corridorMat: {fileID: 2100000, guid: 78be81d9b641350418fc2ef75a655ac3, type: 2}
+  scopeMat: {fileID: 2100000, guid: 4708241de878d0446ac6148d296c2d8e, type: 2}
+  landMat: {fileID: 2100000, guid: b7f73f8725254064886ab4198c60fd88, type: 2}
+  horizonMat: {fileID: 2100000, guid: 6124a2002bd6c2343b00fa097608c0f2, type: 2}
+  robotMat: {fileID: 2100000, guid: 757fd7ea4cfe30f4fac4141420466f6d, type: 2}
+  screenMat: {fileID: 2100000, guid: e73b4cf8cee7aa04eb4c1d9d4236020f, type: 2}
+  crowdMeshMat: {fileID: 2100000, guid: b1c69f847734ef34a821a76e25c3d08f, type: 2}
+--- !u!4 &636837537
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 636837535}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1813562876}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &650494055
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 650494057}
+  - component: {fileID: 650494056}
+  m_Layer: 0
+  m_Name: unity_lightrain
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &650494056
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 650494055}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7ede49b96cb8700e7b8303949c255b18, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.LightRainShow
+  cam: {fileID: 1163271234}
+  beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
+  glowMat: {fileID: 2100000, guid: a9752ab407b83b342ac48eb727646460, type: 2}
+  groundMat: {fileID: 2100000, guid: 3b50b03dcf3f6304cbd594ed2c5f284f, type: 2}
+  hazeMat: {fileID: 2100000, guid: c1fc308b1272eee408c68fe96ade1f7f, type: 2}
+  surfaceMat: {fileID: 2100000, guid: 2d329defadec31841905655c0aeb9693, type: 2}
+  tubeMat: {fileID: 2100000, guid: 501252de1e91cb94098fb4c1d1a94cbd, type: 2}
+  orbMat: {fileID: 2100000, guid: 73a4c051c446f2b4e9afe7b67ba84bd3, type: 2}
+  structMat: {fileID: 2100000, guid: 35cd406b2714c9a4aae393ce416d16d5, type: 2}
+  membraneMat: {fileID: 2100000, guid: de756b3a3fb71874fb5b1830d2b1fcaa, type: 2}
+  ribbonMat: {fileID: 2100000, guid: 59221eb3395699242a69e5e98cec75d6, type: 2}
+  deepMat: {fileID: 2100000, guid: a67ec944e36e5a34ea77187036027883, type: 2}
+  corridorMat: {fileID: 2100000, guid: 78be81d9b641350418fc2ef75a655ac3, type: 2}
+  scopeMat: {fileID: 2100000, guid: 4708241de878d0446ac6148d296c2d8e, type: 2}
+  landMat: {fileID: 2100000, guid: b7f73f8725254064886ab4198c60fd88, type: 2}
+  horizonMat: {fileID: 2100000, guid: 6124a2002bd6c2343b00fa097608c0f2, type: 2}
+  robotMat: {fileID: 2100000, guid: 757fd7ea4cfe30f4fac4141420466f6d, type: 2}
+  screenMat: {fileID: 2100000, guid: e73b4cf8cee7aa04eb4c1d9d4236020f, type: 2}
+  crowdMeshMat: {fileID: 2100000, guid: b1c69f847734ef34a821a76e25c3d08f, type: 2}
+--- !u!4 &650494057
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 650494055}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1813562876}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &674645495
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 674645497}
+  - component: {fileID: 674645496}
+  m_Layer: 0
+  m_Name: unity_gyroscope
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &674645496
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 674645495}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bf298c4462e1ee4263166cf49e988ed2, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.GyroscopeShow
+  cam: {fileID: 1163271234}
+  beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
+  glowMat: {fileID: 2100000, guid: a9752ab407b83b342ac48eb727646460, type: 2}
+  groundMat: {fileID: 2100000, guid: 3b50b03dcf3f6304cbd594ed2c5f284f, type: 2}
+  hazeMat: {fileID: 2100000, guid: c1fc308b1272eee408c68fe96ade1f7f, type: 2}
+  surfaceMat: {fileID: 2100000, guid: 2d329defadec31841905655c0aeb9693, type: 2}
+  tubeMat: {fileID: 2100000, guid: 501252de1e91cb94098fb4c1d1a94cbd, type: 2}
+  orbMat: {fileID: 2100000, guid: 73a4c051c446f2b4e9afe7b67ba84bd3, type: 2}
+  structMat: {fileID: 2100000, guid: 35cd406b2714c9a4aae393ce416d16d5, type: 2}
+  membraneMat: {fileID: 2100000, guid: de756b3a3fb71874fb5b1830d2b1fcaa, type: 2}
+  ribbonMat: {fileID: 2100000, guid: 59221eb3395699242a69e5e98cec75d6, type: 2}
+  deepMat: {fileID: 2100000, guid: a67ec944e36e5a34ea77187036027883, type: 2}
+  corridorMat: {fileID: 2100000, guid: 78be81d9b641350418fc2ef75a655ac3, type: 2}
+  scopeMat: {fileID: 2100000, guid: 4708241de878d0446ac6148d296c2d8e, type: 2}
+  landMat: {fileID: 2100000, guid: b7f73f8725254064886ab4198c60fd88, type: 2}
+  horizonMat: {fileID: 2100000, guid: 6124a2002bd6c2343b00fa097608c0f2, type: 2}
+  robotMat: {fileID: 2100000, guid: 757fd7ea4cfe30f4fac4141420466f6d, type: 2}
+  screenMat: {fileID: 2100000, guid: e73b4cf8cee7aa04eb4c1d9d4236020f, type: 2}
+  crowdMeshMat: {fileID: 2100000, guid: b1c69f847734ef34a821a76e25c3d08f, type: 2}
+--- !u!4 &674645497
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 674645495}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1813562876}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &771267971
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 771267973}
+  - component: {fileID: 771267972}
+  m_Layer: 0
+  m_Name: unity_orb
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &771267972
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 771267971}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 045e338546f72f8e542aec44bf3ed0cf, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.OrbShow
+  cam: {fileID: 1163271234}
+  beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
+  glowMat: {fileID: 2100000, guid: a9752ab407b83b342ac48eb727646460, type: 2}
+  groundMat: {fileID: 2100000, guid: 3b50b03dcf3f6304cbd594ed2c5f284f, type: 2}
+  hazeMat: {fileID: 2100000, guid: c1fc308b1272eee408c68fe96ade1f7f, type: 2}
+  surfaceMat: {fileID: 2100000, guid: 2d329defadec31841905655c0aeb9693, type: 2}
+  tubeMat: {fileID: 2100000, guid: 501252de1e91cb94098fb4c1d1a94cbd, type: 2}
+  orbMat: {fileID: 2100000, guid: 73a4c051c446f2b4e9afe7b67ba84bd3, type: 2}
+  structMat: {fileID: 2100000, guid: 35cd406b2714c9a4aae393ce416d16d5, type: 2}
+  membraneMat: {fileID: 2100000, guid: de756b3a3fb71874fb5b1830d2b1fcaa, type: 2}
+  ribbonMat: {fileID: 2100000, guid: 59221eb3395699242a69e5e98cec75d6, type: 2}
+  deepMat: {fileID: 2100000, guid: a67ec944e36e5a34ea77187036027883, type: 2}
+  corridorMat: {fileID: 2100000, guid: 78be81d9b641350418fc2ef75a655ac3, type: 2}
+  scopeMat: {fileID: 2100000, guid: 4708241de878d0446ac6148d296c2d8e, type: 2}
+  landMat: {fileID: 2100000, guid: b7f73f8725254064886ab4198c60fd88, type: 2}
+  horizonMat: {fileID: 2100000, guid: 6124a2002bd6c2343b00fa097608c0f2, type: 2}
+  robotMat: {fileID: 2100000, guid: 757fd7ea4cfe30f4fac4141420466f6d, type: 2}
+  screenMat: {fileID: 2100000, guid: e73b4cf8cee7aa04eb4c1d9d4236020f, type: 2}
+  crowdMeshMat: {fileID: 2100000, guid: b1c69f847734ef34a821a76e25c3d08f, type: 2}
+--- !u!4 &771267973
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 771267971}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1813562876}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &813125749
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 813125751}
+  - component: {fileID: 813125750}
+  m_Layer: 0
+  m_Name: unity_ledwall
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &813125750
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 813125749}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: cc457a82fdb64f2119d5558cbf155ba0, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.LedWallShow
+  cam: {fileID: 1163271234}
+  beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
+  glowMat: {fileID: 2100000, guid: a9752ab407b83b342ac48eb727646460, type: 2}
+  groundMat: {fileID: 2100000, guid: 3b50b03dcf3f6304cbd594ed2c5f284f, type: 2}
+  hazeMat: {fileID: 2100000, guid: c1fc308b1272eee408c68fe96ade1f7f, type: 2}
+  surfaceMat: {fileID: 2100000, guid: 2d329defadec31841905655c0aeb9693, type: 2}
+  tubeMat: {fileID: 2100000, guid: 501252de1e91cb94098fb4c1d1a94cbd, type: 2}
+  orbMat: {fileID: 2100000, guid: 73a4c051c446f2b4e9afe7b67ba84bd3, type: 2}
+  structMat: {fileID: 2100000, guid: 35cd406b2714c9a4aae393ce416d16d5, type: 2}
+  membraneMat: {fileID: 2100000, guid: de756b3a3fb71874fb5b1830d2b1fcaa, type: 2}
+  ribbonMat: {fileID: 2100000, guid: 59221eb3395699242a69e5e98cec75d6, type: 2}
+  deepMat: {fileID: 2100000, guid: a67ec944e36e5a34ea77187036027883, type: 2}
+  corridorMat: {fileID: 2100000, guid: 78be81d9b641350418fc2ef75a655ac3, type: 2}
+  scopeMat: {fileID: 2100000, guid: 4708241de878d0446ac6148d296c2d8e, type: 2}
+  landMat: {fileID: 2100000, guid: b7f73f8725254064886ab4198c60fd88, type: 2}
+  horizonMat: {fileID: 2100000, guid: 6124a2002bd6c2343b00fa097608c0f2, type: 2}
+  robotMat: {fileID: 2100000, guid: 757fd7ea4cfe30f4fac4141420466f6d, type: 2}
+  screenMat: {fileID: 2100000, guid: e73b4cf8cee7aa04eb4c1d9d4236020f, type: 2}
+  crowdMeshMat: {fileID: 2100000, guid: b1c69f847734ef34a821a76e25c3d08f, type: 2}
+--- !u!4 &813125751
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 813125749}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1813562876}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &817803180
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 817803182}
+  - component: {fileID: 817803181}
+  m_Layer: 0
+  m_Name: unity_aurora
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &817803181
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 817803180}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c6e83d1b4a7f4529b0d2f9a5e1c78b34, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.AuroraShow
+  cam: {fileID: 1163271234}
+  auroraMat: {fileID: 2100000, guid: 5c4c3953249631744a7be92fb3a9248c, type: 2}
+  beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
+  groundMat: {fileID: 2100000, guid: 3b50b03dcf3f6304cbd594ed2c5f284f, type: 2}
+  hazeMat: {fileID: 2100000, guid: c1fc308b1272eee408c68fe96ade1f7f, type: 2}
+--- !u!4 &817803182
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 817803180}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1813562876}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &858887898
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 858887900}
+  - component: {fileID: 858887899}
+  m_Layer: 0
+  m_Name: unity_stage
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &858887899
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 858887898}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6df1551d0e2884846bccda59a1ea5f2c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.StageDirector
+  cam: {fileID: 1163271234}
+  output: {fileID: 8400000, guid: 61632b5a12ed5114f9b66b62b6c72d0f, type: 2}
+  beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
+  ledMat: {fileID: 2100000, guid: 2189ea29a554775419584fb03e3da79b, type: 2}
+  structMat: {fileID: 2100000, guid: 35cd406b2714c9a4aae393ce416d16d5, type: 2}
+  crowdMat: {fileID: 2100000, guid: 1e5647265a308944ab56c2bfa89d1769, type: 2}
+  hazeMat: {fileID: 2100000, guid: c1fc308b1272eee408c68fe96ade1f7f, type: 2}
+  addMat: {fileID: 2100000, guid: 798aa149d26293a4da10c1aba0eb8f7b, type: 2}
+  confettiMat: {fileID: 2100000, guid: 435a0b6f7e5be424dbb54909f4632be9, type: 2}
+  phoneMat: {fileID: 2100000, guid: 5f94801e4adbae545ad2d606d1e31883, type: 2}
+  sunMat: {fileID: 2100000, guid: 7ea4bc34eb0062144a1ecf6b87640e88, type: 2}
+  crowdMeshMat: {fileID: 2100000, guid: b1c69f847734ef34a821a76e25c3d08f, type: 2}
+--- !u!4 &858887900
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 858887898}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1813562876}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &865055516
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 865055518}
+  - component: {fileID: 865055517}
+  m_Layer: 0
+  m_Name: unity_assembly
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &865055517
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 865055516}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4cdddb0092f9420fa2b84be530965607, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.AssemblyShow
+  cam: {fileID: 1163271234}
+  beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
+  glowMat: {fileID: 2100000, guid: a9752ab407b83b342ac48eb727646460, type: 2}
+  groundMat: {fileID: 2100000, guid: 3b50b03dcf3f6304cbd594ed2c5f284f, type: 2}
+  hazeMat: {fileID: 2100000, guid: c1fc308b1272eee408c68fe96ade1f7f, type: 2}
+  surfaceMat: {fileID: 2100000, guid: 2d329defadec31841905655c0aeb9693, type: 2}
+  tubeMat: {fileID: 2100000, guid: 501252de1e91cb94098fb4c1d1a94cbd, type: 2}
+  orbMat: {fileID: 2100000, guid: 73a4c051c446f2b4e9afe7b67ba84bd3, type: 2}
+  structMat: {fileID: 2100000, guid: 35cd406b2714c9a4aae393ce416d16d5, type: 2}
+  membraneMat: {fileID: 2100000, guid: de756b3a3fb71874fb5b1830d2b1fcaa, type: 2}
+  ribbonMat: {fileID: 2100000, guid: 59221eb3395699242a69e5e98cec75d6, type: 2}
+  deepMat: {fileID: 2100000, guid: a67ec944e36e5a34ea77187036027883, type: 2}
+  corridorMat: {fileID: 2100000, guid: 78be81d9b641350418fc2ef75a655ac3, type: 2}
+  scopeMat: {fileID: 2100000, guid: 4708241de878d0446ac6148d296c2d8e, type: 2}
+  landMat: {fileID: 2100000, guid: b7f73f8725254064886ab4198c60fd88, type: 2}
+  horizonMat: {fileID: 2100000, guid: 6124a2002bd6c2343b00fa097608c0f2, type: 2}
+  robotMat: {fileID: 2100000, guid: 757fd7ea4cfe30f4fac4141420466f6d, type: 2}
+  screenMat: {fileID: 2100000, guid: e73b4cf8cee7aa04eb4c1d9d4236020f, type: 2}
+  crowdMeshMat: {fileID: 2100000, guid: b1c69f847734ef34a821a76e25c3d08f, type: 2}
+--- !u!4 &865055518
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 865055516}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1813562876}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &873778688
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 873778690}
+  - component: {fileID: 873778689}
+  m_Layer: 0
+  m_Name: unity_colossus
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &873778689
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 873778688}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4e1c566efcbef0645a673a94076d962c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.ColossusShow
+  cam: {fileID: 1163271234}
+  androidMat: {fileID: 2100000, guid: 58c3be1478df7ac418ee068709a64c85, type: 2}
+  headMat: {fileID: 2100000, guid: b663d397da7c86940bc4e207bc713bd1, type: 2}
+  glowMat: {fileID: 2100000, guid: a9752ab407b83b342ac48eb727646460, type: 2}
+  cityMat: {fileID: 2100000, guid: d54287b3119643e4b93ae1629785f35b, type: 2}
+  skyMat: {fileID: 2100000, guid: 891a6ebd8d50ac44086e564b321aa2b9, type: 2}
+  groundMat: {fileID: 2100000, guid: 3b50b03dcf3f6304cbd594ed2c5f284f, type: 2}
+  beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
+--- !u!4 &873778690
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 873778688}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1813562876}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &893683079
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 893683081}
+  - component: {fileID: 893683080}
+  m_Layer: 0
+  m_Name: unity_pillars
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &893683080
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 893683079}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2f7d9a4b6c1e48d3b5a0e8c2d7f13a96, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.PillarsShow
+  cam: {fileID: 1163271234}
+  beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
+  groundMat: {fileID: 2100000, guid: 3b50b03dcf3f6304cbd594ed2c5f284f, type: 2}
+  hazeMat: {fileID: 2100000, guid: c1fc308b1272eee408c68fe96ade1f7f, type: 2}
+--- !u!4 &893683081
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 893683079}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1813562876}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &894307406
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 894307408}
+  - component: {fileID: 894307407}
+  m_Layer: 0
+  m_Name: unity_galaxy
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &894307407
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 894307406}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e112960a102ee8b0771549e1d66ea57c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.GalaxyShow
+  cam: {fileID: 1163271234}
+  beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
+  glowMat: {fileID: 2100000, guid: a9752ab407b83b342ac48eb727646460, type: 2}
+  groundMat: {fileID: 2100000, guid: 3b50b03dcf3f6304cbd594ed2c5f284f, type: 2}
+  hazeMat: {fileID: 2100000, guid: c1fc308b1272eee408c68fe96ade1f7f, type: 2}
+  surfaceMat: {fileID: 2100000, guid: 2d329defadec31841905655c0aeb9693, type: 2}
+  tubeMat: {fileID: 2100000, guid: 501252de1e91cb94098fb4c1d1a94cbd, type: 2}
+  orbMat: {fileID: 2100000, guid: 73a4c051c446f2b4e9afe7b67ba84bd3, type: 2}
+  structMat: {fileID: 2100000, guid: 35cd406b2714c9a4aae393ce416d16d5, type: 2}
+  membraneMat: {fileID: 2100000, guid: de756b3a3fb71874fb5b1830d2b1fcaa, type: 2}
+  ribbonMat: {fileID: 2100000, guid: 59221eb3395699242a69e5e98cec75d6, type: 2}
+  deepMat: {fileID: 2100000, guid: a67ec944e36e5a34ea77187036027883, type: 2}
+  corridorMat: {fileID: 2100000, guid: 78be81d9b641350418fc2ef75a655ac3, type: 2}
+  scopeMat: {fileID: 2100000, guid: 4708241de878d0446ac6148d296c2d8e, type: 2}
+  landMat: {fileID: 2100000, guid: b7f73f8725254064886ab4198c60fd88, type: 2}
+  horizonMat: {fileID: 2100000, guid: 6124a2002bd6c2343b00fa097608c0f2, type: 2}
+  robotMat: {fileID: 2100000, guid: 757fd7ea4cfe30f4fac4141420466f6d, type: 2}
+  screenMat: {fileID: 2100000, guid: e73b4cf8cee7aa04eb4c1d9d4236020f, type: 2}
+  crowdMeshMat: {fileID: 2100000, guid: b1c69f847734ef34a821a76e25c3d08f, type: 2}
+--- !u!4 &894307408
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 894307406}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1813562876}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &971151716
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 971151718}
+  - component: {fileID: 971151717}
+  m_Layer: 0
+  m_Name: unity_highlands
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &971151717
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 971151716}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ec6a2dc52ab59f0488c405b70bd5d99e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.HighlandsShow
+  cam: {fileID: 1163271234}
+  beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
+  glowMat: {fileID: 2100000, guid: a9752ab407b83b342ac48eb727646460, type: 2}
+  groundMat: {fileID: 2100000, guid: 3b50b03dcf3f6304cbd594ed2c5f284f, type: 2}
+  hazeMat: {fileID: 2100000, guid: c1fc308b1272eee408c68fe96ade1f7f, type: 2}
+  surfaceMat: {fileID: 2100000, guid: 2d329defadec31841905655c0aeb9693, type: 2}
+  tubeMat: {fileID: 2100000, guid: 501252de1e91cb94098fb4c1d1a94cbd, type: 2}
+  orbMat: {fileID: 2100000, guid: 73a4c051c446f2b4e9afe7b67ba84bd3, type: 2}
+  structMat: {fileID: 2100000, guid: 35cd406b2714c9a4aae393ce416d16d5, type: 2}
+  membraneMat: {fileID: 2100000, guid: de756b3a3fb71874fb5b1830d2b1fcaa, type: 2}
+  ribbonMat: {fileID: 2100000, guid: 59221eb3395699242a69e5e98cec75d6, type: 2}
+  deepMat: {fileID: 2100000, guid: a67ec944e36e5a34ea77187036027883, type: 2}
+  corridorMat: {fileID: 2100000, guid: 78be81d9b641350418fc2ef75a655ac3, type: 2}
+  scopeMat: {fileID: 2100000, guid: 4708241de878d0446ac6148d296c2d8e, type: 2}
+  landMat: {fileID: 2100000, guid: b7f73f8725254064886ab4198c60fd88, type: 2}
+  horizonMat: {fileID: 2100000, guid: 6124a2002bd6c2343b00fa097608c0f2, type: 2}
+  robotMat: {fileID: 2100000, guid: 757fd7ea4cfe30f4fac4141420466f6d, type: 2}
+  screenMat: {fileID: 2100000, guid: e73b4cf8cee7aa04eb4c1d9d4236020f, type: 2}
+  crowdMeshMat: {fileID: 2100000, guid: b1c69f847734ef34a821a76e25c3d08f, type: 2}
+  highlandsMat: {fileID: 2100000, guid: e6dae2e4ec3fd16449dda852149be7ea, type: 2}
+--- !u!4 &971151718
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 971151716}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1813562876}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1139564117
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1139564119}
+  - component: {fileID: 1139564118}
+  m_Layer: 0
+  m_Name: unity_robot_rave
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1139564118
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1139564117}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5c6b8628bc684a2ab918626d5ae6fb45, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.RobotRaveShow
+  cam: {fileID: 1163271234}
+  beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
+  glowMat: {fileID: 2100000, guid: a9752ab407b83b342ac48eb727646460, type: 2}
+  groundMat: {fileID: 2100000, guid: 3b50b03dcf3f6304cbd594ed2c5f284f, type: 2}
+  hazeMat: {fileID: 2100000, guid: c1fc308b1272eee408c68fe96ade1f7f, type: 2}
+  surfaceMat: {fileID: 2100000, guid: 2d329defadec31841905655c0aeb9693, type: 2}
+  tubeMat: {fileID: 2100000, guid: 501252de1e91cb94098fb4c1d1a94cbd, type: 2}
+  orbMat: {fileID: 2100000, guid: 73a4c051c446f2b4e9afe7b67ba84bd3, type: 2}
+  structMat: {fileID: 2100000, guid: 35cd406b2714c9a4aae393ce416d16d5, type: 2}
+  membraneMat: {fileID: 2100000, guid: de756b3a3fb71874fb5b1830d2b1fcaa, type: 2}
+  ribbonMat: {fileID: 2100000, guid: 59221eb3395699242a69e5e98cec75d6, type: 2}
+  deepMat: {fileID: 2100000, guid: a67ec944e36e5a34ea77187036027883, type: 2}
+  corridorMat: {fileID: 2100000, guid: 78be81d9b641350418fc2ef75a655ac3, type: 2}
+  scopeMat: {fileID: 2100000, guid: 4708241de878d0446ac6148d296c2d8e, type: 2}
+  landMat: {fileID: 2100000, guid: b7f73f8725254064886ab4198c60fd88, type: 2}
+  horizonMat: {fileID: 2100000, guid: 6124a2002bd6c2343b00fa097608c0f2, type: 2}
+  robotMat: {fileID: 2100000, guid: 757fd7ea4cfe30f4fac4141420466f6d, type: 2}
+  screenMat: {fileID: 2100000, guid: e73b4cf8cee7aa04eb4c1d9d4236020f, type: 2}
+  crowdMeshMat: {fileID: 2100000, guid: b1c69f847734ef34a821a76e25c3d08f, type: 2}
+--- !u!4 &1139564119
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1139564117}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1813562876}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1163271233
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1163271236}
+  - component: {fileID: 1163271234}
+  - component: {fileID: 1163271235}
   m_Layer: 0
   m_Name: Stage Camera
   m_TagString: Untagged
@@ -137,13 +1420,13 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!20 &261141365
+--- !u!20 &1163271234
 Camera:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 261141364}
+  m_GameObject: {fileID: 1163271233}
   m_Enabled: 1
   serializedVersion: 2
   m_ClearFlags: 2
@@ -188,13 +1471,13 @@ Camera:
   m_OcclusionCulling: 1
   m_StereoConvergence: 10
   m_StereoSeparation: 0.022
---- !u!114 &261141366
+--- !u!114 &1163271235
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 261141364}
+  m_GameObject: {fileID: 1163271233}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: a79441f348de89743a2939f4d699eac1, type: 3}
@@ -232,13 +1515,13 @@ MonoBehaviour:
     m_VarianceClampScale: 0.9
     m_ContrastAdaptiveSharpening: 0
   m_Version: 2
---- !u!4 &261141367
+--- !u!4 &1163271236
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 261141364}
+  m_GameObject: {fileID: 1163271233}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
@@ -247,7 +1530,7 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &513918626
+--- !u!1 &1180830522
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -255,46 +1538,176 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 513918628}
-  - component: {fileID: 513918627}
+  - component: {fileID: 1180830524}
+  - component: {fileID: 1180830523}
   m_Layer: 0
-  m_Name: unity_flow
+  m_Name: unity_helix
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &513918627
+--- !u!114 &1180830523
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 513918626}
+  m_GameObject: {fileID: 1180830522}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: e6fd509dc36f347429e70f0d476ae273, type: 3}
+  m_Script: {fileID: 11500000, guid: 0c07f6df56ed2c50a9d90d6eb2f723d0, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.FlowShow
-  cam: {fileID: 261141365}
-  flow: {fileID: 7200000, guid: 75b7d91d0c12d4c4ba9c4840dcbb8502, type: 3}
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.HelixShow
+  cam: {fileID: 1163271234}
+  beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
+  glowMat: {fileID: 2100000, guid: a9752ab407b83b342ac48eb727646460, type: 2}
+  groundMat: {fileID: 2100000, guid: 3b50b03dcf3f6304cbd594ed2c5f284f, type: 2}
+  hazeMat: {fileID: 2100000, guid: c1fc308b1272eee408c68fe96ade1f7f, type: 2}
+  surfaceMat: {fileID: 2100000, guid: 2d329defadec31841905655c0aeb9693, type: 2}
+  tubeMat: {fileID: 2100000, guid: 501252de1e91cb94098fb4c1d1a94cbd, type: 2}
+  orbMat: {fileID: 2100000, guid: 73a4c051c446f2b4e9afe7b67ba84bd3, type: 2}
+  structMat: {fileID: 2100000, guid: 35cd406b2714c9a4aae393ce416d16d5, type: 2}
+  membraneMat: {fileID: 2100000, guid: de756b3a3fb71874fb5b1830d2b1fcaa, type: 2}
+  ribbonMat: {fileID: 2100000, guid: 59221eb3395699242a69e5e98cec75d6, type: 2}
+  deepMat: {fileID: 2100000, guid: a67ec944e36e5a34ea77187036027883, type: 2}
+  corridorMat: {fileID: 2100000, guid: 78be81d9b641350418fc2ef75a655ac3, type: 2}
+  scopeMat: {fileID: 2100000, guid: 4708241de878d0446ac6148d296c2d8e, type: 2}
+  landMat: {fileID: 2100000, guid: b7f73f8725254064886ab4198c60fd88, type: 2}
+  horizonMat: {fileID: 2100000, guid: 6124a2002bd6c2343b00fa097608c0f2, type: 2}
+  robotMat: {fileID: 2100000, guid: 757fd7ea4cfe30f4fac4141420466f6d, type: 2}
+  screenMat: {fileID: 2100000, guid: e73b4cf8cee7aa04eb4c1d9d4236020f, type: 2}
+  crowdMeshMat: {fileID: 2100000, guid: b1c69f847734ef34a821a76e25c3d08f, type: 2}
+--- !u!4 &1180830524
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1180830522}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1813562876}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1230101815
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1230101817}
+  - component: {fileID: 1230101816}
+  m_Layer: 0
+  m_Name: unity_ocean
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1230101816
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1230101815}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7d348d95f9262a85940f02be40bf4551, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.OceanShow
+  cam: {fileID: 1163271234}
+  beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
+  glowMat: {fileID: 2100000, guid: a9752ab407b83b342ac48eb727646460, type: 2}
+  groundMat: {fileID: 2100000, guid: 3b50b03dcf3f6304cbd594ed2c5f284f, type: 2}
+  hazeMat: {fileID: 2100000, guid: c1fc308b1272eee408c68fe96ade1f7f, type: 2}
+  surfaceMat: {fileID: 2100000, guid: 2d329defadec31841905655c0aeb9693, type: 2}
+  tubeMat: {fileID: 2100000, guid: 501252de1e91cb94098fb4c1d1a94cbd, type: 2}
+  orbMat: {fileID: 2100000, guid: 73a4c051c446f2b4e9afe7b67ba84bd3, type: 2}
+  structMat: {fileID: 2100000, guid: 35cd406b2714c9a4aae393ce416d16d5, type: 2}
+  membraneMat: {fileID: 2100000, guid: de756b3a3fb71874fb5b1830d2b1fcaa, type: 2}
+  ribbonMat: {fileID: 2100000, guid: 59221eb3395699242a69e5e98cec75d6, type: 2}
+  deepMat: {fileID: 2100000, guid: a67ec944e36e5a34ea77187036027883, type: 2}
+  corridorMat: {fileID: 2100000, guid: 78be81d9b641350418fc2ef75a655ac3, type: 2}
+  scopeMat: {fileID: 2100000, guid: 4708241de878d0446ac6148d296c2d8e, type: 2}
+  landMat: {fileID: 2100000, guid: b7f73f8725254064886ab4198c60fd88, type: 2}
+  horizonMat: {fileID: 2100000, guid: 6124a2002bd6c2343b00fa097608c0f2, type: 2}
+  robotMat: {fileID: 2100000, guid: 757fd7ea4cfe30f4fac4141420466f6d, type: 2}
+  screenMat: {fileID: 2100000, guid: e73b4cf8cee7aa04eb4c1d9d4236020f, type: 2}
+  crowdMeshMat: {fileID: 2100000, guid: b1c69f847734ef34a821a76e25c3d08f, type: 2}
+--- !u!4 &1230101817
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1230101815}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1813562876}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1231860943
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1231860945}
+  - component: {fileID: 1231860944}
+  m_Layer: 0
+  m_Name: unity_orbit_foundry
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1231860944
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1231860943}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1f8d30dbeda0ad744982e5c369dae3e9, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.OrbitFoundryShow
+  cam: {fileID: 1163271234}
+  coreMat: {fileID: 2100000, guid: 4cb439b36a3f89048b808313cbb41be8, type: 2}
+  ringMat: {fileID: 2100000, guid: 4855c8f29e10aea4f81bf1f68f087d51, type: 2}
+  floorMat: {fileID: 2100000, guid: 99262b51b860d90409bf69b4093b1e35, type: 2}
+  skyMat: {fileID: 2100000, guid: 82df9e9a9593c354880c7c5c7ac23516, type: 2}
+  beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
   pointsMat: {fileID: 2100000, guid: 4383535c54737134bb9b6dc1251e50bb, type: 2}
---- !u!4 &513918628
+--- !u!4 &1231860945
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 513918626}
+  m_GameObject: {fileID: 1231860943}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
-  m_Father: {fileID: 1452243692}
+  m_Father: {fileID: 1813562876}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &1126206576
+--- !u!1 &1347137710
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -302,46 +1715,62 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 1126206578}
-  - component: {fileID: 1126206577}
+  - component: {fileID: 1347137712}
+  - component: {fileID: 1347137711}
   m_Layer: 0
-  m_Name: unity_crystals
+  m_Name: unity_spectrum
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &1126206577
+--- !u!114 &1347137711
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1126206576}
+  m_GameObject: {fileID: 1347137710}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 3839aea14f4900742b6526312739e2db, type: 3}
+  m_Script: {fileID: 11500000, guid: 2be0da0842b4699a42a377841db4ffc9, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.CrystalShow
-  cam: {fileID: 261141365}
-  chromeMat: {fileID: 2100000, guid: e039a798edaeed842850fb12d899a109, type: 2}
-  sunMat: {fileID: 2100000, guid: 7ea4bc34eb0062144a1ecf6b87640e88, type: 2}
---- !u!4 &1126206578
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.SpectrumShow
+  cam: {fileID: 1163271234}
+  beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
+  glowMat: {fileID: 2100000, guid: a9752ab407b83b342ac48eb727646460, type: 2}
+  groundMat: {fileID: 2100000, guid: 3b50b03dcf3f6304cbd594ed2c5f284f, type: 2}
+  hazeMat: {fileID: 2100000, guid: c1fc308b1272eee408c68fe96ade1f7f, type: 2}
+  surfaceMat: {fileID: 2100000, guid: 2d329defadec31841905655c0aeb9693, type: 2}
+  tubeMat: {fileID: 2100000, guid: 501252de1e91cb94098fb4c1d1a94cbd, type: 2}
+  orbMat: {fileID: 2100000, guid: 73a4c051c446f2b4e9afe7b67ba84bd3, type: 2}
+  structMat: {fileID: 2100000, guid: 35cd406b2714c9a4aae393ce416d16d5, type: 2}
+  membraneMat: {fileID: 2100000, guid: de756b3a3fb71874fb5b1830d2b1fcaa, type: 2}
+  ribbonMat: {fileID: 2100000, guid: 59221eb3395699242a69e5e98cec75d6, type: 2}
+  deepMat: {fileID: 2100000, guid: a67ec944e36e5a34ea77187036027883, type: 2}
+  corridorMat: {fileID: 2100000, guid: 78be81d9b641350418fc2ef75a655ac3, type: 2}
+  scopeMat: {fileID: 2100000, guid: 4708241de878d0446ac6148d296c2d8e, type: 2}
+  landMat: {fileID: 2100000, guid: b7f73f8725254064886ab4198c60fd88, type: 2}
+  horizonMat: {fileID: 2100000, guid: 6124a2002bd6c2343b00fa097608c0f2, type: 2}
+  robotMat: {fileID: 2100000, guid: 757fd7ea4cfe30f4fac4141420466f6d, type: 2}
+  screenMat: {fileID: 2100000, guid: e73b4cf8cee7aa04eb4c1d9d4236020f, type: 2}
+  crowdMeshMat: {fileID: 2100000, guid: b1c69f847734ef34a821a76e25c3d08f, type: 2}
+--- !u!4 &1347137712
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1126206576}
+  m_GameObject: {fileID: 1347137710}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
-  m_Father: {fileID: 1452243692}
+  m_Father: {fileID: 1813562876}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &1209328906
+--- !u!1 &1468136347
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -349,8 +1778,782 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 1209328908}
-  - component: {fileID: 1209328907}
+  - component: {fileID: 1468136349}
+  - component: {fileID: 1468136348}
+  m_Layer: 0
+  m_Name: unity_pendulum
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1468136348
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1468136347}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6352697a8f990d8ddb26176be87cf8f8, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.PendulumShow
+  cam: {fileID: 1163271234}
+  beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
+  glowMat: {fileID: 2100000, guid: a9752ab407b83b342ac48eb727646460, type: 2}
+  groundMat: {fileID: 2100000, guid: 3b50b03dcf3f6304cbd594ed2c5f284f, type: 2}
+  hazeMat: {fileID: 2100000, guid: c1fc308b1272eee408c68fe96ade1f7f, type: 2}
+  surfaceMat: {fileID: 2100000, guid: 2d329defadec31841905655c0aeb9693, type: 2}
+  tubeMat: {fileID: 2100000, guid: 501252de1e91cb94098fb4c1d1a94cbd, type: 2}
+  orbMat: {fileID: 2100000, guid: 73a4c051c446f2b4e9afe7b67ba84bd3, type: 2}
+  structMat: {fileID: 2100000, guid: 35cd406b2714c9a4aae393ce416d16d5, type: 2}
+  membraneMat: {fileID: 2100000, guid: de756b3a3fb71874fb5b1830d2b1fcaa, type: 2}
+  ribbonMat: {fileID: 2100000, guid: 59221eb3395699242a69e5e98cec75d6, type: 2}
+  deepMat: {fileID: 2100000, guid: a67ec944e36e5a34ea77187036027883, type: 2}
+  corridorMat: {fileID: 2100000, guid: 78be81d9b641350418fc2ef75a655ac3, type: 2}
+  scopeMat: {fileID: 2100000, guid: 4708241de878d0446ac6148d296c2d8e, type: 2}
+  landMat: {fileID: 2100000, guid: b7f73f8725254064886ab4198c60fd88, type: 2}
+  horizonMat: {fileID: 2100000, guid: 6124a2002bd6c2343b00fa097608c0f2, type: 2}
+  robotMat: {fileID: 2100000, guid: 757fd7ea4cfe30f4fac4141420466f6d, type: 2}
+  screenMat: {fileID: 2100000, guid: e73b4cf8cee7aa04eb4c1d9d4236020f, type: 2}
+  crowdMeshMat: {fileID: 2100000, guid: b1c69f847734ef34a821a76e25c3d08f, type: 2}
+--- !u!4 &1468136349
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1468136347}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1813562876}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1513465701
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1513465703}
+  - component: {fileID: 1513465702}
+  m_Layer: 0
+  m_Name: unity_eclipse
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1513465702
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1513465701}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: cc695ec7db6f8c98d9d5b69c11a0f5b3, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.EclipseShow
+  cam: {fileID: 1163271234}
+  beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
+  glowMat: {fileID: 2100000, guid: a9752ab407b83b342ac48eb727646460, type: 2}
+  groundMat: {fileID: 2100000, guid: 3b50b03dcf3f6304cbd594ed2c5f284f, type: 2}
+  hazeMat: {fileID: 2100000, guid: c1fc308b1272eee408c68fe96ade1f7f, type: 2}
+  surfaceMat: {fileID: 2100000, guid: 2d329defadec31841905655c0aeb9693, type: 2}
+  tubeMat: {fileID: 2100000, guid: 501252de1e91cb94098fb4c1d1a94cbd, type: 2}
+  orbMat: {fileID: 2100000, guid: 73a4c051c446f2b4e9afe7b67ba84bd3, type: 2}
+  structMat: {fileID: 2100000, guid: 35cd406b2714c9a4aae393ce416d16d5, type: 2}
+  membraneMat: {fileID: 2100000, guid: de756b3a3fb71874fb5b1830d2b1fcaa, type: 2}
+  ribbonMat: {fileID: 2100000, guid: 59221eb3395699242a69e5e98cec75d6, type: 2}
+  deepMat: {fileID: 2100000, guid: a67ec944e36e5a34ea77187036027883, type: 2}
+  corridorMat: {fileID: 2100000, guid: 78be81d9b641350418fc2ef75a655ac3, type: 2}
+  scopeMat: {fileID: 2100000, guid: 4708241de878d0446ac6148d296c2d8e, type: 2}
+  landMat: {fileID: 2100000, guid: b7f73f8725254064886ab4198c60fd88, type: 2}
+  horizonMat: {fileID: 2100000, guid: 6124a2002bd6c2343b00fa097608c0f2, type: 2}
+  robotMat: {fileID: 2100000, guid: 757fd7ea4cfe30f4fac4141420466f6d, type: 2}
+  screenMat: {fileID: 2100000, guid: e73b4cf8cee7aa04eb4c1d9d4236020f, type: 2}
+  crowdMeshMat: {fileID: 2100000, guid: b1c69f847734ef34a821a76e25c3d08f, type: 2}
+--- !u!4 &1513465703
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1513465701}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1813562876}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1532324048
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1532324050}
+  - component: {fileID: 1532324049}
+  m_Layer: 0
+  m_Name: unity_coaster
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1532324049
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1532324048}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fb3b56f506188084faafb8d33b530054, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.CoasterShow
+  cam: {fileID: 1163271234}
+  beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
+  glowMat: {fileID: 2100000, guid: a9752ab407b83b342ac48eb727646460, type: 2}
+  groundMat: {fileID: 2100000, guid: 3b50b03dcf3f6304cbd594ed2c5f284f, type: 2}
+  hazeMat: {fileID: 2100000, guid: c1fc308b1272eee408c68fe96ade1f7f, type: 2}
+  surfaceMat: {fileID: 2100000, guid: 2d329defadec31841905655c0aeb9693, type: 2}
+  tubeMat: {fileID: 2100000, guid: 501252de1e91cb94098fb4c1d1a94cbd, type: 2}
+  orbMat: {fileID: 2100000, guid: 73a4c051c446f2b4e9afe7b67ba84bd3, type: 2}
+  structMat: {fileID: 2100000, guid: 35cd406b2714c9a4aae393ce416d16d5, type: 2}
+  membraneMat: {fileID: 2100000, guid: de756b3a3fb71874fb5b1830d2b1fcaa, type: 2}
+  ribbonMat: {fileID: 2100000, guid: 59221eb3395699242a69e5e98cec75d6, type: 2}
+  deepMat: {fileID: 2100000, guid: a67ec944e36e5a34ea77187036027883, type: 2}
+  corridorMat: {fileID: 2100000, guid: 78be81d9b641350418fc2ef75a655ac3, type: 2}
+  scopeMat: {fileID: 2100000, guid: 4708241de878d0446ac6148d296c2d8e, type: 2}
+  landMat: {fileID: 2100000, guid: b7f73f8725254064886ab4198c60fd88, type: 2}
+  horizonMat: {fileID: 2100000, guid: 6124a2002bd6c2343b00fa097608c0f2, type: 2}
+  robotMat: {fileID: 2100000, guid: 757fd7ea4cfe30f4fac4141420466f6d, type: 2}
+  screenMat: {fileID: 2100000, guid: e73b4cf8cee7aa04eb4c1d9d4236020f, type: 2}
+  crowdMeshMat: {fileID: 2100000, guid: b1c69f847734ef34a821a76e25c3d08f, type: 2}
+  coasterCityMat: {fileID: 2100000, guid: 70f72b98d86b1e142b5c45d8c0d99416, type: 2}
+  deckMat: {fileID: 2100000, guid: 99870e5144ed701469a8e7f2a538faec, type: 2}
+  noseMat: {fileID: 2100000, guid: 3a096ac6c0554944eb44793f12e391e2, type: 2}
+  skyMat: {fileID: 2100000, guid: 891a6ebd8d50ac44086e564b321aa2b9, type: 2}
+--- !u!4 &1532324050
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1532324048}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1813562876}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1549923516
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1549923518}
+  - component: {fileID: 1549923517}
+  m_Layer: 0
+  m_Name: unity_tesseract
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1549923517
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1549923516}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bf3496784e89928944ed1b811fc1b2bc, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.TesseractShow
+  cam: {fileID: 1163271234}
+  beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
+  glowMat: {fileID: 2100000, guid: a9752ab407b83b342ac48eb727646460, type: 2}
+  groundMat: {fileID: 2100000, guid: 3b50b03dcf3f6304cbd594ed2c5f284f, type: 2}
+  hazeMat: {fileID: 2100000, guid: c1fc308b1272eee408c68fe96ade1f7f, type: 2}
+  surfaceMat: {fileID: 2100000, guid: 2d329defadec31841905655c0aeb9693, type: 2}
+  tubeMat: {fileID: 2100000, guid: 501252de1e91cb94098fb4c1d1a94cbd, type: 2}
+  orbMat: {fileID: 2100000, guid: 73a4c051c446f2b4e9afe7b67ba84bd3, type: 2}
+  structMat: {fileID: 2100000, guid: 35cd406b2714c9a4aae393ce416d16d5, type: 2}
+  membraneMat: {fileID: 2100000, guid: de756b3a3fb71874fb5b1830d2b1fcaa, type: 2}
+  ribbonMat: {fileID: 2100000, guid: 59221eb3395699242a69e5e98cec75d6, type: 2}
+  deepMat: {fileID: 2100000, guid: a67ec944e36e5a34ea77187036027883, type: 2}
+  corridorMat: {fileID: 2100000, guid: 78be81d9b641350418fc2ef75a655ac3, type: 2}
+  scopeMat: {fileID: 2100000, guid: 4708241de878d0446ac6148d296c2d8e, type: 2}
+  landMat: {fileID: 2100000, guid: b7f73f8725254064886ab4198c60fd88, type: 2}
+  horizonMat: {fileID: 2100000, guid: 6124a2002bd6c2343b00fa097608c0f2, type: 2}
+  robotMat: {fileID: 2100000, guid: 757fd7ea4cfe30f4fac4141420466f6d, type: 2}
+  screenMat: {fileID: 2100000, guid: e73b4cf8cee7aa04eb4c1d9d4236020f, type: 2}
+  crowdMeshMat: {fileID: 2100000, guid: b1c69f847734ef34a821a76e25c3d08f, type: 2}
+--- !u!4 &1549923518
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1549923516}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1813562876}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1599070196
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1599070198}
+  - component: {fileID: 1599070197}
+  m_Layer: 0
+  m_Name: unity_lattice
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1599070197
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1599070196}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: aa69577a0046af4b8a8f49d7f4fa1d18, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.LatticeShow
+  cam: {fileID: 1163271234}
+  beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
+  glowMat: {fileID: 2100000, guid: a9752ab407b83b342ac48eb727646460, type: 2}
+  groundMat: {fileID: 2100000, guid: 3b50b03dcf3f6304cbd594ed2c5f284f, type: 2}
+  hazeMat: {fileID: 2100000, guid: c1fc308b1272eee408c68fe96ade1f7f, type: 2}
+  surfaceMat: {fileID: 2100000, guid: 2d329defadec31841905655c0aeb9693, type: 2}
+  tubeMat: {fileID: 2100000, guid: 501252de1e91cb94098fb4c1d1a94cbd, type: 2}
+  orbMat: {fileID: 2100000, guid: 73a4c051c446f2b4e9afe7b67ba84bd3, type: 2}
+  structMat: {fileID: 2100000, guid: 35cd406b2714c9a4aae393ce416d16d5, type: 2}
+  membraneMat: {fileID: 2100000, guid: de756b3a3fb71874fb5b1830d2b1fcaa, type: 2}
+  ribbonMat: {fileID: 2100000, guid: 59221eb3395699242a69e5e98cec75d6, type: 2}
+  deepMat: {fileID: 2100000, guid: a67ec944e36e5a34ea77187036027883, type: 2}
+  corridorMat: {fileID: 2100000, guid: 78be81d9b641350418fc2ef75a655ac3, type: 2}
+  scopeMat: {fileID: 2100000, guid: 4708241de878d0446ac6148d296c2d8e, type: 2}
+  landMat: {fileID: 2100000, guid: b7f73f8725254064886ab4198c60fd88, type: 2}
+  horizonMat: {fileID: 2100000, guid: 6124a2002bd6c2343b00fa097608c0f2, type: 2}
+  robotMat: {fileID: 2100000, guid: 757fd7ea4cfe30f4fac4141420466f6d, type: 2}
+  screenMat: {fileID: 2100000, guid: e73b4cf8cee7aa04eb4c1d9d4236020f, type: 2}
+  crowdMeshMat: {fileID: 2100000, guid: b1c69f847734ef34a821a76e25c3d08f, type: 2}
+--- !u!4 &1599070198
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1599070196}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1813562876}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1650321963
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1650321965}
+  - component: {fileID: 1650321964}
+  m_Layer: 0
+  m_Name: Post
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1650321964
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1650321963}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 172515602e62fb746b5d573b38a5fe58, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Unity.RenderPipelines.Core.Runtime::UnityEngine.Rendering.Volume
+  m_IsGlobal: 1
+  priority: 0
+  blendDistance: 0
+  weight: 1
+  sharedProfile: {fileID: 11400000, guid: 108de603e76ee9546a575161f02013be, type: 2}
+--- !u!4 &1650321965
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1650321963}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1663161768
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1663161770}
+  - component: {fileID: 1663161769}
+  m_Layer: 0
+  m_Name: unity_radar
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1663161769
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1663161768}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8858b928ce1286f6cab6a2a69c28cb35, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.RadarShow
+  cam: {fileID: 1163271234}
+  beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
+  glowMat: {fileID: 2100000, guid: a9752ab407b83b342ac48eb727646460, type: 2}
+  groundMat: {fileID: 2100000, guid: 3b50b03dcf3f6304cbd594ed2c5f284f, type: 2}
+  hazeMat: {fileID: 2100000, guid: c1fc308b1272eee408c68fe96ade1f7f, type: 2}
+  surfaceMat: {fileID: 2100000, guid: 2d329defadec31841905655c0aeb9693, type: 2}
+  tubeMat: {fileID: 2100000, guid: 501252de1e91cb94098fb4c1d1a94cbd, type: 2}
+  orbMat: {fileID: 2100000, guid: 73a4c051c446f2b4e9afe7b67ba84bd3, type: 2}
+  structMat: {fileID: 2100000, guid: 35cd406b2714c9a4aae393ce416d16d5, type: 2}
+  membraneMat: {fileID: 2100000, guid: de756b3a3fb71874fb5b1830d2b1fcaa, type: 2}
+  ribbonMat: {fileID: 2100000, guid: 59221eb3395699242a69e5e98cec75d6, type: 2}
+  deepMat: {fileID: 2100000, guid: a67ec944e36e5a34ea77187036027883, type: 2}
+  corridorMat: {fileID: 2100000, guid: 78be81d9b641350418fc2ef75a655ac3, type: 2}
+  scopeMat: {fileID: 2100000, guid: 4708241de878d0446ac6148d296c2d8e, type: 2}
+  landMat: {fileID: 2100000, guid: b7f73f8725254064886ab4198c60fd88, type: 2}
+  horizonMat: {fileID: 2100000, guid: 6124a2002bd6c2343b00fa097608c0f2, type: 2}
+  robotMat: {fileID: 2100000, guid: 757fd7ea4cfe30f4fac4141420466f6d, type: 2}
+  screenMat: {fileID: 2100000, guid: e73b4cf8cee7aa04eb4c1d9d4236020f, type: 2}
+  crowdMeshMat: {fileID: 2100000, guid: b1c69f847734ef34a821a76e25c3d08f, type: 2}
+--- !u!4 &1663161770
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1663161768}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1813562876}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1663863856
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1663863858}
+  - component: {fileID: 1663863857}
+  m_Layer: 0
+  m_Name: unity_warp
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1663863857
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1663863856}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ebe9549b688e69fd92fe5dbcffe6f184, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.WarpShow
+  cam: {fileID: 1163271234}
+  beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
+  glowMat: {fileID: 2100000, guid: a9752ab407b83b342ac48eb727646460, type: 2}
+  groundMat: {fileID: 2100000, guid: 3b50b03dcf3f6304cbd594ed2c5f284f, type: 2}
+  hazeMat: {fileID: 2100000, guid: c1fc308b1272eee408c68fe96ade1f7f, type: 2}
+  surfaceMat: {fileID: 2100000, guid: 2d329defadec31841905655c0aeb9693, type: 2}
+  tubeMat: {fileID: 2100000, guid: 501252de1e91cb94098fb4c1d1a94cbd, type: 2}
+  orbMat: {fileID: 2100000, guid: 73a4c051c446f2b4e9afe7b67ba84bd3, type: 2}
+  structMat: {fileID: 2100000, guid: 35cd406b2714c9a4aae393ce416d16d5, type: 2}
+  membraneMat: {fileID: 2100000, guid: de756b3a3fb71874fb5b1830d2b1fcaa, type: 2}
+  ribbonMat: {fileID: 2100000, guid: 59221eb3395699242a69e5e98cec75d6, type: 2}
+  deepMat: {fileID: 2100000, guid: a67ec944e36e5a34ea77187036027883, type: 2}
+  corridorMat: {fileID: 2100000, guid: 78be81d9b641350418fc2ef75a655ac3, type: 2}
+  scopeMat: {fileID: 2100000, guid: 4708241de878d0446ac6148d296c2d8e, type: 2}
+  landMat: {fileID: 2100000, guid: b7f73f8725254064886ab4198c60fd88, type: 2}
+  horizonMat: {fileID: 2100000, guid: 6124a2002bd6c2343b00fa097608c0f2, type: 2}
+  robotMat: {fileID: 2100000, guid: 757fd7ea4cfe30f4fac4141420466f6d, type: 2}
+  screenMat: {fileID: 2100000, guid: e73b4cf8cee7aa04eb4c1d9d4236020f, type: 2}
+  crowdMeshMat: {fileID: 2100000, guid: b1c69f847734ef34a821a76e25c3d08f, type: 2}
+--- !u!4 &1663863858
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1663863856}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1813562876}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1716736903
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1716736905}
+  - component: {fileID: 1716736904}
+  m_Layer: 0
+  m_Name: unity_basscore
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1716736904
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1716736903}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e1a5c7d03b894f26a8d4f6b2c9e07135, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.BasscoreShow
+  cam: {fileID: 1163271234}
+  membraneMat: {fileID: 2100000, guid: de756b3a3fb71874fb5b1830d2b1fcaa, type: 2}
+  beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
+  groundMat: {fileID: 2100000, guid: 3b50b03dcf3f6304cbd594ed2c5f284f, type: 2}
+  hazeMat: {fileID: 2100000, guid: c1fc308b1272eee408c68fe96ade1f7f, type: 2}
+--- !u!4 &1716736905
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1716736903}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1813562876}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1804027728
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1804027730}
+  - component: {fileID: 1804027729}
+  m_Layer: 0
+  m_Name: unity_leviathan
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1804027729
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1804027728}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6e8ab226edab7ab4b943a972aa44e32e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.LeviathanShow
+  cam: {fileID: 1163271234}
+  sim: {fileID: 7200000, guid: 58604a0218edd484c872908711decc4c, type: 3}
+  filamentMat: {fileID: 2100000, guid: 4505f82c1477649428bc78867e77bb9b, type: 2}
+  pointsMat: {fileID: 2100000, guid: 4383535c54737134bb9b6dc1251e50bb, type: 2}
+  skinMat: {fileID: 2100000, guid: 13169e897b8e6e749aaac99958395ee0, type: 2}
+--- !u!4 &1804027730
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1804027728}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1813562876}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1813562873
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1813562876}
+  - component: {fileID: 1813562875}
+  - component: {fileID: 1813562874}
+  m_Layer: 0
+  m_Name: Engine
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1813562874
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1813562873}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 52d8f3a5904284545ba493365671515a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.ShowManager
+  cam: {fileID: 1163271234}
+  output: {fileID: 8400000, guid: 61632b5a12ed5114f9b66b62b6c72d0f, type: 2}
+  shows:
+  - {fileID: 858887898}
+  - {fileID: 518440441}
+  - {fileID: 202407605}
+  - {fileID: 1804027728}
+  - {fileID: 1843921493}
+  - {fileID: 873778688}
+  - {fileID: 1897061441}
+  - {fileID: 228682009}
+  - {fileID: 483962808}
+  - {fileID: 817803180}
+  - {fileID: 1716736903}
+  - {fileID: 893683079}
+  - {fileID: 1231860943}
+  - {fileID: 1180830522}
+  - {fileID: 1549923516}
+  - {fileID: 2104505497}
+  - {fileID: 636837535}
+  - {fileID: 674645495}
+  - {fileID: 1599070196}
+  - {fileID: 1468136347}
+  - {fileID: 1347137710}
+  - {fileID: 1513465701}
+  - {fileID: 650494055}
+  - {fileID: 1663863856}
+  - {fileID: 813125749}
+  - {fileID: 1915865013}
+  - {fileID: 894307406}
+  - {fileID: 391682585}
+  - {fileID: 539772187}
+  - {fileID: 1230101815}
+  - {fileID: 615563420}
+  - {fileID: 206004383}
+  - {fileID: 771267971}
+  - {fileID: 1663161768}
+  - {fileID: 1852364533}
+  - {fileID: 1139564117}
+  - {fileID: 865055516}
+  - {fileID: 429038298}
+  - {fileID: 971151716}
+  - {fileID: 1532324048}
+  names:
+  - unity_stage
+  - unity_crystals
+  - unity_flow
+  - unity_leviathan
+  - unity_sculpture
+  - unity_colossus
+  - unity_tidal_cathedral
+  - unity_lightstorm
+  - unity_prism
+  - unity_aurora
+  - unity_basscore
+  - unity_pillars
+  - unity_orbit_foundry
+  - unity_helix
+  - unity_tesseract
+  - unity_polyhedra
+  - unity_knot
+  - unity_gyroscope
+  - unity_lattice
+  - unity_pendulum
+  - unity_spectrum
+  - unity_eclipse
+  - unity_lightrain
+  - unity_warp
+  - unity_ledwall
+  - unity_fountain
+  - unity_galaxy
+  - unity_nebula
+  - unity_terrain
+  - unity_ocean
+  - unity_chladni
+  - unity_tunnel
+  - unity_orb
+  - unity_radar
+  - unity_djbot
+  - unity_robot_rave
+  - unity_assembly
+  - unity_robot_club
+  - unity_highlands
+  - unity_coaster
+--- !u!114 &1813562875
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1813562873}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c28bbc898c837b844960790cbcd20a64, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.TrippinLink
+  port: 9137
+--- !u!4 &1813562876
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1813562873}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children:
+  - {fileID: 858887900}
+  - {fileID: 518440443}
+  - {fileID: 202407607}
+  - {fileID: 1804027730}
+  - {fileID: 1843921495}
+  - {fileID: 873778690}
+  - {fileID: 1897061443}
+  - {fileID: 228682011}
+  - {fileID: 483962810}
+  - {fileID: 817803182}
+  - {fileID: 1716736905}
+  - {fileID: 893683081}
+  - {fileID: 1231860945}
+  - {fileID: 1180830524}
+  - {fileID: 1549923518}
+  - {fileID: 2104505499}
+  - {fileID: 636837537}
+  - {fileID: 674645497}
+  - {fileID: 1599070198}
+  - {fileID: 1468136349}
+  - {fileID: 1347137712}
+  - {fileID: 1513465703}
+  - {fileID: 650494057}
+  - {fileID: 1663863858}
+  - {fileID: 813125751}
+  - {fileID: 1915865015}
+  - {fileID: 894307408}
+  - {fileID: 391682587}
+  - {fileID: 539772189}
+  - {fileID: 1230101817}
+  - {fileID: 615563422}
+  - {fileID: 206004385}
+  - {fileID: 771267973}
+  - {fileID: 1663161770}
+  - {fileID: 1852364535}
+  - {fileID: 1139564119}
+  - {fileID: 865055518}
+  - {fileID: 429038300}
+  - {fileID: 971151718}
+  - {fileID: 1532324050}
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1840760067
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1840760069}
+  - component: {fileID: 1840760068}
   m_Layer: 0
   m_Name: Display Camera
   m_TagString: Untagged
@@ -358,13 +2561,13 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!20 &1209328907
+--- !u!20 &1840760068
 Camera:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1209328906}
+  m_GameObject: {fileID: 1840760067}
   m_Enabled: 1
   serializedVersion: 2
   m_ClearFlags: 2
@@ -409,13 +2612,13 @@ Camera:
   m_OcclusionCulling: 1
   m_StereoConvergence: 10
   m_StereoSeparation: 0.022
---- !u!4 &1209328908
+--- !u!4 &1840760069
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1209328906}
+  m_GameObject: {fileID: 1840760067}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
@@ -424,7 +2627,7 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &1452243689
+--- !u!1 &1843921493
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -432,178 +2635,296 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 1452243692}
-  - component: {fileID: 1452243691}
-  - component: {fileID: 1452243690}
+  - component: {fileID: 1843921495}
+  - component: {fileID: 1843921494}
   m_Layer: 0
-  m_Name: Engine
+  m_Name: unity_sculpture
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &1452243690
+--- !u!114 &1843921494
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1452243689}
+  m_GameObject: {fileID: 1843921493}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 52d8f3a5904284545ba493365671515a, type: 3}
+  m_Script: {fileID: 11500000, guid: 65cb11e6fb9e0df4481234e63167ea78, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.ShowManager
-  cam: {fileID: 261141365}
-  output: {fileID: 8400000, guid: 61632b5a12ed5114f9b66b62b6c72d0f, type: 2}
-  shows:
-  - {fileID: 1977997339}
-  - {fileID: 1126206576}
-  - {fileID: 513918626}
-  names:
-  - unity_stage
-  - unity_crystals
-  - unity_flow
---- !u!114 &1452243691
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1452243689}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: c28bbc898c837b844960790cbcd20a64, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.TrippinLink
-  port: 9137
---- !u!4 &1452243692
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1452243689}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children:
-  - {fileID: 1977997341}
-  - {fileID: 1126206578}
-  - {fileID: 513918628}
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &1477487740
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 1477487742}
-  - component: {fileID: 1477487741}
-  m_Layer: 0
-  m_Name: Post
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!114 &1477487741
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1477487740}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 172515602e62fb746b5d573b38a5fe58, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Unity.RenderPipelines.Core.Runtime::UnityEngine.Rendering.Volume
-  m_IsGlobal: 1
-  priority: 0
-  blendDistance: 0
-  weight: 1
-  sharedProfile: {fileID: 11400000, guid: 108de603e76ee9546a575161f02013be, type: 2}
---- !u!4 &1477487742
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1477487740}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &1977997339
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 1977997341}
-  - component: {fileID: 1977997340}
-  m_Layer: 0
-  m_Name: unity_stage
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!114 &1977997340
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1977997339}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 6df1551d0e2884846bccda59a1ea5f2c, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.StageDirector
-  cam: {fileID: 261141365}
-  output: {fileID: 8400000, guid: 61632b5a12ed5114f9b66b62b6c72d0f, type: 2}
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.SculptureShow
+  cam: {fileID: 1163271234}
+  sculptMat: {fileID: 2100000, guid: 78221df034523aa4aab23bf845d170c6, type: 2}
+  skyMat: {fileID: 2100000, guid: 891a6ebd8d50ac44086e564b321aa2b9, type: 2}
+  groundMat: {fileID: 2100000, guid: 3b50b03dcf3f6304cbd594ed2c5f284f, type: 2}
   beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
-  ledMat: {fileID: 2100000, guid: 2189ea29a554775419584fb03e3da79b, type: 2}
-  structMat: {fileID: 2100000, guid: 35cd406b2714c9a4aae393ce416d16d5, type: 2}
-  crowdMat: {fileID: 2100000, guid: 1e5647265a308944ab56c2bfa89d1769, type: 2}
+  glowMat: {fileID: 2100000, guid: a9752ab407b83b342ac48eb727646460, type: 2}
   hazeMat: {fileID: 2100000, guid: c1fc308b1272eee408c68fe96ade1f7f, type: 2}
-  addMat: {fileID: 2100000, guid: 798aa149d26293a4da10c1aba0eb8f7b, type: 2}
-  confettiMat: {fileID: 2100000, guid: 435a0b6f7e5be424dbb54909f4632be9, type: 2}
-  phoneMat: {fileID: 2100000, guid: 5f94801e4adbae545ad2d606d1e31883, type: 2}
-  sunMat: {fileID: 2100000, guid: 7ea4bc34eb0062144a1ecf6b87640e88, type: 2}
---- !u!4 &1977997341
+--- !u!4 &1843921495
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1977997339}
+  m_GameObject: {fileID: 1843921493}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
-  m_Father: {fileID: 1452243692}
+  m_Father: {fileID: 1813562876}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1852364533
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1852364535}
+  - component: {fileID: 1852364534}
+  m_Layer: 0
+  m_Name: unity_djbot
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1852364534
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1852364533}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a016982e5d654b22b302dd9707fc1e0b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.DjBotShow
+  cam: {fileID: 1163271234}
+  beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
+  glowMat: {fileID: 2100000, guid: a9752ab407b83b342ac48eb727646460, type: 2}
+  groundMat: {fileID: 2100000, guid: 3b50b03dcf3f6304cbd594ed2c5f284f, type: 2}
+  hazeMat: {fileID: 2100000, guid: c1fc308b1272eee408c68fe96ade1f7f, type: 2}
+  surfaceMat: {fileID: 2100000, guid: 2d329defadec31841905655c0aeb9693, type: 2}
+  tubeMat: {fileID: 2100000, guid: 501252de1e91cb94098fb4c1d1a94cbd, type: 2}
+  orbMat: {fileID: 2100000, guid: 73a4c051c446f2b4e9afe7b67ba84bd3, type: 2}
+  structMat: {fileID: 2100000, guid: 35cd406b2714c9a4aae393ce416d16d5, type: 2}
+  membraneMat: {fileID: 2100000, guid: de756b3a3fb71874fb5b1830d2b1fcaa, type: 2}
+  ribbonMat: {fileID: 2100000, guid: 59221eb3395699242a69e5e98cec75d6, type: 2}
+  deepMat: {fileID: 2100000, guid: a67ec944e36e5a34ea77187036027883, type: 2}
+  corridorMat: {fileID: 2100000, guid: 78be81d9b641350418fc2ef75a655ac3, type: 2}
+  scopeMat: {fileID: 2100000, guid: 4708241de878d0446ac6148d296c2d8e, type: 2}
+  landMat: {fileID: 2100000, guid: b7f73f8725254064886ab4198c60fd88, type: 2}
+  horizonMat: {fileID: 2100000, guid: 6124a2002bd6c2343b00fa097608c0f2, type: 2}
+  robotMat: {fileID: 2100000, guid: 757fd7ea4cfe30f4fac4141420466f6d, type: 2}
+  screenMat: {fileID: 2100000, guid: e73b4cf8cee7aa04eb4c1d9d4236020f, type: 2}
+  crowdMeshMat: {fileID: 2100000, guid: b1c69f847734ef34a821a76e25c3d08f, type: 2}
+--- !u!4 &1852364535
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1852364533}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1813562876}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1897061441
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1897061443}
+  - component: {fileID: 1897061442}
+  m_Layer: 0
+  m_Name: unity_tidal_cathedral
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1897061442
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1897061441}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a7b982de15d847bca295e56e3c789b01, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.TidalCathedralShow
+  cam: {fileID: 1163271234}
+  sailMat: {fileID: 2100000, guid: a25ac3f36dc108e4fbf0c6814239e5d9, type: 2}
+  seaMat: {fileID: 2100000, guid: d20c1381b71d2ce49878c5aba9a5d20f, type: 2}
+  skyMat: {fileID: 2100000, guid: 82df9e9a9593c354880c7c5c7ac23516, type: 2}
+  glowMat: {fileID: 2100000, guid: a9752ab407b83b342ac48eb727646460, type: 2}
+  coreMat: {fileID: 2100000, guid: 7f6ffc7ec170b664fa22b1aaea51e594, type: 2}
+  frameMat: {fileID: 2100000, guid: 5b09b258cb73e154f8804067764cbbc9, type: 2}
+  hazeMat: {fileID: 2100000, guid: f511bcb6e507ffe4cb562fd9dcba66b6, type: 2}
+  beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
+--- !u!4 &1897061443
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1897061441}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1813562876}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1915865013
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1915865015}
+  - component: {fileID: 1915865014}
+  m_Layer: 0
+  m_Name: unity_fountain
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1915865014
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1915865013}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0650db2db4941d6958bbe7d87ddbbd90, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.FountainShow
+  cam: {fileID: 1163271234}
+  beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
+  glowMat: {fileID: 2100000, guid: a9752ab407b83b342ac48eb727646460, type: 2}
+  groundMat: {fileID: 2100000, guid: 3b50b03dcf3f6304cbd594ed2c5f284f, type: 2}
+  hazeMat: {fileID: 2100000, guid: c1fc308b1272eee408c68fe96ade1f7f, type: 2}
+  surfaceMat: {fileID: 2100000, guid: 2d329defadec31841905655c0aeb9693, type: 2}
+  tubeMat: {fileID: 2100000, guid: 501252de1e91cb94098fb4c1d1a94cbd, type: 2}
+  orbMat: {fileID: 2100000, guid: 73a4c051c446f2b4e9afe7b67ba84bd3, type: 2}
+  structMat: {fileID: 2100000, guid: 35cd406b2714c9a4aae393ce416d16d5, type: 2}
+  membraneMat: {fileID: 2100000, guid: de756b3a3fb71874fb5b1830d2b1fcaa, type: 2}
+  ribbonMat: {fileID: 2100000, guid: 59221eb3395699242a69e5e98cec75d6, type: 2}
+  deepMat: {fileID: 2100000, guid: a67ec944e36e5a34ea77187036027883, type: 2}
+  corridorMat: {fileID: 2100000, guid: 78be81d9b641350418fc2ef75a655ac3, type: 2}
+  scopeMat: {fileID: 2100000, guid: 4708241de878d0446ac6148d296c2d8e, type: 2}
+  landMat: {fileID: 2100000, guid: b7f73f8725254064886ab4198c60fd88, type: 2}
+  horizonMat: {fileID: 2100000, guid: 6124a2002bd6c2343b00fa097608c0f2, type: 2}
+  robotMat: {fileID: 2100000, guid: 757fd7ea4cfe30f4fac4141420466f6d, type: 2}
+  screenMat: {fileID: 2100000, guid: e73b4cf8cee7aa04eb4c1d9d4236020f, type: 2}
+  crowdMeshMat: {fileID: 2100000, guid: b1c69f847734ef34a821a76e25c3d08f, type: 2}
+--- !u!4 &1915865015
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1915865013}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1813562876}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &2104505497
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 2104505499}
+  - component: {fileID: 2104505498}
+  m_Layer: 0
+  m_Name: unity_polyhedra
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &2104505498
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2104505497}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c57b49673e0d4f2b1f058f7244cf06b7, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrippinStage.PolyhedraShow
+  cam: {fileID: 1163271234}
+  beamMat: {fileID: 2100000, guid: 45d31a438f442d84b87c73422429e723, type: 2}
+  glowMat: {fileID: 2100000, guid: a9752ab407b83b342ac48eb727646460, type: 2}
+  groundMat: {fileID: 2100000, guid: 3b50b03dcf3f6304cbd594ed2c5f284f, type: 2}
+  hazeMat: {fileID: 2100000, guid: c1fc308b1272eee408c68fe96ade1f7f, type: 2}
+  surfaceMat: {fileID: 2100000, guid: 2d329defadec31841905655c0aeb9693, type: 2}
+  tubeMat: {fileID: 2100000, guid: 501252de1e91cb94098fb4c1d1a94cbd, type: 2}
+  orbMat: {fileID: 2100000, guid: 73a4c051c446f2b4e9afe7b67ba84bd3, type: 2}
+  structMat: {fileID: 2100000, guid: 35cd406b2714c9a4aae393ce416d16d5, type: 2}
+  membraneMat: {fileID: 2100000, guid: de756b3a3fb71874fb5b1830d2b1fcaa, type: 2}
+  ribbonMat: {fileID: 2100000, guid: 59221eb3395699242a69e5e98cec75d6, type: 2}
+  deepMat: {fileID: 2100000, guid: a67ec944e36e5a34ea77187036027883, type: 2}
+  corridorMat: {fileID: 2100000, guid: 78be81d9b641350418fc2ef75a655ac3, type: 2}
+  scopeMat: {fileID: 2100000, guid: 4708241de878d0446ac6148d296c2d8e, type: 2}
+  landMat: {fileID: 2100000, guid: b7f73f8725254064886ab4198c60fd88, type: 2}
+  horizonMat: {fileID: 2100000, guid: 6124a2002bd6c2343b00fa097608c0f2, type: 2}
+  robotMat: {fileID: 2100000, guid: 757fd7ea4cfe30f4fac4141420466f6d, type: 2}
+  screenMat: {fileID: 2100000, guid: e73b4cf8cee7aa04eb4c1d9d4236020f, type: 2}
+  crowdMeshMat: {fileID: 2100000, guid: b1c69f847734ef34a821a76e25c3d08f, type: 2}
+--- !u!4 &2104505499
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2104505497}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1813562876}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
   m_Roots:
-  - {fileID: 261141367}
-  - {fileID: 1209328908}
-  - {fileID: 1477487742}
-  - {fileID: 1452243692}
+  - {fileID: 1163271236}
+  - {fileID: 1840760069}
+  - {fileID: 1650321965}
+  - {fileID: 1813562876}
