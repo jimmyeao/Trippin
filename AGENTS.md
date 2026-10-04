@@ -283,10 +283,23 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   `videos.pexels.com/video-files/<id>/<id>-sd_<w>_<h>_<fps>fps.mp4` guesses
   smaller renditions; `images.pexels.com/videos/<id>/pictures/preview-0.jpg`
   thumbs IDs cheaply. Pixabay is fully blocked.
-- **AI-matte props:** `u2net_human_seg` erodes held instruments (a guitar
-  becomes a blob) — use `isnet-general-use`. It also keeps near-opaque floor
-  reflections fused to the feet: fade the below-ankle region into a soft
-  elliptical shadow rather than trying to cut it.
+- **AI-matte props:** `u2net_human_seg` erodes held instruments entirely (a
+  guitar becomes part of the body blob); `isnet-general-use` keeps them but
+  also mattes person-adjacent *equipment* on cluttered stages — drum kits,
+  monitor wedges, cables end up fused to the silhouette and can't be
+  separated by component or alpha cuts.
+- **Mid-alpha mattes:** a `--matte bg` clip that renders see-through
+  (guitar bodies, clothing in the key colour) is fixed by
+  `clean_masks.py --bg-weight 0 --static-max 1.0 --solid 1.0 --thresh 0.2`
+  — raise every kept pixel to full opacity. Keep `--static-max 1.0` for
+  seated/dwelling performers or the body is rejected as static backdrop.
+- **Procedural musicians:** when real footage won't matte cleanly,
+  `tools/guitar_choreo.py` writes a guitarist BVH (chord shifts, eighth-note
+  strums, an on-beat nod — no headbanging) and `mocap_dancer.py --whole
+  --male --guitar` renders it (`--guitar` draws the instrument from the hand
+  positions). Don't run `beat_align.py` on procedural clips: the strums
+  already land on every beat, and its single-peak accent rotation pushes
+  them off-grid — omit `accent` from clip.json.
 
 ## 7. Rust and app gotchas
 
