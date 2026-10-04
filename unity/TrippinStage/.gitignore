@@ -19,3 +19,4 @@
 *.mdb
 *.opendb
 *.VC.db
+/TrippinEngine-*.zip

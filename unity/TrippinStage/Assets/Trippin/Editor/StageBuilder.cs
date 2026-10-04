@@ -284,7 +284,16 @@ namespace TrippinStage.EditorTools
                 ("unity_robot_rave", typeof(RobotRaveShow)),
                 ("unity_assembly", typeof(AssemblyShow)),
                 ("unity_robot_club", typeof(RobotClubShow)),
+                ("unity_highlands", typeof(HighlandsShow)),
+                ("unity_coaster", typeof(CoasterShow)),
             };
+            // Extra materials for the ported scenes: instancing must be on the
+            // material asset or the build strips the variant (AGENTS.md).
+            var highlandsMat = Mat("Trippin/Highlands", "Highlands");
+            var coasterCityMat = Mat("Trippin/CoasterCity", "CoasterCity");
+            coasterCityMat.enableInstancing = true;
+            var coasterDeckMat = Mat("Trippin/CoasterDeck", "CoasterDeck");
+            var coasterNoseMat = Mat("Trippin/CoasterNose", "CoasterNose");
             var showList = new System.Collections.Generic.List<GameObject> { stage, crystals, flowGo, levGo, sculptGo, colGo, tidalGo, stormGo, prismGo, auroraGo, bassGo, pillarsGo, orbitGo };
             var nameList = new System.Collections.Generic.List<string> { "unity_stage", "unity_crystals", "unity_flow", "unity_leviathan", "unity_sculpture", "unity_colossus", "unity_tidal_cathedral", "unity_lightstorm", "unity_prism", "unity_aurora", "unity_basscore", "unity_pillars", "unity_orbit_foundry" };
             foreach (var (kname, ktype) in kitShows)
@@ -311,6 +320,14 @@ namespace TrippinStage.EditorTools
                 ks.robotMat = kitRobot;
                 ks.screenMat = kitScreen;
                 ks.crowdMeshMat = dir.crowdMeshMat;
+                if (ks is HighlandsShow hs) hs.highlandsMat = highlandsMat;
+                if (ks is CoasterShow cosh)
+                {
+                    cosh.coasterCityMat = coasterCityMat;
+                    cosh.deckMat = coasterDeckMat;
+                    cosh.noseMat = coasterNoseMat;
+                    cosh.skyMat = Mat("Trippin/Sky", "Sky");
+                }
                 showList.Add(kgo);
                 nameList.Add(kname);
             }
