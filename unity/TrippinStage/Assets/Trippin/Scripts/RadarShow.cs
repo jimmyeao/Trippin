@@ -1,62 +1,87 @@
-// unity_radar: a radar scope. A rotating sweep with a fading trail crosses a
-// circular wire grid; 36 contacts glow where the sweep has just passed and
-// fade as it moves on, as on a phosphor screen.
-//  - Shape: each contact swells with the eased level of its own spectrum
-//    bin when the sweep lights it, so the picture is a live spectrum scan.
+// unity_radar: a radar scope. A sweep with phosphor persistence turns across a
+// disc of range rings; a polar spectrum plot around it lights up as the sweep
+// passes, contacts glow where it has just been, rings expand from the hub on
+// kicks, and a wall of light bars stands round the rim as a 3D spectrum.
+// (The first version only drew a faint grid; this one is the Scope shader.)
+//  - Shape: the polar plot's bars and the wall of light round the rim rise and
+//    fall with the eased spectrum; each contact swells with its own band; the
+//    hub swells with the eased bass.
 //  - Motion: the sweep angle IS the smooth energy clock (it turns faster as
-//    the track builds and surges on a drop); the camera orbits above.
-//  - Luminance: contacts, trail and grid follow the music's loudness.
-//  - Drops: a build dims the scope; the drop sweeps it bright (eased).
+//    the track builds and surges on a drop); the camera orbits above and swings
+//    direction with the phrase; kick rings expand outward at a fixed speed.
+//  - Luminance: everything follows the music's loudness.
+//  - Drops: a build dims the scope and shrinks the wall; the drop sweeps it
+//    bright and throws the wall up (eased); a drop also launches a ring.
 using UnityEngine;
 
 namespace TrippinStage
 {
     public sealed class RadarShow : KitShow
     {
-        const int Trail = 19, Blips = 36;
-        const float Radius = 22f;
+        const int Bars = 72;
+        const float Radius = 24f;
         Material _m;
-        BeamPool _sweep;
-        GlowPool _blips;
+        BeamPool _bars;
+        readonly float[] _ringR = { -1f, -1f, -1f, -1f };
+        readonly float[] _ringK = new float[4];
+        bool _armed = true, _wasDrop;
 
         protected override void Build()
         {
             Env(140f, 0.04f, false);
-            Mesh mesh = Kit.GridMesh(192, 72, "scope");
-            _m = new Material(membraneMat);
+            _m = Kit.Part(transform, "scope", Kit.GridMesh(1, 1, "scope"), new Material(scopeMat), Vector3.zero, Vector3.one)
+                .GetComponent<Renderer>().sharedMaterial;
             _m.SetFloat("_Radius", Radius);
-            _m.SetFloat("_Amp", 0f);
-            Kit.Part(transform, "scope", mesh, _m, Vector3.zero, Vector3.one);
-            _sweep = new BeamPool(transform, beamMat, Trail, "sweep", false, 0.1f, 0.0f, 20f, 0.25f, 0.99f, 0.3f);
-            _blips = new GlowPool(transform, glowMat, Blips, "contact", false);
+            _m.SetFloat("_Extent", Radius * 1.12f);
+            _bars = new BeamPool(transform, beamMat, Bars, "bar", false, 0.16f, 0f, 14f, 0.35f, 0.97f, 0.25f);
+        }
+
+        // Launch a ring into the most-faded slot (so a busy track still shows new ones).
+        void Spawn()
+        {
+            int best = 0; float oldest = -2f;
+            for (int i = 0; i < 4; i++)
+            {
+                float age = _ringR[i] < 0f ? 9f : _ringR[i];
+                if (age > oldest) { oldest = age; best = i; }
+            }
+            _ringR[best] = 0.04f;
+            _ringK[best] = 1f;
         }
 
         protected override void Frame(ShowState s, float dt)
         {
-            float gain = rx.Gain(0.55f, 1.4f);
-            _m.SetFloat("_Intensity", 1.6f * gain);
+            float gain = rx.Gain(0.6f, 1.5f);
+            if (rx.kick > 0.55f && _armed) { Spawn(); _armed = false; }
+            else if (rx.kick < 0.3f) _armed = true;
+            if (rx.dropped && !_wasDrop) Spawn();
+            _wasDrop = rx.dropped;
+            for (int i = 0; i < 4; i++)
+            {
+                if (_ringR[i] < 0f) { _ringK[i] = 0f; continue; }
+                _ringR[i] += dt * 0.5f;
+                if (_ringR[i] > 1f) { _ringR[i] = -1f; _ringK[i] = 0f; continue; }
+                _ringK[i] = Mathf.Pow(1f - _ringR[i], 1.5f);
+            }
+            _m.SetVector("_RingR", new Vector4(_ringR[0], _ringR[1], _ringR[2], _ringR[3]));
+            _m.SetVector("_RingK", new Vector4(_ringK[0], _ringK[1], _ringK[2], _ringK[3]));
+            _m.SetFloat("_Gain", gain * 1.2f);
             _m.SetFloat("_Hue", 0.4f + 0.08f * Mathf.Sin(rx.phrase));
-            float phi = rx.clk * 0.12f;
-            var centre = new Vector3(0f, 0.3f, 0f);
-            for (int j = 0; j < Trail; j++)
+            _m.SetFloat("_Sweep", rx.clk * 0.12f);
+            _m.SetFloat("_Drift", rx.clk);
+
+            // A wall of light bars round the rim: the same 96-bin plot, in 3D.
+            float lift = (1f - 0.35f * rx.tension) * (1f + 0.6f * rx.impact);
+            for (int i = 0; i < Bars; i++)
             {
-                float a = phi - j * 0.06f;
-                float f = 1f - j / (float)Trail;
-                _sweep.Set(j, centre, centre + new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)) * Radius, Kit.Hue(0.4f), gain * 1.3f * f * f);
+                float a = i / (float)Bars * Mathf.PI * 2f;
+                float sym = Mathf.Abs(i / (float)Bars * 2f - 1f);
+                float lvl = rx.Spec(sym);
+                float h = (0.8f + 11f * lvl) * lift;
+                Vector3 foot = new Vector3(Mathf.Cos(a) * Radius * 1.06f, 0.1f, Mathf.Sin(a) * Radius * 1.06f);
+                _bars.Set(i, foot, foot + new Vector3(0f, h, 0f), Kit.Hue(0.4f + 0.3f * sym), gain * (0.3f + 1.1f * lvl));
             }
-            Quaternion face = cam.transform.rotation;
-            for (int i = 0; i < Blips; i++)
-            {
-                float th = Kit.H(i, 1) * Mathf.PI * 2f;
-                float rho = 4f + 16f * Kit.H(i, 2);
-                float delta = (phi - th) % (Mathf.PI * 2f);
-                if (delta < 0f) delta += Mathf.PI * 2f;
-                float persist = Mathf.Exp(-delta * 1.4f);
-                float lvl = rx.Spec(((i * 5) % 32) / 31f);
-                float glow = 0.06f + persist * (0.4f + 1.4f * lvl);
-                _blips.Set(i, new Vector3(Mathf.Cos(th) * rho, 0.5f, Mathf.Sin(th) * rho), 0.8f + 1.4f * lvl * persist, 0.2f + 0.5f * Kit.H(i, 3), gain * glow, face);
-            }
-            rig.Orbit(cam, rx, 30f, 24f, 0f, dt);
+            rig.Orbit(cam, rx, 34f, 26f, 0f, dt);
         }
     }
 }
