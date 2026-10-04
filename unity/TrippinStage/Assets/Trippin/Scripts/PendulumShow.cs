@@ -60,7 +60,9 @@ namespace TrippinStage
             else if (f != _cur) { _prev = _cur; _cur = f; _start = rx.beat; }
             float m = Mathf.SmoothStep(0f, 1f, (rx.beat - _start) / 4f);
             float gain = rx.Gain();
-            float shrink = (1f - 0.4f * rx.tension) * (1f + 0.45f * rx.impact);
+            // 0.45 swung three thick ribbons out so fast the drop read as a lurch (M2:
+            // frame change ~55 for 0.3 s vs a 2.4 median); 0.25 keeps the burst.
+            float shrink = (1f - 0.4f * rx.tension) * (1f + 0.25f * rx.impact);
             float ax = (7f + 5f * rx.bassFast) * shrink, ay = (6f + 5f * rx.midFast) * shrink, az = (7f + 4f * rx.mhFast) * shrink;
             float T = rx.clk * 0.12f;
             Quaternion turn = Quaternion.AngleAxis((rx.clk * 0.4f + 40f * Mathf.Sin(rx.phrase)) * 1f, Vector3.up);
