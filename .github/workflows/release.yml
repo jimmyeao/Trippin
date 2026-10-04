@@ -1,6 +1,9 @@
-# Builds the Windows installer.
-# - Every push to master and every PR: build + installer, uploaded as a workflow artifact.
-# - Pushing a tag like v0.2.0: also publishes a GitHub release with the installer attached.
+# Builds the Windows installer and the macOS package.
+# Runs only for releases and on demand (owner: every master push and PR used
+# up the monthly Actions allowance — the macOS runner especially):
+# - Pushing a tag like v0.2.0: builds and publishes a GitHub release.
+# - Actions > Build installer > Run workflow: a build-only test (blank version),
+#   or a release (see below).
 # - Manual release (Actions > Build installer > Run workflow > version):
 #   bumps Cargo.toml/Cargo.lock, pushes the commit and a v<version> tag, builds,
 #   and publishes the release — all in one run. (A tag pushed by GITHUB_TOKEN
@@ -9,9 +12,7 @@ name: Build installer
 
 on:
   push:
-    branches: [master]
     tags: ["v*"]
-  pull_request:
   workflow_dispatch:
     inputs:
       release_version:
@@ -24,6 +25,11 @@ on:
 
 permissions:
   contents: write
+
+# A newer run for the same ref replaces one still in progress.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   windows:
@@ -88,6 +94,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Trippin-Setup-${{ steps.version.outputs.version }}
+          retention-days: 3
           path: dist/*.exe
 
       - name: Publish release (tags and manual releases)
@@ -308,6 +315,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Trippin-macOS-${{ steps.version.outputs.version }}
+          retention-days: 3
           path: |
             Trippin-macOS-*.pkg
             Trippin-macOS-*.zip
