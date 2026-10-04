@@ -249,6 +249,12 @@ namespace TrippinStage.EditorTools
             var kitTube = Mat("Trippin/WireTube", "WireTube");
             var kitOrb = Mat("Trippin/Orb", "Orb");
             var kitMembrane = Mat("Trippin/Membrane", "Membrane");
+            var kitRibbon = Mat("Trippin/Tube", "Tube");
+            var kitDeep = Mat("Trippin/DeepSpace", "DeepSpace");
+            var kitCorridor = Mat("Trippin/Corridor", "Corridor");
+            var kitScope = Mat("Trippin/Scope", "Scope");
+            var kitLand = Mat("Trippin/Land", "Land");
+            var kitHorizon = Mat("Trippin/Horizon", "Horizon");
             var kitShows = new (string name, System.Type type)[]
             {
                 ("unity_helix", typeof(HelixShow)),
@@ -290,6 +296,12 @@ namespace TrippinStage.EditorTools
                 ks.tubeMat = kitTube;
                 ks.orbMat = kitOrb;
                 ks.membraneMat = kitMembrane;
+                ks.ribbonMat = kitRibbon;
+                ks.deepMat = kitDeep;
+                ks.corridorMat = kitCorridor;
+                ks.scopeMat = kitScope;
+                ks.landMat = kitLand;
+                ks.horizonMat = kitHorizon;
                 showList.Add(kgo);
                 nameList.Add(kname);
             }

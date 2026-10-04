@@ -1,4 +1,4 @@
-// Unity helix: a three-strand light helix standing in a hazy hall. A screen-content show from the external Unity engine (Spout sender "Trippin Stage", see
+// Unity helix: a double helix of light (DNA) with base-pair rungs. A screen-content show from the external Unity engine (Spout sender "Trippin Stage", see
 // unity/README.md), driven live by Trippin's show-state feed. Only in rotation while frames
 // are arriving. The frame is already tonemapped, so this undoes present's exposure + ACES
 // to hand it through unchanged — dancer, text, strobe, FX and outputs still layer on top.

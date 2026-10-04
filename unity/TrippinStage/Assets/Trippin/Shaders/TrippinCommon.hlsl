@@ -8,6 +8,23 @@ float4 _TLvl, _THits, _TPres, _TClock;
 float4 _TPal[8];
 float4 _TSpec[8];
 
+// The kit shows' eased signals (Rx.PushGlobals in Kit.cs): fast attack, slower
+// release, so shape and brightness follow the music without stepping.
+float4 _RxLvl;   // bass, mid, mid-high, high (eased levels)
+float4 _RxMisc;  // kick, loudness, tension (build), impact (eased drop)
+float4 _RxClk;   // smooth energy clock (beats), high clock, phrase angle, calm
+float4 _RxSpec[8];
+
+// Eased spectrum at x in 0..1, linearly interpolated between the 32 bins.
+float RxSpec(float x)
+{
+    float f = saturate(x) * 31.0;
+    int i = min((int)f, 30);
+    float a = _RxSpec[i >> 2][i & 3];
+    float b = _RxSpec[(i + 1) >> 2][(i + 1) & 3];
+    return lerp(a, b, f - i);
+}
+
 // Palette across the 8 feed colours, t in 0..1 (wraps).
 float3 TPalette(float t)
 {

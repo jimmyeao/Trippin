@@ -1,4 +1,4 @@
-// Unity pendulum: a pendulum wave of 28 glowing bobs. A screen-content show from the external Unity engine (Spout sender "Trippin Stage", see
+// Unity pendulum: a harmonograph: three pendulums drawing long glowing Lissajous ribbons. A screen-content show from the external Unity engine (Spout sender "Trippin Stage", see
 // unity/README.md), driven live by Trippin's show-state feed. Only in rotation while frames
 // are arriving. The frame is already tonemapped, so this undoes present's exposure + ACES
 // to hand it through unchanged — dancer, text, strobe, FX and outputs still layer on top.
