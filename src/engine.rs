@@ -58,16 +58,16 @@ fn kill_child() {
 /// installers stay small and CI needs no Unity licence. Rebuild + upload a
 /// new `unity-engine-vN` release when the Unity project changes, and bump
 /// these. An empty checksum means no build for this platform yet.
-const RELEASE_BASE: &str = "https://github.com/jimmyeao/Trippin/releases/download/unity-engine-v10";
+const RELEASE_BASE: &str = "https://github.com/jimmyeao/Trippin/releases/download/unity-engine-v11";
 #[cfg(target_os = "macos")]
 const ASSET: (&str, &str) = (
-    "TrippinEngine-macos-v10.zip",
-    "9d4db290dbdef72ab4393bea8854a9ae8b2c8b3ff974fd84d6a602914f7f4787",
+    "TrippinEngine-macos-v11.zip",
+    "bbaa8d57729920638ad5f7ae861df812d8d30935b2846adb84eb490ed6f7396a",
 );
 #[cfg(not(target_os = "macos"))]
 const ASSET: (&str, &str) = (
-    "TrippinEngine-windows-x64-v10.zip",
-    "6ab9cf6e861344c9aad22d778ffd7892beb61ec3a4e11d9e623e5c43a8fff27c",
+    "TrippinEngine-windows-x64-v11.zip",
+    "5f077257d46a26ffe1685c532bef46324a507dc98cda512a7dcfd9355bb2a19c",
 );
 /// Written into the unpacked folder; a download whose stamp isn't the
 /// current `ASSET` is stale and gets replaced.
