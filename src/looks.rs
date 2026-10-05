@@ -131,10 +131,12 @@ pub fn apply(look: &SavedLook, s: &mut Settings, scenes: &[String], clips: &[Str
     }
     if let Some(d) = &look.dancer {
         s.dancer_enabled = d.enabled;
-        if let Some(i) = d.style {
-            if i < crate::dancer::STYLES.len() {
-                s.dancer_style = Some(i);
-            }
+        // `None` is the "auto" dancer look (what capture writes for it), so it
+        // is restored too; only an out-of-range index is left alone.
+        match d.style {
+            Some(i) if i < crate::dancer::STYLES.len() => s.dancer_style = Some(i),
+            Some(_) => {}
+            None => s.dancer_style = None,
         }
         if let Some(z) = d.size {
             s.dancer_size = z.clamp(0.2, 3.0);
@@ -298,6 +300,16 @@ mod tests {
         assert_eq!(a.clip.as_deref(), Some("stock_disco"));
         assert_eq!((t.palette.clone(), t.fx, t.dancer_style), (other_palette(), Fx::Kaleido6, Some(2)));
         assert!((t.fx_amt - 0.4).abs() < 1e-6 && (t.dancer_size - 1.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn an_auto_dancer_look_is_restored() {
+        // Saved with the dancer look on "auto" (None), recalled after the DJ
+        // picked a look by hand: auto comes back.
+        let look = capture("Auto", &Settings::default(), None, None);
+        let mut t = Settings { dancer_style: Some(2), ..Settings::default() };
+        apply(&look, &mut t, &[], &[]);
+        assert_eq!(t.dancer_style, None);
     }
 
     #[test]
