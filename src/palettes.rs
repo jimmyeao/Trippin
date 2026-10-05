@@ -252,6 +252,12 @@ impl Auto {
     /// The palette matching this frame's mood. `beat` is the running beat
     /// clock (`f.beat_position(now)`) used for the hold/dwell windows.
     pub fn pick(&mut self, f: &Features, beat: f64) -> &'static str {
+        self.pick_in(f, beat, None)
+    }
+
+    /// `pick`, with a Style's own palette family per mood (`styles::mood_palettes`).
+    /// A mood whose list is empty falls back to the built-in rotation.
+    pub fn pick_in(&mut self, f: &Features, beat: f64, over: Option<&[Vec<&'static str>; 4]>) -> &'static str {
         const HOLD: f64 = 2.0;
         const DWELL: f64 = 16.0;
         let b = bucket(f);
@@ -261,7 +267,11 @@ impl Auto {
             if beat - since >= HOLD && beat - self.since >= DWELL {
                 self.bucket = b;
                 self.idx[b] += 1;
-                self.name = MOODS[b][self.idx[b] % MOODS[b].len()];
+                let list: &[&'static str] = match over {
+                    Some(o) if !o[b].is_empty() => &o[b],
+                    _ => MOODS[b],
+                };
+                self.name = list[self.idx[b] % list.len()];
                 self.since = beat;
                 self.cand = None;
             }

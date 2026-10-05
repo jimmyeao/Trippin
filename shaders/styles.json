@@ -1,0 +1,405 @@
+[
+  {
+    "id": "dance",
+    "name": "Dance / EDM",
+    "about": "Fast, bright and electric: lasers, tunnels and light walls. Cuts on every phrase and drop.",
+    "scenes": {
+      "include": [
+        "driving",
+        "stage",
+        "bright"
+      ],
+      "exclude": [
+        "slow",
+        "seasonal",
+        "dark"
+      ]
+    },
+    "calm_scenes": {
+      "include": [
+        "space",
+        "cold",
+        "abstract"
+      ],
+      "require": [
+        "slow"
+      ]
+    },
+    "palettes": {
+      "calm": [
+        "ocean",
+        "ice",
+        "rift"
+      ],
+      "groove": [
+        "cyber",
+        "magenta",
+        "party"
+      ],
+      "driving": [
+        "cyber",
+        "magenta",
+        "party",
+        "sunset"
+      ],
+      "peak": [
+        "party",
+        "fire",
+        "magenta",
+        "cyber"
+      ]
+    },
+    "director": {
+      "phrase_bars": 4,
+      "cut_on_drops": true
+    }
+  },
+  {
+    "id": "house_techno",
+    "name": "House & Techno",
+    "about": "Dark, hypnotic and architectural: tunnels, grids, city and geometry, with colour kept cool.",
+    "scenes": {
+      "include": [
+        "dark",
+        "urban",
+        "flight"
+      ],
+      "exclude": [
+        "bright",
+        "warm",
+        "seasonal",
+        "character",
+        "slow"
+      ]
+    },
+    "calm_scenes": {
+      "include": [
+        "dark",
+        "space",
+        "cold"
+      ],
+      "require": [
+        "slow"
+      ]
+    },
+    "palettes": {
+      "calm": [
+        "ocean",
+        "ice",
+        "rift"
+      ],
+      "groove": [
+        "cyber",
+        "ocean",
+        "rift"
+      ],
+      "driving": [
+        "cyber",
+        "magenta",
+        "rift"
+      ],
+      "peak": [
+        "cyber",
+        "magenta",
+        "ice"
+      ]
+    },
+    "director": {
+      "phrase_bars": 8,
+      "cut_on_drops": true
+    }
+  },
+  {
+    "id": "pop",
+    "name": "Pop",
+    "about": "Colourful and friendly: bright scenes, warm light and stage rigs, never dark or cold.",
+    "scenes": {
+      "include": [
+        "bright",
+        "warm",
+        "organic",
+        "character"
+      ],
+      "exclude": [
+        "dark",
+        "cold",
+        "analyser",
+        "seasonal",
+        "stage",
+        "neon"
+      ]
+    },
+    "calm_scenes": {
+      "include": [
+        "warm",
+        "organic",
+        "bright"
+      ],
+      "require": [
+        "slow"
+      ],
+      "exclude": [
+        "dark"
+      ]
+    },
+    "palettes": {
+      "calm": [
+        "sunset",
+        "breeze",
+        "coral"
+      ],
+      "groove": [
+        "party",
+        "coral",
+        "sunset",
+        "rainbow"
+      ],
+      "driving": [
+        "party",
+        "magenta",
+        "rainbow",
+        "sunset"
+      ],
+      "peak": [
+        "party",
+        "rainbow",
+        "fire",
+        "magenta"
+      ]
+    },
+    "director": {
+      "phrase_bars": 4,
+      "cut_on_drops": true,
+      "fx_auto": false
+    }
+  },
+  {
+    "id": "rock",
+    "name": "Rock",
+    "about": "Fire, storms and stage lights: warm, organic and loud. No synth-grid looks.",
+    "scenes": {
+      "include": [
+        "warm",
+        "stage",
+        "organic"
+      ],
+      "exclude": [
+        "retro",
+        "analyser",
+        "geometric",
+        "seasonal"
+      ]
+    },
+    "calm_scenes": {
+      "include": [
+        "warm",
+        "dark",
+        "organic"
+      ],
+      "require": [
+        "slow"
+      ]
+    },
+    "palettes": {
+      "calm": [
+        "autumn",
+        "ocean",
+        "gold"
+      ],
+      "groove": [
+        "autumn",
+        "gold",
+        "fire"
+      ],
+      "driving": [
+        "fire",
+        "lava",
+        "gold"
+      ],
+      "peak": [
+        "fire",
+        "lava",
+        "party"
+      ]
+    },
+    "director": {
+      "phrase_bars": 4,
+      "cut_on_drops": true,
+      "fx_auto": false
+    }
+  },
+  {
+    "id": "hiphop_rnb",
+    "name": "Hip-hop & R&B",
+    "about": "Night city, neon and chrome: urban, moody and smooth, with warm gold and magenta.",
+    "scenes": {
+      "include": [
+        "urban",
+        "dark",
+        "character"
+      ],
+      "exclude": [
+        "bright",
+        "seasonal",
+        "analyser",
+        "geometric",
+        "space"
+      ]
+    },
+    "calm_scenes": {
+      "include": [
+        "dark",
+        "urban",
+        "abstract"
+      ],
+      "require": [
+        "slow"
+      ]
+    },
+    "palettes": {
+      "calm": [
+        "rift",
+        "ocean",
+        "gold"
+      ],
+      "groove": [
+        "gold",
+        "magenta",
+        "sunset"
+      ],
+      "driving": [
+        "magenta",
+        "gold",
+        "cyber"
+      ],
+      "peak": [
+        "magenta",
+        "fire",
+        "gold"
+      ]
+    },
+    "director": {
+      "phrase_bars": 8,
+      "cut_on_drops": true
+    }
+  },
+  {
+    "id": "chill",
+    "name": "Chill / Lounge",
+    "about": "Slow and soft: aurora, water, galaxies and flowing forms. Long scenes, no flashes.",
+    "scenes": {
+      "require": [
+        "slow"
+      ],
+      "exclude": [
+        "stage",
+        "driving",
+        "seasonal",
+        "retro"
+      ]
+    },
+    "calm_scenes": {
+      "require": [
+        "slow"
+      ],
+      "exclude": [
+        "stage",
+        "driving",
+        "retro"
+      ]
+    },
+    "palettes": {
+      "calm": [
+        "ocean",
+        "ice",
+        "breeze",
+        "rift"
+      ],
+      "groove": [
+        "ocean",
+        "sunset",
+        "breeze",
+        "coral"
+      ],
+      "driving": [
+        "sunset",
+        "coral",
+        "ocean"
+      ],
+      "peak": [
+        "sunset",
+        "coral",
+        "gold"
+      ]
+    },
+    "director": {
+      "phrase_bars": 16,
+      "cut_on_drops": false,
+      "fx_auto": false,
+      "fx_amt": 0.0
+    }
+  },
+  {
+    "id": "party",
+    "name": "Party / Wedding",
+    "about": "Everything friendly: bright, warm and festive, with the seasonal scenes in rotation. Safe for mixed crowds.",
+    "scenes": {
+      "include": [
+        "bright",
+        "stage",
+        "warm",
+        "character",
+        "seasonal"
+      ],
+      "exclude": [
+        "dark",
+        "analyser",
+        "retro"
+      ]
+    },
+    "calm_scenes": {
+      "include": [
+        "warm",
+        "organic",
+        "bright",
+        "space"
+      ],
+      "require": [
+        "slow"
+      ],
+      "exclude": [
+        "dark"
+      ]
+    },
+    "palettes": {
+      "calm": [
+        "sunset",
+        "breeze",
+        "coral"
+      ],
+      "groove": [
+        "party",
+        "rainbow",
+        "coral",
+        "sunset"
+      ],
+      "driving": [
+        "party",
+        "rainbow",
+        "magenta",
+        "sunset"
+      ],
+      "peak": [
+        "party",
+        "rainbow",
+        "fire",
+        "gold"
+      ]
+    },
+    "director": {
+      "phrase_bars": 4,
+      "cut_on_drops": true,
+      "fx_auto": true
+    }
+  }
+]

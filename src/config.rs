@@ -49,10 +49,12 @@ pub enum Action {
     Look6,
     Look7,
     Look8,
+    /// Step through the Styles: off, then each one in turn (unbound by default).
+    NextTheme,
 }
 
 impl Action {
-    pub const ALL: [Action; 38] = [
+    pub const ALL: [Action; 39] = [
         Action::NextScene,
         Action::PrevScene,
         Action::ModeAuto,
@@ -91,6 +93,7 @@ impl Action {
         Action::Look6,
         Action::Look7,
         Action::Look8,
+        Action::NextTheme,
     ];
 
     pub fn label(self) -> &'static str {
@@ -133,6 +136,7 @@ impl Action {
             Action::Look6 => "Look 6 (the saved Look on slot 6)",
             Action::Look7 => "Look 7 (the saved Look on slot 7)",
             Action::Look8 => "Look 8 (the saved Look on slot 8)",
+            Action::NextTheme => "Next Style (off, Dance, House, Pop...)",
         }
     }
 
@@ -198,7 +202,8 @@ impl Action {
             | Action::Look5
             | Action::Look6
             | Action::Look7
-            | Action::Look8 => "",
+            | Action::Look8
+            | Action::NextTheme => "",
         }
     }
 }
@@ -359,6 +364,9 @@ pub struct Settings {
     pub disabled_scenes: Vec<String>,
     /// Starred scenes — the Perform "fav" chip filters to these.
     pub favourite_scenes: Vec<String>,
+    /// The selected Style (`styles.json` id); `None` = off. Only the id is saved:
+    /// the pool, palettes and pacing are an overlay on the per-frame settings.
+    pub style: Option<String>,
     pub seasonal: Seasonal,
     pub dancer_enabled: bool,
     /// None = auto-pilot picks the look; Some(i) = always that look.
@@ -497,6 +505,7 @@ impl Default for Settings {
             phrase_bars: 16,
             cut_on_drops: true,
             disabled_scenes: Vec::new(),
+            style: None,
             favourite_scenes: Vec::new(),
             seasonal: Seasonal::Auto,
             dancer_enabled: true,

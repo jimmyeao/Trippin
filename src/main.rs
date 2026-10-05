@@ -55,6 +55,7 @@ mod perf;
 mod render;
 mod snap;
 mod song;
+mod styles;
 #[cfg(target_os = "macos")]
 mod sysaudio;
 mod tags;
@@ -226,7 +227,10 @@ fn usable_scenes(r: &Renderer, s: &Settings) -> Vec<usize> {
             (Seasonal::Auto, Some(in_now)) => in_now,
         })
         .collect();
-    if on.is_empty() { all } else { on }
+    let on = if on.is_empty() { return all } else { on };
+    // The selected Style narrows what's left (never what the user turned off:
+    // those were removed above, so a Style can't bring them back).
+    styles::narrow(&on, &|i| names[i].clone(), s, styles::catalog())
 }
 
 /// Stop the show player and put the live audio engine back.
@@ -538,7 +542,13 @@ fn repick_for_mood(dir: &mut Director, r: &Renderer, usable: &[usize], f: &audio
     }
     // Candidates near the target energy — take the best cluster so the
     // pick stays varied rather than always landing the same scene.
-    let mut cands: Vec<(f32, usize)> = usable
+    // In a breakdown a Style prefers its own calm scenes.
+    let pool = if target < 0.5 {
+        styles::calm_candidates(usable, &|i| r.scene_name(i).to_string(), s, styles::catalog())
+    } else {
+        usable.to_vec()
+    };
+    let mut cands: Vec<(f32, usize)> = pool
         .iter()
         .copied()
         .filter(|&n| n != dir.scene)
@@ -600,6 +610,8 @@ fn render_loop(
     let mut master = 1.0f32;
     // `palette = "auto"` mood matcher (palettes::Auto).
     let mut auto_pal = palettes::Auto::default();
+    // The selected Style's auto-palette families, cached by Style id.
+    let mut style_pals: Option<(String, [Vec<&'static str>; 4])> = None;
     // Audio watchdog: a stream that dies or goes silent gets rebuilt after
     // `audio_retry` of sustained silence, backing off when the source is
     // genuinely quiet so it isn't re-opened forever.
@@ -924,6 +936,8 @@ fn render_loop(
             fps += (1.0 / dt - fps) * 0.05;
         }
         let mut s = lock(&shared.settings).clone();
+        // The Style's pacing overlays this per-frame clone; nothing is saved.
+        styles::overlay(&mut s, styles::catalog());
         // While the GPU check is on a `unity_*` scene the engine link is
         // borrowed so its shows can be measured — this is the per-frame
         // clone, so the saved setting is never touched.
@@ -1317,9 +1331,20 @@ fn render_loop(
                 }
             }
         }
+        // A Style change swaps the auto-palette families (and restarts the mood
+        // picker so the new family shows within a couple of beats).
+        {
+            let want = s.style.as_deref();
+            if style_pals.as_ref().map(|(id, _)| id.as_str()) != want {
+                style_pals = want
+                    .and_then(|id| styles::catalog().theme(id))
+                    .map(|t| (t.id.clone(), styles::mood_palettes(t)));
+                auto_pal = palettes::Auto::default();
+            }
+        }
         // `palette = "auto"`: pick the gradient to match the music's mood.
         let pal = if s.palette == palettes::AUTO {
-            auto_pal.pick(&f, pos)
+            auto_pal.pick_in(&f, pos, style_pals.as_ref().map(|(_, p)| p))
         } else {
             s.palette.as_str()
         };
@@ -1757,7 +1782,8 @@ fn apply_render(
         | Action::Look5
         | Action::Look6
         | Action::Look7
-        | Action::Look8 => {}
+        | Action::Look8
+        | Action::NextTheme => {}
         Action::SaveClip => shared.rec_clip.store(true, Ordering::Relaxed),
         Action::RecordSet => {
             shared.rec_set.fetch_xor(true, Ordering::Relaxed);
@@ -1944,6 +1970,15 @@ impl App {
                     let mut tl = lock(&sh.timeline);
                     tl.recording = !tl.recording;
                 }
+            }
+            Action::NextTheme => {
+                let cat = styles::catalog();
+                let next = {
+                    let s = self.settings_mut();
+                    styles::next_id(s.style.as_deref(), cat)
+                };
+                self.settings_mut().style = next;
+                self.mark_dirty();
             }
             a if a.look_slot().is_some() => {
                 let slot = a.look_slot().unwrap_or(0);
