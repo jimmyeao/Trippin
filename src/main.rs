@@ -32,6 +32,7 @@ mod audio;
 mod beats;
 mod engine;
 mod link;
+mod looks;
 mod config;
 mod dancer;
 mod director;
