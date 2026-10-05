@@ -168,7 +168,7 @@ Shader "Trippin/Land"
                 }
                 col *= _Gain;
                 float fog = max(1.0 - exp(-pow(abs(dist / _Fade), 1.5)), i.fe);
-                float3 fogc = SkyCol(normalize(float3(-vv.x, 0.015, -vv.z)));
+                float3 fogc = SkyCol(normalize(float3(-vv.x, 0.015, -vv.z)), 0.0);   // horizon colour, no sun disc
                 col = lerp(col, fogc, fog);
                 col = col / (1.0 + 0.3 * col);
                 return float4(col, 1.0);

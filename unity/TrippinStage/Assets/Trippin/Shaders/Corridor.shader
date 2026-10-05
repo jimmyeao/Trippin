@@ -10,6 +10,11 @@
 //    the bends swing with the phrase, light packets run along the strips.
 //  - Luminance: _Gain (eased loudness, build dip, drop flare). No beat-synced
 //    flashes (a flight scene).
+//  - Owner ("speeds up and slows down, only reactivity is light at the end
+//    flashing - better as a fast flight with the walls reactive"): the show
+//    now flies at a steady tempo-locked speed; the wall's cross-section takes
+//    the spectrum's shape (loud bands bulge in, _Shape), the panels glow
+//    harder with their band, and the light at the end is a steady glow.
 Shader "Trippin/Corridor"
 {
     Properties
@@ -22,6 +27,7 @@ Shader "Trippin/Corridor"
         _BendAmp ("Bend (m)", Float) = 3
         _BendPhase ("Bend phase", Float) = 0
         _Rib ("Rib depth 0..1", Float) = 0.2
+        _Shape ("Spectrum bulge of the wall 0..1", Float) = 0
     }
     SubShader
     {
@@ -39,7 +45,7 @@ Shader "Trippin/Corridor"
             #include "TrippinFull.hlsl"
 
             CBUFFER_START(UnityPerMaterial)
-            float _Hue, _Gain, _Radius, _Scroll, _Phase, _BendAmp, _BendPhase, _Rib;
+            float _Hue, _Gain, _Radius, _Scroll, _Phase, _BendAmp, _BendPhase, _Rib, _Shape;
             CBUFFER_END
 
             static const float kTau = 6.2831853;
@@ -75,11 +81,16 @@ Shader "Trippin/Corridor"
                 float a = max(dot(dxy, dxy), 1e-5);
                 float t = _Radius / sqrt(a);
                 [unroll]
-                for (int k = 0; k < 4; k++)
+                for (int k = 0; k < 5; k++)
                 {
                     float z = max(d.z, 0.0) * t;
                     float2 c = Bend(z);
-                    float R = RadiusAt(z);
+                    // The cross-section takes the spectrum's shape: the band at this angle (from the
+                    // previous estimate's hit point, mirrored top/bottom like the panels) pulls the
+                    // wall in. Refined with the hit, so it converges with the other iterations.
+                    float2 relk = dxy * t - c;
+                    float thk = atan2(relk.y, relk.x) / kTau + 0.5;
+                    float R = RadiusAt(z) * (1.0 - _Shape * 0.3 * RxSpec(abs(thk * 2.0 - 1.0)));
                     float b = -2.0 * dot(dxy, c);
                     float cc = dot(c, c) - R * R;
                     float disc = max(b * b - 4.0 * a * cc, 0.0);
@@ -119,7 +130,7 @@ Shader "Trippin/Corridor"
 
                 // Panels: lit by their band, with a per-panel flicker of brightness (not of time).
                 float3 col = wall * 0.012;
-                col += wall * panel * lvl * (0.5 + 0.7 * pk) * 0.55;
+                col += wall * panel * lvl * (0.5 + 0.7 * pk) * 1.0;
                 col += Pal(_Hue + 0.5) * line_ * (0.1 + 0.25 * lum + 0.3 * lvl);
 
                 // Light strips along the corridor, packets sliding down them.
@@ -137,8 +148,8 @@ Shader "Trippin/Corridor"
                 // Distance: fog into the palette, a bright flare where the corridor ends.
                 float fog = exp(-t * 0.016);
                 col = col * fog + Pal(_Hue + 0.1) * (1.0 - fog) * 0.05;
-                float flare = exp((d.z - 1.0) * (80.0 / (1.0 + 2.0 * bass)));
-                col += Pal(_Hue + 0.1) * flare * (0.5 + 1.8 * bass + impact);
+                float flare = exp((d.z - 1.0) * 60.0);                       // steady: it flashed with the bass
+                col += Pal(_Hue + 0.1) * flare * (0.6 + 0.3 * lum + 0.5 * impact);
 
                 col *= _Gain;
                 col = col / (1.0 + 0.3 * col);

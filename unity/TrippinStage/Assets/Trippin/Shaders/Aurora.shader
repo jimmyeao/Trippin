@@ -13,6 +13,9 @@ Shader "Trippin/Aurora"
         _Phase ("Fold travel", Float) = 0
         _Fold ("Fold amount", Float) = 1
         _Height ("Curtain height (m)", Float) = 20
+        _SpecAmt ("Spectrum lift of the curtain top (x height)", Float) = 0
+        _WaveR ("Kick wave: distance from the centre (m)", Float) = 999
+        _WaveA ("Kick wave: depth (m)", Float) = 0
         _Base ("Base height (m)", Float) = 6
         _Z ("Depth (m)", Float) = 0
         _Seed ("Seed", Float) = 0
@@ -33,7 +36,7 @@ Shader "Trippin/Aurora"
             #include "TrippinCommon.hlsl"
 
             CBUFFER_START(UnityPerMaterial)
-            float _Hue, _Intensity, _Phase, _Fold, _Height, _Base, _Z, _Seed, _Mirror;
+            float _Hue, _Intensity, _Phase, _Fold, _Height, _Base, _Z, _Seed, _Mirror, _SpecAmt, _WaveR, _WaveA;
             CBUFFER_END
 
             struct A { float4 pos : POSITION; float2 uv : TEXCOORD0; };
@@ -47,7 +50,14 @@ Shader "Trippin/Aurora"
                 float w2 = sin(u * 13.0 - _Phase * 1.1 + _Seed * 9.0);
                 float x = (u - 0.5) * 150.0 + sin(v * 2.5 + _Phase * 0.5 + _Seed * 7.0) * _Fold * 2.0;
                 float z = _Z + _Fold * (w1 * 9.0 + w2 * 3.5);
-                float y = _Base + v * _Height;
+                // The curtain's top follows the eased spectrum along its length, mirrored about the
+                // centre (bass in the middle, highs at the ends; no seam), so the music reshapes it.
+                float sx = abs(u - 0.5) * 2.0;
+                float sp = RxSpec(0.05 + 0.85 * sx);
+                float y = _Base + v * _Height * (0.6 + _SpecAmt * sp);
+                // A kick sends a fold out from the centre along the curtain.
+                float dw = sx * 75.0 - _WaveR;
+                z += _WaveA * sin(dw * 0.3) * exp(-dw * dw / 150.0) * (0.4 + 0.6 * v);
                 if (_Mirror > 0.5) y = -y;
                 o.pos = TransformWorldToHClip(TransformObjectToWorld(float3(x, y, z)));
                 o.uv = i.uv;

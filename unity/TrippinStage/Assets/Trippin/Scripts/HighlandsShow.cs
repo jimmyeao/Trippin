@@ -9,6 +9,11 @@
 //  - Luminance: terrain, mist and sun follow the eased loudness; the mist
 //    thickens a little in breakdowns.
 //  - Drops: a build dims the light; the drop warms the sun through.
+//  - Owner ("not reactive"; "the sun bleeds a vertical line ... needs
+//    perspective so it fans out from the source"): the column was the far fog
+//    sampling the sun disc (fixed in TrippinSky.hlsl). The sun now throws a fan
+//    of rays (_SkyRays), each as long as its slice of the eased spectrum; the
+//    mist banks swell and the camera lifts with the eased bass.
 using UnityEngine;
 
 namespace TrippinStage
@@ -48,6 +53,7 @@ namespace TrippinStage
             _sky.SetFloat("_SkyHue", hue);
             _sky.SetFloat("_SkyGain", gain);
             _sky.SetFloat("_SkyClk", rx.clk);
+            _sky.SetFloat("_SkyRays", 1f - 0.5f * rx.tension);
             _land.SetFloat("_SkyHue", hue);
             _land.SetFloat("_SkyGain", gain);
             _land.SetFloat("_SkyClk", rx.clk);
@@ -55,13 +61,13 @@ namespace TrippinStage
             // The ridges sharpen with the slow bass; the mist stirs and warms
             // with the music, thicker when the drums are out.
             _land.SetFloat("_Ridge", Mathf.Clamp01(rx.bassSlow * 1.2f));
-            _land.SetFloat("_Mist", 0.4f + 0.5f * rx.lum + 0.25f * rx.calm);
+            _land.SetFloat("_Mist", 0.35f + 0.4f * rx.lum + 0.35f * rx.bassFast + 0.25f * rx.calm);
             _land.SetFloat("_Scroll", rx.clk * 6f);
 
             float sway = Mathf.Sin(rx.phrase);
             float bob = Mathf.Sin(rx.beat / 16f * Mathf.PI * 2f);
             rig.Move(cam,
-                new Vector3(9f * sway, 8f + 1.5f * bob, 0f),
+                new Vector3(9f * sway, 8f + 1.5f * bob + 2.5f * rx.bassFast, 0f),
                 new Vector3(16f * Mathf.Sin(rx.phrase * 0.6f), 2f, 300f), dt, 1.0f);
         }
     }
