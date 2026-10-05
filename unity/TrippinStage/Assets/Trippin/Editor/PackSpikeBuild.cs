@@ -26,6 +26,19 @@ namespace TrippinStage.EditorTools
             PrefabUtility.SaveAsPrefabAsset(go, "Assets/PackSpike/PackPulseOrb.prefab");
             Object.DestroyImmediate(go);
             AssetImporter.GetAtPath("Assets/PackSpike/PackPulseOrb.prefab").assetBundleName = "packpulse.bundle";
+            // Windows step 6: a bundle-only instancing shader, one material with
+            // instancing on the ASSET and a control with it off (the stripping trap).
+            File.Copy("Assets/Trippin/Editor/PackInst.shader.txt", "Assets/PackSpike/PackInst.shader", true);
+            AssetDatabase.ImportAsset("Assets/PackSpike/PackInst.shader", ImportAssetOptions.ForceUpdate);
+            var ish = AssetDatabase.LoadAssetAtPath<Shader>("Assets/PackSpike/PackInst.shader");
+            if (ish == null) { Debug.LogError("[PackSpike] PackInst.shader failed to import"); return; }
+            foreach (var (n, inst) in new[] { ("PackInstMat", true), ("PackCtlMat", false) })
+            {
+                var im = new Material(ish) { name = n, enableInstancing = inst };
+                im.SetColor("_Tint", inst ? Color.white : new Color(1f, 0.25f, 0.25f));
+                AssetDatabase.CreateAsset(im, $"Assets/PackSpike/{n}.mat");
+                AssetImporter.GetAtPath($"Assets/PackSpike/{n}.mat").assetBundleName = "packpulse.bundle";
+            }
             AssetDatabase.SaveAssets();
             foreach (var (t, sub) in new[] { (BuildTarget.StandaloneOSX, "mac"), (BuildTarget.StandaloneWindows64, "win") })
             {

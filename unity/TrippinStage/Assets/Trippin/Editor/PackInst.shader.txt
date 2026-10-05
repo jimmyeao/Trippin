@@ -1,0 +1,50 @@
+// SPIKE: a bundle-only shader with an instancing variant (step 6 of the Windows
+// pack-loader check). PackSpikeBuild copies this into Assets/PackSpike as
+// PackInst.shader, so the player build never includes it: it reaches the
+// player only through the pack's AssetBundle.
+Shader "TrippinPack/InstPulse"
+{
+    Properties
+    {
+        _Tint ("Tint", Color) = (1, 1, 1, 1)
+    }
+    SubShader
+    {
+        Tags { "RenderType"="Opaque" "Queue"="Geometry" "RenderPipeline"="UniversalPipeline" }
+        Pass
+        {
+            HLSLPROGRAM
+            #pragma vertex vert
+            #pragma fragment frag
+            #pragma multi_compile_instancing
+            #pragma target 4.5
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+
+            CBUFFER_START(UnityPerMaterial)
+            float4 _Tint;
+            CBUFFER_END
+
+            struct A { float4 pos : POSITION; float3 n : NORMAL; UNITY_VERTEX_INPUT_INSTANCE_ID };
+            struct V { float4 pos : SV_POSITION; float3 n : TEXCOORD0; float3 c : TEXCOORD1; };
+
+            V vert(A i)
+            {
+                V o;
+                UNITY_SETUP_INSTANCE_ID(i);
+                float3 wp = TransformObjectToWorld(i.pos.xyz);
+                o.pos = TransformWorldToHClip(wp);
+                o.n = TransformObjectToWorldNormal(i.n);
+                float3 org = TransformObjectToWorld(float3(0, 0, 0));
+                o.c = 0.5 + 0.5 * cos(atan2(org.z, org.x) + float3(0, 2.1, 4.2));
+                return o;
+            }
+
+            float4 frag(V i) : SV_Target
+            {
+                float l = 0.35 + 0.65 * saturate(dot(normalize(i.n), normalize(float3(0.3, 0.8, 0.4))));
+                return float4(i.c * l * _Tint.rgb, 1);
+            }
+            ENDHLSL
+        }
+    }
+}
