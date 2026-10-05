@@ -198,8 +198,16 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 /// Scenes that compile, are ticked in the playlist and (for seasonal
-/// scenes) are in season.
+/// scenes) are in season, narrowed to the selected Style's pool.
 fn usable_scenes(r: &Renderer, s: &Settings) -> Vec<usize> {
+    let names = r.scene_names();
+    // The selected Style narrows what's left (never what the user turned off:
+    // those were removed by allowed_scenes, so a Style can't bring them back).
+    styles::narrow(&allowed_scenes(r, s), &|i| names[i].clone(), s, styles::catalog())
+}
+
+/// [`usable_scenes`] before the Style narrows it: what the user allows.
+fn allowed_scenes(r: &Renderer, s: &Settings) -> Vec<usize> {
     let names = r.scene_names();
     let heavy = r.scene_heavy();
     let all = r.usable_scenes();
@@ -227,10 +235,7 @@ fn usable_scenes(r: &Renderer, s: &Settings) -> Vec<usize> {
             (Seasonal::Auto, Some(in_now)) => in_now,
         })
         .collect();
-    let on = if on.is_empty() { return all } else { on };
-    // The selected Style narrows what's left (never what the user turned off:
-    // those were removed above, so a Style can't bring them back).
-    styles::narrow(&on, &|i| names[i].clone(), s, styles::catalog())
+    if on.is_empty() { all } else { on }
 }
 
 /// Stop the show player and put the live audio engine back.
@@ -944,7 +949,19 @@ fn render_loop(
         if check.as_ref().is_some_and(|c| c.cur_is_unity()) {
             s.unity_link = true;
         }
-        let usable = usable_scenes(&r, &s);
+        let allowed = allowed_scenes(&r, &s);
+        let mut usable = styles::narrow(&allowed, &|i| r.scene_name(i).to_string(), &s, styles::catalog());
+        // A scene the DJ picked (or queued) by hand outside the Style's pool
+        // stays on air: the director cuts away at once from a scene that isn't
+        // usable (meant for one switched off in the playlist), so keep it in
+        // the list. The pickers skip the live scene, so the Style still decides
+        // every automatic pick; the next phrase cut goes back to the pool.
+        for keep in [Some(dir.scene), dir.next.filter(|_| dir.next_queued)].into_iter().flatten() {
+            if allowed.contains(&keep) && !usable.contains(&keep) {
+                usable.push(keep);
+            }
+        }
+        usable.sort_unstable();
         {
             let mut c = lock(&shared.np_cfg);
             if c.source != s.np_source || c.delay_s != s.np_delay_s || c.file != s.np_file {
