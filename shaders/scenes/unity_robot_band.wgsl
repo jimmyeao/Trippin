@@ -1,4 +1,4 @@
-// @title Unity DJ Bot
+// @title Unity Robot Band
 // Unity robot band: a four-piece band of androids (drums, bass, keys, singer) playing in time on a lit stage. A screen-content show from the external Unity engine (Spout sender "Trippin Stage", see
 // unity/README.md), driven live by Trippin's show-state feed. Only in rotation while frames
 // are arriving. The frame is already tonemapped, so this undoes present's exposure + ACES

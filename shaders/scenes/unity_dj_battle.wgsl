@@ -1,4 +1,4 @@
-// @title Unity DJ Bot
+// @title Unity DJ Battle
 // Unity dj battle: two android DJs trading the decks every four bars in front of an LED wall and lasers. A screen-content show from the external Unity engine (Spout sender "Trippin Stage", see
 // unity/README.md), driven live by Trippin's show-state feed. Only in rotation while frames
 // are arriving. The frame is already tonemapped, so this undoes present's exposure + ACES
