@@ -526,9 +526,24 @@ fn apply_playhead(
 /// time an event fires: in a breakdown the queue should hold a calm scene,
 /// in a hot section a hot one. Random order only — an ordered playlist is
 /// a curated sequence, and a queued "play next" is the operator's call.
-fn repick_for_mood(dir: &mut Director, r: &Renderer, usable: &[usize], f: &audio::Features, s: &Settings) {
+/// `allowed` is `usable` before the Style narrowed it: a Style's calm pool
+/// usually sits outside its main pool (Dance excludes `slow`, its calm pool
+/// requires it), so breakdown picks are drawn from what the user allows.
+fn repick_for_mood(
+    dir: &mut Director,
+    r: &Renderer,
+    usable: &[usize],
+    allowed: &[usize],
+    f: &audio::Features,
+    s: &Settings,
+) {
     if s.mode != Mode::Auto || !s.random_order || usable.len() < 2 || dir.next_queued {
         return;
+    }
+    // A calm pick from outside the Style's pool is for the breakdown only: as
+    // soon as it lifts, queue a pool scene again so the drop lands on one.
+    if f.calm <= 0.55 && dir.next.is_some_and(|n| !usable.contains(&n)) {
+        dir.next = dir.pick_next(usable, true);
     }
     // Mid-moods get no opinion — any pick is honest.
     let target = if f.calm > 0.55 {
@@ -538,21 +553,21 @@ fn repick_for_mood(dir: &mut Director, r: &Renderer, usable: &[usize], f: &audio
     } else {
         return;
     };
+    // In a breakdown a Style prefers its own calm scenes.
+    let pool = if target < 0.5 {
+        styles::calm_candidates(usable, allowed, &|i| r.scene_name(i).to_string(), s, styles::catalog())
+    } else {
+        usable.to_vec()
+    };
     let close = |e: f32| (e - target).abs() <= 0.22;
     if dir
         .next
-        .is_some_and(|n| close(ai::scene_meta(r.scene_name(n)).energy))
+        .is_some_and(|n| close(ai::scene_meta(r.scene_name(n)).energy) && pool.contains(&n))
     {
         return;
     }
     // Candidates near the target energy — take the best cluster so the
     // pick stays varied rather than always landing the same scene.
-    // In a breakdown a Style prefers its own calm scenes.
-    let pool = if target < 0.5 {
-        styles::calm_candidates(usable, &|i| r.scene_name(i).to_string(), s, styles::catalog())
-    } else {
-        usable.to_vec()
-    };
     let mut cands: Vec<(f32, usize)> = pool
         .iter()
         .copied()
@@ -950,13 +965,15 @@ fn render_loop(
             s.unity_link = true;
         }
         let allowed = allowed_scenes(&r, &s);
-        let mut usable = styles::narrow(&allowed, &|i| r.scene_name(i).to_string(), &s, styles::catalog());
-        // A scene the DJ picked (or queued) by hand outside the Style's pool
-        // stays on air: the director cuts away at once from a scene that isn't
-        // usable (meant for one switched off in the playlist), so keep it in
-        // the list. The pickers skip the live scene, so the Style still decides
-        // every automatic pick; the next phrase cut goes back to the pool.
-        for keep in [Some(dir.scene), dir.next.filter(|_| dir.next_queued)].into_iter().flatten() {
+        let pool = styles::narrow(&allowed, &|i| r.scene_name(i).to_string(), &s, styles::catalog());
+        let mut usable = pool.clone();
+        // The live scene and the queued next stay in the director's list when
+        // the user allows them, even outside the Style's pool: a hand pick or
+        // play-next, or a breakdown's calm pick (repick_for_mood). Otherwise the
+        // director cuts away at once from a scene that isn't usable (meant for
+        // one switched off in the playlist) and drops the queued one. The
+        // pickers skip the live scene, so every other pick is still the Style's.
+        for keep in [Some(dir.scene), dir.next].into_iter().flatten() {
             if allowed.contains(&keep) && !usable.contains(&keep) {
                 usable.push(keep);
             }
@@ -1368,7 +1385,7 @@ fn render_loop(
         r.set_palette(pal);
         // Free cuts land on musical events — the queued pick should fit
         // the mood too: calm sections want calm scenes, hot ones want hot.
-        repick_for_mood(&mut dir, &r, &usable, &f, &s);
+        repick_for_mood(&mut dir, &r, &pool, &allowed, &f, &s);
 
         // Dancer follows the settings; auto-pilot changes it on cuts and phrases.
         dancer.enabled = s.dancer_enabled;

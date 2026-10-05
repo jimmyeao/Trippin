@@ -155,11 +155,19 @@ pub fn narrow(usable: &[usize], name: &dyn Fn(usize) -> String, s: &Settings, ca
 }
 
 /// The scenes to prefer in a breakdown: the Style's calm pool within
-/// `usable`, or all of `usable` when there is no Style, no calm pool, or it
+/// `allowed` (the user's scenes before the Style narrowed them: a calm pool
+/// usually sits outside the main pool, e.g. Dance excludes `slow` and its calm
+/// pool requires it), or `usable` when there is no Style, no calm pool, or it
 /// would leave fewer than two scenes.
-pub fn calm_candidates(usable: &[usize], name: &dyn Fn(usize) -> String, s: &Settings, cat: &Catalog) -> Vec<usize> {
+pub fn calm_candidates(
+    usable: &[usize],
+    allowed: &[usize],
+    name: &dyn Fn(usize) -> String,
+    s: &Settings,
+    cat: &Catalog,
+) -> Vec<usize> {
     let Some(theme) = active(s, cat) else { return usable.to_vec() };
-    let calm: Vec<usize> = usable.iter().copied().filter(|&i| theme.calm_scenes.matches(&name(i), &cat.tags)).collect();
+    let calm: Vec<usize> = allowed.iter().copied().filter(|&i| theme.calm_scenes.matches(&name(i), &cat.tags)).collect();
     if calm.len() >= 2 { calm } else { usable.to_vec() }
 }
 
@@ -325,12 +333,16 @@ mod tests {
         let name = |i: usize| names[i].clone();
         let all: Vec<usize> = (0..names.len()).collect();
         let s = settings(Some("dance"), Mode::Auto);
-        let calm = calm_candidates(&all, &name, &s, &c);
+        // As the render loop calls it: `usable` is already narrowed to the
+        // Dance pool, which has no slow scene at all.
+        let usable = narrow(&all, &name, &s, &c);
+        assert!(!usable.iter().any(|&i| c.tags.has(&names[i], "slow")));
+        let calm = calm_candidates(&usable, &all, &name, &s, &c);
         assert!(calm.len() >= 6 && calm.len() < all.len());
         assert!(calm.iter().all(|&i| c.tags.has(&names[i], "slow")));
         let loud: Vec<usize> = (0..names.len()).filter(|&i| c.tags.has(&names[i], "driving")).take(10).collect();
-        assert_eq!(calm_candidates(&loud, &name, &s, &c), loud, "no calm scene usable: fall back");
-        assert_eq!(calm_candidates(&all, &name, &settings(None, Mode::Auto), &c), all);
+        assert_eq!(calm_candidates(&loud, &loud, &name, &s, &c), loud, "no calm scene allowed: fall back");
+        assert_eq!(calm_candidates(&usable, &all, &name, &settings(None, Mode::Auto), &c), usable);
     }
 
     #[test]
