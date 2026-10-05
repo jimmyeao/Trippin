@@ -859,6 +859,34 @@ fn perform_tab(
                 .desired_width(120.0)
                 .hint_text("name this look…"),
         );
+        // Style: steers the auto-pilot's scene pool, palettes and pacing.
+        let cat = crate::styles::catalog();
+        if !cat.themes.is_empty() {
+            ui.separator();
+            ui.label(egui::RichText::new("Style").size(11.5).color(MUTED));
+            let now = s
+                .style
+                .as_deref()
+                .and_then(|id| cat.theme(id))
+                .map(|t| t.name.as_str())
+                .unwrap_or("Off");
+            egui::ComboBox::from_id_salt("style_pick")
+                .selected_text(egui::RichText::new(now).size(11.5))
+                .width(130.0)
+                .show_ui(ui, |ui| {
+                    if ui.selectable_label(s.style.is_none(), "Off").clicked() {
+                        s.style = None;
+                    }
+                    for t in &cat.themes {
+                        let on = s.style.as_deref() == Some(t.id.as_str());
+                        if ui.selectable_label(on, &t.name).on_hover_text(&t.about).clicked() {
+                            s.style = Some(t.id.clone());
+                        }
+                    }
+                })
+                .response
+                .on_hover_text("Steers which scenes and colours Auto picks, and how fast it cuts");
+        }
         let can = !look_name.trim().is_empty();
         if ui
             .add_enabled(can, egui::Button::new(egui::RichText::new("Save look").size(11.5)))

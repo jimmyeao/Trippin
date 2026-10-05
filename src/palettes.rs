@@ -251,6 +251,7 @@ impl Default for Auto {
 impl Auto {
     /// The palette matching this frame's mood. `beat` is the running beat
     /// clock (`f.beat_position(now)`) used for the hold/dwell windows.
+    #[allow(dead_code)] // the render loop uses `pick_in`; kept for the tests and tools
     pub fn pick(&mut self, f: &Features, beat: f64) -> &'static str {
         self.pick_in(f, beat, None)
     }

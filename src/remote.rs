@@ -10,6 +10,7 @@
 //! C→S  {"cmd":"goto_scene"|"queue_next","scene":"laser_show"|12}
 //! C→S  {"cmd":"show_clip","clip":"hiphop_01"}
 //! C→S  {"cmd":"look","look":"club-red"|"3"}        — a saved Look by id or slot
+//! C→S  {"cmd":"style","style":"rock"|"off"}       — the Style steering the auto-pilot
 //! C→S  {"cmd":"set","key":"palette","value":"sunset"}     — SetKey whitelist
 //! C→S  {"cmd":"transport","op":"toggle"|"stop"|"seek","pos":12.0}
 //! C→S  {"cmd":"now_playing","artist":"..","title":"..","source":"Serato"}
@@ -20,7 +21,9 @@
 //! S→C  {"type":"hello","ok":true,...} — scene/clip/palette/action lists;
 //!      `scene_titles`/`clip_titles` are the display names parallel with
 //!      `scenes`/`clips` — the ids stay the keys for every command. `looks`
-//!      lists the saved Looks as `{id,name,slot}` (absent from older servers).
+//!      lists the saved Looks as `{id,name,slot}`, `styles` the Styles as
+//!      `{id,name,about}`, and `state.style` is the selected id or null
+//!      (all absent from older servers).
 //! S→C  {"type":"state",...}           — show state, ~10 Hz; `scene_name`
 //!      etc are ids, `scene_title`/`clip_title` the display names.
 //! S→C  {"type":"thumb","scene":...,"png_b64":...}
@@ -101,6 +104,8 @@ pub enum RemoteCmd {
     ShowClip(String),
     /// Recall a saved Look by id, or by slot number ("1".."8").
     Look(String),
+    /// Select a Style by id ("", "off" or "none" = off).
+    Style(String),
     Set(SetKey),
     Transport(SongCtl),
     /// Now-playing push from a companion agent; `client` tags it so a
@@ -157,6 +162,9 @@ enum In {
     },
     Look {
         look: String,
+    },
+    Style {
+        style: String,
     },
     Set {
         key: String,
@@ -656,6 +664,7 @@ fn parse(msg: In, client: u64) -> Result<Option<RemoteCmd>> {
         })),
         In::ShowClip { clip } => Some(RemoteCmd::ShowClip(clip)),
         In::Look { look } => Some(RemoteCmd::Look(look)),
+        In::Style { style } => Some(RemoteCmd::Style(style)),
         In::Set { key, value } => Some(RemoteCmd::Set(parse_set(&key, value)?)),
         In::Transport { op, pos } => Some(RemoteCmd::Transport(match op.as_str() {
             "toggle" | "play" | "pause" => SongCtl::Toggle,
@@ -804,6 +813,11 @@ mod tests {
         assert!(matches!(
             rx.recv_timeout(Duration::from_secs(2)).unwrap(),
             RemoteCmd::Look(id) if id == "club-red"
+        ));
+        ws.send(Message::Text(r#"{"cmd":"style","style":"rock"}"#.into())).unwrap();
+        assert!(matches!(
+            rx.recv_timeout(Duration::from_secs(2)).unwrap(),
+            RemoteCmd::Style(s) if s == "rock"
         ));
         ws.send(Message::Text(r#"{"cmd":"action","action":"Look3"}"#.into())).unwrap();
         assert!(matches!(

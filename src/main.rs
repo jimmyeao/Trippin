@@ -2157,6 +2157,19 @@ impl App {
                     self.apply_look(&l);
                 }
             }
+            R::Style(sel) => {
+                // "", "off" or "none" clears; an unknown id is ignored (a typo must
+                // not silently turn the current Style off).
+                let cat = styles::catalog();
+                let next = match sel.trim().to_lowercase().as_str() {
+                    "" | "off" | "none" => Some(None),
+                    id => cat.theme(id).map(|t| Some(t.id.clone())),
+                };
+                if let Some(n) = next {
+                    self.settings_mut().style = n;
+                    self.mark_dirty();
+                }
+            }
             R::Transport(ctl) => self.send(Msg::Transport(ctl)),
             // A LAN agent's now-playing push; `None` retracts, but only
             // the pushing client's own track.
@@ -2224,6 +2237,11 @@ impl App {
                     "scene_titles": meta_sh.scene_titles.as_slice(),
                     "heavy": meta_sh.scene_heavy,
                     "clips": meta_sh.clip_names,
+                    "styles": styles::catalog()
+                        .themes
+                        .iter()
+                        .map(|t| serde_json::json!({ "id": t.id, "name": t.name, "about": t.about }))
+                        .collect::<Vec<_>>(),
                     "looks": lock(&meta_sh.looks)
                         .iter()
                         .map(|l| serde_json::json!({ "id": l.id, "name": l.name, "slot": l.slot }))
@@ -2292,6 +2310,7 @@ impl App {
                     "dancer": s.dancer_enabled,
                     "dancer_style": s.dancer_style,
                     "palette": s.palette,
+                    "style": s.style,
                     "palette_now": st.palette_now,
                     "random_order": s.random_order,
                     "phrase_bars": s.phrase_bars,

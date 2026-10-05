@@ -12,6 +12,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 /// Every tag a scene may carry, grouped by what it describes.
+#[allow(dead_code)] // enforced by the tests; packs will validate against it at load
 pub const VOCAB: &[&str] = &[
     // colour and light
     "neon",   // saturated glowing synth / laser look

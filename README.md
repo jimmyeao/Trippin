@@ -195,6 +195,31 @@ Pressing the pad fires the action exactly like the hotkey, including while
 the timeline is recording. Right-click a bound note to clear it. Unplugging
 and replugging the controller is picked up automatically.
 
+## Styles
+
+A **Style** steers what Auto picks for you, so a rock night doesn't get synth grids
+and a lounge set doesn't get strobes. Choose one from the **Style** menu in the
+Looks row on the Perform page (or `Next Style` on a key, OSC `/trippin/style`, the
+remote). **Off** is the default and leaves Auto exactly as it was.
+
+| Style | What you get |
+|---|---|
+| Dance / EDM | Fast, bright, electric: lasers, tunnels, light walls. Cuts every 4 bars and on drops. |
+| House & Techno | Dark and hypnotic: tunnels, grids, city, geometry. Cool colours, 8-bar scenes. |
+| Pop | Colourful and friendly: bright, warm, organic. Never dark or cold. |
+| Rock | Fire, storms and stage lights. Warm colours, no synth-grid looks. |
+| Hip-hop & R&B | Night city, neon and chrome. Gold and magenta, 8-bar scenes. |
+| Chill / Lounge | Slow, soft scenes: aurora, water, galaxies. 16-bar scenes, no flashes, no drop cuts. |
+| Party / Wedding | Bright, warm and festive, with the seasonal scenes in. Safe for a mixed crowd. |
+
+A Style narrows the scenes Auto may choose from (by what each scene looks like; see
+`shaders/scene_tags.json`), picks calmer ones in breakdowns, keeps the **auto**
+palette to its own colour family (a fixed palette you pick stays as you set it),
+and sets the cut length. It never overrides you: scenes you switched off stay off,
+and **Manual** mode and anything you pick by hand are untouched. While a Style is
+on, it owns the phrase length, cut-on-drops and automatic effects, so changing those
+by hand has no effect until you turn the Style off. Only the Style's name is saved.
+
 ## Looks
 
 A **Look** is the visual state saved under a name: the scene, palette, effect and
