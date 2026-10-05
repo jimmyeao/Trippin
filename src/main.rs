@@ -534,20 +534,22 @@ fn repick_for_mood(dir: &mut Director, r: &Renderer, usable: &[usize], f: &audio
         return;
     };
     let close = |e: f32| (e - target).abs() <= 0.22;
-    if dir
-        .next
-        .is_some_and(|n| close(ai::scene_meta(r.scene_name(n)).energy))
-    {
-        return;
-    }
-    // Candidates near the target energy — take the best cluster so the
-    // pick stays varied rather than always landing the same scene.
     // In a breakdown a Style prefers its own calm scenes.
     let pool = if target < 0.5 {
         styles::calm_candidates(usable, &|i| r.scene_name(i).to_string(), s, styles::catalog())
     } else {
         usable.to_vec()
     };
+    // Keep the queued pick only if it already fits: near the target energy
+    // AND in the pool (a low-energy main-pool scene isn't a Style's calm pick).
+    if dir
+        .next
+        .is_some_and(|n| close(ai::scene_meta(r.scene_name(n)).energy) && pool.contains(&n))
+    {
+        return;
+    }
+    // Candidates near the target energy — take the best cluster so the
+    // pick stays varied rather than always landing the same scene.
     let mut cands: Vec<(f32, usize)> = pool
         .iter()
         .copied()

@@ -819,7 +819,9 @@ fn perform_tab(
     // Looks: one-tap recall of a saved scene + palette + effect + dancer. Wrapped
     // like the toolbar below (a non-wrapping row would re-widen the parent
     // cursor under the inspector at narrow widths).
+    let row_w = ui.available_width();
     ui.horizontal_wrapped(|ui| {
+        ui.set_max_width(row_w);
         ui.add_space(2.0);
         ui.label(egui::RichText::new("Looks").size(11.5).color(MUTED));
         for l in &st.looks {
