@@ -1331,15 +1331,15 @@ fn render_loop(
                 }
             }
         }
-        // A Style change swaps the auto-palette families (and restarts the mood
-        // picker so the new family shows within a couple of beats).
+        // A Style change swaps the auto-palette families, and the mood picker
+        // re-picks from the new family at once.
         {
             let want = s.style.as_deref();
             if style_pals.as_ref().map(|(id, _)| id.as_str()) != want {
                 style_pals = want
                     .and_then(|id| styles::catalog().theme(id))
                     .map(|t| (t.id.clone(), styles::mood_palettes(t)));
-                auto_pal = palettes::Auto::default();
+                auto_pal.restyle(style_pals.as_ref().map(|(_, p)| p));
             }
         }
         // `palette = "auto"`: pick the gradient to match the music's mood.
