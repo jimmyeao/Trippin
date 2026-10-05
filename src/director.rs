@@ -15,6 +15,9 @@ pub struct Events {
     pub phrase: bool,
     /// The track moved between beat mode and a breakdown (either way).
     pub mode_change: bool,
+    /// A drop landed (drums back after a breakdown, or a big jump in energy
+    /// off a low). Raised whatever the cut settings are, for auto clips.
+    pub drop: bool,
 }
 
 pub struct Director {
@@ -49,6 +52,10 @@ pub struct Director {
     /// need ≥4 beats of clear air after it — a busy run of musical events
     /// must not strobe the scene list.
     last_cut_pos: f64,
+    /// Beat position of the last drop flagged for the clip recorder.
+    last_drop_pos: f64,
+    /// Beat position where the current breakdown was entered (MAX: none seen).
+    breakdown_enter_pos: f64,
     // --- Drum-fill detection ---------------------------------------------
     // The bar grid is a skeleton, not a cage: a fill is a burst of onsets
     // far above the section's baseline density. While one runs the render
@@ -115,6 +122,8 @@ impl Director {
             next: None,
             next_queued: false,
             last_cut_pos: f64::MIN,
+            last_drop_pos: f64::MIN,
+            breakdown_enter_pos: f64::MAX,
             energy_fast: 0.0,
             energy_slow: 0.5,
             surge_since: f64::MAX,
@@ -244,6 +253,7 @@ impl Director {
             cut: std::mem::take(&mut self.pending_cut),
             phrase: false,
             mode_change: false,
+            drop: false,
         };
         self.flash = (self.flash - dt * 2.5).max(0.0);
         self.calm = f.calm;
@@ -273,6 +283,14 @@ impl Director {
             self.in_breakdown = enter;
             ev.mode_change = true;
         }
+        // No bars-in-scene requirement here (that only stops a double cut): a
+        // breakdown that just cut to a new scene still has a drop worth a clip.
+        // But it must be a breakdown we watched start and last two bars: the
+        // director boots "in a breakdown", which isn't one.
+        if enter {
+            self.breakdown_enter_pos = pos;
+        }
+        ev.drop = leave && !f.silent && pos - self.breakdown_enter_pos >= 8.0;
         // Drums slamming back in after a breakdown: that's the drop.
         if the_drop && s.cut_on_drops && s.mode == Mode::Auto && !usable.is_empty() {
             self.next_scene(usable, s.random_order);
@@ -326,6 +344,20 @@ impl Director {
             && f.energy > 0.55
             && self.bars_in_scene >= 2
             && pos - self.last_cut_pos >= 8.0;
+        // Same jump, without the cut settings: the clip recorder wants every
+        // drop. (The energy memory below only drifts up afterwards, so one
+        // jump raises this on one downbeat check, not on every frame.)
+        if f.calm < 0.5
+            && f.energy - self.recent_low > 0.35
+            && f.energy > 0.55
+            && self.bars_in_scene >= 2
+            && pos - self.last_drop_pos >= 8.0
+        {
+            ev.drop = true;
+        }
+        if ev.drop {
+            self.last_drop_pos = pos;
+        }
         // Breakdowns breathe: phrases run twice as long before a cut.
         let bars = if f.calm > 0.5 { s.phrase_bars.max(1) * 2 } else { s.phrase_bars.max(1) };
         let phrase_end = self.bars_in_scene >= bars;
@@ -588,6 +620,33 @@ mod tests {
             }
         }
         cuts
+    }
+
+    /// Count `Events::drop` over `beats` beats (30 frames a beat).
+    fn drops(d: &mut Director, f: &Features, pos: &mut f64, beats: f64, s: &Settings) -> usize {
+        let usable = [0usize, 1, 2, 3];
+        let mut n = 0;
+        for _ in 0..(beats * 30.0) as usize {
+            *pos += 1.0 / 30.0;
+            if d.update(f, *pos, 0.016, &usable, s).drop {
+                n += 1;
+            }
+        }
+        n
+    }
+
+    #[test]
+    fn drop_flag_fires_once_when_drums_return_even_with_cuts_off() {
+        // Auto clips want the drop whatever the cut settings say.
+        let mut s = settings(Mode::Auto);
+        s.cut_on_drops = false;
+        let (mut d, mut pos) = (Director::new(), 0.0f64);
+        let steady = features(0.2);
+        assert_eq!(drops(&mut d, &steady, &mut pos, 16.0, &s), 0, "steady beats are no drop");
+        let mut calm = features(0.0);
+        calm.calm = 1.0;
+        assert_eq!(drops(&mut d, &calm, &mut pos, 16.0, &s), 0, "entering a breakdown is no drop");
+        assert_eq!(drops(&mut d, &steady, &mut pos, 16.0, &s), 1, "the drums returning is exactly one drop");
     }
 
     #[test]

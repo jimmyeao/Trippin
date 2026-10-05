@@ -2696,6 +2696,15 @@ fn stream_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<Ui
                     ui.selectable_value(&mut s.rec_layout, l, l.label());
                 }
             });
+            grow(ui, "Drop clips", |ui| {
+                ui.checkbox(&mut s.auto_clip, "Save one at every drop")
+                    .on_hover_text("Needs the replay buffer. At most one every 45 s, and the cap below per run.");
+                ui.add_enabled_ui(s.auto_clip, |ui| {
+                    ui.add(egui::DragValue::new(&mut s.auto_clip_before_s).range(2..=60).suffix(" s before"));
+                    ui.add(egui::DragValue::new(&mut s.auto_clip_after_s).range(2..=60).suffix(" s after"));
+                    ui.add(egui::DragValue::new(&mut s.auto_clip_max).range(1..=100).suffix(" max"));
+                });
+            });
             grow(ui, "", |ui| {
                 let can = st.rec.is_some();
                 if ui.add_enabled(can, egui::Button::new("Save clip")).on_hover_text("Hotkey K").clicked() {

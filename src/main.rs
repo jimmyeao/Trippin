@@ -624,6 +624,11 @@ fn render_loop(
     let mut recorder: Option<rec::Recorder> = None;
     let mut rec_err: Option<String> = None;
     let mut set_on = false;
+    // Auto drop clips: when to save the clip for a drop (its tail has to
+    // play out first), when the last one was saved, and how many this run.
+    let mut drop_clip_at: Option<Instant> = None;
+    let mut last_auto_clip: Option<Instant> = None;
+    let mut auto_clips = 0u32;
     // Live rig as it was before a timeline borrowed it — restored on show end.
     let mut pre_show: Option<ShowBaseline> = None;
     // GPU baseline (Settings > performance check): steps @heavy + unity_*
@@ -1026,8 +1031,17 @@ fn render_loop(
                 if shared.rec_clip.swap(false, Ordering::Relaxed) {
                     rc.save_clip(s.rec_keep_s, s.rec_layout);
                 }
+                if drop_clip_at.is_some_and(|t| now >= t) {
+                    drop_clip_at = None;
+                    // The buffer keeps `rec_keep_s`; a longer ask is trimmed to it.
+                    let secs = (s.auto_clip_before_s + s.auto_clip_after_s).clamp(5, s.rec_keep_s.max(10));
+                    rc.save_clip(secs, s.rec_layout);
+                    last_auto_clip = Some(now);
+                    auto_clips += 1;
+                }
             } else {
                 shared.rec_clip.store(false, Ordering::Relaxed);
+                drop_clip_at = None;
                 if !want {
                     set_on = false;
                 }
@@ -1299,6 +1313,19 @@ fn render_loop(
         // Positive latency shows the beat earlier (compensating capture delay).
         let pos = f.beat_position(now) + s.latency_ms as f64 / 1000.0 * f.bpm as f64 / 60.0;
         let ev = dir.update(&f, pos, dt, &usable, &s);
+        // A drop schedules a clip once its payoff has played. Not while a
+        // timeline show plays (a paused or scrubbed song fakes drops), nor
+        // too soon after the last one, nor past the per-run cap.
+        if ev.drop
+            && s.auto_clip
+            && s.rec_buffer
+            && player.is_none()
+            && drop_clip_at.is_none()
+            && auto_clips < s.auto_clip_max
+            && last_auto_clip.map_or(true, |t| now.duration_since(t).as_secs() >= 45)
+        {
+            drop_clip_at = Some(now + Duration::from_secs(s.auto_clip_after_s as u64));
+        }
         // GPU baseline: pin the scene under test against the auto-pilot's
         // own cuts. The measurement runs below, once the engine's frame
         // counter for this frame is fresh.

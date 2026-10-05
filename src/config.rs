@@ -383,6 +383,13 @@ pub struct Settings {
     pub rec_buffer: bool,
     pub rec_keep_s: u32,
     pub rec_layout: crate::rec::Layout,
+    /// Auto drop clips: save a clip around every drop (needs the replay
+    /// buffer). Off by default; each clip is `before + after` seconds and
+    /// at most `auto_clip_max` are saved per run, 45 s apart.
+    pub auto_clip: bool,
+    pub auto_clip_before_s: u32,
+    pub auto_clip_after_s: u32,
+    pub auto_clip_max: u32,
     /// Clip folder ("" = Videos/Trippin).
     pub rec_dir: String,
     /// ffmpeg binary ("" = find it).
@@ -484,6 +491,10 @@ impl Default for Settings {
             rec_buffer: false,
             rec_keep_s: 60,
             rec_layout: crate::rec::Layout::Wide,
+            auto_clip: false,
+            auto_clip_before_s: 8,
+            auto_clip_after_s: 12,
+            auto_clip_max: 12,
             rec_dir: String::new(),
             ffmpeg_path: String::new(),
             np_source: Default::default(),
