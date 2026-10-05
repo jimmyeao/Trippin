@@ -32,6 +32,9 @@ pub struct LookDancer {
     pub enabled: bool,
     /// Index into `dancer::STYLES` (append-only, so indices are stable).
     pub style: Option<usize>,
+    /// The dancer's look was on auto (`Settings::dancer_style == None`).
+    /// `style: None` alone means "leave it", so this is how a Look puts it back.
+    pub style_auto: bool,
     /// Routine id; `None` leaves the running routine.
     pub clip: Option<String>,
     pub size: Option<f32>,
@@ -59,6 +62,10 @@ pub struct SavedLook {
 /// through the render thread, not by writing settings).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Applied {
+    /// The palette the Look set (for the timeline cue).
+    pub palette: Option<String>,
+    /// The effect the Look set: (mode, auto).
+    pub fx: Option<(Fx, bool)>,
     pub scene: Option<String>,
     pub clip: Option<String>,
     /// The Look names a scene that isn't installed/usable here. The rest of the
@@ -90,19 +97,26 @@ pub fn slugify(name: &str) -> String {
 
 /// Snapshot the current visual state as a Look called `name`. `scene` and
 /// `clip` are what is on screen now (they live on the render thread, not in
-/// `Settings`).
-pub fn capture(name: &str, s: &Settings, scene: Option<&str>, clip: Option<&str>) -> SavedLook {
+/// `Settings`), and so is `palette_now`: with the palette on `auto` the
+/// Look stores the colours actually showing, so recalling it gives the same
+/// picture instead of whatever auto picks next.
+pub fn capture(name: &str, s: &Settings, scene: Option<&str>, clip: Option<&str>, palette_now: Option<&str>) -> SavedLook {
+    let palette = match palette_now {
+        Some(p) if s.palette == crate::palettes::AUTO && crate::palettes::names().any(|n| n == p) => p.to_string(),
+        _ => s.palette.clone(),
+    };
     SavedLook {
         version: VERSION,
         id: slugify(name),
         name: name.trim().to_string(),
         slot: None,
         scene: scene.map(str::to_string),
-        palette: Some(s.palette.clone()),
+        palette: Some(palette),
         fx: Some(LookFx { mode: s.fx, amt: s.fx_amt, auto: s.fx_auto }),
         dancer: Some(LookDancer {
             enabled: s.dancer_enabled,
             style: s.dancer_style,
+            style_auto: s.dancer_style.is_none(),
             clip: clip.map(str::to_string),
             size: Some(s.dancer_size),
         }),
@@ -122,16 +136,20 @@ pub fn apply(look: &SavedLook, s: &mut Settings, scenes: &[String], clips: &[Str
     if let Some(p) = &look.palette {
         if crate::palettes::is_valid(p) {
             s.palette = p.clone();
+            out.palette = Some(p.clone());
         }
     }
     if let Some(fx) = &look.fx {
         s.fx = fx.mode;
         s.fx_amt = fx.amt.clamp(0.0, 1.0);
         s.fx_auto = fx.auto;
+        out.fx = Some((fx.mode, fx.auto));
     }
     if let Some(d) = &look.dancer {
         s.dancer_enabled = d.enabled;
-        if let Some(i) = d.style {
+        if d.style_auto {
+            s.dancer_style = None;
+        } else if let Some(i) = d.style {
             if i < crate::dancer::STYLES.len() {
                 s.dancer_style = Some(i);
             }
@@ -225,6 +243,17 @@ pub fn unique_id(existing: &[SavedLook], name: &str) -> String {
     (2..).map(|n| format!("{base}-{n}")).find(|id| !taken(id)).unwrap()
 }
 
+/// A display name for a Look whose id came out as `id` for the name `name`:
+/// `Club Red` stays `Club Red`; when the id had to take a `-2` suffix the name
+/// gets the same ` 2`, so two Looks never show identical buttons.
+pub fn unique_name(name: &str, id: &str) -> String {
+    let base = slugify(name);
+    match id.strip_prefix(&base).and_then(|r| r.strip_prefix('-')).filter(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit())) {
+        Some(n) => format!("{} {n}", name.trim()),
+        None => name.trim().to_string(),
+    }
+}
+
 /// Put `id` on `slot` (1..=SLOTS) and take the slot off any other Look,
 /// like MIDI-learn: one slot, one Look. `slot` of `None` clears it.
 pub fn assign_slot(looks: &mut [SavedLook], id: &str, slot: Option<u8>) {
@@ -288,7 +317,7 @@ mod tests {
         s.dancer_enabled = true;
         s.dancer_style = Some(2);
         s.dancer_size = 1.5;
-        let look = capture("Club red", &s, Some("laser_show"), Some("stock_disco"));
+        let look = capture("Club red", &s, Some("laser_show"), Some("stock_disco"), None);
         assert_eq!(look.id, "club-red");
 
         let mut t = Settings::default();
@@ -302,7 +331,7 @@ mod tests {
 
     #[test]
     fn applying_twice_changes_nothing_the_second_time() {
-        let look = capture("x", &Settings { palette: other_palette(), ..Settings::default() }, None, None);
+        let look = capture("x", &Settings { palette: other_palette(), ..Settings::default() }, None, None, None);
         let mut s = Settings::default();
         assert!(apply(&look, &mut s, &[], &[]).changed);
         assert!(!apply(&look, &mut s, &[], &[]).changed, "idempotent");
@@ -346,7 +375,7 @@ mod tests {
             id: "j".into(),
             palette: Some("no-such-palette".into()),
             fx: Some(LookFx { mode: Fx::Off, amt: 99.0, auto: false }),
-            dancer: Some(LookDancer { enabled: true, style: Some(999), clip: Some("nope".into()), size: Some(-5.0) }),
+            dancer: Some(LookDancer { enabled: true, style: Some(999), style_auto: false, clip: Some("nope".into()), size: Some(-5.0) }),
             ..Default::default()
         };
         let mut s = Settings::default();
@@ -362,10 +391,10 @@ mod tests {
     #[test]
     fn save_load_delete_round_trip_and_survive_junk_files() {
         let dir = tmp("io");
-        let mut a = capture("Alpha", &Settings::default(), Some("tunnel"), None);
+        let mut a = capture("Alpha", &Settings::default(), Some("tunnel"), None, None);
         a.slot = Some(3);
         save(&dir, &a).unwrap();
-        save(&dir, &capture("beta", &Settings::default(), None, None)).unwrap();
+        save(&dir, &capture("beta", &Settings::default(), None, None, None)).unwrap();
         std::fs::write(dir.join("broken.look.json"), "{not json").unwrap();
         std::fs::write(dir.join("future.look.json"), r#"{"version":99,"id":"f","name":"F"}"#).unwrap();
         std::fs::write(dir.join("notes.txt"), "ignore me").unwrap();
@@ -407,6 +436,56 @@ mod tests {
         assert_eq!(v[0].slot, None);
         assign_slot(&mut v, "club-red-2", Some(99));
         assert_eq!(v[1].slot, None, "out-of-range slot clears it");
+    }
+
+    #[test]
+    fn a_look_saved_on_auto_keeps_the_colours_on_screen() {
+        // Windows test: a Look saved on "auto" stored "auto", so "Club Red" came back blue.
+        let mut s = Settings::default();
+        s.palette = crate::palettes::AUTO.into();
+        let shown = other_palette();
+        let l = capture("x", &s, None, None, Some(&shown));
+        assert_eq!(l.palette.as_deref(), Some(shown.as_str()));
+        // A fixed palette is kept as chosen whatever is "now" (nothing to resolve).
+        s.palette = "fire".into();
+        assert_eq!(capture("x", &s, None, None, Some("ocean")).palette.as_deref(), Some("fire"));
+        // An unknown "now" name (a stale status) never writes a bogus palette.
+        s.palette = crate::palettes::AUTO.into();
+        assert_eq!(capture("x", &s, None, None, Some("nope")).palette.as_deref(), Some(crate::palettes::AUTO));
+    }
+
+    #[test]
+    fn a_look_can_put_the_dancer_look_back_to_auto() {
+        let mut s = Settings { dancer_style: Some(2), ..Settings::default() };
+        let auto = capture("a", &Settings { dancer_style: None, ..Settings::default() }, None, None, None);
+        assert!(auto.dancer.as_ref().unwrap().style_auto);
+        apply(&auto, &mut s, &[], &[]);
+        assert_eq!(s.dancer_style, None);
+        // Old files (no style_auto) and "style: null" still mean "leave it alone".
+        let old: SavedLook = serde_json::from_str(r#"{"version":1,"name":"o","dancer":{"enabled":true}}"#).unwrap();
+        s.dancer_style = Some(1);
+        apply(&old, &mut s, &[], &[]);
+        assert_eq!(s.dancer_style, Some(1));
+    }
+
+    #[test]
+    fn apply_reports_the_palette_and_effect_it_set_for_the_timeline() {
+        let mut s = Settings::default();
+        let look = capture("x", &Settings { palette: other_palette(), fx: Fx::Quad, fx_auto: false, ..Settings::default() }, None, None, None);
+        let a = apply(&look, &mut s, &[], &[]);
+        assert_eq!(a.palette, Some(other_palette()));
+        assert_eq!(a.fx, Some((Fx::Quad, false)));
+        let none = apply(&SavedLook { version: 1, id: "n".into(), ..Default::default() }, &mut s, &[], &[]);
+        assert_eq!((none.palette, none.fx), (None, None));
+    }
+
+    #[test]
+    fn duplicate_looks_get_distinct_display_names() {
+        assert_eq!(unique_name("Club Red", "club-red"), "Club Red");
+        assert_eq!(unique_name("Club Red", "club-red-2"), "Club Red 2");
+        assert_eq!(unique_name("  Club Red ", "club-red-13"), "Club Red 13");
+        assert_eq!(unique_name("Mix 2", "mix-2"), "Mix 2", "a name that already ends in a number is not a suffix");
+        assert_eq!(unique_name("Mix", "mix-two"), "Mix", "only numeric suffixes");
     }
 
     #[test]
