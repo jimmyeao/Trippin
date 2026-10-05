@@ -200,6 +200,13 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 /// Scenes that compile, are ticked in the playlist and (for seasonal
 /// scenes) are in season.
 fn usable_scenes(r: &Renderer, s: &Settings) -> Vec<usize> {
+    usable_scenes_mood(r, s, false)
+}
+
+/// `usable_scenes`, with the Style's calm pool in effect while `calm` (a
+/// breakdown). Only the director's per-frame list wants `calm`; one-off picks
+/// (next/prev, show playback) use the main pool.
+fn usable_scenes_mood(r: &Renderer, s: &Settings, calm: bool) -> Vec<usize> {
     let names = r.scene_names();
     let heavy = r.scene_heavy();
     let all = r.usable_scenes();
@@ -230,7 +237,7 @@ fn usable_scenes(r: &Renderer, s: &Settings) -> Vec<usize> {
     let on = if on.is_empty() { return all } else { on };
     // The selected Style narrows what's left (never what the user turned off:
     // those were removed above, so a Style can't bring them back).
-    styles::narrow(&on, &|i| names[i].clone(), s, styles::catalog())
+    styles::narrow(&on, &|i| names[i].clone(), s, styles::catalog(), calm)
 }
 
 /// Stop the show player and put the live audio engine back.
@@ -614,6 +621,9 @@ fn render_loop(
     let mut auto_pal = palettes::Auto::default();
     // The selected Style's auto-palette families, cached by Style id.
     let mut style_pals: Option<(String, [Vec<&'static str>; 4])> = None;
+    // The track is in a breakdown, as far as a Style's calm pool is concerned
+    // (same 0.7 in / 0.3 out hysteresis as the director's own breakdown mode).
+    let mut style_calm = false;
     // Audio watchdog: a stream that dies or goes silent gets rebuilt after
     // `audio_retry` of sustained silence, backing off when the source is
     // genuinely quiet so it isn't re-opened forever.
@@ -946,7 +956,7 @@ fn render_loop(
         if check.as_ref().is_some_and(|c| c.cur_is_unity()) {
             s.unity_link = true;
         }
-        let usable = usable_scenes(&r, &s);
+        let usable = usable_scenes_mood(&r, &s, style_calm);
         {
             let mut c = lock(&shared.np_cfg);
             if c.source != s.np_source || c.delay_s != s.np_delay_s || c.file != s.np_file {
@@ -1317,6 +1327,8 @@ fn render_loop(
         if !s.breakdown_mode {
             f.calm = 0.0;
         }
+        // Next frame's Style pool: the calm pool while the breakdown lasts.
+        style_calm = s.style.is_some() && (if f.calm > 0.7 { true } else if f.calm < 0.3 { false } else { style_calm });
         // Positive latency shows the beat earlier (compensating capture delay).
         let pos = f.beat_position(now) + s.latency_ms as f64 / 1000.0 * f.bpm as f64 / 60.0;
         let ev = dir.update(&f, pos, dt, &usable, &s);
@@ -1342,6 +1354,9 @@ fn render_loop(
                     .and_then(|id| styles::catalog().theme(id))
                     .map(|t| (t.id.clone(), styles::mood_palettes(t)));
                 auto_pal = palettes::Auto::default();
+                if let Some(first) = style_pals.as_ref().and_then(|(_, p)| p[1].first().copied()) {
+                    auto_pal.start_with(first);
+                }
             }
         }
         // `palette = "auto"`: pick the gradient to match the music's mood.
@@ -1979,7 +1994,7 @@ impl App {
                     let s = self.settings_mut();
                     styles::next_id(s.style.as_deref(), cat)
                 };
-                self.settings_mut().style = next;
+                styles::select(&mut self.settings_mut(), next);
                 self.mark_dirty();
             }
             a if a.look_slot().is_some() => {
@@ -2168,7 +2183,7 @@ impl App {
                     id => cat.theme(id).map(|t| Some(t.id.clone())),
                 };
                 if let Some(n) = next {
-                    self.settings_mut().style = n;
+                    styles::select(&mut self.settings_mut(), n);
                     self.mark_dirty();
                 }
             }

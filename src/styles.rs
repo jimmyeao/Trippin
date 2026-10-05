@@ -123,6 +123,17 @@ pub fn catalog() -> &'static Catalog {
     })
 }
 
+/// Choose a Style (`None` = off). Choosing one also puts the palette on Auto:
+/// a Style's colour families only steer the `auto` palette, and the default
+/// (a fixed rainbow) would otherwise make the choice look like it did nothing.
+/// Pick a fixed palette afterwards to override.
+pub fn select(s: &mut Settings, id: Option<String>) {
+    if id.is_some() {
+        s.palette = crate::palettes::AUTO.to_string();
+    }
+    s.style = id;
+}
+
 /// The Style `s` has selected, if it names one that exists.
 pub fn active<'a>(s: &Settings, cat: &'a Catalog) -> Option<&'a Theme> {
     s.style.as_deref().and_then(|id| cat.theme(id))
@@ -132,10 +143,23 @@ pub fn active<'a>(s: &Settings, cat: &'a Catalog) -> Option<&'a Theme> {
 /// scene index to its id. Unchanged when no Style is selected or in Manual
 /// mode; widened with the nearest scenes when the pool would be under
 /// [`MIN_POOL`]. Never adds a scene that wasn't already in `usable`.
-pub fn narrow(usable: &[usize], name: &dyn Fn(usize) -> String, s: &Settings, cat: &Catalog) -> Vec<usize> {
+///
+/// `calm` is true while the track is in a breakdown: the Style's *calm* pool
+/// replaces its main pool (Dance and House exclude `slow` from the main pool,
+/// so filtering the calm scenes out of the main pool, as an earlier version
+/// did, could never find any). A calm pool that would leave fewer than
+/// [`MIN_POOL`] scenes falls back to the main pool.
+pub fn narrow(usable: &[usize], name: &dyn Fn(usize) -> String, s: &Settings, cat: &Catalog, calm: bool) -> Vec<usize> {
     let Some(theme) = active(s, cat) else { return usable.to_vec() };
     if s.mode == Mode::Manual {
         return usable.to_vec();
+    }
+    if calm {
+        let c: Vec<usize> =
+            usable.iter().copied().filter(|&i| theme.calm_scenes.matches(&name(i), &cat.tags)).collect();
+        if c.len() >= MIN_POOL {
+            return c;
+        }
     }
     let mut keep: Vec<usize> = usable.iter().copied().filter(|&i| theme.scenes.matches(&name(i), &cat.tags)).collect();
     if keep.len() >= MIN_POOL.min(usable.len()) {
@@ -285,7 +309,7 @@ mod tests {
         let name = |i: usize| names[i].clone();
         let usable: Vec<usize> = (0..names.len()).filter(|i| i % 2 == 0).collect();
         let s = settings(Some("chill"), Mode::Auto);
-        let out = narrow(&usable, &name, &s, &c);
+        let out = narrow(&usable, &name, &s, &c, false);
         assert!(!out.is_empty() && out.len() < usable.len());
         assert!(out.iter().all(|i| usable.contains(i)), "a Style never adds a scene the user had off");
         assert!(out.iter().all(|&i| c.tags.has(&names[i], "slow")), "chill keeps only slow scenes here");
@@ -297,9 +321,9 @@ mod tests {
         let names = all_scenes(&c);
         let name = |i: usize| names[i].clone();
         let usable: Vec<usize> = (0..names.len()).collect();
-        assert_eq!(narrow(&usable, &name, &settings(None, Mode::Auto), &c), usable);
-        assert_eq!(narrow(&usable, &name, &settings(Some("rock"), Mode::Manual), &c), usable, "Manual is never narrowed");
-        assert_eq!(narrow(&usable, &name, &settings(Some("no-such-style"), Mode::Auto), &c), usable);
+        assert_eq!(narrow(&usable, &name, &settings(None, Mode::Auto), &c, false), usable);
+        assert_eq!(narrow(&usable, &name, &settings(Some("rock"), Mode::Manual), &c, false), usable, "Manual is never narrowed");
+        assert_eq!(narrow(&usable, &name, &settings(Some("no-such-style"), Mode::Auto), &c, false), usable);
     }
 
     #[test]
@@ -310,12 +334,49 @@ mod tests {
         // Only scenes the chill Style rejects (loud stage scenes) are usable.
         let stage: Vec<usize> = (0..names.len()).filter(|&i| c.tags.has(&names[i], "stage") && c.tags.has(&names[i], "driving")).take(8).collect();
         assert!(stage.len() >= MIN_POOL);
-        let out = narrow(&stage, &name, &settings(Some("chill"), Mode::Auto), &c);
+        let out = narrow(&stage, &name, &settings(Some("chill"), Mode::Auto), &c, false);
         assert!(out.len() >= MIN_POOL, "widened to at least {MIN_POOL}, got {}", out.len());
         assert!(out.iter().all(|i| stage.contains(i)));
         // And with fewer than MIN_POOL usable, everything usable stays.
         let two = &stage[..2];
-        assert_eq!(narrow(two, &name, &settings(Some("chill"), Mode::Auto), &c), two.to_vec());
+        assert_eq!(narrow(two, &name, &settings(Some("chill"), Mode::Auto), &c, false), two.to_vec());
+    }
+
+    #[test]
+    fn a_breakdown_swaps_in_the_calm_pool_even_when_the_main_pool_excludes_it() {
+        // The bug the Windows test found: Dance excludes `slow` from its main
+        // pool, so its calm pool (which requires `slow`) was never reachable by
+        // filtering the main pool. In a breakdown the calm pool must stand alone.
+        let c = cat();
+        let names = all_scenes(&c);
+        let name = |i: usize| names[i].clone();
+        let all: Vec<usize> = (0..names.len()).collect();
+        for id in ["dance", "house_techno", "pop", "rock", "hiphop_rnb", "party"] {
+            let s = settings(Some(id), Mode::Auto);
+            let main = narrow(&all, &name, &s, &c, false);
+            let calm = narrow(&all, &name, &s, &c, true);
+            assert!(calm.len() >= MIN_POOL, "{id}: calm pool too small ({})", calm.len());
+            assert!(calm.iter().all(|&i| c.themes.iter().find(|t| t.id == id).unwrap().calm_scenes.matches(&names[i], &c.tags)));
+            assert!(calm.iter().any(|i| !main.contains(i)), "{id}: calm scenes should include some the main pool lacks");
+        }
+        // Not in a breakdown: the main pool as before. Manual and no Style: untouched.
+        let dance = settings(Some("dance"), Mode::Auto);
+        assert!(narrow(&all, &name, &dance, &c, false).iter().all(|&i| !c.tags.has(&names[i], "slow")));
+        assert_eq!(narrow(&all, &name, &settings(Some("dance"), Mode::Manual), &c, true), all);
+        assert_eq!(narrow(&all, &name, &settings(None, Mode::Auto), &c, true), all);
+        // A calm pool with fewer than MIN_POOL usable scenes falls back to the main pool.
+        let loud: Vec<usize> = (0..names.len()).filter(|&i| c.tags.has(&names[i], "driving")).collect();
+        assert_eq!(narrow(&loud, &name, &dance, &c, true), narrow(&loud, &name, &dance, &c, false));
+    }
+
+    #[test]
+    fn choosing_a_style_puts_the_palette_on_auto() {
+        let mut s = Settings { palette: "rainbow".into(), ..Settings::default() };
+        select(&mut s, Some("rock".into()));
+        assert_eq!((s.style.as_deref(), s.palette.as_str()), (Some("rock"), crate::palettes::AUTO));
+        s.palette = "fire".into();
+        select(&mut s, None);
+        assert_eq!((s.style, s.palette.as_str()), (None, "fire"), "turning a Style off leaves the palette alone");
     }
 
     #[test]

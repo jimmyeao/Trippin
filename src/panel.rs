@@ -877,12 +877,12 @@ fn perform_tab(
                 .width(130.0)
                 .show_ui(ui, |ui| {
                     if ui.selectable_label(s.style.is_none(), "Off").clicked() {
-                        s.style = None;
+                        crate::styles::select(s, None);
                     }
                     for t in &cat.themes {
                         let on = s.style.as_deref() == Some(t.id.as_str());
                         if ui.selectable_label(on, &t.name).on_hover_text(&t.about).clicked() {
-                            s.style = Some(t.id.clone());
+                            crate::styles::select(s, Some(t.id.clone()));
                         }
                     }
                 })

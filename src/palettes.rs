@@ -249,6 +249,12 @@ impl Default for Auto {
 }
 
 impl Auto {
+    /// Start on `name` (a Style change puts its family on screen immediately
+    /// instead of waiting for the mood picker's hold and dwell windows).
+    pub fn start_with(&mut self, name: &'static str) {
+        self.name = name;
+    }
+
     /// The palette matching this frame's mood. `beat` is the running beat
     /// clock (`f.beat_position(now)`) used for the hold/dwell windows.
     #[allow(dead_code)] // the render loop uses `pick_in`; kept for the tests and tools
