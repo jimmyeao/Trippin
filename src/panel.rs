@@ -827,12 +827,17 @@ fn perform_tab(
                 Some(n) => format!("{n} · {}", l.name),
                 None => l.name.clone(),
             };
+            let short = if label.chars().count() > 22 {
+                format!("{}…", label.chars().take(21).collect::<String>().trim_end())
+            } else {
+                label.clone()
+            };
             let r = ui.add(
-                egui::Button::new(egui::RichText::new(label.chars().take(22).collect::<String>()).size(11.5).color(TEXT))
+                egui::Button::new(egui::RichText::new(short).size(11.5).color(TEXT))
                     .fill(RAISED)
                     .corner_radius(egui::CornerRadius::same(9)),
             );
-            r.clone().on_hover_text("Click to recall · right-click for key/pad slot or delete");
+            r.clone().on_hover_text(format!("{label}\nClick to recall · right-click for key/pad slot or delete"));
             if r.clicked() {
                 cmd.push(UiCommand::ApplyLook(l.id.clone()));
             }
@@ -854,46 +859,60 @@ fn perform_tab(
                 }
             });
         }
-        ui.add(
-            egui::TextEdit::singleline(look_name)
-                .desired_width(120.0)
-                .hint_text("name this look…"),
-        );
+        // The name field and its button wrap as one item, so "Save look" never
+        // lands on a line of its own.
+        ui.allocate_ui(egui::vec2(210.0, 22.0), |ui| {
+            ui.horizontal(|ui| {
+                let field = ui.add(
+                    egui::TextEdit::singleline(look_name)
+                        .desired_width(120.0)
+                        .hint_text("name this look…"),
+                );
+                let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                let can = !look_name.trim().is_empty();
+                let save = ui
+                    .add_enabled(can, egui::Button::new(egui::RichText::new("Save look").size(11.5)))
+                    .on_hover_text("Saves the scene, palette, effect and dancer as they are now")
+                    .clicked();
+                if can && (save || enter) {
+                    cmd.push(UiCommand::SaveLook(std::mem::take(look_name)));
+                }
+            });
+        });
         // Style: steers the auto-pilot's scene pool, palettes and pacing.
         let cat = crate::styles::catalog();
         if !cat.themes.is_empty() {
             ui.separator();
-            ui.label(egui::RichText::new("Style").size(11.5).color(MUTED));
-            let now = s
-                .style
-                .as_deref()
-                .and_then(|id| cat.theme(id))
-                .map(|t| t.name.as_str())
-                .unwrap_or("Off");
-            egui::ComboBox::from_id_salt("style_pick")
-                .selected_text(egui::RichText::new(now).size(11.5))
-                .width(130.0)
-                .show_ui(ui, |ui| {
-                    if ui.selectable_label(s.style.is_none(), "Off").clicked() {
-                        s.style = None;
-                    }
-                    for t in &cat.themes {
-                        let on = s.style.as_deref() == Some(t.id.as_str());
-                        if ui.selectable_label(on, &t.name).on_hover_text(&t.about).clicked() {
-                            s.style = Some(t.id.clone());
-                        }
-                    }
-                })
-                .response
-                .on_hover_text("Steers which scenes and colours Auto picks, and how fast it cuts");
-        }
-        let can = !look_name.trim().is_empty();
-        if ui
-            .add_enabled(can, egui::Button::new(egui::RichText::new("Save look").size(11.5)))
-            .on_hover_text("Saves the scene, palette, effect and dancer as they are now")
-            .clicked()
-        {
-            cmd.push(UiCommand::SaveLook(std::mem::take(look_name)));
+            // ComboBox::show_ui is a ui.horizontal inside, which never wraps: in
+            // this wrapped row it spilled under the inspector when it landed
+            // near the edge. One wrap-aware allocation keeps label + combo together.
+            ui.allocate_ui(egui::vec2(190.0, 22.0), |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Style").size(11.5).color(MUTED));
+                    let now = s
+                        .style
+                        .as_deref()
+                        .and_then(|id| cat.theme(id))
+                        .map(|t| t.name.as_str())
+                        .unwrap_or("Off");
+                    egui::ComboBox::from_id_salt("style_pick")
+                        .selected_text(egui::RichText::new(now).size(11.5))
+                        .width(130.0)
+                        .show_ui(ui, |ui| {
+                            if ui.selectable_label(s.style.is_none(), "Off").clicked() {
+                                s.style = None;
+                            }
+                            for t in &cat.themes {
+                                let on = s.style.as_deref() == Some(t.id.as_str());
+                                if ui.selectable_label(on, &t.name).on_hover_text(&t.about).clicked() {
+                                    s.style = Some(t.id.clone());
+                                }
+                            }
+                        })
+                        .response
+                        .on_hover_text("Steers which scenes and colours Auto picks, and how fast it cuts");
+                });
+            });
         }
     });
 
@@ -3398,6 +3417,7 @@ fn keys_tab(
                 Action::Look6,
                 Action::Look7,
                 Action::Look8,
+                Action::NextTheme,
             ],
         ),
         ("mode", &[Action::ModeAuto, Action::ModeStatic, Action::ModeManual]),
