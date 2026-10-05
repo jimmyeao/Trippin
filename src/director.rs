@@ -56,6 +56,9 @@ pub struct Director {
     last_drop_pos: f64,
     /// Beat position where the current breakdown was entered (MAX: none seen).
     breakdown_enter_pos: f64,
+    /// Beat position of the last silent frame: music starting after silence
+    /// (the first track, or the next one after a gap) isn't a drop.
+    last_silent_pos: f64,
     // --- Drum-fill detection ---------------------------------------------
     // The bar grid is a skeleton, not a cage: a fill is a burst of onsets
     // far above the section's baseline density. While one runs the render
@@ -124,6 +127,7 @@ impl Director {
             last_cut_pos: f64::MIN,
             last_drop_pos: f64::MIN,
             breakdown_enter_pos: f64::MAX,
+            last_silent_pos: f64::MIN,
             energy_fast: 0.0,
             energy_slow: 0.5,
             surge_since: f64::MAX,
@@ -290,7 +294,19 @@ impl Director {
         if enter {
             self.breakdown_enter_pos = pos;
         }
+        // A silence is not a breakdown: the music coming back after one (a
+        // gap between tracks, the first track of the night) must not clip.
+        if f.silent {
+            self.breakdown_enter_pos = f64::MAX;
+            self.last_silent_pos = pos;
+        }
         ev.drop = leave && !f.silent && pos - self.breakdown_enter_pos >= 8.0;
+        // Set the guard here too: this fires mid-bar, and the downbeat path
+        // below returns early on most frames, so it never saw this drop and
+        // flagged the same one again at the next downbeat (M2, real feed).
+        if ev.drop {
+            self.last_drop_pos = pos;
+        }
         // Drums slamming back in after a breakdown: that's the drop.
         if the_drop && s.cut_on_drops && s.mode == Mode::Auto && !usable.is_empty() {
             self.next_scene(usable, s.random_order);
@@ -351,7 +367,10 @@ impl Director {
             && f.energy - self.recent_low > 0.35
             && f.energy > 0.55
             && self.bars_in_scene >= 2
-            && pos - self.last_drop_pos >= 8.0
+            // 8 bars, not 2: after a drop the low only drifts up 0.1 a bar, so 8 beats on
+            // the same chorus still read as a 0.35 jump and flagged it again.
+            && pos - self.last_drop_pos >= 32.0
+            && pos - self.last_silent_pos >= 32.0
         {
             ev.drop = true;
         }
@@ -647,6 +666,43 @@ mod tests {
         calm.calm = 1.0;
         assert_eq!(drops(&mut d, &calm, &mut pos, 16.0, &s), 0, "entering a breakdown is no drop");
         assert_eq!(drops(&mut d, &steady, &mut pos, 16.0, &s), 1, "the drums returning is exactly one drop");
+    }
+
+    #[test]
+    fn music_after_silence_is_no_drop() {
+        // The first track of the night, or the next one after a gap: the energy jumps
+        // from silence, and the silence looked like a breakdown. Neither is a drop.
+        let s = settings(Mode::Auto);
+        let (mut d, mut pos) = (Director::new(), 0.0f64);
+        let mut quiet = features(0.0);
+        quiet.energy = 0.3;
+        assert_eq!(drops(&mut d, &quiet, &mut pos, 16.0, &s), 0);
+        let mut silent = features(0.0);
+        silent.silent = true;
+        silent.calm = 1.0;
+        silent.energy = 0.0;
+        assert_eq!(drops(&mut d, &silent, &mut pos, 16.0, &s), 0);
+        let mut loud = features(0.4);
+        loud.energy = 0.8;
+        assert_eq!(drops(&mut d, &loud, &mut pos, 48.0, &s), 0, "music starting after silence");
+    }
+
+    #[test]
+    fn a_drop_is_flagged_once_not_again_at_the_next_downbeat() {
+        // The breakdown path fires mid-bar; the energy path checks on downbeats. Both
+        // see the same drop, so it must be flagged once.
+        let s = settings(Mode::Auto);
+        let (mut d, mut pos) = (Director::new(), 0.0f64);
+        let mut steady = features(0.3);
+        steady.energy = 0.3;
+        assert_eq!(drops(&mut d, &steady, &mut pos, 16.0, &s), 0);
+        let mut bd = features(0.0);
+        bd.calm = 1.0;
+        bd.energy = 0.05;
+        assert_eq!(drops(&mut d, &bd, &mut pos, 16.0, &s), 0);
+        let mut back = features(0.4);
+        back.energy = 0.8;
+        assert_eq!(drops(&mut d, &back, &mut pos, 32.0, &s), 1, "one drop, not one per path");
     }
 
     #[test]

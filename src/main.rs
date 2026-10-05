@@ -626,7 +626,7 @@ fn render_loop(
     let mut set_on = false;
     // Auto drop clips: when to save the clip for a drop (its tail has to
     // play out first), when the last one was saved, and how many this run.
-    let mut drop_clip_at: Option<Instant> = None;
+    let mut drop_clip_at: Option<(Instant, u32)> = None;
     let mut last_auto_clip: Option<Instant> = None;
     let mut auto_clips = 0u32;
     // Live rig as it was before a timeline borrowed it — restored on show end.
@@ -1031,10 +1031,8 @@ fn render_loop(
                 if shared.rec_clip.swap(false, Ordering::Relaxed) {
                     rc.save_clip(s.rec_keep_s, s.rec_layout);
                 }
-                if drop_clip_at.is_some_and(|t| now >= t) {
+                if let Some((_, secs)) = drop_clip_at.filter(|&(t, _)| now >= t) {
                     drop_clip_at = None;
-                    // The buffer keeps `rec_keep_s`; a longer ask is trimmed to it.
-                    let secs = (s.auto_clip_before_s + s.auto_clip_after_s).clamp(5, s.rec_keep_s.max(10));
                     rc.save_clip(secs, s.rec_layout);
                     last_auto_clip = Some(now);
                     auto_clips += 1;
@@ -1324,7 +1322,13 @@ fn render_loop(
             && auto_clips < s.auto_clip_max
             && last_auto_clip.map_or(true, |t| now.duration_since(t).as_secs() >= 45)
         {
-            drop_clip_at = Some(now + Duration::from_secs(s.auto_clip_after_s as u64));
+            // The buffer only keeps `rec_keep_s`. Trimming the clip's start to fit it cut
+            // the drop itself out (10 s kept, 8 + 12 asked: the clip was all aftermath), so
+            // shrink both sides instead: at most half the buffer before the drop.
+            let keep = s.rec_keep_s.max(10);
+            let before = s.auto_clip_before_s.min(keep / 2);
+            let after = s.auto_clip_after_s.min(keep - before);
+            drop_clip_at = Some((now + Duration::from_secs(after as u64), (before + after).max(5)));
         }
         // GPU baseline: pin the scene under test against the auto-pilot's
         // own cuts. The measurement runs below, once the engine's frame

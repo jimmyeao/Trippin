@@ -2696,9 +2696,13 @@ fn stream_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<Ui
                     ui.selectable_value(&mut s.rec_layout, l, l.label());
                 }
             });
+            // Two rows: on one, the checkbox and the three values overflowed the card at
+            // the default 980 pt window (the card widened under Video output, AGENTS.md).
             grow(ui, "Drop clips", |ui| {
                 ui.checkbox(&mut s.auto_clip, "Save one at every drop")
                     .on_hover_text("Needs the replay buffer. At most one every 45 s, and the cap below per run.");
+            });
+            grow(ui, "", |ui| {
                 ui.add_enabled_ui(s.auto_clip, |ui| {
                     ui.add(egui::DragValue::new(&mut s.auto_clip_before_s).range(2..=60).suffix(" s before"));
                     ui.add(egui::DragValue::new(&mut s.auto_clip_after_s).range(2..=60).suffix(" s after"));
