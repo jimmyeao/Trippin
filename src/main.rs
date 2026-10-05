@@ -56,6 +56,7 @@ mod snap;
 mod song;
 #[cfg(target_os = "macos")]
 mod sysaudio;
+mod tags;
 mod text;
 mod timeline;
 mod ui_theme;

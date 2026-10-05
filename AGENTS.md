@@ -225,6 +225,11 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
 - **The entry point:** `shaders/scenes/<name>.wgsl` with
   `@fragment fn fs_main(in: VsOut) -> @location(0) vec4<f32>`. The output is
   HDR, and present tonemaps it.
+- **Scene tags:** every scene needs an entry in `shaders/scene_tags.json`
+  (2-5 tags from the closed vocabulary in `src/tags.rs`; `void` has none).
+  `cargo test` fails until you add it, and on any tag outside the vocabulary.
+  Styles (docs/design/looks-styles-packs.md) pick scene pools by these tags, so
+  tag by what the scene looks and moves like, not by who made it.
 - **Header tags** go in the first 8 lines: `// @heavy`, `// @bloom 0.7`,
   `// @tonemap agx` and `// @title Display Name`. `@title` is the scene's
   human name in pickers/remotes — the file stem stays the id; without it
