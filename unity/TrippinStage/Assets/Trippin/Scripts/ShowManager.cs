@@ -31,6 +31,7 @@ namespace TrippinStage
 
         void Start()
         {
+            PackLoader.Load(this);   // SPIKE: -packDir shows join the list before anything reads it
             Uncapped = System.Array.IndexOf(System.Environment.GetCommandLineArgs(), "-uncapped") >= 0;
             Application.targetFrameRate = Uncapped ? -1 : 60;
             QualitySettings.vSyncCount = 0;

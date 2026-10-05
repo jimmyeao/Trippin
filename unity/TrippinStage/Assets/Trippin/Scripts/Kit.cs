@@ -609,6 +609,8 @@ namespace TrippinStage
         public Material beamMat, glowMat, groundMat, hazeMat, surfaceMat, tubeMat, orbMat, structMat, membraneMat;
         public Material ribbonMat, deepMat, corridorMat, scopeMat, landMat, horizonMat, robotMat, screenMat, crowdMeshMat;
 
+        /// SPIKE: a runtime-loaded pack show's AssetBundle (PackLoader sets it before activation).
+        public AssetBundle pack;
         protected readonly Rx rx = new Rx();
         protected readonly CamRig rig = new CamRig();
         protected HazeSet haze;
