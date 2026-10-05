@@ -233,17 +233,6 @@ namespace TrippinStage.EditorTools
             pl.groundMat = co.groundMat;
             pl.hazeMat = dir.hazeMat;
 
-            var orbitGo = new GameObject("unity_orbit_foundry");
-            orbitGo.transform.SetParent(engine.transform, false);
-            var orbit = orbitGo.AddComponent<OrbitFoundryShow>();
-            orbit.cam = cam;
-            orbit.coreMat = Mat("Trippin/OrbitCore", "OrbitCore");
-            orbit.ringMat = Mat("Trippin/OrbitRing", "OrbitRing");
-            orbit.floorMat = Mat("Trippin/OrbitFloor", "OrbitFloor");
-            orbit.skyMat = Mat("Trippin/TidalSky", "TidalSky");
-            orbit.beamMat = dir.beamMat;
-            orbit.pointsMat = Mat("Trippin/Points", "Points");
-
             // Kit shows (KitShow subclasses): wired uniformly, one loop for all of them.
             var kitSurface = Mat("Trippin/WireSurface", "WireSurface");
             var kitTube = Mat("Trippin/WireTube", "WireTube");
@@ -274,7 +263,6 @@ namespace TrippinStage.EditorTools
                 ("unity_fountain", typeof(FountainShow)),
                 ("unity_galaxy", typeof(GalaxyShow)),
                 ("unity_nebula", typeof(NebulaShow)),
-                ("unity_terrain", typeof(TerrainShow)),
                 ("unity_ocean", typeof(OceanShow)),
                 ("unity_chladni", typeof(ChladniShow)),
                 ("unity_tunnel", typeof(TunnelShow)),
@@ -296,8 +284,8 @@ namespace TrippinStage.EditorTools
             coasterCityMat.enableInstancing = true;
             var coasterDeckMat = Mat("Trippin/CoasterDeck", "CoasterDeck");
             var coasterNoseMat = Mat("Trippin/CoasterNose", "CoasterNose");
-            var showList = new System.Collections.Generic.List<GameObject> { stage, crystals, flowGo, levGo, sculptGo, colGo, tidalGo, stormGo, prismGo, auroraGo, bassGo, pillarsGo, orbitGo };
-            var nameList = new System.Collections.Generic.List<string> { "unity_stage", "unity_crystals", "unity_flow", "unity_leviathan", "unity_sculpture", "unity_colossus", "unity_tidal_cathedral", "unity_lightstorm", "unity_prism", "unity_aurora", "unity_basscore", "unity_pillars", "unity_orbit_foundry" };
+            var showList = new System.Collections.Generic.List<GameObject> { stage, crystals, flowGo, levGo, sculptGo, colGo, tidalGo, stormGo, prismGo, auroraGo, bassGo, pillarsGo };
+            var nameList = new System.Collections.Generic.List<string> { "unity_stage", "unity_crystals", "unity_flow", "unity_leviathan", "unity_sculpture", "unity_colossus", "unity_tidal_cathedral", "unity_lightstorm", "unity_prism", "unity_aurora", "unity_basscore", "unity_pillars" };
             foreach (var (kname, ktype) in kitShows)
             {
                 var kgo = new GameObject(kname);

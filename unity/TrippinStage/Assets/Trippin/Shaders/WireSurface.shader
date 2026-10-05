@@ -24,6 +24,9 @@ Shader "Trippin/WireSurface"
         _Fill ("Fill", Float) = 0.5
         _Fade ("Distance fade (m)", Float) = 120
         _P0 ("Mode params", Vector) = (14, 20, 0, 0)
+        _Vib ("Chladni: vibration phase (-1..1, scales the displacement only)", Float) = 1
+        _RipR ("Chladni: strike ring radius (m)", Float) = 0
+        _RipA ("Chladni: strike ring height (m)", Float) = 0
     }
     SubShader
     {
@@ -42,6 +45,7 @@ Shader "Trippin/WireSurface"
             CBUFFER_START(UnityPerMaterial)
             float _Mode, _SizeX, _SizeZ, _Amp, _Scroll, _Phase, _Grid, _Hue, _Intensity, _Fill, _Fade;
             float4 _P0;
+            float _Vib, _RipR, _RipA;
             CBUFFER_END
 
             struct A { float4 pos : POSITION; float2 uv : TEXCOORD0; };
@@ -80,7 +84,17 @@ Shader "Trippin/WireSurface"
                 float2 xz = (i.uv - 0.5) * float2(_SizeX, _SizeZ);
                 float2 wxz = float2(xz.x, xz.y + _Scroll);
                 float h = Height(wxz, xz);
-                float3 p = float3(xz.x, h, xz.y);
+                float dh = h;
+                if (_Mode > 1.5)
+                {
+                    // The plate vibrates: the figure flexes through zero with _Vib (the nodal lines,
+                    // computed from the undisplaced figure in frag, stay put), and a kick strike sends
+                    // a ring out from the centre.
+                    float r = length(xz);
+                    float ring = exp(-(r - _RipR) * (r - _RipR) * 0.08);
+                    dh = h * _Vib + _RipA * ring;
+                }
+                float3 p = float3(xz.x, dh, xz.y);
                 float3 wp = TransformObjectToWorld(p);
                 o.pos = TransformWorldToHClip(wp);
                 o.uv = i.uv;

@@ -26,7 +26,16 @@ float3 SkyStars(float3 d, float scale, float density, float tw)
     return SkyPal(h2 * 0.5 + _SkyHue * 0.3) * s * t * (0.5 + 1.8 * h2);
 }
 
-float3 SkyCol(float3 d)
+// _SkyRays (0 = off): a fan of sun rays spreading from the disc (sun mode),
+// each ray as long as its slice of the eased spectrum (RxSpec, mirrored left
+// and right), turning slowly on _SkyClk. Light shape, no flashes.
+float _SkyRays;
+
+// sunOn = 0 leaves out the disc, its bands and the rays: for fogging terrain
+// into the horizon colour. With the disc, a fog lookup at a fixed low height
+// lies inside the disc's span, and every far pixel under the sun took the
+// disc's colour - a hard vertical column of "sunlight" down the valley.
+float3 SkyCol(float3 d, float sunOn)
 {
     float bass = _RxLvl.x, high = _RxLvl.w, lum = _RxMisc.y;
     float3 S = normalize(float3(0.0, _SunH, 1.0));
@@ -44,8 +53,20 @@ float3 SkyCol(float3 d)
         float disc = smoothstep(size, size * 0.985, ang);
         float cut = lerp(step(saturate(0.12 - v) * 0.8, frac(v * 8.0)), 1.0, step(0.12, v));
         float3 sunc = lerp(SkyPal(_SkyHue + 0.14) * 2.4, SkyPal(_SkyHue) * 2.0, saturate(0.5 - v * 0.5));
-        c += sunc * disc * cut;
+        c += sunc * disc * cut * sunOn;
         c += SkyPal(_SkyHue + 0.08) * exp(-ang * 5.0) * 0.55 * (0.6 + bass);
+        if (_SkyRays > 0.0 && sunOn > 0.5)
+        {
+            float3 right = normalize(cross(float3(0, 1, 0), S));
+            float3 up = cross(S, right);
+            float3 rr = d - S * dot(d, S);
+            float a = atan2(dot(rr, up), dot(rr, right) + 1e-6);          // angle round the sun
+            float spin = _SkyClk * 0.004;
+            float rays = pow(saturate(0.5 + 0.5 * cos(a * 22.0 + spin * 22.0)), 5.0);
+            float len = 0.08 + 0.55 * RxSpec(abs(a) / 3.14159265);       // mirrored: no seam at the bottom
+            float fan = rays * exp(-max(ang - size, 0.0) / len) * smoothstep(size * 0.95, size * 1.3, ang);
+            c += SkyPal(_SkyHue + 0.1) * fan * 0.5 * _SkyRays * (0.5 + 0.8 * lum);
+        }
         float cloud = smoothstep(0.52, 0.8, TFbm3(float3(d.x * 4.0 + _SkyClk * 0.0008, d.y * 16.0, 3.7))) * exp(-abs(h - 0.1) * 12.0);
         c += SkyPal(_SkyHue + 0.2) * cloud * 0.35 * (0.5 + lum);
         c += (SkyStars(d, 58.0, 0.96, _SkyClk) + 0.7 * SkyStars(d, 130.0, 0.94, _SkyClk + 9.0)) * smoothstep(0.12, 0.5, h) * (0.4 + high);
@@ -68,5 +89,7 @@ float3 SkyCol(float3 d)
     }
     return c * _SkyGain;
 }
+
+float3 SkyCol(float3 d) { return SkyCol(d, 1.0); }
 
 #endif

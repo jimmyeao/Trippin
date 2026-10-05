@@ -12,6 +12,9 @@
 //  - Drops (DropDirector): tension gathers the curtains (folds flatten,
 //    they rise a little, the rig dims); the drop flares them and fans the
 //    searchlights open.
+//  - Real music (owner: "not reactive"): the curtain tops follow the eased
+//    spectrum along their length (bass in the middle, highs at the ends), and
+//    each kick sends a fold rippling out from the centre of every curtain.
 // No beat flashes: everything rides slow presence, the clocks and the drop.
 // Brightness numbers start low on purpose: additive layers wash out fast.
 
@@ -38,6 +41,8 @@ namespace TrippinStage
         float _bassFast, _midEase, _highEase; // eased fast vocabulary: shape reacts within ~70 ms, never steps
         float _impS; // DropDirector.Impact with a short attack (see Update)
         Vector3 _camPos, _camLook;
+        readonly Rx _rx = new Rx();       // eased spectrum + kick (and the RxSpec shader global)
+        float _waveR = 999f, _waveA, _kickPrev;
         bool _camSet;
 
         void Awake()
@@ -164,6 +169,11 @@ namespace TrippinStage
             float dt = Time.deltaTime;
             float beat = s.beat;
             DropDirector.Tick(s, dt);
+            _rx.Tick(s, dt);
+            if (_rx.kick > 0.55f && _kickPrev <= 0.55f) { _waveR = 0f; _waveA = (2.5f + 3.5f * _rx.bassFast) * (1f - 0.6f * s.calm); }
+            _kickPrev = _rx.kick;
+            _waveR += 55f * dt;
+            _waveA *= Mathf.Exp(-1.4f * dt);
             float clk = s.clock4 != null && s.clock4.Length > 1 ? s.clock4[1] : beat;
             float pres0 = s.pres4 != null && s.pres4.Length > 0 ? s.pres4[0] : 0.4f;
             float pres1 = s.pres4 != null && s.pres4.Length > 1 ? s.pres4[1] : 0.4f;
@@ -202,6 +212,9 @@ namespace TrippinStage
                 _mpb.SetFloat("_Phase", phase);
                 _mpb.SetFloat("_Fold", fold);
                 _mpb.SetFloat("_Height", height);
+                _mpb.SetFloat("_SpecAmt", 0.9f);
+                _mpb.SetFloat("_WaveR", _waveR - i * 6f);          // the back curtains answer a beat-fraction later
+                _mpb.SetFloat("_WaveA", _waveA);
                 _mpb.SetFloat("_Base", 5f + i * 1.2f);
                 _mpb.SetFloat("_Z", -18f + i * 16f);
                 _mpb.SetFloat("_Seed", i * 0.37f);
