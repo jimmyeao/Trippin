@@ -169,9 +169,24 @@ pub enum UiCommand {
     Song(SongCtl),
     /// Ask the render thread to produce a scene thumbnail.
     Thumb(String),
+    /// Recall a saved Look by id.
+    ApplyLook(String),
+    /// Save the live state as a new Look with this name.
+    SaveLook(String),
+    DeleteLook(String),
+    /// Put a Look on pad/key slot 1..=8, or clear it.
+    LookSlot(String, Option<u8>),
     /// Start (or cancel) the GPU baseline — heavy + unity scenes are
     /// stepped through and sub-30 fps ones deselected.
     PerfCheck,
+}
+
+/// One saved Look as the panel lists it.
+#[derive(Clone, Debug, Default)]
+pub struct LookRow {
+    pub id: String,
+    pub name: String,
+    pub slot: Option<u8>,
 }
 
 /// Live state shown in the panel's status area, written by the render thread.
@@ -190,6 +205,8 @@ pub struct Status {
     pub bar_in_scene: u32,
     pub bars_total: u32,
     pub clip: Option<String>,
+    /// Saved Looks, filled in by the event thread before the panel draws.
+    pub looks: Vec<LookRow>,
     /// Display title for `clip` (same index-space as `clip_titles`).
     pub clip_title: Option<String>,
     pub blackout: bool,
@@ -299,6 +316,8 @@ pub struct Panel {
     clip_thumbs: HashMap<String, Option<egui::TextureHandle>>,
     /// Text filter on the Keys page.
     keys_filter: String,
+    /// Name being typed for "Save look".
+    look_name: String,
     /// Saved-timeline metadata for the Timeline tab's list — parsed lazily
     /// and refreshed only when the file list or mtimes change.
     saved: SavedCache,
@@ -338,6 +357,7 @@ impl Panel {
             live_saved: HashMap::new(),
             clip_thumbs: HashMap::new(),
             keys_filter: String::new(),
+            look_name: String::new(),
             saved: SavedCache::default(),
         })
     }
@@ -421,6 +441,7 @@ impl Panel {
         let tab = &mut self.tab;
         let scene_filter = &mut self.scene_filter;
         let chip = &mut self.chip;
+        let look_name = &mut self.look_name;
         let thumbs = &mut self.thumbs;
         let want_thumbs = &mut self.want_thumbs;
         let clip_thumbs = &mut self.clip_thumbs;
@@ -464,6 +485,7 @@ impl Panel {
                 tab,
                 scene_filter,
                 chip,
+                look_name,
                 thumbs,
                 want_thumbs,
                 clip_thumbs,
@@ -499,6 +521,7 @@ fn build_ui(
     tab: &mut Tab,
     scene_filter: &mut String,
     chip: &mut LibChip,
+    look_name: &mut String,
     thumbs: &mut HashMap<String, egui::TextureHandle>,
     want_thumbs: &mut HashMap<String, Instant>,
     clip_thumbs: &mut HashMap<String, Option<egui::TextureHandle>>,
@@ -558,6 +581,7 @@ fn build_ui(
                         heavy_ok,
                         scene_filter,
                         chip,
+                        look_name,
                         thumbs,
                         want_thumbs,
                         cmd,
@@ -749,6 +773,7 @@ fn perform_tab(
     heavy_ok: bool,
     filter: &mut String,
     chip: &mut LibChip,
+    look_name: &mut String,
     thumbs: &mut HashMap<String, egui::TextureHandle>,
     want: &mut HashMap<String, Instant>,
     cmd: &mut Vec<UiCommand>,
@@ -790,6 +815,59 @@ fn perform_tab(
                 }
         })
         .count();
+
+    // Looks: one-tap recall of a saved scene + palette + effect + dancer. Wrapped
+    // like the toolbar below (a non-wrapping row would re-widen the parent
+    // cursor under the inspector at narrow widths).
+    ui.horizontal_wrapped(|ui| {
+        ui.add_space(2.0);
+        ui.label(egui::RichText::new("Looks").size(11.5).color(MUTED));
+        for l in &st.looks {
+            let label = match l.slot {
+                Some(n) => format!("{n} · {}", l.name),
+                None => l.name.clone(),
+            };
+            let r = ui.add(
+                egui::Button::new(egui::RichText::new(label.chars().take(22).collect::<String>()).size(11.5).color(TEXT))
+                    .fill(RAISED)
+                    .corner_radius(egui::CornerRadius::same(9)),
+            );
+            r.clone().on_hover_text("Click to recall · right-click for key/pad slot or delete");
+            if r.clicked() {
+                cmd.push(UiCommand::ApplyLook(l.id.clone()));
+            }
+            r.context_menu(|ui| {
+                for n in 1..=crate::looks::SLOTS {
+                    if ui.button(format!("Put on slot {n}")).clicked() {
+                        cmd.push(UiCommand::LookSlot(l.id.clone(), Some(n)));
+                        ui.close();
+                    }
+                }
+                if l.slot.is_some() && ui.button("Clear slot").clicked() {
+                    cmd.push(UiCommand::LookSlot(l.id.clone(), None));
+                    ui.close();
+                }
+                ui.separator();
+                if ui.button("Delete").clicked() {
+                    cmd.push(UiCommand::DeleteLook(l.id.clone()));
+                    ui.close();
+                }
+            });
+        }
+        ui.add(
+            egui::TextEdit::singleline(look_name)
+                .desired_width(120.0)
+                .hint_text("name this look…"),
+        );
+        let can = !look_name.trim().is_empty();
+        if ui
+            .add_enabled(can, egui::Button::new(egui::RichText::new("Save look").size(11.5)))
+            .on_hover_text("Saves the scene, palette, effect and dancer as they are now")
+            .clicked()
+        {
+            cmd.push(UiCommand::SaveLook(std::mem::take(look_name)));
+        }
+    });
 
     // Toolbar: search field, filter pills (active one is bright, like the
     // mockup), then the stats line with all on/off at its right edge.
@@ -1528,7 +1606,7 @@ fn inspector_body(
         // settings page — the inspector isn't a second settings panel.
         nav_row(
             ui,
-            "Look",
+            "Dancer look",
             s.dancer_style.map(|i| STYLES[i]).unwrap_or("auto").to_string(),
             || {
                 *tab = Tab::DancerFx;
@@ -2840,7 +2918,7 @@ fn dancer_fx_tab(
             ui.small("Silhouette layer, look and movement — one line only.");
             ui.add_space(4.0);
             ui.checkbox(&mut s.dancer_enabled, "Dancer layer on");
-            ctl_row(ui, "Look", |ui| {
+            ctl_row(ui, "Dancer look", |ui| {
                 // A dropdown: six segmented buttons overflow the card.
                 egui::ComboBox::from_id_salt("dancer_look")
                     .width(110.0)
@@ -3281,6 +3359,19 @@ fn keys_tab(
     // Grouped sections (review F) — far easier to scan than 25 flat rows.
     const GROUPS: &[(&str, &[Action])] = &[
         ("scenes", &[Action::NextScene, Action::PrevScene, Action::ToggleRandom]),
+        (
+            "looks",
+            &[
+                Action::Look1,
+                Action::Look2,
+                Action::Look3,
+                Action::Look4,
+                Action::Look5,
+                Action::Look6,
+                Action::Look7,
+                Action::Look8,
+            ],
+        ),
         ("mode", &[Action::ModeAuto, Action::ModeStatic, Action::ModeManual]),
         (
             "dancer",

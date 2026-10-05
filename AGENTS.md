@@ -211,6 +211,8 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
 | `src/timeline.rs`, `src/song.rs`, `src/editor.rs`, `src/ai.rs` | The timeline show editor (F2), song playback, and the AI show builder (local analysis → prompt → plan → `expand_plan` rules → cues). |
 | `src/panel.rs` | The egui control panel. Tabs: Perform, Dancer & FX, Stream, Timeline, Keys, Settings. App-wide preferences (audio in, latency, director rules, AI provider/key) live on **Settings** (`settings_tab`), not in collapsibles on other pages or in the timeline editor. |
 | `src/config.rs` | `Settings` (serde, `#[serde(default)]`), actions and hotkeys, `titleize` (id → display name), and `data_dir()`. |
+| `src/looks.rs` | Saved Looks (scene + palette + effect + dancer): pure state, `apply`, and one-file-per-Look storage in `<data dir>/looks`. `App::apply_look` (main.rs) applies the settings half through `looks::apply` and sends the scene/routine through the render thread, recording cues. Recalled by `Action::Look1..8` (slots), `RemoteCmd::Look` (remote `look`, OSC `/trippin/look`) and the Perform page row. Design: `docs/design/looks-styles-packs.md`. |
+| `src/tags.rs`, `shaders/scene_tags.json` | The closed scene-tag vocabulary and each scene's tags (tests fail on a scene without tags). Styles will pick pools by tag. |
 | `src/perf.rs` | The per-machine GPU baseline (`perf.json`) and the Settings-button check that measures `@heavy`/`unity_*` scenes and deselects sub-30 fps ones. |
 | `src/midi.rs` | MIDI input (midir): one port, note-ons become `Action`s. |
 | `src/remote.rs` | LAN remote for the iOS companion app: a WebSocket JSON server (TCP 9138, Bonjour `_trippin._tcp`, PIN-gated) — protocol at the top of the file, details in §8. |

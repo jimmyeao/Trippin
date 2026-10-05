@@ -186,6 +186,7 @@ Default keys (all rebindable in the panel):
 | J | record the whole set: start / stop |
 | F1 | show / hide the control panel |
 | Esc | leave fullscreen (it never quits; close the window to quit) |
+| (unbound) | Look 1 to 8: recall the saved Look on that slot (bind keys or pads on the Keys page) |
 
 **MIDI controllers:** every action above can also sit on a MIDI pad or key.
 Pick the input at the top of the Keys tab (`--list-midi` shows the names),
@@ -193,6 +194,27 @@ then click a row's **midi** button and hit the pad — the note is bound.
 Pressing the pad fires the action exactly like the hotkey, including while
 the timeline is recording. Right-click a bound note to clear it. Unplugging
 and replugging the controller is picked up automatically.
+
+## Looks
+
+A **Look** is the visual state saved under a name: the scene, palette, effect and
+dancer, as they are on screen right now. One tap recalls it.
+
+- **Save one:** on the Perform page, type a name in the Looks row and press
+  **Save look**. It never overwrites; a name already in use becomes `name-2`.
+- **Recall:** click it. Right-click a Look to put it on **slot 1 to 8** (then a
+  hotkey, a MIDI pad, OSC `/trippin/look 3` or the remote can recall it) or to
+  delete it.
+- **Partial Looks:** anything a Look leaves out stays as it is, so a Look can be
+  "just this palette". Edit the file if you want that; the button saves everything.
+- **A scene you don't have:** a Look made on another machine, or one that uses a
+  pack you haven't installed, still applies everything it can and says in the log
+  which scene it skipped.
+- **Files:** one `<name>.look.json` per Look in the `looks` folder next to
+  `trippin.json`. Copy a file to another machine to share it. Broken or newer-format
+  files are ignored, never an error.
+- Recalling a Look records into an armed timeline as ordinary scene and routine cues.
+- The dancer's look (shadow, neon, ...) is called the **Dancer look** in the panel.
 
 ## Scenes
 

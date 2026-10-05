@@ -150,6 +150,9 @@ struct Shared {
     midi_status: Mutex<(bool, String)>,
     /// Remote-server state for the Settings card: (listening, status line).
     remote_status: Mutex<(bool, String)>,
+    /// Saved Looks (files in `looks::looks_dir()`), mirrored here for the panel
+    /// and the remote. Written only by the event thread.
+    looks: Mutex<Vec<looks::SavedLook>>,
 }
 
 /// A pad press on the MIDI keyboard, posted to the event loop from midir's
@@ -1581,6 +1584,7 @@ fn render_loop(
                 .and_then(|n| shared.clip_names.iter().position(|c| c == n))
                 .and_then(|i| shared.clip_titles.get(i).cloned());
             *lock(&shared.status) = Status {
+                looks: Vec::new(), // filled by the event thread when the panel draws
                 bpm: f.bpm,
                 confidence: f.tempo_confidence,
                 beat_in_bar,
@@ -1745,6 +1749,15 @@ fn apply_render(
         }
         Action::ReloadShaders => r.reload_shaders(true),
         Action::ShowNowPlaying => shared.np_replay.store(true, Ordering::Relaxed),
+        // Looks are recalled on the event thread (App::apply); never sent here.
+        Action::Look1
+        | Action::Look2
+        | Action::Look3
+        | Action::Look4
+        | Action::Look5
+        | Action::Look6
+        | Action::Look7
+        | Action::Look8 => {}
         Action::SaveClip => shared.rec_clip.store(true, Ordering::Relaxed),
         Action::RecordSet => {
             shared.rec_set.fetch_xor(true, Ordering::Relaxed);
@@ -1932,6 +1945,16 @@ impl App {
                     tl.recording = !tl.recording;
                 }
             }
+            a if a.look_slot().is_some() => {
+                let slot = a.look_slot().unwrap_or(0);
+                let look = self
+                    .shared
+                    .as_ref()
+                    .and_then(|sh| looks::by_slot(&lock(&sh.looks), slot).cloned());
+                if let Some(l) = look {
+                    self.apply_look(&l);
+                }
+            }
             _ => self.send(Msg::Act(action)),
         }
         self.record_action(action);
@@ -1939,6 +1962,65 @@ impl App {
     }
 
     /// The live settings: the shared copy once rendering is running.
+    /// Recall a Look: the settings half is written here; the scene and routine
+    /// go through the render thread like any other pick, and are recorded as
+    /// cues when a timeline is armed. A scene this machine lacks is skipped
+    /// with a log line and the rest of the Look still applies.
+    fn apply_look(&mut self, look: &looks::SavedLook) {
+        let Some(sh) = self.shared.clone() else { return };
+        let applied = {
+            let mut s = self.settings_mut();
+            looks::apply(look, &mut s, &sh.scene_names, &sh.clip_names)
+        };
+        // The settings guard is gone before record_cue takes the timeline lock.
+        if applied.changed {
+            self.mark_dirty();
+        }
+        if let Some(name) = applied.scene {
+            if let Some(i) = sh.scene_names.iter().position(|n| *n == name) {
+                self.record_cue(CueKind::Scene(name));
+                self.send(Msg::GoToScene(i));
+            }
+        }
+        if let Some(name) = applied.clip {
+            if let Some(i) = sh.clip_names.iter().position(|c| *c == name) {
+                self.record_cue(CueKind::Clip(name));
+                self.send(Msg::ShowClip(i));
+            }
+        }
+        if let Some(missing) = applied.skipped_scene {
+            let need = if look.requires.is_empty() {
+                String::new()
+            } else {
+                format!(" (needs {})", look.requires.join(", "))
+            };
+            eprintln!("Look \"{}\": scene {missing} isn't available here{need}; applied the rest", look.name);
+        }
+    }
+
+    /// Save the live state as a new Look called `name` (never overwrites: a
+    /// taken name gets `-2`, `-3`...).
+    fn save_look(&mut self, name: &str, shared: &Shared) {
+        let name = name.trim();
+        if name.is_empty() {
+            return;
+        }
+        let (scene, clip) = {
+            let st = lock(&shared.status);
+            (shared.scene_names.get(st.scene).cloned(), st.clip.clone())
+        };
+        let mut look = {
+            let s = lock(&shared.settings);
+            looks::capture(name, &s, scene.as_deref(), clip.as_deref())
+        };
+        let mut all = lock(&shared.looks);
+        look.id = looks::unique_id(&all, name);
+        if looks::save(&looks::looks_dir(), &look).is_ok() {
+            all.push(look);
+            all.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()).then(a.id.cmp(&b.id)));
+        }
+    }
+
     fn settings_mut(&mut self) -> std::sync::MutexGuard<'_, Settings> {
         lock(&self.shared.as_ref().unwrap().settings)
     }
@@ -2027,6 +2109,19 @@ impl App {
                     self.send(Msg::ShowClip(i));
                 }
             }
+            R::Look(sel) => {
+                // An id wins; else digits are a slot (ids like "2" stay reachable).
+                let look = {
+                    let all = lock(&sh.looks);
+                    all.iter()
+                        .find(|l| l.id == sel)
+                        .or_else(|| sel.parse::<u8>().ok().and_then(|n| looks::by_slot(&all, n)))
+                        .cloned()
+                };
+                if let Some(l) = look {
+                    self.apply_look(&l);
+                }
+            }
             R::Transport(ctl) => self.send(Msg::Transport(ctl)),
             // A LAN agent's now-playing push; `None` retracts, but only
             // the pushing client's own track.
@@ -2094,6 +2189,10 @@ impl App {
                     "scene_titles": meta_sh.scene_titles.as_slice(),
                     "heavy": meta_sh.scene_heavy,
                     "clips": meta_sh.clip_names,
+                    "looks": lock(&meta_sh.looks)
+                        .iter()
+                        .map(|l| serde_json::json!({ "id": l.id, "name": l.name, "slot": l.slot }))
+                        .collect::<Vec<_>>(),
                     "clip_titles": meta_sh.clip_titles.as_slice(),
                     "palettes": palettes::all_names().collect::<Vec<_>>(),
                     "actions": Action::ALL
@@ -2244,6 +2343,10 @@ impl App {
         if let Some(w) = &self.window {
             status.fullscreen = w.fullscreen().is_some();
         }
+        status.looks = lock(&shared.looks)
+            .iter()
+            .map(|l| panel::LookRow { id: l.id.clone(), name: l.name.clone(), slot: l.slot })
+            .collect();
         let midi_status = lock(&shared.midi_status).clone();
         let remote_status = lock(&shared.remote_status).clone();
         // The UI runs under the settings lock; the GPU acquire/present must
@@ -2306,6 +2409,25 @@ impl App {
             }
             UiCommand::Song(ctl) => self.send(Msg::Transport(ctl)),
             UiCommand::Thumb(name) => self.send(Msg::Thumb(name)),
+            UiCommand::ApplyLook(id) => {
+                let look = lock(&shared.looks).iter().find(|l| l.id == id).cloned();
+                if let Some(l) = look {
+                    self.apply_look(&l);
+                }
+            }
+            UiCommand::SaveLook(name) => self.save_look(&name, shared),
+            UiCommand::DeleteLook(id) => {
+                let _ = looks::delete(&looks::looks_dir(), &id);
+                lock(&shared.looks).retain(|l| l.id != id);
+            }
+            UiCommand::LookSlot(id, slot) => {
+                let mut all = lock(&shared.looks);
+                looks::assign_slot(&mut all, &id, slot);
+                // Persist every Look whose slot changed (the old owner loses it too).
+                for l in all.iter() {
+                    let _ = looks::save(&looks::looks_dir(), l);
+                }
+            }
             UiCommand::PerfCheck => self.send(Msg::PerfCheck),
             UiCommand::SaveTimeline => {
                 let mut tl = lock(&shared.timeline);
@@ -2468,6 +2590,7 @@ impl ApplicationHandler<AppEvent> for App {
             thumbs: Mutex::new(std::collections::HashMap::new()),
             midi_status: Mutex::new((false, "off".into())),
             remote_status: Mutex::new((false, "off".into())),
+            looks: Mutex::new(looks::load_all(&looks::looks_dir())),
         });
         self.shared = Some(shared.clone());
         let (tx, rx) = mpsc::channel();

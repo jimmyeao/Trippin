@@ -156,7 +156,6 @@ pub fn apply(look: &SavedLook, s: &mut Settings, scenes: &[String], clips: &[Str
 
 // ---- storage ----------------------------------------------------------------
 
-#[allow(dead_code)] // wired in by App::apply_look (next commit)
 pub fn looks_dir() -> PathBuf {
     crate::config::data_dir().join("looks")
 }
