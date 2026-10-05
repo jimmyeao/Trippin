@@ -83,7 +83,7 @@ namespace TrippinStage
                 // Offsets in whole beats only (pi/2 in the half-speed terms, a half beat
                 // in the full-speed ones), so the routines differ but stay on the grid.
                 float ph = (i % 4) * Mathf.PI * 0.5f;
-                float t = rx.beat;
+                float t = rx.beatS;
                 Vector3 baseP = new Vector3(Spots[i].x * tight, 0f, Spots[i].z);
                 // Lowest on every beat, for everyone: the knee dip is the pulse.
                 float bob = Mathf.Abs(Mathf.Cos(t * Mathf.PI));

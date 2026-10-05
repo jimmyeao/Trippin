@@ -29,6 +29,9 @@ namespace TrippinStage
         float _kick, _rot, _waveR = 99f, _waveAmp, _lastKick = -1f, _energy;
         bool _drumsWas = true;
 
+        bool _placeCam;
+        void OnEnable() { _placeCam = true; }
+
         void Awake()
         {
             _pos = new ComputeBuffer(Count, 16);
@@ -137,7 +140,9 @@ namespace TrippinStage
             // Direction eases through zero as the phrase sine turns — no snap.
             _orbit += dt * (0.08f + 0.12f * s.intensity) * Mathf.Sin(phrase * 0.5f);
             var p = new Vector3(Mathf.Sin(_orbit) * 34f, 6f + Mathf.Sin(phrase) * 9f, Mathf.Cos(_orbit) * 34f);
-            cam.transform.position = Vector3.Lerp(cam.transform.position, p, 1f - Mathf.Exp(-dt * 1.5f));
+            // First frame after a cut-in: on the orbit, not eased in from the previous show's camera.
+            cam.transform.position = _placeCam ? p : Vector3.Lerp(cam.transform.position, p, 1f - Mathf.Exp(-dt * 1.5f));
+            _placeCam = false;
             cam.transform.LookAt(Vector3.zero);
 
             // The core light at the heart of the shape, billboarded to the
