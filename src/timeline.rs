@@ -660,6 +660,13 @@ const SUB: usize = 4;
 /// Score above this locks the match; below LOW unlocks (sticky in between).
 const LOCK_SCORE: f32 = 0.5;
 const UNLOCK_SCORE: f32 = 0.28;
+/// While locked, a match more than `JUMP_S` away from the coasted position
+/// is a jump: it needs this score, seen on two evaluations in a row that
+/// agree. Repetitive house scores many offsets alike at 0.3-0.6, and
+/// following each one hopped the playhead around the track (median: eight
+/// seeks in 35 s on Krush - House Arrest, cues firing from each spot).
+const JUMP_SCORE: f32 = 0.7;
+const JUMP_S: f64 = 1.0;
 
 pub struct Matcher {
     pub locked: bool,
@@ -674,6 +681,8 @@ pub struct Matcher {
     coasted_at: Instant,
     /// Skip evaluation until this instant (runs ~2×/sec max).
     next_eval: Instant,
+    /// A jump candidate (global seconds, when seen) awaiting confirmation.
+    pending_jump: Option<(f64, Instant)>,
 }
 
 impl Matcher {
@@ -685,6 +694,7 @@ impl Matcher {
             locked_clip: None,
             coasted_at: Instant::now(),
             next_eval: Instant::now(),
+            pending_jump: None,
         }
     }
 
@@ -754,21 +764,43 @@ impl Matcher {
         };
 
         self.score = score;
+        let now = Instant::now();
+        let found = doc.clips[ci].offset_s + local_s;
         if self.locked {
             if score < UNLOCK_SCORE {
                 self.locked = false;
                 self.locked_clip = None;
-            } else if self.locked_clip.is_some_and(|c| c != ci) {
-                // Another clip matched better — only switch if it's clearly better.
-                self.locked_clip = Some(ci);
+                self.pending_jump = None;
+                return None;
             }
+            let coasted = self.pos_s + now.duration_since(self.coasted_at).as_secs_f64();
+            if (found - coasted).abs() <= JUMP_S && self.locked_clip == Some(ci) {
+                // Agrees with where we are: take the refinement.
+                self.pos_s = found;
+                self.pending_jump = None;
+            } else {
+                // A jump (or another clip): confirm it before seeking.
+                let confirmed = score >= JUMP_SCORE
+                    && self.pending_jump.is_some_and(|(p, t)| {
+                        (found - (p + now.duration_since(t).as_secs_f64())).abs() <= JUMP_S
+                    });
+                if confirmed {
+                    self.pos_s = found;
+                    self.locked_clip = Some(ci);
+                    self.pending_jump = None;
+                } else {
+                    self.pos_s = coasted;
+                    self.pending_jump = (score >= JUMP_SCORE).then_some((found, now));
+                }
+            }
+            self.coasted_at = now;
+            Some(self.pos_s)
         } else if score >= LOCK_SCORE {
             self.locked = true;
             self.locked_clip = Some(ci);
-        }
-        if self.locked {
-            self.pos_s = doc.clips[ci].offset_s + local_s;
-            self.coasted_at = Instant::now();
+            self.pending_jump = None;
+            self.pos_s = found;
+            self.coasted_at = now;
             Some(self.pos_s)
         } else {
             None
@@ -781,6 +813,7 @@ impl Matcher {
         self.score = 0.0;
         self.pos_s = 0.0;
         self.locked_clip = None;
+        self.pending_jump = None;
     }
 }
 
