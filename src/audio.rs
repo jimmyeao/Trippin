@@ -556,7 +556,25 @@ struct Analyzer {
     /// and hats in a lot of house — so it's told where the real beat sits
     /// relative to its pick.
     nn_bias: f32,
+    /// Flywheel through drumless breaks: once the tempo has been locked with
+    /// beats playing (`had_lock`), a beatless stretch (silence, or the kick
+    /// density below the breakdown threshold) coasts on that tempo and phase
+    /// instead of re-estimating from an envelope with no rhythm in it — which
+    /// wandered the BPM and slipped the beat count, resetting bars/phrases.
+    had_lock: bool,
+    /// Clock when the current beatless stretch began (None while beats play).
+    beatless_since: Option<f32>,
+    /// Seconds the kick density has been back at beat level (leaving a
+    /// beatless stretch needs a bar of it).
+    beats_back_for: f32,
+    /// Clock of the last beatless hop: neural windows overlapping it are
+    /// neither sent nor applied.
+    last_beatless: f32,
 }
+
+/// Longest a drumless stretch coasts on the old tempo. Past it the lock is
+/// forgotten, so a track that genuinely has no kick still gets tracked.
+const FLYWHEEL_MAX_S: f32 = 90.0;
 
 impl Analyzer {
     fn new(
@@ -635,6 +653,10 @@ impl Analyzer {
             nn_sync: false,
             nn_applied: 0,
             nn_bias: 0.0,
+            had_lock: false,
+            beatless_since: None,
+            beats_back_for: 0.0,
+            last_beatless: f32::MIN,
         }
     }
 
@@ -698,6 +720,9 @@ impl Analyzer {
         for r in results {
             self.nn_busy = false;
             match r {
+                // `silent` here also means "the window overlapped a beatless
+                // stretch": its downbeats would be guesses over pads.
+                Ok(downs) if silent => drop(downs),
                 Ok(downs) => self.nn_vote(&downs),
                 Err(e) => eprintln!("neural downbeat check: {e}"),
             }
@@ -1037,14 +1062,47 @@ impl Analyzer {
             *w += (target - *w) * 0.6;
         }
 
-        self.track_beats(silent);
-        self.nn_tick(silent);
+        // Flywheel: no beat to follow (silence, or the kicks gone below the
+        // breakdown threshold) after a confident lock → coast on the locked
+        // tempo and phase, bounded by FLYWHEEL_MAX_S.
+        // Hysteresis: a stray kick in a build-up lifts the groove past 0.22 for
+        // a moment (D.O.D. – Set Me Free, 46-60 s), and tracking that
+        // sparse-kick envelope locked a wrong 74.9 BPM. The beat only counts
+        // as back after a bar of real kick density.
+        if silent || self.f.groove < 0.22 {
+            self.beatless_since.get_or_insert(self.clock);
+            self.beats_back_for = 0.0;
+        } else if self.beatless_since.is_some() {
+            if self.f.groove >= 0.6 {
+                self.beats_back_for += hop_s;
+                if self.beats_back_for >= 2.0 {
+                    self.beatless_since = None;
+                }
+            } else {
+                self.beats_back_for = 0.0;
+            }
+        }
+        let beatless = self.beatless_since.is_some();
+        if let Some(since) = self.beatless_since {
+            self.last_beatless = self.clock;
+            if self.clock - since > FLYWHEEL_MAX_S {
+                self.had_lock = false;
+            }
+        } else if self.confidence > 0.3 {
+            self.had_lock = true;
+        }
+        let coast = beatless && self.had_lock;
+        // A neural window must hold beats throughout to say anything.
+        let nn_window_beatless = self.clock - self.last_beatless < NN_WINDOW_S;
+
+        self.track_beats(silent || coast);
+        self.nn_tick(silent || nn_window_beatless);
 
         self.frames_since_tempo += 1;
         if self.frames_since_tempo as f32 > self.fps * 0.5 && self.env.len() as f32 > self.fps * 4.0
         {
             self.frames_since_tempo = 0;
-            if !silent {
+            if !silent && !coast {
                 self.estimate_tempo();
                 self.correct_phase();
             }
@@ -1567,6 +1625,73 @@ mod tests {
         assert!(at(29.0).2 > 0.9, "a drumless section is a breakdown");
         assert!(at(33.5).2 < 0.3, "the drop must be caught fast");
         assert!(at(44.0).2 < 0.05);
+    }
+
+    /// Beats → a long drumless break (pad only) → beats again: the tempo must
+    /// hold through the break and the beat grid must come out the other side
+    /// on the same count (no slipped beats = no reset bars/phrases).
+    #[test]
+    fn grid_holds_through_drumless_break() {
+        let sr = 48000.0f32;
+        let (_tx, rx) = mpsc::channel();
+        let shared: SharedFeatures = Arc::new(Mutex::new(Features::default()));
+        let mut a = Analyzer::new(sr, shared, rx, None);
+        let bpm = 124.0;
+        let spb = 60.0 / bpm;
+        let (brk0, brk1, total) = (24.0f32, 56.0f32, 72.0f32);
+        let mut k = 0u64;
+        let mut t = 0.0f32;
+        let mut rng = 1u32;
+        // (t, bpm, beat_count + phase - true beat index)
+        let mut log: Vec<(f32, f32, f64)> = Vec::new();
+        while t < total {
+            // Time from the sample index (an f32 += 1/sr accumulates error).
+            t = (k as f64 / sr as f64) as f32;
+            k += 1;
+            let with_drums = !(brk0..brk1).contains(&t);
+            let mut s = 0.08 * ((t * 220.0 * TAU_F).sin() + (t * 277.2 * TAU_F).sin() + (t * 329.6 * TAU_F).sin()) / 3.0
+                * (0.7 + 0.3 * (t * 0.5).sin());
+            rng ^= rng << 13;
+            rng ^= rng >> 17;
+            rng ^= rng << 5;
+            s += (rng as f32 / u32::MAX as f32 - 0.5) * 0.01;
+            if with_drums {
+                let ph = (t % spb) / spb;
+                let kt = ph * spb;
+                let f = 50.0 + 120.0 * (-kt * 30.0).exp();
+                s += 0.6 * (kt * f * TAU_F).sin() * (-kt * 9.0).exp();
+            }
+            a.buf.push_back(s);
+            if a.buf.len() > FFT_SIZE {
+                a.buf.pop_front();
+            }
+            a.since_hop += 1;
+            if a.since_hop >= HOP && a.buf.len() == FFT_SIZE {
+                a.since_hop = 0;
+                a.frame();
+                let truth = (k - 1) as f64 / sr as f64 / spb as f64;
+                log.push((t, a.f.bpm, a.beat_count as f64 + a.phase as f64 - truth));
+            }
+        }
+        let at = |x: f32| log.iter().find(|e| e.0 >= x).copied().unwrap();
+        for x in [20.0, 28.0, 36.0, 44.0, 52.0, 60.0, 68.0, 71.0] {
+            let e = at(x);
+            println!("t={:5.1}s bpm={:6.2} grid offset={:+.2} beats", e.0, e.1, e.2);
+        }
+        let worst_bpm = log
+            .iter()
+            .filter(|e| e.0 >= brk0 && e.0 < brk1 + 4.0)
+            .map(|e| (e.1 - bpm).abs())
+            .fold(0.0f32, f32::max);
+        assert!(worst_bpm < 1.0, "tempo drifted {worst_bpm:.2} BPM in the break");
+        // Offset before vs after: the same beat count (within a quarter beat).
+        let before = at(22.0).2;
+        let after = at(70.0).2;
+        assert!(
+            (after - before).abs() < 0.25,
+            "beat grid slipped {:+.2} beats across the break ({before:+.2} -> {after:+.2})",
+            after - before
+        );
     }
 
     /// A steady tone must draw the same trace every frame (triggered scope),
