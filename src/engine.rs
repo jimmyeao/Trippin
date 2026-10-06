@@ -5,7 +5,10 @@
 //!   headless (`-batchmode`, renders offscreen) with the frame-file path and
 //!   the feed port on its command line; it's restarted if it exits and
 //!   killed when the link goes off or Trippin quits. The player quits by
-//!   itself if Trippin's feed stops (so a crashed Trippin leaves no orphan).
+//!   itself if Trippin's feed stops — but a relaunched Trippin feeds the same
+//!   port, so a player left by a crash or force-quit kept running, writing to
+//!   the dead instance's frame file, and the new player could not start. On
+//!   launch [`sweep_stale_players`] stops such orphans first.
 //! - **Frames:** a shared-memory file (memory-mapped on both Windows and
 //!   macOS — no Spout/Syphon) that Unity fills via async GPU readback:
 //!   a 64-byte header then RGBA8 pixels at `EXT_W` x `EXT_H`. The header's
@@ -51,6 +54,104 @@ fn kill_child() {
     if let Some(mut c) = child().take() {
         let _ = c.kill();
         let _ = c.wait();
+    }
+}
+
+/// The frame-file name for the Trippin with process id `owner`. It goes on
+/// the player's command line, so a running player names its owner.
+fn frame_name(owner: u32) -> String {
+    format!("trippin-engine-{owner}.frame")
+}
+
+/// Players in `listing` whose owning Trippin is gone. `listing` is one
+/// process per line, `<pid> <command line>` (spaces or a tab after the pid).
+/// A player is recognised by `-trippinFrame` and its owner by the pid in
+/// `trippin-engine-<pid>.frame`; the owner counts as alive while a process
+/// with that pid whose command line names trippin (and isn't itself a
+/// player) is in the listing. `me` is never stopped, nor is a player whose
+/// owner is alive — another running Trippin's player is left alone. A
+/// reused owner pid can only make a player look owned, never the reverse.
+fn stale_players(listing: &str, me: u32) -> Vec<u32> {
+    let procs: Vec<(u32, &str)> = listing
+        .lines()
+        .filter_map(|l| {
+            let l = l.trim_start();
+            let (pid, cmd) = l.split_once(|c: char| c.is_whitespace())?;
+            Some((pid.parse().ok()?, cmd.trim()))
+        })
+        .collect();
+    let is_player = |cmd: &str| cmd.contains("-trippinFrame");
+    let trippin_alive = |pid: u32| {
+        procs
+            .iter()
+            .any(|&(p, cmd)| p == pid && !is_player(cmd) && cmd.to_lowercase().contains("trippin"))
+    };
+    procs
+        .iter()
+        .filter(|&&(pid, cmd)| pid != me && is_player(cmd))
+        .filter_map(|&(pid, cmd)| {
+            let at = cmd.find("trippin-engine-")? + "trippin-engine-".len();
+            let digits: String = cmd[at..].chars().take_while(|c| c.is_ascii_digit()).collect();
+            let owner: u32 = digits.parse().ok()?;
+            (!trippin_alive(owner)).then_some(pid)
+        })
+        .collect()
+}
+
+/// Every process as `<pid> <command line>` lines (see [`stale_players`]).
+#[cfg(unix)]
+fn process_listing() -> Option<String> {
+    let out = Command::new("ps").args(["-axww", "-o", "pid=,command="]).output().ok()?;
+    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// Not compiled on Windows yet. Win32_Process has the command line (tasklist
+/// doesn't); a null one prints as an empty field and is skipped as no player.
+#[cfg(windows)]
+fn process_listing() -> Option<String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let out = Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            r#"Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId)`t$($_.CommandLine)" }"#,
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .stdin(Stdio::null())
+        .output()
+        .ok()?;
+    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+fn kill_pid(pid: u32) {
+    #[cfg(unix)]
+    let r = Command::new("kill").args(["-9", &pid.to_string()]).status();
+    #[cfg(windows)]
+    let r = {
+        use std::os::windows::process::CommandExt;
+        Command::new("taskkill")
+            .args(["/F", "/PID", &pid.to_string()])
+            .creation_flags(0x0800_0000)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+    };
+    match r {
+        Ok(st) if st.success() => eprintln!("unity engine: stopped player {pid} left by a Trippin that is gone"),
+        Ok(st) => eprintln!("unity engine: could not stop stale player {pid} ({st})"),
+        Err(e) => eprintln!("unity engine: could not stop stale player {pid}: {e}"),
+    }
+}
+
+/// Stop players left running by a Trippin that crashed or was force-quit
+/// (its exit path, [`shutdown`], never ran). Slow on Windows (PowerShell), so
+/// [`Engine::new`] runs it on a thread and the first spawn waits for it.
+pub fn sweep_stale_players() {
+    let Some(listing) = process_listing() else { return };
+    for pid in stale_players(&listing, std::process::id()) {
+        kill_pid(pid);
     }
 }
 
@@ -125,13 +226,15 @@ pub struct Engine {
     pub status: String,
     /// Download progress / result while the player is being fetched.
     download: Option<Arc<Mutex<Result<String, String>>>>,
+    /// The stale-player sweep; nothing is spawned until it finishes.
+    sweep: Option<(std::thread::JoinHandle<()>, Instant)>,
 }
 
 impl Engine {
     /// Create the frame file and start the reader thread; the process is
     /// spawned by `tick`.
     pub fn new(port: u16) -> Result<Engine> {
-        let path = std::env::temp_dir().join(format!("trippin-engine-{}.frame", std::process::id()));
+        let path = std::env::temp_dir().join(frame_name(std::process::id()));
         let len = HEADER + (EXT_W * EXT_H * 4) as usize;
         let f = std::fs::OpenOptions::new()
             .read(true)
@@ -162,6 +265,11 @@ impl Engine {
             stop,
             status: "starting".into(),
             download: None,
+            sweep: std::thread::Builder::new()
+                .name("engine-sweep".into())
+                .spawn(sweep_stale_players)
+                .ok()
+                .map(|h| (h, Instant::now())),
         })
     }
 
@@ -170,6 +278,15 @@ impl Engine {
     pub fn tick(&mut self) {
         if QUITTING.load(Ordering::Relaxed) {
             return;
+        }
+        // A stale player must be gone before ours starts (it holds the feed
+        // port's traffic and blocks a second instance). Bounded: a hung
+        // listing never keeps the engine off.
+        if let Some((h, t)) = &self.sweep {
+            if !h.is_finished() && t.elapsed() < Duration::from_secs(10) {
+                return;
+            }
+            self.sweep = None;
         }
         {
             let mut g = child();
@@ -422,5 +539,47 @@ fn read_loop(map: MmapMut, latest: Arc<Mutex<Option<InFrame>>>, stop: Arc<Atomic
             rgba: Arc::new(px),
             at: Instant::now(),
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_player_whose_trippin_is_gone_is_stale() {
+        // macOS `ps` lines: the dead Trippin 4100's player, the live 4200's
+        // player and the live Trippin 4200 itself (paths with spaces).
+        let listing = "\
+ 4101 ./unity/TrippinStage.app/Contents/MacOS/Trippin Stage -batchmode -trippinFrame /var/folders/x/T/trippin-engine-4100.frame -trippinPort 9137
+ 4201 ./unity/TrippinStage.app/Contents/MacOS/Trippin Stage -batchmode -trippinFrame /var/folders/x/T/trippin-engine-4200.frame -trippinPort 9137
+ 4200 /Applications/Trippin.app/Contents/MacOS/trippin
+  300 /usr/sbin/cfprefsd agent
+";
+        assert_eq!(stale_players(listing, 4200), vec![4101]);
+    }
+
+    #[test]
+    fn another_running_trippins_player_and_our_own_are_kept() {
+        let players = "\
+ 4201 Trippin Stage -batchmode -trippinFrame /tmp/trippin-engine-4200.frame
+ 4200 /Users/dj/Trippin/target/release/trippin
+ 5001 Trippin Stage -batchmode -trippinFrame /tmp/trippin-engine-5000.frame
+";
+        let listing = format!("{players} 5000 /Applications/Trippin.app/Contents/MacOS/trippin\n");
+        assert!(stale_players(&listing, 4200).is_empty(), "both owners are alive");
+        // The owner pid reused by something that isn't Trippin: stale.
+        let reused = format!("{players} 5000 /usr/bin/vim notes.txt\n");
+        assert_eq!(stale_players(&reused, 4200), vec![5001]);
+        // A player never counts its own pid as stale.
+        assert!(stale_players(&reused, 5001).is_empty());
+    }
+
+    #[test]
+    fn windows_lines_parse_too() {
+        // Win32_Process via PowerShell: pid, tab, command line (may be empty).
+        let listing = "4\t\n812\t\"C:\\Program Files\\Trippin\\unity\\TrippinStage.exe\" -batchmode -trippinFrame C:\\Users\\dj\\AppData\\Local\\Temp\\trippin-engine-777.frame -trippinPort 9137\n900\t\"C:\\Program Files\\Trippin\\trippin.exe\"\n";
+        assert_eq!(stale_players(listing, 900), vec![812]);
+        assert_eq!(frame_name(777), "trippin-engine-777.frame");
     }
 }
