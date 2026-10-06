@@ -620,6 +620,15 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
     `text_edit_focused()` (`EguiWin::wants_keyboard`). Otherwise egui
     swallows Space and re-triggers the focused widget instead of firing
     the bound hotkey.
+  - A click that comes back to the exact pixel the pointer left from
+    used to do nothing: winit (Windows) skips a `CursorMoved` whose
+    position equals its cached last one, and egui-winit forgets the
+    pointer on `CursorLeft`, so the press had no position.
+    `EguiWin::on_event` replays the last position on `CursorEntered`.
+    Test harnesses that jump the cursor with `SetCursorPos` hit this
+    every time, so keep that replay. Also: `PrintWindow` captures of an
+    idle egui window can be stale. Check panel state with a real screen
+    grab or over the remote, not `PrintWindow`.
 
 ## 8. Streaming features: how they work
 
