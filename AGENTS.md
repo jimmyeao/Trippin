@@ -39,10 +39,13 @@ weighted by the share of rated scenes that fit: at the 0.5 default they
 never played, and counted as always fitting they took 43% of cuts.
 Follow-live also scores the coasted position (`correlate`'s `expect`,
 within `NEAR_S` = 0.15 s: a wider window lets a refinement slip a beat and
-ratchet) and seeks only on a confirmed jump: slow and strict while the near
-match holds (repeated sections score as high as the right spot), fast once
-it's lost (`LOST_SCORE`). Recovery from a real DJ jump still takes the
-20 s live window to refill; switching it off while locked must run
+ratchet) and seeks only on evidence: a *distinct* peak (`DISTINCT` above
+anything 2 s away; repeats and flat breakdowns have none) whose candidates
+*advance with the music* (`AGREE_S`), stricter while the near match holds.
+Lost with no such peak it coasts (`LOST_HOLD_S`) rather than chase the
+luckiest offset. `TRIPPIN_FOLLOW_DEBUG=1` logs every evaluation. Recovery
+from a real DJ jump still takes the 20 s live window to refill; switching
+it off while locked must run
 `end_show` (the `Stopped if was_locked` arm).
 Random picks skip the last few scenes (`Director::recent`, half the pool,
 max 8), or a small Style pool repeats the same scenes. Timeline follow-live
