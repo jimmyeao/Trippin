@@ -200,7 +200,9 @@ and replugging the controller is picked up automatically.
 A **Style** steers what Auto picks for you, so a rock night doesn't get synth grids
 and a lounge set doesn't get strobes. Choose one from the **Style** menu in the
 Looks row on the Perform page (or `Next Style` on a key, OSC `/trippin/style`, the
-remote). **Off** is the default and leaves Auto exactly as it was.
+remote). **Off** is the default and leaves Auto exactly as it was. Choosing a Style puts
+the palette on **Auto** (its colour families only steer Auto); pick a fixed palette
+afterwards to override the colours and keep the rest.
 
 | Style | What you get |
 |---|---|
@@ -213,20 +215,23 @@ remote). **Off** is the default and leaves Auto exactly as it was.
 | Party / Wedding | Bright, warm and festive, with the seasonal scenes in. Safe for a mixed crowd. |
 
 A Style narrows the scenes Auto may choose from (by what each scene looks like; see
-`shaders/scene_tags.json`), picks calmer ones in breakdowns, keeps the **auto**
+`shaders/scene_tags.json`), swaps to its own calmer scenes for the length of a breakdown, keeps the **auto**
 palette to its own colour family (a fixed palette you pick stays as you set it),
 and sets the cut length. It never overrides you: scenes you switched off stay off,
 and **Manual** mode and anything you pick by hand are untouched. While a Style is
-on, it owns the phrase length, cut-on-drops and automatic effects, so changing those
-by hand has no effect until you turn the Style off. Only the Style's name is saved.
+on, it owns the phrase length, cut-on-drops and automatic effects (the controls say
+what the Style is setting), so changing those by hand has no effect until you turn
+the Style off. The Perform page shows how many scenes Auto picks from. Only the
+Style's name is saved.
 
 ## Looks
 
 A **Look** is the visual state saved under a name: the scene, palette, effect and
 dancer, as they are on screen right now. One tap recalls it.
 
-- **Save one:** on the Perform page, type a name in the Looks row and press
-  **Save look**. It never overwrites; a name already in use becomes `name-2`.
+- **Save one:** on the Perform page (Library and Pads views), type a name under the
+  Looks row and press **Save look**. With the palette on Auto it stores the colours
+  on screen at that moment, so the Look comes back looking the same. It never overwrites; a name already in use becomes `name-2`.
 - **Recall:** click it. Right-click a Look to put it on **slot 1 to 8** (then a
   hotkey, a MIDI pad, OSC `/trippin/look 3` or the remote can recall it) or to
   delete it.
@@ -238,7 +243,9 @@ dancer, as they are on screen right now. One tap recalls it.
 - **Files:** one `<name>.look.json` per Look in the `looks` folder next to
   `trippin.json`. Copy a file to another machine to share it. Broken or newer-format
   files are ignored, never an error.
-- Recalling a Look records into an armed timeline as ordinary scene and routine cues.
+- Recalling a Look records into an armed timeline as ordinary scene, routine, palette
+  and effect cues. A scene this machine doesn't have is named on the row for a few
+  seconds, and the rest still applies.
 - The dancer's look (shadow, neon, ...) is called the **Dancer look** in the panel.
 
 ## Scenes

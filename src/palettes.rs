@@ -249,6 +249,12 @@ impl Default for Auto {
 }
 
 impl Auto {
+    /// Start on `name` (a Style change puts its family on screen immediately
+    /// instead of waiting for the mood picker's hold and dwell windows).
+    pub fn start_with(&mut self, name: &'static str) {
+        self.name = name;
+    }
+
     /// The palette matching this frame's mood. `beat` is the running beat
     /// clock (`f.beat_position(now)`) used for the hold/dwell windows.
     #[allow(dead_code)] // the render loop uses `pick_in`; kept for the tests and tools
@@ -258,23 +264,6 @@ impl Auto {
 
     /// `pick`, with a Style's own palette family per mood (`styles::mood_palettes`).
     /// A mood whose list is empty falls back to the built-in rotation.
-    /// The family changed (a Style was picked or cleared): re-pick from it for
-    /// the current mood right away. Starting over with a fresh `Auto` showed
-    /// `rainbow` until a mood held for two clean beats, which on music whose
-    /// energy hovers at a bucket edge took up to ~50 s (i9 test pass).
-    pub fn restyle(&mut self, over: Option<&[Vec<&'static str>; 4]>) {
-        let b = self.bucket;
-        if b >= MOODS.len() {
-            return; // nothing picked yet: the first pick uses the new family
-        }
-        let list: &[&'static str] = match over {
-            Some(o) if !o[b].is_empty() => &o[b],
-            _ => MOODS[b],
-        };
-        self.name = list[self.idx[b] % list.len()];
-        self.cand = None;
-    }
-
     pub fn pick_in(&mut self, f: &Features, beat: f64, over: Option<&[Vec<&'static str>; 4]>) -> &'static str {
         const HOLD: f64 = 2.0;
         const DWELL: f64 = 16.0;
@@ -407,19 +396,5 @@ mod tests {
         assert!(MOODS[1].contains(&a.pick(&peak, 6.0)));
         // Past the 16-beat dwell the peak pick finally lands.
         assert!(MOODS[3].contains(&a.pick(&peak, 20.0)));
-    }
-
-    #[test]
-    fn a_new_family_applies_at_once() {
-        let mut a = Auto::default();
-        let g = feats(0.0, 0.0, 0.0);
-        a.pick(&g, 0.0);
-        a.pick(&g, 2.0); // groove pick from the built-in rotation
-        let fam: [Vec<&'static str>; 4] = [vec!["ice"], vec!["gold"], vec!["fire"], vec!["lava"]];
-        a.restyle(Some(&fam));
-        // Same mood, one frame later, inside the dwell: already the new family.
-        assert_eq!(a.pick_in(&g, 2.1, Some(&fam)), "gold");
-        a.restyle(None);
-        assert!(MOODS[1].contains(&a.pick(&g, 2.2)));
     }
 }

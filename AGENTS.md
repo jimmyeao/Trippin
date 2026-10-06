@@ -157,6 +157,15 @@ cargo run --release -- --ndi-monitor [name]
 cargo run --release -- --list-midi          # MIDI input ports (pad/key controllers)
 ```
 
+- **Names that collide (do not "fix" them: they are serialized):** the dancer's
+  looks are `dancer::STYLES`, `Action::NextStyle` and `CueKind::Look`; the user-facing
+  **Style** (a vibe steering Auto) is `styles::Theme`, `Action::NextTheme`,
+  `Settings::style` and the `style` remote/OSC command; a saved **Look** is
+  `looks::SavedLook` and `Action::Look1..8`. The UI says "Dancer look" for the first.
+- **A Style's breakdown pool is not a subset of its main pool:** Dance/House exclude
+  `slow` from main while their calm pools require it. `styles::narrow(.., calm)`
+  swaps pools; filtering one from the other finds nothing (the bug the Windows test
+  caught). The render loop passes `style_calm` (0.7 in / 0.3 out) for the director's list.
 - **Dancer looks** are `dancer::STYLES` (shadow, neon, strobe, comic, wire); the
   index is stored in settings, timeline cues, AI plans and the iOS remote, so
   only ever append. `--snap-dancer <look>` renders one over a scene, which is how

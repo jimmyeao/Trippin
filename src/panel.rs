@@ -207,6 +207,8 @@ pub struct Status {
     pub clip: Option<String>,
     /// Saved Looks, filled in by the event thread before the panel draws.
     pub looks: Vec<LookRow>,
+    /// A short-lived line for the Looks row (a Look skipped a missing scene).
+    pub look_notice: Option<String>,
     /// Display title for `clip` (same index-space as `clip_titles`).
     pub clip_title: Option<String>,
     pub blackout: bool,
@@ -555,7 +557,7 @@ fn build_ui(
         .show(ui, |ui| match *tab {
             Tab::Perform => {
                 if s.perform_pads {
-                    pads_view(ui, s, st, scenes, thumbs, want_thumbs, cmd);
+                    pads_view(ui, s, st, scenes, look_name, thumbs, want_thumbs, cmd);
                 } else {
                     // Inspector declared before the central grid (top → right →
                     // central) so egui shrinks the library correctly — no width
@@ -764,6 +766,157 @@ fn palette_swatch(ui: &mut egui::Ui, s: &mut Settings, name: &str, w: f32, h: f3
 // ---------------------------------------------------------------------------
 
 #[allow(clippy::too_many_arguments)]
+/// The Looks and Style controls: a one-row strip of Look buttons that scrolls
+/// sideways (twelve Looks must not push the scene grid down), then the name
+/// field with its Save button, the Style menu, and any notice. Shared by the
+/// Library and Pads views: Looks are a performance control.
+/// What a selected Style is setting right now, for the controls it overrides:
+/// those show the saved value, which is not what is in effect. `None` when
+/// no Style is on.
+fn style_override_note(s: &Settings) -> Option<String> {
+    let cat = crate::styles::catalog();
+    let t = crate::styles::active(s, cat)?;
+    let mut parts = Vec::new();
+    if let Some(b) = t.director.phrase_bars {
+        parts.push(format!("{b} bars"));
+    }
+    if let Some(d) = t.director.cut_on_drops {
+        parts.push(format!("cut on drops {}", if d { "on" } else { "off" }));
+    }
+    if let Some(a) = t.director.fx_auto {
+        parts.push(format!("auto effects {}", if a { "on" } else { "off" }));
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    Some(format!("Style {} sets: {} (turn the Style off to use your own)", t.name, parts.join(", ")))
+}
+
+fn looks_strip(ui: &mut egui::Ui, s: &mut Settings, st: &Status, look_name: &mut String, cmd: &mut Vec<UiCommand>) {
+    use crate::ui_theme::*;
+    // `horizontal` children see the parent's max_rect, so pin the row width up
+    // front (AGENTS.md egui rules): nothing here may widen under the inspector.
+    let row_w = ui.available_width();
+    ui.horizontal(|ui| {
+        ui.set_max_width(row_w);
+        ui.add_space(2.0);
+        ui.label(egui::RichText::new("Looks").size(11.5).color(MUTED));
+        if st.looks.is_empty() {
+            ui.label(
+                egui::RichText::new("none yet: name the current look below and press Save look")
+                    .size(11.0)
+                    .color(FAINT),
+            );
+            return;
+        }
+        egui::ScrollArea::horizontal()
+            .id_salt("looks_scroll")
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    for l in &st.looks {
+                        let full = match l.slot {
+                            Some(n) => format!("{n} · {}", l.name),
+                            None => l.name.clone(),
+                        };
+                        let shown = if full.chars().count() > 22 {
+                            format!("{}…", full.chars().take(21).collect::<String>())
+                        } else {
+                            full.clone()
+                        };
+                        let r = ui.add(
+                            egui::Button::new(egui::RichText::new(shown).size(11.5).color(TEXT))
+                                .fill(RAISED)
+                                .corner_radius(egui::CornerRadius::same(9)),
+                        );
+                        r.clone().on_hover_text(format!("{full}\nClick to recall · right-click for key/pad slot or delete"));
+                        if r.clicked() {
+                            cmd.push(UiCommand::ApplyLook(l.id.clone()));
+                        }
+                        r.context_menu(|ui| {
+                            for n in 1..=crate::looks::SLOTS {
+                                let taken = st.looks.iter().find(|o| o.slot == Some(n) && o.id != l.id);
+                                let label = match taken {
+                                    Some(o) => format!("Put on slot {n} (replaces {})", o.name),
+                                    None => format!("Put on slot {n}"),
+                                };
+                                if ui.button(label).clicked() {
+                                    cmd.push(UiCommand::LookSlot(l.id.clone(), Some(n)));
+                                    ui.close();
+                                }
+                            }
+                            if l.slot.is_some() && ui.button("Clear slot").clicked() {
+                                cmd.push(UiCommand::LookSlot(l.id.clone(), None));
+                                ui.close();
+                            }
+                            ui.separator();
+                            if ui.button("Delete").clicked() {
+                                cmd.push(UiCommand::DeleteLook(l.id.clone()));
+                                ui.close();
+                            }
+                        });
+                    }
+                });
+            });
+    });
+    ui.horizontal_wrapped(|ui| {
+        ui.set_max_width(row_w);
+        ui.add_space(2.0);
+        let field = ui.add(
+            egui::TextEdit::singleline(look_name)
+                .desired_width(140.0)
+                .hint_text("name this look…"),
+        );
+        let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        let can = !look_name.trim().is_empty();
+        let save = ui
+            .add_enabled(can, egui::Button::new(egui::RichText::new("Save look").size(11.5)))
+            .on_hover_text("Saves the scene, palette, effect and dancer as they are now")
+            .clicked();
+        if can && (save || enter) {
+            cmd.push(UiCommand::SaveLook(std::mem::take(look_name)));
+        }
+        // Style: steers the auto-pilot's scene pool, palettes and pacing.
+        let cat = crate::styles::catalog();
+        if !cat.themes.is_empty() {
+            ui.separator();
+            // ComboBox::show_ui is a ui.horizontal inside, which never wraps: in
+            // this wrapped row it spilled under the inspector at 720 pt (i9 test).
+            // One wrap-aware allocation keeps the label and the combo together.
+            ui.allocate_ui(egui::vec2(190.0, 22.0), |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Style").size(11.5).color(MUTED));
+                    let now = s
+                        .style
+                        .as_deref()
+                        .and_then(|id| cat.theme(id))
+                        .map(|t| t.name.as_str())
+                        .unwrap_or("Off");
+                    egui::ComboBox::from_id_salt("style_pick")
+                        .selected_text(egui::RichText::new(now).size(11.5))
+                        .width(130.0)
+                        .show_ui(ui, |ui| {
+                            if ui.selectable_label(s.style.is_none(), "Off").clicked() {
+                                crate::styles::select(s, None);
+                            }
+                            for t in &cat.themes {
+                                let on = s.style.as_deref() == Some(t.id.as_str());
+                                if ui.selectable_label(on, &t.name).on_hover_text(&t.about).clicked() {
+                                    crate::styles::select(s, Some(t.id.clone()));
+                                }
+                            }
+                        })
+                        .response
+                        .on_hover_text("Steers which scenes and colours Auto picks, and how fast it cuts. Choosing one puts the palette on Auto.");
+                });
+            });
+        }
+        if let Some(n) = &st.look_notice {
+            ui.label(egui::RichText::new(n).size(10.5).color(egui::Color32::from_rgb(230, 170, 70)));
+        }
+    });
+}
+
 fn perform_tab(
     ui: &mut egui::Ui,
     s: &mut Settings,
@@ -805,7 +958,7 @@ fn perform_tab(
             }
         })
         .collect();
-    let in_rotation = (0..scenes.len())
+    let rotating: Vec<usize> = (0..scenes.len())
         .filter(|&i| {
             !s.disabled_scenes.contains(&scenes[i])
                 && if heavy.get(i).copied().unwrap_or(false) {
@@ -814,107 +967,21 @@ fn perform_tab(
                     s.flat_scenes
                 }
         })
-        .count();
-
-    // Looks: one-tap recall of a saved scene + palette + effect + dancer. Wrapped
-    // like the toolbar below (a non-wrapping row would re-widen the parent
-    // cursor under the inspector at narrow widths).
-    ui.horizontal_wrapped(|ui| {
-        ui.add_space(2.0);
-        ui.label(egui::RichText::new("Looks").size(11.5).color(MUTED));
-        for l in &st.looks {
-            let label = match l.slot {
-                Some(n) => format!("{n} · {}", l.name),
-                None => l.name.clone(),
-            };
-            let short = if label.chars().count() > 22 {
-                format!("{}…", label.chars().take(21).collect::<String>().trim_end())
-            } else {
-                label.clone()
-            };
-            let r = ui.add(
-                egui::Button::new(egui::RichText::new(short).size(11.5).color(TEXT))
-                    .fill(RAISED)
-                    .corner_radius(egui::CornerRadius::same(9)),
-            );
-            r.clone().on_hover_text(format!("{label}\nClick to recall · right-click for key/pad slot or delete"));
-            if r.clicked() {
-                cmd.push(UiCommand::ApplyLook(l.id.clone()));
-            }
-            r.context_menu(|ui| {
-                for n in 1..=crate::looks::SLOTS {
-                    if ui.button(format!("Put on slot {n}")).clicked() {
-                        cmd.push(UiCommand::LookSlot(l.id.clone(), Some(n)));
-                        ui.close();
-                    }
-                }
-                if l.slot.is_some() && ui.button("Clear slot").clicked() {
-                    cmd.push(UiCommand::LookSlot(l.id.clone(), None));
-                    ui.close();
-                }
-                ui.separator();
-                if ui.button("Delete").clicked() {
-                    cmd.push(UiCommand::DeleteLook(l.id.clone()));
-                    ui.close();
-                }
-            });
-        }
-        // The name field and its button wrap as one item, so "Save look" never
-        // lands on a line of its own.
-        ui.allocate_ui(egui::vec2(210.0, 22.0), |ui| {
-            ui.horizontal(|ui| {
-                let field = ui.add(
-                    egui::TextEdit::singleline(look_name)
-                        .desired_width(120.0)
-                        .hint_text("name this look…"),
-                );
-                let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                let can = !look_name.trim().is_empty();
-                let save = ui
-                    .add_enabled(can, egui::Button::new(egui::RichText::new("Save look").size(11.5)))
-                    .on_hover_text("Saves the scene, palette, effect and dancer as they are now")
-                    .clicked();
-                if can && (save || enter) {
-                    cmd.push(UiCommand::SaveLook(std::mem::take(look_name)));
-                }
-            });
-        });
-        // Style: steers the auto-pilot's scene pool, palettes and pacing.
+        .collect();
+    let in_rotation = rotating.len();
+    // With a Style on, say how many of those Auto may actually pick from.
+    let style_note = {
         let cat = crate::styles::catalog();
-        if !cat.themes.is_empty() {
-            ui.separator();
-            // ComboBox::show_ui is a ui.horizontal inside, which never wraps: in
-            // this wrapped row it spilled under the inspector when it landed
-            // near the edge. One wrap-aware allocation keeps label + combo together.
-            ui.allocate_ui(egui::vec2(190.0, 22.0), |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Style").size(11.5).color(MUTED));
-                    let now = s
-                        .style
-                        .as_deref()
-                        .and_then(|id| cat.theme(id))
-                        .map(|t| t.name.as_str())
-                        .unwrap_or("Off");
-                    egui::ComboBox::from_id_salt("style_pick")
-                        .selected_text(egui::RichText::new(now).size(11.5))
-                        .width(130.0)
-                        .show_ui(ui, |ui| {
-                            if ui.selectable_label(s.style.is_none(), "Off").clicked() {
-                                s.style = None;
-                            }
-                            for t in &cat.themes {
-                                let on = s.style.as_deref() == Some(t.id.as_str());
-                                if ui.selectable_label(on, &t.name).on_hover_text(&t.about).clicked() {
-                                    s.style = Some(t.id.clone());
-                                }
-                            }
-                        })
-                        .response
-                        .on_hover_text("Steers which scenes and colours Auto picks, and how fast it cuts");
-                });
-            });
+        match crate::styles::active(s, cat) {
+            Some(t) if s.mode != crate::config::Mode::Manual => {
+                let n = rotating.iter().filter(|&&i| t.scenes.matches(&scenes[i], &cat.tags)).count();
+                format!(" · {} Style: Auto picks from {n}", t.name)
+            }
+            _ => String::new(),
         }
-    });
+    };
+
+    looks_strip(ui, s, st, look_name, cmd);
 
     // Toolbar: search field, filter pills (active one is bright, like the
     // mockup), then the stats line with all on/off at its right edge.
@@ -1005,10 +1072,11 @@ fn perform_tab(
     ui.horizontal_wrapped(|ui| {
         ui.label(
             egui::RichText::new(format!(
-                "{} shown · {} of {} in rotation · click to preview · toggle to add/remove from rotation",
+                "{} shown · {} of {} in rotation{} · click to preview · toggle to add/remove from rotation",
                 shown.len(),
                 in_rotation,
-                scenes.len()
+                scenes.len(),
+                style_note
             ))
             .size(10.5)
             .color(FAINT),
@@ -1620,6 +1688,9 @@ fn inspector_body(
             &mut s.phrase_bars,
             &[(2u32, "2"), (4, "4"), (8, "8"), (16, "16"), (32, "32")],
         );
+        if let Some(n) = style_override_note(s) {
+            ui.label(egui::RichText::new(n).size(10.0).color(crate::ui_theme::FAINT));
+        }
         ctl_row(ui, "Dancer", |ui| {
             // Button first via right-to-left so a long clip name can't push
             // it past the panel edge; the value gets the leftover width.
@@ -1772,6 +1843,7 @@ fn pads_view(
     s: &mut Settings,
     st: &Status,
     scenes: &[String],
+    look_name: &mut String,
     thumbs: &mut HashMap<String, egui::TextureHandle>,
     want: &mut HashMap<String, Instant>,
     cmd: &mut Vec<UiCommand>,
@@ -1795,6 +1867,8 @@ fn pads_view(
     // pills/blocks are painted inside a rect bounded by the shrunk cursor:
     // a nested right_to_left would re-anchor to the window's full max_rect
     // and overflow under the palette panel (the A1 cursor bug).
+    looks_strip(ui, s, st, look_name, cmd);
+    ui.add_space(2.0);
     let beat_right = ui.cursor().min.x + ui.available_width();
     ui.horizontal(|ui| {
         ui.add_space(6.0);
@@ -3895,6 +3969,9 @@ fn settings_tab(
                 .on_hover_text("Quiet sections switch the show into calm mode");
             ui.checkbox(&mut s.cut_on_drops, "Cut early on a drop")
                 .on_hover_text("A drop lands early — cut to the next scene with it");
+            if let Some(n) = style_override_note(s) {
+                ui.small(n);
+            }
             ui.checkbox(&mut s.random_order, "Random order")
                 .on_hover_text("Shuffle the rotation instead of playing it in order");
             // External engine (the Unity shows in unity/): its unity_* scenes

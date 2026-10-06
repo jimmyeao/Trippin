@@ -154,6 +154,9 @@ struct Shared {
     /// Saved Looks (files in `looks::looks_dir()`), mirrored here for the panel
     /// and the remote. Written only by the event thread.
     looks: Mutex<Vec<looks::SavedLook>>,
+    /// A line the Looks row shows for a few seconds (a Look that skipped a
+    /// scene this machine lacks). The GUI build has no console to log to.
+    look_notice: Mutex<Option<(String, Instant)>>,
 }
 
 /// A pad press on the MIDI keyboard, posted to the event loop from midir's
@@ -198,15 +201,41 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 /// Scenes that compile, are ticked in the playlist and (for seasonal
-/// scenes) are in season, narrowed to the selected Style's pool.
+/// scenes) are in season.
 fn usable_scenes(r: &Renderer, s: &Settings) -> Vec<usize> {
-    let names = r.scene_names();
-    // The selected Style narrows what's left (never what the user turned off:
-    // those were removed by allowed_scenes, so a Style can't bring them back).
-    styles::narrow(&allowed_scenes(r, s), &|i| names[i].clone(), s, styles::catalog())
+    usable_scenes_mood(r, s, false)
 }
 
-/// [`usable_scenes`] before the Style narrows it: what the user allows.
+/// `usable_scenes`, with the Style's calm pool in effect while `calm` (a
+/// breakdown). Only the director's per-frame list wants `calm`; one-off picks
+/// (next/prev, show playback) use the main pool.
+fn usable_scenes_mood(r: &Renderer, s: &Settings, calm: bool) -> Vec<usize> {
+    let names = r.scene_names();
+    // The selected Style narrows what's left (never what the user turned off:
+    // allowed_scenes removed those, so a Style can't bring them back).
+    styles::narrow(&allowed_scenes(r, s), &|i| names[i].clone(), s, styles::catalog(), calm)
+}
+
+/// The director's per-frame list: `allowed` narrowed by the Style (its calm
+/// pool while `calm`). A scene the DJ picked or queued by hand outside the pool
+/// stays on air: the director cuts away at once from a scene that isn't usable
+/// (meant for one switched off in the playlist) and drops a queued one at cut
+/// time, so they are kept while the user allows them. The pickers skip the
+/// live scene, so every automatic pick is still the Style's and the next phrase
+/// cut goes back to the pool.
+fn director_scenes(r: &Renderer, s: &Settings, allowed: &[usize], calm: bool, dir: &Director) -> Vec<usize> {
+    let mut usable = styles::narrow(allowed, &|i| r.scene_name(i).to_string(), s, styles::catalog(), calm);
+    for keep in [Some(dir.scene), dir.next.filter(|_| dir.next_queued)].into_iter().flatten() {
+        if allowed.contains(&keep) && !usable.contains(&keep) {
+            usable.push(keep);
+        }
+    }
+    usable.sort_unstable();
+    usable
+}
+
+/// The scenes the user allows (compiled, ticked, in season, GPU tier), before
+/// the Style narrows them.
 fn allowed_scenes(r: &Renderer, s: &Settings) -> Vec<usize> {
     let names = r.scene_names();
     let heavy = r.scene_heavy();
@@ -526,24 +555,9 @@ fn apply_playhead(
 /// time an event fires: in a breakdown the queue should hold a calm scene,
 /// in a hot section a hot one. Random order only — an ordered playlist is
 /// a curated sequence, and a queued "play next" is the operator's call.
-/// `allowed` is `usable` before the Style narrowed it: a Style's calm pool
-/// usually sits outside its main pool (Dance excludes `slow`, its calm pool
-/// requires it), so breakdown picks are drawn from what the user allows.
-fn repick_for_mood(
-    dir: &mut Director,
-    r: &Renderer,
-    usable: &[usize],
-    allowed: &[usize],
-    f: &audio::Features,
-    s: &Settings,
-) {
+fn repick_for_mood(dir: &mut Director, r: &Renderer, usable: &[usize], f: &audio::Features, s: &Settings) {
     if s.mode != Mode::Auto || !s.random_order || usable.len() < 2 || dir.next_queued {
         return;
-    }
-    // A calm pick from outside the Style's pool is for the breakdown only: as
-    // soon as it lifts, queue a pool scene again so the drop lands on one.
-    if f.calm <= 0.55 && dir.next.is_some_and(|n| !usable.contains(&n)) {
-        dir.next = dir.pick_next(usable, true);
     }
     // Mid-moods get no opinion — any pick is honest.
     let target = if f.calm > 0.55 {
@@ -553,13 +567,15 @@ fn repick_for_mood(
     } else {
         return;
     };
+    let close = |e: f32| (e - target).abs() <= 0.22;
     // In a breakdown a Style prefers its own calm scenes.
     let pool = if target < 0.5 {
-        styles::calm_candidates(usable, allowed, &|i| r.scene_name(i).to_string(), s, styles::catalog())
+        styles::calm_candidates(usable, &|i| r.scene_name(i).to_string(), s, styles::catalog())
     } else {
         usable.to_vec()
     };
-    let close = |e: f32| (e - target).abs() <= 0.22;
+    // Keep the queued pick only if it already fits: near the target energy
+    // AND in the pool (a low-energy main-pool scene isn't a Style's calm pick).
     if dir
         .next
         .is_some_and(|n| close(ai::scene_meta(r.scene_name(n)).energy) && pool.contains(&n))
@@ -632,6 +648,9 @@ fn render_loop(
     let mut auto_pal = palettes::Auto::default();
     // The selected Style's auto-palette families, cached by Style id.
     let mut style_pals: Option<(String, [Vec<&'static str>; 4])> = None;
+    // The track is in a breakdown, as far as a Style's calm pool is concerned
+    // (same 0.7 in / 0.3 out hysteresis as the director's own breakdown mode).
+    let mut style_calm = false;
     // Audio watchdog: a stream that dies or goes silent gets rebuilt after
     // `audio_retry` of sustained silence, backing off when the source is
     // genuinely quiet so it isn't re-opened forever.
@@ -965,20 +984,7 @@ fn render_loop(
             s.unity_link = true;
         }
         let allowed = allowed_scenes(&r, &s);
-        let pool = styles::narrow(&allowed, &|i| r.scene_name(i).to_string(), &s, styles::catalog());
-        let mut usable = pool.clone();
-        // The live scene and the queued next stay in the director's list when
-        // the user allows them, even outside the Style's pool: a hand pick or
-        // play-next, or a breakdown's calm pick (repick_for_mood). Otherwise the
-        // director cuts away at once from a scene that isn't usable (meant for
-        // one switched off in the playlist) and drops the queued one. The
-        // pickers skip the live scene, so every other pick is still the Style's.
-        for keep in [Some(dir.scene), dir.next].into_iter().flatten() {
-            if allowed.contains(&keep) && !usable.contains(&keep) {
-                usable.push(keep);
-            }
-        }
-        usable.sort_unstable();
+        let mut usable = director_scenes(&r, &s, &allowed, style_calm, &dir);
         {
             let mut c = lock(&shared.np_cfg);
             if c.source != s.np_source || c.delay_s != s.np_delay_s || c.file != s.np_file {
@@ -1349,6 +1355,16 @@ fn render_loop(
         if !s.breakdown_mode {
             f.calm = 0.0;
         }
+        // The Style pool: the calm pool while the breakdown lasts. Same 0.7/0.3
+        // edges as the director's breakdown events, so when it flips the list
+        // is rebuilt before dir.update: the entry cut must already see the calm
+        // pool and the drop cut the main one (a one-frame-old list sent them
+        // the wrong way round on the i9 test).
+        let was_calm = style_calm;
+        style_calm = s.style.is_some() && (if f.calm > 0.7 { true } else if f.calm < 0.3 { false } else { style_calm });
+        if style_calm != was_calm {
+            usable = director_scenes(&r, &s, &allowed, style_calm, &dir);
+        }
         // Positive latency shows the beat earlier (compensating capture delay).
         let pos = f.beat_position(now) + s.latency_ms as f64 / 1000.0 * f.bpm as f64 / 60.0;
         let ev = dir.update(&f, pos, dt, &usable, &s);
@@ -1365,15 +1381,18 @@ fn render_loop(
                 }
             }
         }
-        // A Style change swaps the auto-palette families, and the mood picker
-        // re-picks from the new family at once.
+        // A Style change swaps the auto-palette families (and restarts the mood
+        // picker so the new family shows within a couple of beats).
         {
             let want = s.style.as_deref();
             if style_pals.as_ref().map(|(id, _)| id.as_str()) != want {
                 style_pals = want
                     .and_then(|id| styles::catalog().theme(id))
                     .map(|t| (t.id.clone(), styles::mood_palettes(t)));
-                auto_pal.restyle(style_pals.as_ref().map(|(_, p)| p));
+                auto_pal = palettes::Auto::default();
+                if let Some(first) = style_pals.as_ref().and_then(|(_, p)| p[1].first().copied()) {
+                    auto_pal.start_with(first);
+                }
             }
         }
         // `palette = "auto"`: pick the gradient to match the music's mood.
@@ -1385,7 +1404,7 @@ fn render_loop(
         r.set_palette(pal);
         // Free cuts land on musical events — the queued pick should fit
         // the mood too: calm sections want calm scenes, hot ones want hot.
-        repick_for_mood(&mut dir, &r, &pool, &allowed, &f, &s);
+        repick_for_mood(&mut dir, &r, &usable, &f, &s);
 
         // Dancer follows the settings; auto-pilot changes it on cuts and phrases.
         dancer.enabled = s.dancer_enabled;
@@ -1644,6 +1663,7 @@ fn render_loop(
                 .and_then(|i| shared.clip_titles.get(i).cloned());
             *lock(&shared.status) = Status {
                 looks: Vec::new(), // filled by the event thread when the panel draws
+                look_notice: None,
                 bpm: f.bpm,
                 confidence: f.tempo_confidence,
                 beat_in_bar,
@@ -2011,7 +2031,7 @@ impl App {
                     let s = self.settings_mut();
                     styles::next_id(s.style.as_deref(), cat)
                 };
-                self.settings_mut().style = next;
+                styles::select(&mut self.settings_mut(), next);
                 self.mark_dirty();
             }
             a if a.look_slot().is_some() => {
@@ -2045,6 +2065,14 @@ impl App {
         if applied.changed {
             self.mark_dirty();
         }
+        // Colours and effect record too, so a recorded Look replays whole.
+        if let Some(p) = applied.palette {
+            self.record_cue(CueKind::Palette(p));
+        }
+        if let Some((mode, auto)) = applied.fx {
+            self.record_cue(CueKind::Fx(mode));
+            self.record_cue(CueKind::FxAuto(auto));
+        }
         if let Some(name) = applied.scene {
             if let Some(i) = sh.scene_names.iter().position(|n| *n == name) {
                 self.record_cue(CueKind::Scene(name));
@@ -2063,7 +2091,9 @@ impl App {
             } else {
                 format!(" (needs {})", look.requires.join(", "))
             };
-            eprintln!("Look \"{}\": scene {missing} isn't available here{need}; applied the rest", look.name);
+            let msg = format!("Look \"{}\": scene {missing} isn't available here{need}; applied the rest", look.name);
+            eprintln!("{msg}");
+            *lock(&sh.look_notice) = Some((msg, Instant::now()));
         }
     }
 
@@ -2074,16 +2104,17 @@ impl App {
         if name.is_empty() {
             return;
         }
-        let (scene, clip) = {
+        let (scene, clip, palette_now) = {
             let st = lock(&shared.status);
-            (shared.scene_names.get(st.scene).cloned(), st.clip.clone())
+            (shared.scene_names.get(st.scene).cloned(), st.clip.clone(), st.palette_now.clone())
         };
         let mut look = {
             let s = lock(&shared.settings);
-            looks::capture(name, &s, scene.as_deref(), clip.as_deref())
+            looks::capture(name, &s, scene.as_deref(), clip.as_deref(), Some(palette_now.as_str()))
         };
         let mut all = lock(&shared.looks);
         look.id = looks::unique_id(&all, name);
+        look.name = looks::unique_name(name, &look.id);
         if looks::save(&looks::looks_dir(), &look).is_ok() {
             all.push(look);
             all.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()).then(a.id.cmp(&b.id)));
@@ -2200,7 +2231,7 @@ impl App {
                     id => cat.theme(id).map(|t| Some(t.id.clone())),
                 };
                 if let Some(n) = next {
-                    self.settings_mut().style = n;
+                    styles::select(&mut self.settings_mut(), n);
                     self.mark_dirty();
                 }
             }
@@ -2431,6 +2462,10 @@ impl App {
         if let Some(w) = &self.window {
             status.fullscreen = w.fullscreen().is_some();
         }
+        status.look_notice = lock(&shared.look_notice)
+            .as_ref()
+            .filter(|(_, at)| at.elapsed() < Duration::from_secs(8))
+            .map(|(m, _)| m.clone());
         status.looks = lock(&shared.looks)
             .iter()
             .map(|l| panel::LookRow { id: l.id.clone(), name: l.name.clone(), slot: l.slot })
@@ -2679,6 +2714,7 @@ impl ApplicationHandler<AppEvent> for App {
             midi_status: Mutex::new((false, "off".into())),
             remote_status: Mutex::new((false, "off".into())),
             looks: Mutex::new(looks::load_all(&looks::looks_dir())),
+            look_notice: Mutex::new(None),
         });
         self.shared = Some(shared.clone());
         let (tx, rx) = mpsc::channel();
