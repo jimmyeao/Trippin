@@ -2853,12 +2853,13 @@ impl ApplicationHandler<AppEvent> for App {
                         // focused text field; function/arrow keys stay global
                         // hotkeys, so F1 toggles even while typing in the
                         // scene filter. Space counts as text too — names
-                        // need it.
+                        // need it — and Enter submits a field (Save look).
                         let text_like = matches!(event.logical_key, Key::Character(_))
                             || matches!(
                                 event.logical_key,
                                 Key::Named(
                                     winit::keyboard::NamedKey::Space
+                                        | winit::keyboard::NamedKey::Enter
                                         | winit::keyboard::NamedKey::Backspace
                                         | winit::keyboard::NamedKey::Delete
                                         | winit::keyboard::NamedKey::Home

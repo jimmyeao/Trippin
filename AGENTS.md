@@ -554,6 +554,14 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
     overflow and re-widen `cursor.max.x`, pushing later rows under a
     `Panel::right`. Capture the needed width at parent scope first, or
     paint inside a bounded `allocate_exact_size` rect.
+  - `ComboBox::show_ui` is a `ui.horizontal` inside, so in a
+    `horizontal_wrapped` row it never wraps and spills past the column when
+    it lands near the edge (the Perform page Looks row with 12 Looks).
+    Put a label + combo, or a field + its button, in one
+    `allocate_ui(vec2(w, h), …)` so the pair wraps as one item.
+  - The panel hands a focused text field only "text-like" keys (`main.rs`
+    `text_like`, and a second set for the editor window); anything else goes
+    to the hotkeys. Enter is in the panel's set so a field can submit on it.
   - `ui.columns` inside a `ScrollArea` lets card content bleed under the
     neighbour column; use `ui.new_child(UiBuilder::max_rect(...))` columns
     and `ui.add_space(col_height)` to claim the row (see `stream_tab` /
