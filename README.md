@@ -186,6 +186,7 @@ Default keys (all rebindable in the panel):
 | J | record the whole set: start / stop |
 | F1 | show / hide the control panel |
 | Esc | leave fullscreen (it never quits; close the window to quit) |
+| (unbound) | Look 1 to 8: recall the saved Look on that slot (bind keys or pads on the Keys page) |
 
 **MIDI controllers:** every action above can also sit on a MIDI pad or key.
 Pick the input at the top of the Keys tab (`--list-midi` shows the names),
@@ -193,6 +194,59 @@ then click a row's **midi** button and hit the pad — the note is bound.
 Pressing the pad fires the action exactly like the hotkey, including while
 the timeline is recording. Right-click a bound note to clear it. Unplugging
 and replugging the controller is picked up automatically.
+
+## Styles
+
+A **Style** steers what Auto picks for you, so a rock night doesn't get synth grids
+and a lounge set doesn't get strobes. Choose one from the **Style** menu in the
+Looks row on the Perform page (or `Next Style` on a key, OSC `/trippin/style`, the
+remote). **Off** is the default and leaves Auto exactly as it was. Choosing a Style puts
+the palette on **Auto** (its colour families only steer Auto); pick a fixed palette
+afterwards to override the colours and keep the rest.
+
+| Style | What you get |
+|---|---|
+| Dance / EDM | Fast, bright, electric: lasers, tunnels, light walls. Cuts every 4 bars and on drops. |
+| House & Techno | Dark and hypnotic: tunnels, grids, city, geometry. Cool colours, 8-bar scenes. |
+| Pop | Colourful and friendly: bright, warm, organic. Never dark or cold. |
+| Rock | Fire, storms and stage lights. Warm colours, no synth-grid looks. |
+| Hip-hop & R&B | Night city, neon and chrome. Gold and magenta, 8-bar scenes. |
+| Chill / Lounge | Slow, soft scenes: aurora, water, galaxies. 16-bar scenes, no flashes, no drop cuts. |
+| Party / Wedding | Bright, warm and festive, with the seasonal scenes in. Safe for a mixed crowd. |
+
+A Style narrows the scenes Auto may choose from (by what each scene looks like; see
+`shaders/scene_tags.json`), swaps to its own calmer scenes for the length of a breakdown, keeps the **auto**
+palette to its own colour family (a fixed palette you pick stays as you set it),
+and sets the cut length. It never overrides you: scenes you switched off stay off,
+and **Manual** mode and anything you pick by hand are untouched. While a Style is
+on, it owns the phrase length, cut-on-drops and automatic effects (the controls say
+what the Style is setting), so changing those by hand has no effect until you turn
+the Style off. The Perform page shows how many scenes Auto picks from. Only the
+Style's name is saved.
+
+## Looks
+
+A **Look** is the visual state saved under a name: the scene, palette, effect and
+dancer, as they are on screen right now. One tap recalls it.
+
+- **Save one:** on the Perform page (Library and Pads views), type a name under the
+  Looks row and press **Save look**. With the palette on Auto it stores the colours
+  on screen at that moment, so the Look comes back looking the same. It never overwrites; a name already in use becomes `name-2`.
+- **Recall:** click it. Right-click a Look to put it on **slot 1 to 8** (then a
+  hotkey, a MIDI pad, OSC `/trippin/look 3` or the remote can recall it) or to
+  delete it.
+- **Partial Looks:** anything a Look leaves out stays as it is, so a Look can be
+  "just this palette". Edit the file if you want that; the button saves everything.
+- **A scene you don't have:** a Look made on another machine, or one that uses a
+  pack you haven't installed, still applies everything it can and says in the log
+  which scene it skipped.
+- **Files:** one `<name>.look.json` per Look in the `looks` folder next to
+  `trippin.json`. Copy a file to another machine to share it. Broken or newer-format
+  files are ignored, never an error.
+- Recalling a Look records into an armed timeline as ordinary scene, routine, palette
+  and effect cues. A scene this machine doesn't have is named on the row for a few
+  seconds, and the rest still applies.
+- The dancer's look (shadow, neon, ...) is called the **Dancer look** in the panel.
 
 ## Scenes
 
@@ -535,7 +589,10 @@ boundaries and cue transitions land on the "one", not just on beats.
 - **Follow live** is the adventurous bit: it correlates the room's live
   audio onset envelope against the track's stored envelope, locks on when
   the same song is playing in the room and fires the cues at the matching
-  position — a pre-programmed show that follows the DJ's deck.
+  position — a pre-programmed show that follows the DJ's deck. It's off
+  until you switch it on (the **follow live** button in the editor or on
+  the Timeline card): while it's locked, the timeline's cues run the
+  visuals instead of Auto.
 - **Strobe** (timeline cue, Cues library): while it runs the picture is
   black and cuts in on each drum hit — hard cuts, no fade — so it follows
   whatever the drums actually play.

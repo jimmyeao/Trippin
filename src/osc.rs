@@ -16,6 +16,10 @@
 //! /trippin/overlay/ticker /overlay/np           ticker / now-playing card
 //! /trippin/rec/clip     /trippin/rec/set        clip save / set recording
 //! /trippin/timeline/play                        transport toggle
+//! /trippin/look                                  arg: Look slot 1-8 (int)
+//!                                                 or Look id (string)
+//! /trippin/style                                 arg: Style id (string, "off")
+//!                                                 or position (0 = off, 1 = first)
 //! /trippin/set/<key>                            a SetKey knob: fx_amt,
 //!   dancer_size, phrase_bars, latency_ms, np_size, brand_opacity,
 //!   ticker_speed, ticker_text, palette (string), fx (string)
@@ -138,6 +142,36 @@ fn scene_sel(args: &[OscType]) -> Option<SceneSel> {
     }
 }
 
+/// The first arg as a Look selector: an int is a slot (1-8; a button's 0
+/// release matches no slot and is ignored), a string an id.
+fn look_sel(args: &[OscType]) -> Option<String> {
+    match args.first() {
+        Some(OscType::Int(i)) => Some(i.to_string()),
+        Some(OscType::Long(i)) => Some(i.to_string()),
+        Some(OscType::Float(f)) => Some((*f as i64).to_string()),
+        Some(OscType::Double(f)) => Some((*f as i64).to_string()),
+        Some(OscType::String(s)) => Some(s.clone()),
+        _ => None,
+    }
+}
+
+/// The first arg as a Style selector: a string is an id ("off" clears), an int
+/// is the position in the Style list (0 = off, 1 = the first Style, ...).
+fn style_sel(args: &[OscType]) -> Option<String> {
+    let n = match args.first()? {
+        OscType::String(s) => return Some(s.clone()),
+        OscType::Int(i) => *i as i64,
+        OscType::Long(i) => *i,
+        OscType::Float(f) => *f as i64,
+        OscType::Double(f) => *f as i64,
+        _ => return None,
+    };
+    if n <= 0 {
+        return Some("off".into());
+    }
+    crate::styles::catalog().themes.get(n as usize - 1).map(|t| t.id.clone())
+}
+
 /// The first arg as JSON so `remote::parse_set` can be shared verbatim.
 fn arg_value(args: &[OscType]) -> Option<Value> {
     match args.first() {
@@ -171,6 +205,8 @@ fn map(addr: &str, args: &[OscType]) -> Option<RemoteCmd> {
         "/trippin/overlay/name" => press(Action::ToggleName)?,
         "/trippin/overlay/ticker" => press(Action::ToggleTicker)?,
         "/trippin/overlay/np" => press(Action::ShowNowPlaying)?,
+        "/trippin/look" => RemoteCmd::Look(look_sel(args)?),
+        "/trippin/style" => RemoteCmd::Style(style_sel(args)?),
         "/trippin/rec/clip" => press(Action::SaveClip)?,
         "/trippin/rec/set" => press(Action::RecordSet)?,
         "/trippin/timeline/play" => press(Action::TimelinePlay)?,
@@ -239,6 +275,34 @@ mod tests {
             map("/trippin/mode", &[OscType::Int(2)]),
             Some(RemoteCmd::Act(Action::ModeManual))
         ));
+    }
+
+    #[test]
+    fn look_takes_a_slot_or_an_id() {
+        assert!(matches!(
+            map("/trippin/look", &[OscType::Int(3)]),
+            Some(RemoteCmd::Look(s)) if s == "3"
+        ));
+        assert!(matches!(
+            map("/trippin/look", &[OscType::String("club-red".into())]),
+            Some(RemoteCmd::Look(s)) if s == "club-red"
+        ));
+        // A button release sends 0: that is "slot 0", which no Look has.
+        assert!(matches!(map("/trippin/look", &[OscType::Float(0.0)]), Some(RemoteCmd::Look(s)) if s == "0"));
+        assert!(map("/trippin/look", &[]).is_none());
+    }
+
+    #[test]
+    fn style_takes_an_id_or_a_position() {
+        assert!(matches!(
+            map("/trippin/style", &[OscType::String("rock".into())]),
+            Some(RemoteCmd::Style(s)) if s == "rock"
+        ));
+        assert!(matches!(map("/trippin/style", &[OscType::Int(0)]), Some(RemoteCmd::Style(s)) if s == "off"));
+        let first = crate::styles::catalog().themes.first().map(|t| t.id.clone());
+        assert!(matches!(map("/trippin/style", &[OscType::Int(1)]), Some(RemoteCmd::Style(s)) if Some(&s) == first.as_ref()));
+        assert!(map("/trippin/style", &[OscType::Int(999)]).is_none(), "past the end is ignored, not 'off'");
+        assert!(map("/trippin/style", &[]).is_none());
     }
 
     #[test]

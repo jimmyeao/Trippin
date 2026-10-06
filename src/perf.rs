@@ -51,6 +51,19 @@ impl Report {
         }
     }
 
+    /// Every `unity_*` show measured 0 fps: the engine never answered (a
+    /// stale player from a crashed run holding the frame file, i9mac), so
+    /// the run says nothing about the shows. Drop them rather than deselect
+    /// all of them; without engine frames they can't play anyway (`EXT_LIVE`
+    /// gating). Returns whether it dropped anything.
+    pub fn drop_dead_engine(&mut self) -> bool {
+        let dead = self.fps.len() >= 2 && self.fps.values().all(|f| *f <= 0.0);
+        if dead {
+            self.fps.clear();
+        }
+        dead
+    }
+
     /// Scenes measured below 30 fps-equivalent, for the picker's "slow"
     /// flag and the auto-deselect.
     pub fn slow(&self) -> Vec<String> {
@@ -75,6 +88,15 @@ impl Report {
 const WARM: u32 = 30;
 /// wgpu scenes: samples per scene — ~1 s at 60 fps.
 const SAMPLES: usize = 60;
+/// Engine frames per second from a change in its frame `seq` over `secs`.
+/// `seq` is a seqlock counter that bumps by 2 per frame (engine.rs), so the raw
+/// delta counted every Unity show at twice its real rate: one rendering at
+/// 16 fps read 32 and passed the 30 fps cut (i9 test: 82-118 "fps" for shows
+/// the engine logged at ~57).
+fn unity_fps(seq_delta: u64, secs: f64) -> f64 {
+    (seq_delta / 2) as f64 / secs
+}
+
 /// unity_* scenes: engine frames are counted over this window.
 const UNITY_WINDOW: std::time::Duration = std::time::Duration::from_secs(3);
 /// …after letting the engine boot the show for this long first.
@@ -213,8 +235,7 @@ impl Check {
         match self.seq0 {
             Some((s0, t0)) => {
                 let el = t0.elapsed();
-                (el >= UNITY_WINDOW)
-                    .then(|| seq.saturating_sub(s0) as f64 / el.as_secs_f64())
+                (el >= UNITY_WINDOW).then(|| unity_fps(seq.saturating_sub(s0), el.as_secs_f64()))
             }
             None => {
                 if self.entered.elapsed() >= UNITY_SETTLE {
@@ -229,6 +250,27 @@ impl Check {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unity_fps_counts_frames_not_seq_steps() {
+        // 3 s of a 20 fps engine: 60 frames, seq moved 120.
+        assert!((unity_fps(120, 3.0) - 20.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_dead_engine_deselects_nothing() {
+        let mut rep = Report::default();
+        rep.fps.insert("unity_a".into(), 0.0);
+        rep.fps.insert("unity_b".into(), 0.0);
+        assert!(rep.drop_dead_engine());
+        assert!(rep.slow().is_empty());
+        // One dead show among live ones is a real failure and stays.
+        let mut rep = Report::default();
+        rep.fps.insert("unity_a".into(), 0.0);
+        rep.fps.insert("unity_b".into(), 55.0);
+        assert!(!rep.drop_dead_engine());
+        assert_eq!(rep.slow(), ["unity_a"]);
+    }
 
     #[test]
     fn slow_marks_only_under_threshold() {

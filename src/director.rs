@@ -45,6 +45,10 @@ pub struct Director {
     /// `next` came from the operator's "play next" — the mood fitter must
     /// not overwrite a human's pick.
     pub next_queued: bool,
+    /// The scenes that played before this one, newest last. Random picks
+    /// skip them so a small Style pool doesn't land the same scene over
+    /// and over (Party/Pop showed one scene 6 times in 3 minutes).
+    played: std::collections::VecDeque<usize>,
     /// Beat pos of the last cut the director made (any kind). Event cuts
     /// need ≥4 beats of clear air after it — a busy run of musical events
     /// must not strobe the scene list.
@@ -88,7 +92,20 @@ pub struct Director {
     vocal_since: f64,
     /// No vocal-break cut before this beat pos.
     vocal_cool: f64,
+    /// Beat pos the current breakdown began (MAX = none pending). Its cut
+    /// waits `BREAKDOWN_CONFIRM_BEATS`, so a drum drop-out before the drop
+    /// gets one cut (the drop) instead of two 2-4 s apart (i9mac).
+    calm_since: f64,
 }
+
+/// How long a breakdown must last before Auto cuts into it. Real breakdowns
+/// run 8-32 bars; pre-drop drum gaps one or two. A bar (~1.9 s at 128 BPM)
+/// lets a gap end first; the scene already eases into breakdown mode
+/// (intensity, `u.calm`) without a cut.
+const BREAKDOWN_CONFIRM_BEATS: f64 = 4.0;
+
+/// How many past scenes `recent` remembers.
+const RECENT_MAX: usize = 8;
 
 impl Director {
     pub fn new() -> Self {
@@ -114,12 +131,14 @@ impl Director {
             pending_cut: false,
             next: None,
             next_queued: false,
+            played: std::collections::VecDeque::new(),
             last_cut_pos: f64::MIN,
             energy_fast: 0.0,
             energy_slow: 0.5,
             surge_since: f64::MAX,
             surge_cool: 0.0,
             vocal_since: f64::MAX,
+            calm_since: f64::MAX,
             vocal_cool: 0.0,
             beat_onset_acc: 0.0,
             beat_onset_n: 0,
@@ -160,6 +179,12 @@ impl Director {
     }
 
     pub fn cut_to(&mut self, scene: usize) {
+        if scene != self.scene {
+            self.played.push_back(self.scene);
+            if self.played.len() > RECENT_MAX {
+                self.played.pop_front();
+            }
+        }
         self.scene = scene;
         self.scene_started = Instant::now();
         self.bars_in_scene = 0;
@@ -177,6 +202,7 @@ impl Director {
         self.fill_strobe = false;
         self.surge_since = f64::MAX;
         self.vocal_since = f64::MAX;
+        self.calm_since = f64::MAX;
     }
 
     /// The scene that would play next — random (never the current one) or
@@ -186,11 +212,14 @@ impl Director {
             return None;
         }
         Some(if random && usable.len() > 1 {
-            let others: Vec<usize> = usable
+            let mut others: Vec<usize> = usable
                 .iter()
                 .copied()
-                .filter(|&s| s != self.scene)
+                .filter(|&s| s != self.scene && !self.recent(s, usable.len()))
                 .collect();
+            if others.is_empty() {
+                others = usable.iter().copied().filter(|&s| s != self.scene).collect();
+            }
             others[(self.rand() * others.len() as f32) as usize % others.len()]
         } else {
             let i = usable
@@ -199,6 +228,13 @@ impl Director {
                 .map_or(0, |i| i + 1);
             usable[i % usable.len()]
         })
+    }
+
+    /// `scene` played within the last few cuts. The window is half the pool
+    /// (capped at `RECENT_MAX`), so a small pool still has picks left.
+    pub fn recent(&self, scene: usize, pool: usize) -> bool {
+        let n = (pool / 2).min(RECENT_MAX);
+        self.played.iter().rev().take(n).any(|&p| p == scene)
     }
 
     /// Queue a specific scene for the next cut — the panel's "play next".
@@ -468,8 +504,15 @@ impl Director {
             return;
         }
         // The groove leaving — a breakdown or a vocal break — is a
-        // boundary the moment the detector commits to it.
+        // boundary once it has lasted a bar; a shorter gap is the run-up to
+        // a drop, which cuts on its own.
         if entered_calm && !f.silent {
+            self.calm_since = pos;
+        }
+        if !self.in_breakdown || f.silent {
+            self.calm_since = f64::MAX;
+        } else if pos - self.calm_since >= BREAKDOWN_CONFIRM_BEATS {
+            self.calm_since = f64::MAX;
             self.try_event_cut(usable, s, pos, ev);
         }
 
@@ -557,6 +600,27 @@ impl Director {
 mod tests {
     use super::*;
     use crate::audio::Features;
+
+    #[test]
+    fn random_picks_skip_recent_scenes() {
+        let mut d = Director::new();
+        let pool: Vec<usize> = (0..10).collect();
+        // Over many cuts no scene comes back within the last 5 (half the pool).
+        let mut last: Vec<usize> = vec![d.scene];
+        for _ in 0..200 {
+            let n = d.pick_next(&pool, true).unwrap();
+            assert!(!last.iter().rev().take(5).any(|&p| p == n), "{n} repeated within 5: {last:?}");
+            d.cut_to(n);
+            last.push(n);
+        }
+        // A pool of two still alternates (the window shrinks with the pool).
+        let mut d = Director::new();
+        for _ in 0..10 {
+            let n = d.pick_next(&[0, 1], true).unwrap();
+            assert_ne!(n, d.scene);
+            d.cut_to(n);
+        }
+    }
 
     fn settings(mode: Mode) -> Settings {
         Settings {
@@ -663,8 +727,26 @@ mod tests {
         let mut calm_f = groove();
         calm_f.calm = 0.8;
         calm_f.energy = 0.25;
+        let cuts = run(&mut d, &calm_f, &mut pos, 3.0, &s);
+        assert_eq!(cuts, 0, "a breakdown waits a bar before it cuts");
         let cuts = run(&mut d, &calm_f, &mut pos, 2.0, &s);
-        assert_eq!(cuts, 1, "the breakdown landing is itself a cut point");
+        assert_eq!(cuts, 1, "a breakdown that lasts is a cut point");
+    }
+
+    #[test]
+    fn a_short_drum_gap_cuts_once_on_the_drop() {
+        let (mut d, s, mut pos) = free_run();
+        run(&mut d, &groove(), &mut pos, 24.0, &s);
+        let mut gap = groove();
+        gap.calm = 0.8;
+        gap.energy = 0.25;
+        // Two beats of drop-out, then the drums slam back.
+        let cuts = run(&mut d, &gap, &mut pos, 2.0, &s);
+        assert_eq!(cuts, 0, "no cut into a two-beat gap");
+        let mut drop = groove();
+        drop.energy = 0.9;
+        let cuts = run(&mut d, &drop, &mut pos, 2.0, &s);
+        assert!(cuts <= 1, "the drop cuts once at most, got {cuts}");
     }
 
     #[test]
@@ -698,7 +780,8 @@ mod tests {
         run(&mut d, &groove(), &mut pos, 24.0, &s);
         let mut calm_f = groove();
         calm_f.calm = 0.8;
-        let cuts = run(&mut d, &calm_f, &mut pos, 2.0, &s);
+        // The breakdown cuts once it has lasted a bar.
+        let cuts = run(&mut d, &calm_f, &mut pos, 4.5, &s);
         assert_eq!(cuts, 1);
         // Fakeout: energy surges straight back — inside the 4-beat gap
         // nothing else may cut, however hot the detector runs. (The run

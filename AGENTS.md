@@ -26,14 +26,33 @@ new section lands, so Auto can cut there even mid-bar (`director.rs`'s
 `update_fill`; cuts ride `cut_on_drops` and a 2-bar minimum scene length,
 fills never strobe on tunnel/flight scenes or in Manual mode). The bar grid
 is a backstop, not the score: Auto also cuts off-grid on section events —
-the breakdown detector committing (covers vocal breaks too), a sustained
+the breakdown detector committing and holding for a bar
+(`BREAKDOWN_CONFIRM_BEATS`: a pre-drop drum gap is 1-2 bars and gets only
+the drop's cut; covers vocal breaks too), a sustained
 energy surge (chorus/second-drop with no breakdown; fast vs slow energy EMA
 in `update_events`), and the vocal-break proxy (bass thin, mids hot, 5
 beats). Event cuts share a gap (1 bar in-scene + 4 beats since the last
 cut), ride `cut_on_drops`, and stay off in Static and Manual. The queued
 next scene is refit to the mood every frame (`repick_for_mood` in main.rs:
 calm picks low-energy scenes, hot picks high-energy; random order only, and
-never an operator's "play next").
+never an operator's "play next"). Unrated scenes (`SceneMeta::rated` false:
+every `unity_*` show, which `--snap-energy` can't measure) fit any mood,
+weighted by the share of rated scenes that fit: at the 0.5 default they
+never played, and counted as always fitting they took 43% of cuts.
+Follow-live also scores the coasted position (`correlate`'s `expect`,
+within `NEAR_S` = 0.15 s: a wider window lets a refinement slip a beat and
+ratchet) and seeks only on evidence: a *distinct* peak (`DISTINCT` above
+anything 2 s away; repeats and flat breakdowns have none) whose candidates
+*advance with the music* (`AGREE_S`), stricter while the near match holds.
+Lost with no such peak it coasts (`LOST_HOLD_S`) rather than chase the
+luckiest offset. `TRIPPIN_FOLLOW_DEBUG=1` logs every evaluation. Recovery
+from a real DJ jump still takes the 20 s live window to refill; switching
+it off while locked must run
+`end_show` (the `Stopped if was_locked` arm).
+Random picks skip the last few scenes (`Director::recent`, half the pool,
+max 8), or a small Style pool repeats the same scenes. Timeline follow-live
+(`TimelineState::autosync`) is opt-in: on by default, a loaded timeline
+took over Auto whenever one of its tracks played.
 Over the scenes it draws a beat-locked silhouette dancer, text, and stream
 overlays.
 
@@ -157,6 +176,15 @@ cargo run --release -- --ndi-monitor [name]
 cargo run --release -- --list-midi          # MIDI input ports (pad/key controllers)
 ```
 
+- **Names that collide (do not "fix" them: they are serialized):** the dancer's
+  looks are `dancer::STYLES`, `Action::NextStyle` and `CueKind::Look`; the user-facing
+  **Style** (a vibe steering Auto) is `styles::Theme`, `Action::NextTheme`,
+  `Settings::style` and the `style` remote/OSC command; a saved **Look** is
+  `looks::SavedLook` and `Action::Look1..8`. The UI says "Dancer look" for the first.
+- **A Style's breakdown pool is not a subset of its main pool:** Dance/House exclude
+  `slow` from main while their calm pools require it. `styles::narrow(.., calm)`
+  swaps pools; filtering one from the other finds nothing (the bug the Windows test
+  caught). The render loop passes `style_calm` (0.7 in / 0.3 out) for the director's list.
 - **Dancer looks** are `dancer::STYLES` (shadow, neon, strobe, comic, wire); the
   index is stored in settings, timeline cues, AI plans and the iOS remote, so
   only ever append. `--snap-dancer <look>` renders one over a scene, which is how
@@ -211,6 +239,9 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
 | `src/timeline.rs`, `src/song.rs`, `src/editor.rs`, `src/ai.rs` | The timeline show editor (F2), song playback, and the AI show builder (local analysis → prompt → plan → `expand_plan` rules → cues). |
 | `src/panel.rs` | The egui control panel. Tabs: Perform, Dancer & FX, Stream, Timeline, Keys, Settings. App-wide preferences (audio in, latency, director rules, AI provider/key) live on **Settings** (`settings_tab`), not in collapsibles on other pages or in the timeline editor. |
 | `src/config.rs` | `Settings` (serde, `#[serde(default)]`), actions and hotkeys, `titleize` (id → display name), and `data_dir()`. |
+| `src/looks.rs` | Saved Looks (scene + palette + effect + dancer): pure state, `apply`, and one-file-per-Look storage in `<data dir>/looks`. `App::apply_look` (main.rs) applies the settings half through `looks::apply` and sends the scene/routine through the render thread, recording cues. Recalled by `Action::Look1..8` (slots), `RemoteCmd::Look` (remote `look`, OSC `/trippin/look`) and the Perform page row. Design: `docs/design/looks-styles-packs.md`. |
+| `src/tags.rs`, `shaders/scene_tags.json` | The closed scene-tag vocabulary and each scene's tags (tests fail on a scene without tags). Styles pick pools by tag. |
+| `src/styles.rs`, `shaders/styles.json` | Styles (code type `Theme`; "style" is taken by the dancer looks): a scene pool by tag, a calm pool, `auto`-palette families per mood and pacing. `usable_scenes` narrows through `styles::narrow` *after* the user's disabled scenes and the GPU gating, never in Manual; `styles::overlay` sets pacing on the per-frame settings clone, so only `Settings::style` (the id) is saved. Tests fail on an unknown tag/palette, a pool under 15 wgpu scenes, or two near-identical pools. |
 | `src/perf.rs` | The per-machine GPU baseline (`perf.json`) and the Settings-button check that measures `@heavy`/`unity_*` scenes and deselects sub-30 fps ones. |
 | `src/midi.rs` | MIDI input (midir): one port, note-ons become `Action`s. |
 | `src/remote.rs` | LAN remote for the iOS companion app: a WebSocket JSON server (TCP 9138, Bonjour `_trippin._tcp`, PIN-gated) — protocol at the top of the file, details in §8. |
@@ -225,6 +256,11 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
 - **The entry point:** `shaders/scenes/<name>.wgsl` with
   `@fragment fn fs_main(in: VsOut) -> @location(0) vec4<f32>`. The output is
   HDR, and present tonemaps it.
+- **Scene tags:** every scene needs an entry in `shaders/scene_tags.json`
+  (2-5 tags from the closed vocabulary in `src/tags.rs`; `void` has none).
+  `cargo test` fails until you add it, and on any tag outside the vocabulary.
+  Styles (docs/design/looks-styles-packs.md) pick scene pools by these tags, so
+  tag by what the scene looks and moves like, not by who made it.
 - **Header tags** go in the first 8 lines: `// @heavy`, `// @bloom 0.7`,
   `// @tonemap agx` and `// @title Display Name`. `@title` is the scene's
   human name in pickers/remotes — the file stem stays the id; without it
@@ -412,6 +448,17 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   run (macOS Cmd-Q doesn't even return from `run_app`). Process-level
   cleanup (killing the Unity player: `engine::shutdown`) goes in
   `ApplicationHandler::exiting`, with state the event thread can reach.
+- **A crash or force-quit skips `exiting`, so the Unity player is orphaned.**
+  It quits by itself ~15 s after its feed stops, but a Trippin relaunched
+  inside that window feeds the same UDP port, so the orphan lived on
+  (writing to the dead instance's frame file) and the new player exited at
+  once (`exit status: 0; restarting`, in a loop): no Unity until it was killed
+  by hand, and a perf check then scored every show 0 fps. `Engine::new` runs
+  `engine::sweep_stale_players` on a thread before the first spawn: a player
+  names its owner in `-trippinFrame …/trippin-engine-<pid>.frame`, and it is
+  stopped only if that pid is no longer a running Trippin, so another live
+  Trippin's player is never touched (only one player can run at a time
+  either way). Any change to the frame-file name must keep `frame_name`.
 - **macOS: tag egui window layers sRGB** (`egui_win.rs::tag_srgb`, after
   every `surface.configure`). wgpu leaves an sRGB surface's CAMetalLayer
   untagged, and the window server flips untagged content between
@@ -546,6 +593,14 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
     overflow and re-widen `cursor.max.x`, pushing later rows under a
     `Panel::right`. Capture the needed width at parent scope first, or
     paint inside a bounded `allocate_exact_size` rect.
+  - `ComboBox::show_ui` is a `ui.horizontal` inside, so in a
+    `horizontal_wrapped` row it never wraps and spills past the column when
+    it lands near the edge (the Perform page Looks row with 12 Looks).
+    Put a label + combo, or a field + its button, in one
+    `allocate_ui(vec2(w, h), …)` so the pair wraps as one item.
+  - The panel hands a focused text field only "text-like" keys (`main.rs`
+    `text_like`, and a second set for the editor window); anything else goes
+    to the hotkeys. Enter is in the panel's set so a field can submit on it.
   - `ui.columns` inside a `ScrollArea` lets card content bleed under the
     neighbour column; use `ui.new_child(UiBuilder::max_rect(...))` columns
     and `ui.add_space(col_height)` to claim the row (see `stream_tab` /
@@ -565,6 +620,15 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
     `text_edit_focused()` (`EguiWin::wants_keyboard`). Otherwise egui
     swallows Space and re-triggers the focused widget instead of firing
     the bound hotkey.
+  - A click that comes back to the exact pixel the pointer left from
+    used to do nothing: winit (Windows) skips a `CursorMoved` whose
+    position equals its cached last one, and egui-winit forgets the
+    pointer on `CursorLeft`, so the press had no position.
+    `EguiWin::on_event` replays the last position on `CursorEntered`.
+    Test harnesses that jump the cursor with `SetCursorPos` hit this
+    every time, so keep that replay. Also: `PrintWindow` captures of an
+    idle egui window can be stale. Check panel state with a real screen
+    grab or over the remote, not `PrintWindow`.
 
 ## 8. Streaming features: how they work
 

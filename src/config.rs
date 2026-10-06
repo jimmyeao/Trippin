@@ -40,10 +40,21 @@ pub enum Action {
     ToggleLogo,
     ToggleName,
     ToggleTicker,
+    /// Recall the Look on slot 1..=8 (unbound by default; see `looks.rs`).
+    Look1,
+    Look2,
+    Look3,
+    Look4,
+    Look5,
+    Look6,
+    Look7,
+    Look8,
+    /// Step through the Styles: off, then each one in turn (unbound by default).
+    NextTheme,
 }
 
 impl Action {
-    pub const ALL: [Action; 30] = [
+    pub const ALL: [Action; 39] = [
         Action::NextScene,
         Action::PrevScene,
         Action::ModeAuto,
@@ -74,6 +85,15 @@ impl Action {
         Action::ToggleLogo,
         Action::ToggleName,
         Action::ToggleTicker,
+        Action::Look1,
+        Action::Look2,
+        Action::Look3,
+        Action::Look4,
+        Action::Look5,
+        Action::Look6,
+        Action::Look7,
+        Action::Look8,
+        Action::NextTheme,
     ];
 
     pub fn label(self) -> &'static str {
@@ -108,7 +128,31 @@ impl Action {
             Action::ToggleLogo => "Logo on / off",
             Action::ToggleName => "DJ name on / off",
             Action::ToggleTicker => "Scrolling ticker on / off",
+            Action::Look1 => "Look 1 (the saved Look on slot 1)",
+            Action::Look2 => "Look 2 (the saved Look on slot 2)",
+            Action::Look3 => "Look 3 (the saved Look on slot 3)",
+            Action::Look4 => "Look 4 (the saved Look on slot 4)",
+            Action::Look5 => "Look 5 (the saved Look on slot 5)",
+            Action::Look6 => "Look 6 (the saved Look on slot 6)",
+            Action::Look7 => "Look 7 (the saved Look on slot 7)",
+            Action::Look8 => "Look 8 (the saved Look on slot 8)",
+            Action::NextTheme => "Next Style (off, Dance, House, Pop...)",
         }
+    }
+
+    /// The Look slot (1..=8) this action recalls, if it is one of `Look1..8`.
+    pub fn look_slot(self) -> Option<u8> {
+        Some(match self {
+            Action::Look1 => 1,
+            Action::Look2 => 2,
+            Action::Look3 => 3,
+            Action::Look4 => 4,
+            Action::Look5 => 5,
+            Action::Look6 => 6,
+            Action::Look7 => 7,
+            Action::Look8 => 8,
+            _ => return None,
+        })
     }
 
     pub fn default_key(self) -> &'static str {
@@ -150,6 +194,16 @@ impl Action {
             Action::ToggleLogo => "L",
             Action::ToggleName => "Y",
             Action::ToggleTicker => "W",
+            // Unbound: sixteen default keys would collide with the rest.
+            Action::Look1
+            | Action::Look2
+            | Action::Look3
+            | Action::Look4
+            | Action::Look5
+            | Action::Look6
+            | Action::Look7
+            | Action::Look8
+            | Action::NextTheme => "",
         }
     }
 }
@@ -310,6 +364,9 @@ pub struct Settings {
     pub disabled_scenes: Vec<String>,
     /// Starred scenes — the Perform "fav" chip filters to these.
     pub favourite_scenes: Vec<String>,
+    /// The selected Style (`styles.json` id); `None` = off. Only the id is saved:
+    /// the pool, palettes and pacing are an overlay on the per-frame settings.
+    pub style: Option<String>,
     pub seasonal: Seasonal,
     pub dancer_enabled: bool,
     /// None = auto-pilot picks the look; Some(i) = always that look.
@@ -448,6 +505,7 @@ impl Default for Settings {
             phrase_bars: 16,
             cut_on_drops: true,
             disabled_scenes: Vec::new(),
+            style: None,
             favourite_scenes: Vec::new(),
             seasonal: Seasonal::Auto,
             dancer_enabled: true,
@@ -710,6 +768,20 @@ pub fn key_name(key: &Key) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn look_actions_are_complete_unique_and_unbound() {
+        let all: std::collections::BTreeSet<_> = Action::ALL.iter().collect();
+        assert_eq!(all.len(), Action::ALL.len(), "no action listed twice");
+        let slots: Vec<u8> = Action::ALL.iter().filter_map(|a| a.look_slot()).collect();
+        assert_eq!(slots, (1..=crate::looks::SLOTS).collect::<Vec<_>>(), "Look1..8 map to slots 1..8, in order");
+        for a in Action::ALL.iter().filter(|a| a.look_slot().is_some()) {
+            assert_eq!(a.default_key(), "", "{a:?} must start unbound");
+        }
+        // An unbound action must never answer to a real key press.
+        let s = Settings::default();
+        assert!(s.action_for("A").is_some_and(|a| a.look_slot().is_none()));
+    }
 
     #[test]
     fn settings_from_a_newer_build_keep_what_this_build_knows() {

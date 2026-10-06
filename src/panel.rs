@@ -169,9 +169,24 @@ pub enum UiCommand {
     Song(SongCtl),
     /// Ask the render thread to produce a scene thumbnail.
     Thumb(String),
+    /// Recall a saved Look by id.
+    ApplyLook(String),
+    /// Save the live state as a new Look with this name.
+    SaveLook(String),
+    DeleteLook(String),
+    /// Put a Look on pad/key slot 1..=8, or clear it.
+    LookSlot(String, Option<u8>),
     /// Start (or cancel) the GPU baseline — heavy + unity scenes are
     /// stepped through and sub-30 fps ones deselected.
     PerfCheck,
+}
+
+/// One saved Look as the panel lists it.
+#[derive(Clone, Debug, Default)]
+pub struct LookRow {
+    pub id: String,
+    pub name: String,
+    pub slot: Option<u8>,
 }
 
 /// Live state shown in the panel's status area, written by the render thread.
@@ -190,6 +205,10 @@ pub struct Status {
     pub bar_in_scene: u32,
     pub bars_total: u32,
     pub clip: Option<String>,
+    /// Saved Looks, filled in by the event thread before the panel draws.
+    pub looks: Vec<LookRow>,
+    /// A short-lived line for the Looks row (a Look skipped a missing scene).
+    pub look_notice: Option<String>,
     /// Display title for `clip` (same index-space as `clip_titles`).
     pub clip_title: Option<String>,
     pub blackout: bool,
@@ -299,6 +318,8 @@ pub struct Panel {
     clip_thumbs: HashMap<String, Option<egui::TextureHandle>>,
     /// Text filter on the Keys page.
     keys_filter: String,
+    /// Name being typed for "Save look".
+    look_name: String,
     /// Saved-timeline metadata for the Timeline tab's list — parsed lazily
     /// and refreshed only when the file list or mtimes change.
     saved: SavedCache,
@@ -338,6 +359,7 @@ impl Panel {
             live_saved: HashMap::new(),
             clip_thumbs: HashMap::new(),
             keys_filter: String::new(),
+            look_name: String::new(),
             saved: SavedCache::default(),
         })
     }
@@ -421,6 +443,7 @@ impl Panel {
         let tab = &mut self.tab;
         let scene_filter = &mut self.scene_filter;
         let chip = &mut self.chip;
+        let look_name = &mut self.look_name;
         let thumbs = &mut self.thumbs;
         let want_thumbs = &mut self.want_thumbs;
         let clip_thumbs = &mut self.clip_thumbs;
@@ -464,6 +487,7 @@ impl Panel {
                 tab,
                 scene_filter,
                 chip,
+                look_name,
                 thumbs,
                 want_thumbs,
                 clip_thumbs,
@@ -499,6 +523,7 @@ fn build_ui(
     tab: &mut Tab,
     scene_filter: &mut String,
     chip: &mut LibChip,
+    look_name: &mut String,
     thumbs: &mut HashMap<String, egui::TextureHandle>,
     want_thumbs: &mut HashMap<String, Instant>,
     clip_thumbs: &mut HashMap<String, Option<egui::TextureHandle>>,
@@ -532,7 +557,7 @@ fn build_ui(
         .show(ui, |ui| match *tab {
             Tab::Perform => {
                 if s.perform_pads {
-                    pads_view(ui, s, st, scenes, thumbs, want_thumbs, cmd);
+                    pads_view(ui, s, st, scenes, look_name, thumbs, want_thumbs, cmd);
                 } else {
                     // Inspector declared before the central grid (top → right →
                     // central) so egui shrinks the library correctly — no width
@@ -558,6 +583,7 @@ fn build_ui(
                         heavy_ok,
                         scene_filter,
                         chip,
+                        look_name,
                         thumbs,
                         want_thumbs,
                         cmd,
@@ -740,6 +766,197 @@ fn palette_swatch(ui: &mut egui::Ui, s: &mut Settings, name: &str, w: f32, h: f3
 // ---------------------------------------------------------------------------
 
 #[allow(clippy::too_many_arguments)]
+/// The Looks and Style controls: a one-row strip of Look buttons that scrolls
+/// sideways (twelve Looks must not push the scene grid down), then the name
+/// field with its Save button, the Style menu, and any notice. Shared by the
+/// Library and Pads views: Looks are a performance control.
+/// What a selected Style is setting right now, for the controls it overrides:
+/// those show the saved value, which is not what is in effect. `None` when
+/// no Style is on.
+fn style_override_note(s: &Settings) -> Option<String> {
+    let cat = crate::styles::catalog();
+    let t = crate::styles::active(s, cat)?;
+    let mut parts = Vec::new();
+    if let Some(b) = t.director.phrase_bars {
+        parts.push(format!("{b} bars"));
+    }
+    if let Some(d) = t.director.cut_on_drops {
+        parts.push(format!("cut on drops {}", if d { "on" } else { "off" }));
+    }
+    if let Some(a) = t.director.fx_auto {
+        parts.push(format!("auto effects {}", if a { "on" } else { "off" }));
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    Some(format!("Style {} sets: {} (turn the Style off to use your own)", t.name, parts.join(", ")))
+}
+
+fn looks_strip(ui: &mut egui::Ui, s: &mut Settings, st: &Status, look_name: &mut String, cmd: &mut Vec<UiCommand>) {
+    use crate::ui_theme::*;
+    // `horizontal` children see the parent's max_rect, so pin the row width up
+    // front (AGENTS.md egui rules): nothing here may widen under the inspector.
+    let row_w = ui.available_width();
+    ui.horizontal(|ui| {
+        ui.set_max_width(row_w);
+        ui.add_space(2.0);
+        ui.label(egui::RichText::new("Looks").size(11.5).color(MUTED));
+        if st.looks.is_empty() {
+            ui.label(
+                egui::RichText::new("none yet: name the current look below and press Save look")
+                    .size(11.0)
+                    .color(FAINT),
+            );
+            return;
+        }
+        // The plain wheel scrolls the strip (median: only shift+wheel did);
+        // at either end the wheel passes on to the page.
+        ui.style_mut().always_scroll_the_only_direction = true;
+        let out = egui::ScrollArea::horizontal()
+            .id_salt("looks_scroll")
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    for l in &st.looks {
+                        let full = match l.slot {
+                            Some(n) => format!("{n} · {}", l.name),
+                            None => l.name.clone(),
+                        };
+                        let shown = if full.chars().count() > 22 {
+                            format!("{}…", full.chars().take(21).collect::<String>())
+                        } else {
+                            full.clone()
+                        };
+                        let r = ui.add(
+                            egui::Button::new(egui::RichText::new(shown).size(11.5).color(TEXT))
+                                .fill(RAISED)
+                                .corner_radius(egui::CornerRadius::same(9)),
+                        );
+                        r.clone().on_hover_text(format!("{full}\nClick to recall · right-click for key/pad slot or delete"));
+                        if r.clicked() {
+                            cmd.push(UiCommand::ApplyLook(l.id.clone()));
+                        }
+                        r.context_menu(|ui| {
+                            for n in 1..=crate::looks::SLOTS {
+                                let taken = st.looks.iter().find(|o| o.slot == Some(n) && o.id != l.id);
+                                let label = match taken {
+                                    Some(o) => format!("Put on slot {n} (replaces {})", o.name),
+                                    None => format!("Put on slot {n}"),
+                                };
+                                if ui.button(label).clicked() {
+                                    cmd.push(UiCommand::LookSlot(l.id.clone(), Some(n)));
+                                    ui.close();
+                                }
+                            }
+                            if l.slot.is_some() && ui.button("Clear slot").clicked() {
+                                cmd.push(UiCommand::LookSlot(l.id.clone(), None));
+                                ui.close();
+                            }
+                            ui.separator();
+                            if ui.button("Delete").clicked() {
+                                cmd.push(UiCommand::DeleteLook(l.id.clone()));
+                                ui.close();
+                            }
+                        });
+                    }
+                });
+            });
+        scroll_edges(ui, &out);
+    });
+    ui.horizontal_wrapped(|ui| {
+        ui.set_max_width(row_w);
+        ui.add_space(2.0);
+        let field = ui.add(
+            egui::TextEdit::singleline(look_name)
+                .desired_width(140.0)
+                .hint_text("name this look…"),
+        );
+        let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        let can = !look_name.trim().is_empty();
+        let save = ui
+            .add_enabled(can, egui::Button::new(egui::RichText::new("Save look").size(11.5)))
+            .on_hover_text("Saves the scene, palette, effect and dancer as they are now")
+            .clicked();
+        if can && (save || enter) {
+            cmd.push(UiCommand::SaveLook(std::mem::take(look_name)));
+        }
+        // Style: steers the auto-pilot's scene pool, palettes and pacing.
+        let cat = crate::styles::catalog();
+        if !cat.themes.is_empty() {
+            // Space, not a separator: when Style wraps to its own line a
+            // separator was left dangling at the end of the first (720 pt).
+            ui.add_space(10.0);
+            // ComboBox::show_ui is a ui.horizontal inside, which never wraps: in
+            // this wrapped row it spilled under the inspector at 720 pt (i9 test).
+            // One wrap-aware allocation keeps the label and the combo together.
+            ui.allocate_ui(egui::vec2(190.0, 22.0), |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Style").size(11.5).color(MUTED));
+                    let now = s
+                        .style
+                        .as_deref()
+                        .and_then(|id| cat.theme(id))
+                        .map(|t| t.name.as_str())
+                        .unwrap_or("Off");
+                    egui::ComboBox::from_id_salt("style_pick")
+                        .selected_text(egui::RichText::new(now).size(11.5))
+                        .width(130.0)
+                        .show_ui(ui, |ui| {
+                            if ui.selectable_label(s.style.is_none(), "Off").clicked() {
+                                crate::styles::select(s, None);
+                            }
+                            for t in &cat.themes {
+                                let on = s.style.as_deref() == Some(t.id.as_str());
+                                if ui.selectable_label(on, &t.name).on_hover_text(&t.about).clicked() {
+                                    crate::styles::select(s, Some(t.id.clone()));
+                                }
+                            }
+                        })
+                        .response
+                        .on_hover_text("Steers which scenes and colours Auto picks, and how fast it cuts. Choosing one puts the palette on Auto.");
+                });
+            });
+        }
+        if let Some(n) = &st.look_notice {
+            ui.label(egui::RichText::new(n).size(10.5).color(egui::Color32::from_rgb(230, 170, 70)));
+        }
+    });
+}
+
+/// More Looks off either end of the strip: fade the edge into the panel
+/// and paint a small arrow (no font glyphs, see AGENTS.md), so a clipped
+/// button reads as "scrolls" rather than a layout bug (median, 12 Looks).
+fn scroll_edges<R>(ui: &egui::Ui, out: &egui::scroll_area::ScrollAreaOutput<R>) {
+    use crate::ui_theme::*;
+    let r = out.inner_rect;
+    let max = (out.content_size.x - r.width()).max(0.0);
+    let x = out.state.offset.x;
+    let p = ui.painter_at(r);
+    let bg = ui.visuals().panel_fill;
+    let w = 28.0;
+    for (show, left) in [(x > 1.0, true), (x < max - 1.0, false)] {
+        if !show {
+            continue;
+        }
+        // Fade: thin opaque-to-clear slices toward the content.
+        for i in 0..14 {
+            let t = i as f32 / 14.0;
+            let a = ((1.0 - t) * 230.0) as u8;
+            let x0 = if left { r.left() + t * w } else { r.right() - (t + 1.0 / 14.0) * w };
+            let slice = egui::Rect::from_min_size(egui::pos2(x0, r.top()), egui::vec2(w / 14.0 + 0.5, r.height()));
+            p.rect_filled(slice, 0.0, egui::Color32::from_rgba_unmultiplied(bg.r(), bg.g(), bg.b(), a));
+        }
+        let cy = r.center().y;
+        let tip = if left { r.left() + 4.0 } else { r.right() - 4.0 };
+        let back = if left { tip + 5.0 } else { tip - 5.0 };
+        p.add(egui::Shape::convex_polygon(
+            vec![egui::pos2(tip, cy), egui::pos2(back, cy - 5.0), egui::pos2(back, cy + 5.0)],
+            MUTED,
+            egui::Stroke::NONE,
+        ));
+    }
+}
+
 fn perform_tab(
     ui: &mut egui::Ui,
     s: &mut Settings,
@@ -749,6 +966,7 @@ fn perform_tab(
     heavy_ok: bool,
     filter: &mut String,
     chip: &mut LibChip,
+    look_name: &mut String,
     thumbs: &mut HashMap<String, egui::TextureHandle>,
     want: &mut HashMap<String, Instant>,
     cmd: &mut Vec<UiCommand>,
@@ -780,7 +998,7 @@ fn perform_tab(
             }
         })
         .collect();
-    let in_rotation = (0..scenes.len())
+    let rotating: Vec<usize> = (0..scenes.len())
         .filter(|&i| {
             !s.disabled_scenes.contains(&scenes[i])
                 && if heavy.get(i).copied().unwrap_or(false) {
@@ -789,7 +1007,21 @@ fn perform_tab(
                     s.flat_scenes
                 }
         })
-        .count();
+        .collect();
+    let in_rotation = rotating.len();
+    // With a Style on, say how many of those Auto may actually pick from.
+    let style_note = {
+        let cat = crate::styles::catalog();
+        match crate::styles::active(s, cat) {
+            Some(t) if s.mode != crate::config::Mode::Manual => {
+                let n = rotating.iter().filter(|&&i| t.scenes.matches(&scenes[i], &cat.tags)).count();
+                format!(" · {} Style: Auto picks from {n}", t.name)
+            }
+            _ => String::new(),
+        }
+    };
+
+    looks_strip(ui, s, st, look_name, cmd);
 
     // Toolbar: search field, filter pills (active one is bright, like the
     // mockup), then the stats line with all on/off at its right edge.
@@ -880,10 +1112,11 @@ fn perform_tab(
     ui.horizontal_wrapped(|ui| {
         ui.label(
             egui::RichText::new(format!(
-                "{} shown · {} of {} in rotation · click to preview · toggle to add/remove from rotation",
+                "{} shown · {} of {} in rotation{} · click to preview · toggle to add/remove from rotation",
                 shown.len(),
                 in_rotation,
-                scenes.len()
+                scenes.len(),
+                style_note
             ))
             .size(10.5)
             .color(FAINT),
@@ -1495,6 +1728,9 @@ fn inspector_body(
             &mut s.phrase_bars,
             &[(2u32, "2"), (4, "4"), (8, "8"), (16, "16"), (32, "32")],
         );
+        if let Some(n) = style_override_note(s) {
+            ui.label(egui::RichText::new(n).size(10.0).color(crate::ui_theme::FAINT));
+        }
         ctl_row(ui, "Dancer", |ui| {
             // Button first via right-to-left so a long clip name can't push
             // it past the panel edge; the value gets the leftover width.
@@ -1528,7 +1764,7 @@ fn inspector_body(
         // settings page — the inspector isn't a second settings panel.
         nav_row(
             ui,
-            "Look",
+            "Dancer look",
             s.dancer_style.map(|i| STYLES[i]).unwrap_or("auto").to_string(),
             || {
                 *tab = Tab::DancerFx;
@@ -1647,6 +1883,7 @@ fn pads_view(
     s: &mut Settings,
     st: &Status,
     scenes: &[String],
+    look_name: &mut String,
     thumbs: &mut HashMap<String, egui::TextureHandle>,
     want: &mut HashMap<String, Instant>,
     cmd: &mut Vec<UiCommand>,
@@ -1670,6 +1907,8 @@ fn pads_view(
     // pills/blocks are painted inside a rect bounded by the shrunk cursor:
     // a nested right_to_left would re-anchor to the window's full max_rect
     // and overflow under the palette panel (the A1 cursor bug).
+    looks_strip(ui, s, st, look_name, cmd);
+    ui.add_space(2.0);
     let beat_right = ui.cursor().min.x + ui.available_width();
     ui.horizontal(|ui| {
         ui.add_space(6.0);
@@ -2840,7 +3079,7 @@ fn dancer_fx_tab(
             ui.small("Silhouette layer, look and movement — one line only.");
             ui.add_space(4.0);
             ui.checkbox(&mut s.dancer_enabled, "Dancer layer on");
-            ctl_row(ui, "Look", |ui| {
+            ctl_row(ui, "Dancer look", |ui| {
                 // A dropdown: six segmented buttons overflow the card.
                 egui::ComboBox::from_id_salt("dancer_look")
                     .width(110.0)
@@ -3281,6 +3520,20 @@ fn keys_tab(
     // Grouped sections (review F) — far easier to scan than 25 flat rows.
     const GROUPS: &[(&str, &[Action])] = &[
         ("scenes", &[Action::NextScene, Action::PrevScene, Action::ToggleRandom]),
+        (
+            "looks",
+            &[
+                Action::Look1,
+                Action::Look2,
+                Action::Look3,
+                Action::Look4,
+                Action::Look5,
+                Action::Look6,
+                Action::Look7,
+                Action::Look8,
+                Action::NextTheme,
+            ],
+        ),
         ("mode", &[Action::ModeAuto, Action::ModeStatic, Action::ModeManual]),
         (
             "dancer",
@@ -3415,6 +3668,9 @@ fn keys_tab(
 
 // ---------------------------------------------------------------------------
 // Timeline tab — load a track, drop cues on its beat grid, play or follow.
+
+/// Hover text for the "follow live" toggles (panel and editor).
+pub const FOLLOW_HINT: &str = "Recognise this timeline's songs when they play live and fire their cues at the matched spot. While locked, the cues run the visuals instead of Auto.";
 // ---------------------------------------------------------------------------
 
 pub(crate) fn fmt_time(t: f64) -> String {
@@ -3756,6 +4012,9 @@ fn settings_tab(
                 .on_hover_text("Quiet sections switch the show into calm mode");
             ui.checkbox(&mut s.cut_on_drops, "Cut early on a drop")
                 .on_hover_text("A drop lands early — cut to the next scene with it");
+            if let Some(n) = style_override_note(s) {
+                ui.small(n);
+            }
             ui.checkbox(&mut s.random_order, "Random order")
                 .on_hover_text("Shuffle the rotation instead of playing it in order");
             // External engine (the Unity shows in unity/): its unity_* scenes
@@ -4039,7 +4298,7 @@ fn timeline_tab(
                 cmd.push(UiCommand::Song(SongCtl::Stop));
             }
             ui.label(
-                egui::RichText::new(format!("{} {}", fmt_time(*pos_s), mode_str(*mode)))
+                egui::RichText::new(format!("{} {}", fmt_time(*pos_s), mode_str(*mode, *autosync && *live_locked)))
                     .monospace()
                     .size(13.0)
                     .color(t::TEXT),
@@ -4049,6 +4308,23 @@ fn timeline_tab(
                     .allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
                 ui.painter().circle_filled(r.center(), 4.0, t::DANGER);
                 ui.label(egui::RichText::new("REC").size(11.0).color(t::DANGER));
+            }
+            // Follow-live is opt-in: while it's locked the timeline's cues
+            // run the rig instead of Auto (i9mac: a loaded timeline took
+            // over a live set the moment its track came on).
+            let follow_btn = egui::Button::new(
+                egui::RichText::new("follow live")
+                    .size(11.0)
+                    .color(if *autosync { t::ACCENT } else { t::MUTED }),
+            )
+            .fill(if *autosync { t::ACCENT_SEL } else { t::RAISED })
+            .corner_radius(egui::CornerRadius::same(10));
+            if ui
+                .add_enabled(doc_opt.is_some(), follow_btn)
+                .on_hover_text(FOLLOW_HINT)
+                .clicked()
+            {
+                *autosync = !*autosync;
             }
             if *autosync {
                 ui.label(
@@ -4147,10 +4423,13 @@ fn timeline_tab(
     });
 }
 
-fn mode_str(m: PlayMode) -> &'static str {
+/// The transport's state word. A live lock drives the playhead with the
+/// player stopped, so it reads "following", not "stopped" (median).
+fn mode_str(m: PlayMode, following: bool) -> &'static str {
     match m {
         PlayMode::Playing => "playing",
         PlayMode::Paused => "paused",
+        PlayMode::Stopped if following => "following",
         PlayMode::Stopped => "stopped",
     }
 }
