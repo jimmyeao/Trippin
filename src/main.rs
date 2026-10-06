@@ -1238,6 +1238,16 @@ fn render_loop(
                             None
                         }
                     }
+                    // Follow-live switched off while locked: the arm above
+                    // no longer runs, so hand the borrowed rig back here
+                    // (else Manual mode, a blackout or a cue's palette stick).
+                    PlayMode::Stopped if was_locked => {
+                        lost_lock = true;
+                        was_locked = false;
+                        matcher.reset();
+                        tl.live_locked = false;
+                        None
+                    }
                     _ => None,
                 };
                 if let Some(t) = pos_t {
