@@ -59,6 +59,9 @@ pub struct EguiWin {
     /// The error epoch this surface has already reconfigured for — see
     /// `Gpu::surface_epoch`.
     seen_epoch: u64,
+    /// Last pointer position winit reported — replayed on CursorEntered
+    /// (see `on_event`).
+    last_cursor: Option<winit::dpi::PhysicalPosition<f64>>,
 }
 
 impl EguiWin {
@@ -145,12 +148,29 @@ impl EguiWin {
             last_configure: Instant::now(),
             surface_ok: true,
             seen_epoch: 0,
+            last_cursor: None,
         })
     }
 
     /// Feed a window event to egui. Returns true if egui used it.
     pub fn on_event(&mut self, event: &WindowEvent) -> bool {
         let r = self.state.on_window_event(&self.window, event);
+        match event {
+            WindowEvent::CursorMoved { position, .. } => self.last_cursor = Some(*position),
+            // winit (Windows) drops a CursorMoved whose position equals the
+            // last one it saw, and egui-winit forgets the pointer on
+            // CursorLeft. A pointer that leaves and comes back on the same
+            // pixel therefore has no position, and egui ignores its press:
+            // the click does nothing. Replay the last position on entry; if
+            // the pointer is elsewhere, winit's own CursorMoved follows.
+            WindowEvent::CursorEntered { device_id } => {
+                if let Some(position) = self.last_cursor {
+                    let moved = WindowEvent::CursorMoved { device_id: *device_id, position };
+                    let _ = self.state.on_window_event(&self.window, &moved);
+                }
+            }
+            _ => {}
+        }
         if r.repaint {
             self.window.request_redraw();
         }
