@@ -1124,7 +1124,6 @@ fn render_loop(
                 if let Some((_, secs)) = drop_clip_at.filter(|&(t, _)| now >= t) {
                     drop_clip_at = None;
                     rc.save_clip(secs, s.rec_layout);
-                    last_auto_clip = Some(now);
                     auto_clips += 1;
                 }
             } else {
@@ -1439,6 +1438,10 @@ fn render_loop(
             let before = s.auto_clip_before_s.min(keep / 2);
             let after = s.auto_clip_after_s.min(keep - before);
             drop_clip_at = Some((now + Duration::from_secs(after as u64), (before + after).max(5)));
+            // Space drops 45 s apart from the drop itself, not from the save
+            // `after` seconds later: from the save, a drop 33-45 s after the
+            // last one was skipped (Windows test, D.O.D. – Set Me Free).
+            last_auto_clip = Some(now);
         }
         // GPU baseline: pin the scene under test against the auto-pilot's
         // own cuts. The measurement runs below, once the engine's frame

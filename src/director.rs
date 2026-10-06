@@ -322,6 +322,14 @@ impl Director {
         if enter || leave {
             self.in_breakdown = enter;
             ev.mode_change = true;
+            if std::env::var_os("TRIPPIN_DROP_DEBUG").is_some() {
+                eprintln!(
+                    "drop: breakdown {} at beat {pos:.1} (calm {:.2}, groove {:.2})",
+                    if enter { "enter" } else { "leave" },
+                    f.calm,
+                    f.groove
+                );
+            }
         }
         // No bars-in-scene requirement here (that only stops a double cut): a
         // breakdown that just cut to a new scene still has a drop worth a clip.
@@ -342,6 +350,12 @@ impl Director {
         // flagged the same one again at the next downbeat (M2, real feed).
         if ev.drop {
             self.last_drop_pos = pos;
+            if std::env::var_os("TRIPPIN_DROP_DEBUG").is_some() {
+                eprintln!(
+                    "drop: breakdown exit at beat {pos:.1} (entered {:.1}, calm {:.2})",
+                    self.breakdown_enter_pos, f.calm
+                );
+            }
         }
         // Drums slamming back in after a breakdown: that's the drop.
         if the_drop && s.cut_on_drops && s.mode == Mode::Auto && !usable.is_empty() {
@@ -399,19 +413,18 @@ impl Director {
         // Same jump, without the cut settings: the clip recorder wants every
         // drop. (The energy memory below only drifts up afterwards, so one
         // jump raises this on one downbeat check, not on every frame.)
-        if f.calm < 0.5
-            && f.energy - self.recent_low > 0.35
-            && f.energy > 0.55
-            && self.bars_in_scene >= 2
-            // 8 bars, not 2: after a drop the low only drifts up 0.1 a bar, so 8 beats on
-            // the same chorus still read as a 0.35 jump and flagged it again.
-            && pos - self.last_drop_pos >= 32.0
-            && pos - self.last_silent_pos >= 32.0
-        {
-            ev.drop = true;
-        }
-        if ev.drop {
-            self.last_drop_pos = pos;
+        // Clips are flagged only by a breakdown exit (above). An energy-jump
+        // flag here fired on ordinary section changes mid-groove: 4 of 5
+        // clips on a live D.O.D. – Set Me Free run on Windows were mid-groove
+        // (calm 0, energy 0.55-0.70 against a low of 0.18-0.27). Its silence
+        // guard never engaged either, because a loopback "silence" isn't
+        // digital zero. The jump still cuts scenes (`drop` above) when cuts
+        // on drops are on.
+        if std::env::var_os("TRIPPIN_DROP_DEBUG").is_some() && drop {
+            eprintln!(
+                "drop: energy jump at beat {pos:.1} (energy {:.2}, recent low {:.2}): cut only, no clip",
+                f.energy, self.recent_low
+            );
         }
         // Breakdowns breathe: phrases run twice as long before a cut.
         let bars = if f.calm > 0.5 { s.phrase_bars.max(1) * 2 } else { s.phrase_bars.max(1) };

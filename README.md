@@ -551,7 +551,7 @@ Clips need **ffmpeg**. Install it with `winget install ffmpeg` or
 - **Drop clips** (off by default): with the replay buffer on, Trippin saves a
   clip at every drop on its own: some seconds before it and some after (8 and
   12 by default), in the chosen format. A drop is the drums coming back after
-  a breakdown, or a big jump in energy off a quiet bar. At most one every 45 s
+  a breakdown. At most one every 45 s
   and 12 per run (both adjustable), and none while a timeline show plays.
 - **Set recording**: **J** starts it and **J** again saves the whole set.
 - **Formats**:
