@@ -26,7 +26,9 @@ new section lands, so Auto can cut there even mid-bar (`director.rs`'s
 `update_fill`; cuts ride `cut_on_drops` and a 2-bar minimum scene length,
 fills never strobe on tunnel/flight scenes or in Manual mode). The bar grid
 is a backstop, not the score: Auto also cuts off-grid on section events —
-the breakdown detector committing (covers vocal breaks too), a sustained
+the breakdown detector committing and holding for a bar
+(`BREAKDOWN_CONFIRM_BEATS`: a pre-drop drum gap is 1-2 bars and gets only
+the drop's cut; covers vocal breaks too), a sustained
 energy surge (chorus/second-drop with no breakdown; fast vs slow energy EMA
 in `update_events`), and the vocal-break proxy (bass thin, mids hot, 5
 beats). Event cuts share a gap (1 bar in-scene + 4 beats since the last

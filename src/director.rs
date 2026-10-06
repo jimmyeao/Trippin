@@ -92,7 +92,17 @@ pub struct Director {
     vocal_since: f64,
     /// No vocal-break cut before this beat pos.
     vocal_cool: f64,
+    /// Beat pos the current breakdown began (MAX = none pending). Its cut
+    /// waits `BREAKDOWN_CONFIRM_BEATS`, so a drum drop-out before the drop
+    /// gets one cut (the drop) instead of two 2-4 s apart (i9mac).
+    calm_since: f64,
 }
+
+/// How long a breakdown must last before Auto cuts into it. Real breakdowns
+/// run 8-32 bars; pre-drop drum gaps one or two. A bar (~1.9 s at 128 BPM)
+/// lets a gap end first; the scene already eases into breakdown mode
+/// (intensity, `u.calm`) without a cut.
+const BREAKDOWN_CONFIRM_BEATS: f64 = 4.0;
 
 /// How many past scenes `recent` remembers.
 const RECENT_MAX: usize = 8;
@@ -128,6 +138,7 @@ impl Director {
             surge_since: f64::MAX,
             surge_cool: 0.0,
             vocal_since: f64::MAX,
+            calm_since: f64::MAX,
             vocal_cool: 0.0,
             beat_onset_acc: 0.0,
             beat_onset_n: 0,
@@ -191,6 +202,7 @@ impl Director {
         self.fill_strobe = false;
         self.surge_since = f64::MAX;
         self.vocal_since = f64::MAX;
+        self.calm_since = f64::MAX;
     }
 
     /// The scene that would play next — random (never the current one) or
@@ -492,8 +504,15 @@ impl Director {
             return;
         }
         // The groove leaving — a breakdown or a vocal break — is a
-        // boundary the moment the detector commits to it.
+        // boundary once it has lasted a bar; a shorter gap is the run-up to
+        // a drop, which cuts on its own.
         if entered_calm && !f.silent {
+            self.calm_since = pos;
+        }
+        if !self.in_breakdown || f.silent {
+            self.calm_since = f64::MAX;
+        } else if pos - self.calm_since >= BREAKDOWN_CONFIRM_BEATS {
+            self.calm_since = f64::MAX;
             self.try_event_cut(usable, s, pos, ev);
         }
 
@@ -708,8 +727,26 @@ mod tests {
         let mut calm_f = groove();
         calm_f.calm = 0.8;
         calm_f.energy = 0.25;
+        let cuts = run(&mut d, &calm_f, &mut pos, 3.0, &s);
+        assert_eq!(cuts, 0, "a breakdown waits a bar before it cuts");
         let cuts = run(&mut d, &calm_f, &mut pos, 2.0, &s);
-        assert_eq!(cuts, 1, "the breakdown landing is itself a cut point");
+        assert_eq!(cuts, 1, "a breakdown that lasts is a cut point");
+    }
+
+    #[test]
+    fn a_short_drum_gap_cuts_once_on_the_drop() {
+        let (mut d, s, mut pos) = free_run();
+        run(&mut d, &groove(), &mut pos, 24.0, &s);
+        let mut gap = groove();
+        gap.calm = 0.8;
+        gap.energy = 0.25;
+        // Two beats of drop-out, then the drums slam back.
+        let cuts = run(&mut d, &gap, &mut pos, 2.0, &s);
+        assert_eq!(cuts, 0, "no cut into a two-beat gap");
+        let mut drop = groove();
+        drop.energy = 0.9;
+        let cuts = run(&mut d, &drop, &mut pos, 2.0, &s);
+        assert!(cuts <= 1, "the drop cuts once at most, got {cuts}");
     }
 
     #[test]
@@ -743,7 +780,8 @@ mod tests {
         run(&mut d, &groove(), &mut pos, 24.0, &s);
         let mut calm_f = groove();
         calm_f.calm = 0.8;
-        let cuts = run(&mut d, &calm_f, &mut pos, 2.0, &s);
+        // The breakdown cuts once it has lasted a bar.
+        let cuts = run(&mut d, &calm_f, &mut pos, 4.5, &s);
         assert_eq!(cuts, 1);
         // Fakeout: energy surges straight back — inside the 4-beat gap
         // nothing else may cut, however hot the detector runs. (The run
