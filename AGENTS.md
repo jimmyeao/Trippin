@@ -674,6 +674,19 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
     constant frame rate locked to the wall clock.
   - Audio is tapped at every capture source (`rec::audio_in`), resampled to
     48 kHz stereo, and chunked on the same 2 s grid.
+  - **Auto drop clips** (`Settings::auto_clip`): `director::Events::drop`
+    (breakdown left after >= 2 bars we watched start) is raised whatever the
+    cut settings are; `render_loop` schedules the save `auto_clip_after_s`
+    later so the payoff is in the clip, 45 s apart *counted from the drop*
+    (from the save, a drop 33-45 s after the last was skipped), capped per
+    run, off during timeline shows. The director boots "in a breakdown":
+    never flag a drop on that (the test `drop_flag_fires_once_...` pins it).
+    The loudness jump only *cuts* (with `cut_on_drops`), never clips: on a
+    live Windows run it flagged ordinary section changes mid-groove (4 of 5
+    clips), and its "after silence" guard never engaged because a loopback
+    silence isn't digital zero (`f.silent` is RMS < 1e-4).
+    `TRIPPIN_DROP_DEBUG=1` logs breakdown enter/leave, flagged drops and
+    cut-only jumps.
   - A save concatenates the segments (`-c copy` for 16:9, re-encoded for
     9:16 crop and fit). The concat lists need **absolute** paths.
 
