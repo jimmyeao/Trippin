@@ -809,7 +809,10 @@ fn looks_strip(ui: &mut egui::Ui, s: &mut Settings, st: &Status, look_name: &mut
             );
             return;
         }
-        egui::ScrollArea::horizontal()
+        // The plain wheel scrolls the strip (median: only shift+wheel did);
+        // at either end the wheel passes on to the page.
+        ui.style_mut().always_scroll_the_only_direction = true;
+        let out = egui::ScrollArea::horizontal()
             .id_salt("looks_scroll")
             .auto_shrink([false, true])
             .show(ui, |ui| {
@@ -858,6 +861,7 @@ fn looks_strip(ui: &mut egui::Ui, s: &mut Settings, st: &Status, look_name: &mut
                     }
                 });
             });
+        scroll_edges(ui, &out);
     });
     ui.horizontal_wrapped(|ui| {
         ui.set_max_width(row_w);
@@ -879,7 +883,9 @@ fn looks_strip(ui: &mut egui::Ui, s: &mut Settings, st: &Status, look_name: &mut
         // Style: steers the auto-pilot's scene pool, palettes and pacing.
         let cat = crate::styles::catalog();
         if !cat.themes.is_empty() {
-            ui.separator();
+            // Space, not a separator: when Style wraps to its own line a
+            // separator was left dangling at the end of the first (720 pt).
+            ui.add_space(10.0);
             // ComboBox::show_ui is a ui.horizontal inside, which never wraps: in
             // this wrapped row it spilled under the inspector at 720 pt (i9 test).
             // One wrap-aware allocation keeps the label and the combo together.
@@ -915,6 +921,40 @@ fn looks_strip(ui: &mut egui::Ui, s: &mut Settings, st: &Status, look_name: &mut
             ui.label(egui::RichText::new(n).size(10.5).color(egui::Color32::from_rgb(230, 170, 70)));
         }
     });
+}
+
+/// More Looks off either end of the strip: fade the edge into the panel
+/// and paint a small arrow (no font glyphs, see AGENTS.md), so a clipped
+/// button reads as "scrolls" rather than a layout bug (median, 12 Looks).
+fn scroll_edges<R>(ui: &egui::Ui, out: &egui::scroll_area::ScrollAreaOutput<R>) {
+    use crate::ui_theme::*;
+    let r = out.inner_rect;
+    let max = (out.content_size.x - r.width()).max(0.0);
+    let x = out.state.offset.x;
+    let p = ui.painter_at(r);
+    let bg = ui.visuals().panel_fill;
+    let w = 28.0;
+    for (show, left) in [(x > 1.0, true), (x < max - 1.0, false)] {
+        if !show {
+            continue;
+        }
+        // Fade: thin opaque-to-clear slices toward the content.
+        for i in 0..14 {
+            let t = i as f32 / 14.0;
+            let a = ((1.0 - t) * 230.0) as u8;
+            let x0 = if left { r.left() + t * w } else { r.right() - (t + 1.0 / 14.0) * w };
+            let slice = egui::Rect::from_min_size(egui::pos2(x0, r.top()), egui::vec2(w / 14.0 + 0.5, r.height()));
+            p.rect_filled(slice, 0.0, egui::Color32::from_rgba_unmultiplied(bg.r(), bg.g(), bg.b(), a));
+        }
+        let cy = r.center().y;
+        let tip = if left { r.left() + 4.0 } else { r.right() - 4.0 };
+        let back = if left { tip + 5.0 } else { tip - 5.0 };
+        p.add(egui::Shape::convex_polygon(
+            vec![egui::pos2(tip, cy), egui::pos2(back, cy - 5.0), egui::pos2(back, cy + 5.0)],
+            MUTED,
+            egui::Stroke::NONE,
+        ));
+    }
 }
 
 fn perform_tab(
@@ -4258,7 +4298,7 @@ fn timeline_tab(
                 cmd.push(UiCommand::Song(SongCtl::Stop));
             }
             ui.label(
-                egui::RichText::new(format!("{} {}", fmt_time(*pos_s), mode_str(*mode)))
+                egui::RichText::new(format!("{} {}", fmt_time(*pos_s), mode_str(*mode, *autosync && *live_locked)))
                     .monospace()
                     .size(13.0)
                     .color(t::TEXT),
@@ -4383,10 +4423,13 @@ fn timeline_tab(
     });
 }
 
-fn mode_str(m: PlayMode) -> &'static str {
+/// The transport's state word. A live lock drives the playhead with the
+/// player stopped, so it reads "following", not "stopped" (median).
+fn mode_str(m: PlayMode, following: bool) -> &'static str {
     match m {
         PlayMode::Playing => "playing",
         PlayMode::Paused => "paused",
+        PlayMode::Stopped if following => "following",
         PlayMode::Stopped => "stopped",
     }
 }
