@@ -37,8 +37,10 @@ never an operator's "play next"). Unrated scenes (`SceneMeta::rated` false:
 every `unity_*` show, which `--snap-energy` can't measure) fit any mood,
 weighted by the share of rated scenes that fit: at the 0.5 default they
 never played, and counted as always fitting they took 43% of cuts.
-Follow-live seeks only on a confirmed jump (`timeline.rs` `JUMP_SCORE`,
-two agreeing evaluations); switching it off while locked must run
+Follow-live also scores the coasted position (`correlate`'s `expect`) and
+seeks only when a match elsewhere beats it by `JUMP_MARGIN` on
+`JUMP_EVALS` agreeing evaluations: dance tracks repeat whole sections, so
+the best match overall is often the repeat; switching it off while locked must run
 `end_show` (the `Stopped if was_locked` arm).
 Random picks skip the last few scenes (`Director::recent`, half the pool,
 max 8), or a small Style pool repeats the same scenes. Timeline follow-live
