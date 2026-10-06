@@ -76,6 +76,15 @@ const WARM: u32 = 30;
 /// wgpu scenes: samples per scene — ~1 s at 60 fps.
 const SAMPLES: usize = 60;
 /// unity_* scenes: engine frames are counted over this window.
+/// Engine frames per second from a change in its frame `seq` over `secs`.
+/// `seq` is a seqlock counter that bumps by 2 per frame (engine.rs), so the raw
+/// delta counted every Unity show at twice its real rate: one rendering at
+/// 16 fps read 32 and passed the 30 fps cut (i9 test: 82-118 "fps" for shows
+/// the engine logged at ~57).
+fn unity_fps(seq_delta: u64, secs: f64) -> f64 {
+    (seq_delta / 2) as f64 / secs
+}
+
 const UNITY_WINDOW: std::time::Duration = std::time::Duration::from_secs(3);
 /// …after letting the engine boot the show for this long first.
 const UNITY_SETTLE: std::time::Duration = std::time::Duration::from_secs(2);
@@ -213,8 +222,7 @@ impl Check {
         match self.seq0 {
             Some((s0, t0)) => {
                 let el = t0.elapsed();
-                (el >= UNITY_WINDOW)
-                    .then(|| seq.saturating_sub(s0) as f64 / el.as_secs_f64())
+                (el >= UNITY_WINDOW).then(|| unity_fps(seq.saturating_sub(s0), el.as_secs_f64()))
             }
             None => {
                 if self.entered.elapsed() >= UNITY_SETTLE {
@@ -229,6 +237,12 @@ impl Check {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unity_fps_counts_frames_not_seq_steps() {
+        // 3 s of a 20 fps engine: 60 frames, seq moved 120.
+        assert!((unity_fps(120, 3.0) - 20.0).abs() < 1e-9);
+    }
 
     #[test]
     fn slow_marks_only_under_threshold() {
