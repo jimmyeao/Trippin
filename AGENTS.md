@@ -448,6 +448,17 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   run (macOS Cmd-Q doesn't even return from `run_app`). Process-level
   cleanup (killing the Unity player: `engine::shutdown`) goes in
   `ApplicationHandler::exiting`, with state the event thread can reach.
+- **A crash or force-quit skips `exiting`, so the Unity player is orphaned.**
+  It quits by itself ~15 s after its feed stops, but a Trippin relaunched
+  inside that window feeds the same UDP port, so the orphan lived on
+  (writing to the dead instance's frame file) and the new player exited at
+  once (`exit status: 0; restarting`, in a loop): no Unity until it was killed
+  by hand, and a perf check then scored every show 0 fps. `Engine::new` runs
+  `engine::sweep_stale_players` on a thread before the first spawn: a player
+  names its owner in `-trippinFrame …/trippin-engine-<pid>.frame`, and it is
+  stopped only if that pid is no longer a running Trippin, so another live
+  Trippin's player is never touched (only one player can run at a time
+  either way). Any change to the frame-file name must keep `frame_name`.
 - **macOS: tag egui window layers sRGB** (`egui_win.rs::tag_srgb`, after
   every `surface.configure`). wgpu leaves an sRGB surface's CAMetalLayer
   untagged, and the window server flips untagged content between
