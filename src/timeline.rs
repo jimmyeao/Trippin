@@ -608,7 +608,9 @@ pub struct TimelineState {
     /// Recording: actions are written into the cue list at the playhead.
     pub recording: bool,
     /// Follow-live: cross-correlate room audio onsets against the clips and
-    /// fire cues at the matched position.
+    /// fire cues at the matched position. Off until the user turns it on:
+    /// on by default, merely loading a timeline let its show take over Auto
+    /// whenever one of its tracks played.
     pub autosync: bool,
     pub live_locked: bool,
     pub live_score: f32,
@@ -630,7 +632,7 @@ impl TimelineState {
             pos_s: 0.0,
             cursor_s: 0.0,
             recording: false,
-            autosync: true,
+            autosync: false,
             live_locked: false,
             live_score: 0.0,
             dirty: false,

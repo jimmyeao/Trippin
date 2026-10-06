@@ -373,7 +373,7 @@ impl Editor {
                         .corner_radius(egui::CornerRadius::same(10));
                         if ui
                             .add(follow_btn)
-                            .on_hover_text("chase the live director's position")
+                            .on_hover_text(crate::panel::FOLLOW_HINT)
                             .clicked()
                         {
                             *autosync = !*autosync;

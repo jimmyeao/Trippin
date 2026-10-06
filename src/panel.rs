@@ -3628,6 +3628,9 @@ fn keys_tab(
 
 // ---------------------------------------------------------------------------
 // Timeline tab — load a track, drop cues on its beat grid, play or follow.
+
+/// Hover text for the "follow live" toggles (panel and editor).
+pub const FOLLOW_HINT: &str = "Recognise this timeline's songs when they play live and fire their cues at the matched spot. While locked, the cues run the visuals instead of Auto.";
 // ---------------------------------------------------------------------------
 
 pub(crate) fn fmt_time(t: f64) -> String {
@@ -4265,6 +4268,23 @@ fn timeline_tab(
                     .allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
                 ui.painter().circle_filled(r.center(), 4.0, t::DANGER);
                 ui.label(egui::RichText::new("REC").size(11.0).color(t::DANGER));
+            }
+            // Follow-live is opt-in: while it's locked the timeline's cues
+            // run the rig instead of Auto (i9mac: a loaded timeline took
+            // over a live set the moment its track came on).
+            let follow_btn = egui::Button::new(
+                egui::RichText::new("follow live")
+                    .size(11.0)
+                    .color(if *autosync { t::ACCENT } else { t::MUTED }),
+            )
+            .fill(if *autosync { t::ACCENT_SEL } else { t::RAISED })
+            .corner_radius(egui::CornerRadius::same(10));
+            if ui
+                .add_enabled(doc_opt.is_some(), follow_btn)
+                .on_hover_text(FOLLOW_HINT)
+                .clicked()
+            {
+                *autosync = !*autosync;
             }
             if *autosync {
                 ui.label(
