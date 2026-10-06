@@ -33,7 +33,13 @@ beats). Event cuts share a gap (1 bar in-scene + 4 beats since the last
 cut), ride `cut_on_drops`, and stay off in Static and Manual. The queued
 next scene is refit to the mood every frame (`repick_for_mood` in main.rs:
 calm picks low-energy scenes, hot picks high-energy; random order only, and
-never an operator's "play next").
+never an operator's "play next"). Unrated scenes (`SceneMeta::rated` false:
+every `unity_*` show, which `--snap-energy` can't measure) fit any mood;
+at the 0.5 default they were too far from both targets and never played.
+Random picks skip the last few scenes (`Director::recent`, half the pool,
+max 8), or a small Style pool repeats the same scenes. Timeline follow-live
+(`TimelineState::autosync`) is opt-in: on by default, a loaded timeline
+took over Auto whenever one of its tracks played.
 Over the scenes it draws a beat-locked silhouette dancer, text, and stream
 overlays.
 

@@ -567,7 +567,15 @@ fn repick_for_mood(dir: &mut Director, r: &Renderer, usable: &[usize], f: &audio
     } else {
         return;
     };
-    let close = |e: f32| (e - target).abs() <= 0.22;
+    // Distance from the target mood. An unrated scene (the `unity_*` shows:
+    // no energy measure exists for them) fits any mood rather than sitting
+    // at the 0.5 default, which is too far from both targets — that kept
+    // every Unity show out of hot and calm stretches.
+    let dist = |n: usize| {
+        let m = ai::scene_meta(r.scene_name(n));
+        if m.rated { (m.energy - target).abs() } else { 0.0 }
+    };
+    let close = |n: usize| dist(n) <= 0.22;
     // In a breakdown a Style prefers its own calm scenes.
     let pool = if target < 0.5 {
         styles::calm_candidates(usable, &|i| r.scene_name(i).to_string(), s, styles::catalog())
@@ -576,33 +584,26 @@ fn repick_for_mood(dir: &mut Director, r: &Renderer, usable: &[usize], f: &audio
     };
     // Keep the queued pick only if it already fits: near the target energy
     // AND in the pool (a low-energy main-pool scene isn't a Style's calm pick).
-    if dir
-        .next
-        .is_some_and(|n| close(ai::scene_meta(r.scene_name(n)).energy) && pool.contains(&n))
-    {
+    if dir.next.is_some_and(|n| close(n) && pool.contains(&n)) {
         return;
     }
-    // Candidates near the target energy — take the best cluster so the
-    // pick stays varied rather than always landing the same scene.
-    let mut cands: Vec<(f32, usize)> = pool
+    // Pick among every scene that fits the mood and hasn't played lately;
+    // only when none fits, the nearest cluster. Taking just the nearest
+    // cluster from a small Style pool repeated the same few scenes.
+    let fresh: Vec<usize> = pool
         .iter()
         .copied()
-        .filter(|&n| n != dir.scene)
-        .map(|n| {
-            (
-                (ai::scene_meta(r.scene_name(n)).energy - target).abs(),
-                n,
-            )
-        })
+        .filter(|&n| n != dir.scene && !dir.recent(n, pool.len()))
         .collect();
-    cands.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-    let best = cands.first().map(|c| c.0).unwrap_or(0.0);
-    let top: Vec<usize> = cands
-        .iter()
-        .take_while(|c| c.0 <= best + 0.1)
-        .map(|c| c.1)
-        .collect();
-    if let Some(&pick) = top.get((dir.rand() * top.len() as f32) as usize % top.len().max(1)) {
+    let others: Vec<usize> = pool.iter().copied().filter(|&n| n != dir.scene).collect();
+    let cands = if fresh.is_empty() { others } else { fresh };
+    let mut top: Vec<usize> = cands.iter().copied().filter(|&n| close(n)).collect();
+    if top.is_empty() {
+        let best = cands.iter().map(|&n| dist(n)).fold(f32::INFINITY, f32::min);
+        top = cands.iter().copied().filter(|&n| dist(n) <= best + 0.1).collect();
+    }
+    if !top.is_empty() {
+        let pick = top[(dir.rand() * top.len() as f32) as usize % top.len()];
         dir.next = Some(pick);
     }
 }
