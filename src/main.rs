@@ -1774,6 +1774,9 @@ fn finish_check(chk: perf::Check, size: (u32, u32), shared: &Shared) {
         .map(|d| d.as_secs())
         .unwrap_or(0);
     rep.size = size;
+    if rep.drop_dead_engine() {
+        println!("perf check: the Unity engine sent no frames; Unity shows not measured");
+    }
     rep.save();
     let slow = rep.slow();
     *lock(&shared.perf) = rep;
