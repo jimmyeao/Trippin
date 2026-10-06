@@ -971,7 +971,9 @@ fn correlate(
             }
         }
     }
-    if !best.1.is_finite() {
+    // f32::MIN is the "none yet" sentinel, and it is finite: test against it,
+    // not is_finite().
+    if best.1 == f32::MIN {
         return None;
     }
 
@@ -979,7 +981,11 @@ fn correlate(
     let refine = |lag: usize, coarse: f32| -> (f64, f32) {
         let (mut pos_hops, mut score) = (last_hop(lag as i64 * SUB as i64), coarse);
         for off in -3..=3i64 {
-            let base = (lag as i64 * SUB as i64 + off).clamp(0, (sw - lw) as i64) as usize;
+            // `base` is in full-res hops; the last valid lag is (sw - lw)
+            // SUBSAMPLED lags, i.e. (sw - lw) * SUB hops. Clamping to
+            // (sw - lw) folded every later lag onto one constant spot, which
+            // then often out-scored the coarse match (the 68.53 s magnet).
+            let base = (lag as i64 * SUB as i64 + off).clamp(0, ((sw - lw) * SUB) as i64) as usize;
             let mut dot = 0.0f32;
             let mut ss = 0.0f32;
             for i in 0..lw {
@@ -996,7 +1002,11 @@ fn correlate(
         (pos_hops.max(0) as f64, score)
     };
     let (pos_hops, score) = refine(best.0, best.1);
-    let near = best_near.1.is_finite().then(|| refine(best_near.0, best_near.1));
+    // No lag within the tolerance leaves the sentinel: no near match (the
+    // caller treats that as lost and coasts). With is_finite() this became
+    // refine(lag 0), a constant spot the lock then "held" (the 68.53 s magnet
+    // in the Windows House Arrest runs).
+    let near = (best_near.1 > f32::MIN).then(|| refine(best_near.0, best_near.1));
     // Distinctness: how far the peak stands above the best match more than
     // DISTINCT_S away (in subsampled lags).
     let away = (DISTINCT_S * live_fps / SUB as f64) as usize;
