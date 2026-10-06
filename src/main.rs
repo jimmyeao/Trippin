@@ -114,6 +114,10 @@ struct Shared {
     env: audio::SharedEnv,
     /// Settings changed on the render thread — the event thread saves them.
     dirty: AtomicBool,
+    /// What a timeline show borrowed, while it holds the rig. The saver
+    /// writes these values instead of the show's, so a save during a show
+    /// (a Look recall marks dirty) can't persist its Manual mode or palette.
+    show_baseline: Mutex<Option<ShowBaseline>>,
     /// The visuals window is closing.
     quit: AtomicBool,
     /// Fixed after init; the panel lists them.
@@ -317,6 +321,18 @@ impl ShowBaseline {
             dancer_showing: dancer.showing,
         }
     }
+
+    /// Write the borrowed settings back into `s`.
+    fn restore_into(&self, s: &mut Settings) {
+        s.mode = self.mode;
+        s.dancer_enabled = self.dancer_enabled;
+        s.dancer_style = self.dancer_style;
+        s.dancer_trails = self.dancer_trails;
+        s.canon = self.canon;
+        s.fx = self.fx;
+        s.fx_auto = self.fx_auto;
+        s.palette = self.palette.clone();
+    }
 }
 
 /// End the show: stop the player, swap audio back to the live input, hand the
@@ -336,17 +352,11 @@ fn end_show(
 ) {
     stop_song(player, audio, cfg, shared);
     if let Some(b) = pre_show.take() {
-        {
-            let mut s = lock(&shared.settings);
-            s.mode = b.mode;
-            s.dancer_enabled = b.dancer_enabled;
-            s.dancer_style = b.dancer_style;
-            s.dancer_trails = b.dancer_trails;
-            s.canon = b.canon;
-            s.fx = b.fx;
-            s.fx_auto = b.fx_auto;
-            s.palette = b.palette.clone();
-        }
+        b.restore_into(&mut lock(&shared.settings));
+        *lock(&shared.show_baseline) = None;
+        // A save during the show wrote the baseline (see the saver); save
+        // again so anything else changed since lands too.
+        shared.dirty.store(true, Ordering::Relaxed);
         *blackout = b.blackout;
         STROBE.store(false, Ordering::Relaxed);
         dancer.showing = b.dancer_showing;
@@ -475,7 +485,9 @@ fn apply_playhead(
     // First borrow of the rig: remember what the live show looked like so the
     // show's state never leaks past its end (see `end_show`).
     if pre_show.is_none() {
-        *pre_show = Some(ShowBaseline::take(shared, dir, dancer, *blackout));
+        let b = ShowBaseline::take(shared, dir, dancer, *blackout);
+        *lock(&shared.show_baseline) = Some(b.clone());
+        *pre_show = Some(b);
     }
     {
         let mut s = lock(&shared.settings);
@@ -567,7 +579,15 @@ fn repick_for_mood(dir: &mut Director, r: &Renderer, usable: &[usize], f: &audio
     } else {
         return;
     };
-    let close = |e: f32| (e - target).abs() <= 0.22;
+    // Distance from the target mood. An unrated scene (the `unity_*` shows:
+    // no energy measure exists for them) fits any mood rather than sitting
+    // at the 0.5 default, which is too far from both targets — that kept
+    // every Unity show out of hot and calm stretches.
+    let dist = |n: usize| {
+        let m = ai::scene_meta(r.scene_name(n));
+        if m.rated { (m.energy - target).abs() } else { 0.0 }
+    };
+    let close = |n: usize| dist(n) <= 0.22;
     // In a breakdown a Style prefers its own calm scenes.
     let pool = if target < 0.5 {
         styles::calm_candidates(usable, &|i| r.scene_name(i).to_string(), s, styles::catalog())
@@ -576,33 +596,44 @@ fn repick_for_mood(dir: &mut Director, r: &Renderer, usable: &[usize], f: &audio
     };
     // Keep the queued pick only if it already fits: near the target energy
     // AND in the pool (a low-energy main-pool scene isn't a Style's calm pick).
-    if dir
-        .next
-        .is_some_and(|n| close(ai::scene_meta(r.scene_name(n)).energy) && pool.contains(&n))
-    {
+    if dir.next.is_some_and(|n| close(n) && pool.contains(&n)) {
         return;
     }
-    // Candidates near the target energy — take the best cluster so the
-    // pick stays varied rather than always landing the same scene.
-    let mut cands: Vec<(f32, usize)> = pool
+    // Pick among every scene that fits the mood and hasn't played lately;
+    // only when none fits, the nearest cluster. Taking just the nearest
+    // cluster from a small Style pool repeated the same few scenes.
+    let fresh: Vec<usize> = pool
         .iter()
         .copied()
-        .filter(|&n| n != dir.scene)
-        .map(|n| {
-            (
-                (ai::scene_meta(r.scene_name(n)).energy - target).abs(),
-                n,
-            )
-        })
+        .filter(|&n| n != dir.scene && !dir.recent(n, pool.len()))
         .collect();
-    cands.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-    let best = cands.first().map(|c| c.0).unwrap_or(0.0);
-    let top: Vec<usize> = cands
-        .iter()
-        .take_while(|c| c.0 <= best + 0.1)
-        .map(|c| c.1)
-        .collect();
-    if let Some(&pick) = top.get((dir.rand() * top.len() as f32) as usize % top.len().max(1)) {
+    let others: Vec<usize> = pool.iter().copied().filter(|&n| n != dir.scene).collect();
+    let cands = if fresh.is_empty() { others } else { fresh };
+    let rated = |n: usize| ai::scene_meta(r.scene_name(n)).rated;
+    let mut top: Vec<usize> = cands.iter().copied().filter(|&n| rated(n) && close(n)).collect();
+    let unrated: Vec<usize> = cands.iter().copied().filter(|&n| !rated(n)).collect();
+    // Unrated scenes count as fitting, but only at the rate rated ones do:
+    // all of them in, against half the rated pool in a hot stretch, made
+    // Unity shows 21 of 49 cuts on Party (32% of its pool; median).
+    let n_rated = cands.len() - unrated.len();
+    let fit = if n_rated == 0 { 1.0 } else { top.len() as f32 / n_rated as f32 };
+    // No rated scene fits: the nearest rated cluster, unrated at par.
+    let w_unrated = if top.is_empty() { 1.0 } else { fit };
+    if top.is_empty() && n_rated > 0 {
+        let rd = |n: usize| if rated(n) { dist(n) } else { f32::INFINITY };
+        let best = cands.iter().map(|&n| rd(n)).fold(f32::INFINITY, f32::min);
+        top = cands.iter().copied().filter(|&n| rd(n) <= best + 0.1).collect();
+    }
+    // Weighted pick: each rated fit counts 1, each unrated scene `w_unrated`.
+    let total = top.len() as f32 + unrated.len() as f32 * w_unrated;
+    if total > 0.0 {
+        let mut x = dir.rand() * total;
+        let pick = if x < top.len() as f32 {
+            top[(x as usize).min(top.len() - 1)]
+        } else {
+            x -= top.len() as f32;
+            unrated[((x / w_unrated) as usize).min(unrated.len() - 1)]
+        };
         dir.next = Some(pick);
     }
 }
@@ -1237,6 +1268,16 @@ fn render_loop(
                             None
                         }
                     }
+                    // Follow-live switched off while locked: the arm above
+                    // no longer runs, so hand the borrowed rig back here
+                    // (else Manual mode, a blackout or a cue's palette stick).
+                    PlayMode::Stopped if was_locked => {
+                        lost_lock = true;
+                        was_locked = false;
+                        matcher.reset();
+                        tl.live_locked = false;
+                        None
+                    }
                     _ => None,
                 };
                 if let Some(t) = pos_t {
@@ -1733,6 +1774,9 @@ fn finish_check(chk: perf::Check, size: (u32, u32), shared: &Shared) {
         .map(|d| d.as_secs())
         .unwrap_or(0);
     rep.size = size;
+    if rep.drop_dead_engine() {
+        println!("perf check: the Unity engine sent no frames; Unity shows not measured");
+    }
     rep.save();
     let slow = rep.slow();
     *lock(&shared.perf) = rep;
@@ -2689,6 +2733,7 @@ impl ApplicationHandler<AppEvent> for App {
             rec_clip: AtomicBool::new(false),
             rec_set: AtomicBool::new(false),
             settings: Mutex::new(self.settings.clone()),
+            show_baseline: Mutex::new(None),
             status: Mutex::new(Status::default()),
             timeline: timeline::TimelineState::new(),
             env: self.env.clone(),
@@ -3111,7 +3156,11 @@ impl ApplicationHandler<AppEvent> for App {
                 self.dirty_since = None;
                 if !self.no_save {
                     if let Some(sh) = &self.shared {
-                        lock(&sh.settings).save();
+                        let mut s = lock(&sh.settings).clone();
+                        if let Some(b) = lock(&sh.show_baseline).as_ref() {
+                            b.restore_into(&mut s);
+                        }
+                        s.save();
                     }
                 }
                 if let Some(sh) = &self.shared {

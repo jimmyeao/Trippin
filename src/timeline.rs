@@ -608,7 +608,9 @@ pub struct TimelineState {
     /// Recording: actions are written into the cue list at the playhead.
     pub recording: bool,
     /// Follow-live: cross-correlate room audio onsets against the clips and
-    /// fire cues at the matched position.
+    /// fire cues at the matched position. Off until the user turns it on:
+    /// on by default, merely loading a timeline let its show take over Auto
+    /// whenever one of its tracks played.
     pub autosync: bool,
     pub live_locked: bool,
     pub live_score: f32,
@@ -630,7 +632,7 @@ impl TimelineState {
             pos_s: 0.0,
             cursor_s: 0.0,
             recording: false,
-            autosync: true,
+            autosync: false,
             live_locked: false,
             live_score: 0.0,
             dirty: false,
@@ -658,6 +660,27 @@ const SUB: usize = 4;
 /// Score above this locks the match; below LOW unlocks (sticky in between).
 const LOCK_SCORE: f32 = 0.5;
 const UNLOCK_SCORE: f32 = 0.28;
+/// While locked, the match nearest the coasted position is scored too,
+/// within `NEAR_S`: well under half a beat, so it refines clock drift but
+/// can't step a beat. At ±1 s, on four-on-the-floor music, offsets one or
+/// two beats apart scored alike, every refinement could slip a beat, and the
+/// next search centred on the slip: the playhead ratcheted ahead of the
+/// music (median: +19 s in 60 s).
+const NEAR_S: f64 = 0.15;
+/// A match further away is a jump. While the near match still holds
+/// (>= `LOST_SCORE`), dance tracks' repeated sections score as high as the
+/// right spot with noisy margins (median: 168.9 -> 68.5 s, undone 7.7 s
+/// later), so a jump must reach `JUMP_SCORE`, beat the near match by
+/// `JUMP_MARGIN`, and agree for `JUMP_EVALS` evaluations (~3 s). Once the
+/// near match is lost the music really moved (a DJ jump or restart): a
+/// `LOCK_SCORE` match agreeing on `LOST_EVALS` evaluations seeks.
+const LOST_SCORE: f32 = 0.38;
+const JUMP_SCORE: f32 = 0.6;
+const JUMP_MARGIN: f32 = 0.2;
+const JUMP_EVALS: u32 = 6;
+const LOST_EVALS: u32 = 2;
+/// Two jump candidates agree when they land within this of each other.
+const AGREE_S: f64 = 0.5;
 
 pub struct Matcher {
     pub locked: bool,
@@ -672,6 +695,9 @@ pub struct Matcher {
     coasted_at: Instant,
     /// Skip evaluation until this instant (runs ~2×/sec max).
     next_eval: Instant,
+    /// A jump candidate awaiting confirmation: (global seconds, when seen,
+    /// evaluations in a row that agreed).
+    pending_jump: Option<(f64, Instant, u32)>,
 }
 
 impl Matcher {
@@ -683,6 +709,7 @@ impl Matcher {
             locked_clip: None,
             coasted_at: Instant::now(),
             next_eval: Instant::now(),
+            pending_jump: None,
         }
     }
 
@@ -731,16 +758,26 @@ impl Matcher {
             .sqrt()
             .max(1e-9);
 
-        // Correlate every clip; keep the best. A locked clip only needs to
-        // stay above the unlock floor — best-overall can switch the lock.
+        // Correlate every clip; keep the best. While locked, also the best
+        // match on the locked clip near the coasted position.
+        let now = Instant::now();
+        let coasted = self.pos_s + now.duration_since(self.coasted_at).as_secs_f64();
         let mut best: Option<(usize, f64, f32)> = None; // (clip, local pos s, score)
+        let mut near: Option<(f64, f32)> = None; // (global pos s, score)
         for (ci, clip) in doc.clips.iter().enumerate() {
             if clip.onsets.is_empty() || clip.onset_fps <= 0.0 {
                 continue;
             }
-            if let Some((pos_hops, score)) = correlate(&l_sub, l_mean, l_norm, clip, live_fps) {
+            let expect = (self.locked && self.locked_clip == Some(ci))
+                .then(|| ((coasted - clip.offset_s) * live_fps, NEAR_S * live_fps));
+            if let Some((pos_hops, score, n)) =
+                correlate(&l_sub, l_mean, l_norm, clip, live_fps, expect)
+            {
                 if best.is_none_or(|b| score > b.2) {
                     best = Some((ci, pos_hops / live_fps, score));
+                }
+                if let Some((h, sc)) = n {
+                    near = Some((clip.offset_s + h / live_fps, sc));
                 }
             }
         }
@@ -751,24 +788,64 @@ impl Matcher {
             return None;
         };
 
-        self.score = score;
+        let found = doc.clips[ci].offset_s + local_s;
         if self.locked {
-            if score < UNLOCK_SCORE {
-                self.locked = false;
-                self.locked_clip = None;
-            } else if self.locked_clip.is_some_and(|c| c != ci) {
-                // Another clip matched better — only switch if it's clearly better.
-                self.locked_clip = Some(ci);
+            let near_score = near.map_or(f32::MIN, |n| n.1);
+            let lost = near_score < LOST_SCORE;
+            let (jump_ok, need) = if lost {
+                (score >= LOCK_SCORE && score > near_score, LOST_EVALS)
+            } else {
+                (score >= JUMP_SCORE && score >= near_score + JUMP_MARGIN, JUMP_EVALS)
+            };
+            if jump_ok {
+                // A better match elsewhere: confirm it over several
+                // evaluations before seeking.
+                let n = match self.pending_jump {
+                    Some((p, t, k))
+                        if (found - (p + now.duration_since(t).as_secs_f64())).abs() <= AGREE_S =>
+                    {
+                        k + 1
+                    }
+                    _ => 1,
+                };
+                if n >= need {
+                    self.pos_s = found;
+                    self.locked_clip = Some(ci);
+                    self.pending_jump = None;
+                    self.score = score;
+                } else {
+                    self.pending_jump = Some((found, now, n));
+                    self.pos_s = near.map_or(coasted, |n| n.0);
+                    self.score = near_score.max(0.0);
+                }
+            } else {
+                self.pending_jump = None;
+                match near {
+                    // Where we are still matches: refine there.
+                    Some((p, sc)) if sc >= UNLOCK_SCORE => {
+                        self.pos_s = p;
+                        self.score = sc;
+                    }
+                    _ => {
+                        self.locked = false;
+                        self.locked_clip = None;
+                        self.score = score;
+                        return None;
+                    }
+                }
             }
+            self.coasted_at = now;
+            Some(self.pos_s)
         } else if score >= LOCK_SCORE {
+            self.score = score;
             self.locked = true;
             self.locked_clip = Some(ci);
-        }
-        if self.locked {
-            self.pos_s = doc.clips[ci].offset_s + local_s;
-            self.coasted_at = Instant::now();
+            self.pending_jump = None;
+            self.pos_s = found;
+            self.coasted_at = now;
             Some(self.pos_s)
         } else {
+            self.score = score;
             None
         }
     }
@@ -779,6 +856,7 @@ impl Matcher {
         self.score = 0.0;
         self.pos_s = 0.0;
         self.locked_clip = None;
+        self.pending_jump = None;
     }
 }
 
@@ -790,7 +868,10 @@ fn correlate(
     l_norm: f32,
     clip: &Clip,
     live_fps: f64,
-) -> Option<(f64, f32)> {
+    // (expected "now" position, tolerance), both in live hops: also report
+    // the best match whose "now" lands within the tolerance.
+    expect: Option<(f64, f64)>,
+) -> Option<(f64, f32, Option<(f64, f32)>)> {
     let lw = l_sub.len();
     let scale = clip.onset_fps / live_fps;
     let n_song = (clip.onsets.len() as f64 / scale) as usize;
@@ -822,7 +903,10 @@ fn correlate(
         pss.push(b as f32);
     }
 
+    // The last live sample ("now") sits at song hop lag + (lw-1)*SUB.
+    let last_hop = |lag: i64| -> i64 { lag + (lw as i64 - 1) * SUB as i64 };
     let mut best = (0usize, f32::MIN);
+    let mut best_near = (0usize, f32::MIN);
     for lag in 0..=(sw - lw) {
         // Window norm: sqrt( Σd² - (Σd)²/w ) over song[lag..lag+lw].
         let sd = (pss[lag + lw] - pss[lag]) - (ps[lag + lw] - ps[lag]).powi(2) / lw as f32;
@@ -837,31 +921,39 @@ fn correlate(
         if score > best.1 {
             best = (lag, score);
         }
+        if let Some((e, tol)) = expect {
+            if (last_hop(lag as i64 * SUB as i64) as f64 - e).abs() <= tol && score > best_near.1 {
+                best_near = (lag, score);
+            }
+        }
     }
     if !best.1.is_finite() {
         return None;
     }
 
-    // The last live sample ("now") sits at song hop lag + (lw-1)*SUB.
-    let last_hop = |lag: i64| -> i64 { lag + (lw as i64 - 1) * SUB as i64 };
-    let (mut pos_hops, mut score) = (last_hop(best.0 as i64 * SUB as i64), best.1);
-    for off in -3..=3i64 {
-        // Full-res refinement: same subsampled stride, shifted by hops.
-        let base = (best.0 as i64 * SUB as i64 + off).clamp(0, (sw - lw) as i64) as usize;
-        let mut dot = 0.0f32;
-        let mut ss = 0.0f32;
-        for i in 0..lw {
-            let v = song_at(base + i * SUB);
-            dot += (l_sub[i] - l_mean) * (v - s_mean);
-            ss += (v - s_mean).powi(2);
+    // Full-res refinement around a subsampled lag: same stride, shifted by hops.
+    let refine = |lag: usize, coarse: f32| -> (f64, f32) {
+        let (mut pos_hops, mut score) = (last_hop(lag as i64 * SUB as i64), coarse);
+        for off in -3..=3i64 {
+            let base = (lag as i64 * SUB as i64 + off).clamp(0, (sw - lw) as i64) as usize;
+            let mut dot = 0.0f32;
+            let mut ss = 0.0f32;
+            for i in 0..lw {
+                let v = song_at(base + i * SUB);
+                dot += (l_sub[i] - l_mean) * (v - s_mean);
+                ss += (v - s_mean).powi(2);
+            }
+            let sc = dot / (l_norm * ss.sqrt().max(1e-9));
+            if sc > score {
+                score = sc;
+                pos_hops = last_hop(base as i64);
+            }
         }
-        let sc = dot / (l_norm * ss.sqrt().max(1e-9));
-        if sc > score {
-            score = sc;
-            pos_hops = last_hop(base as i64);
-        }
-    }
-    Some((pos_hops.max(0) as f64, score))
+        (pos_hops.max(0) as f64, score)
+    };
+    let (pos_hops, score) = refine(best.0, best.1);
+    let near = best_near.1.is_finite().then(|| refine(best_near.0, best_near.1));
+    Some((pos_hops, score, near))
 }
 
 #[cfg(test)]
@@ -879,6 +971,93 @@ mod tests {
             onsets: Vec::new(),
             onset_fps: 0.0,
             overview: Vec::new(),
+        }
+    }
+
+    /// A 120 s onset envelope at 60 fps whose 30-60 s section repeats at
+    /// 60-90 s (a dance track's repeated chorus); the rest is unique.
+    fn repeating_clip() -> Clip {
+        let fps = 60.0;
+        let mut x: u32 = 12345;
+        let mut rnd = || {
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            (x % 1000) as f32 / 1000.0
+        };
+        let mut on: Vec<f32> = (0..(120.0 * fps) as usize).map(|_| rnd()).collect();
+        let (a, b) = ((30.0 * fps) as usize, (60.0 * fps) as usize);
+        for i in 0..(b - a) {
+            on[b + i] = on[a + i];
+        }
+        Clip { onsets: on, onset_fps: fps, duration_s: 120.0, ..clip(0.0) }
+    }
+
+    #[test]
+    fn follow_live_holds_through_a_repeated_section() {
+        let c = repeating_clip();
+        let doc = Timeline { clips: vec![c.clone()], ..Timeline::default() };
+        let live = |end_s: f64| c.onsets[(end_s * 60.0) as usize - 20 * 60..(end_s * 60.0) as usize].to_vec();
+        // Locked in the second chorus (80 s): the identical first chorus at
+        // 50 s ties for best (and wins the argmax as the earlier lag) but
+        // must not pull the playhead.
+        let mut m = Matcher::new();
+        let p = m.update(&live(80.0), 60.0, &doc).expect("locks");
+        assert!((p - 50.0).abs() < 0.5 || (p - 80.0).abs() < 0.5, "{p}");
+        m.pos_s = 80.0;
+        for _ in 0..5 {
+            let p = m.update(&live(80.0), 60.0, &doc).unwrap();
+            assert!((p - 80.0).abs() < 0.5, "hopped to {p}");
+        }
+        // Locked somewhere wrong (20 s, unique material) while the room
+        // plays 100 s: the near match is lost, so the better match wins
+        // after LOST_EVALS.
+        m.pos_s = 20.0;
+        let mut seeks = Vec::new();
+        for _ in 0..LOST_EVALS {
+            seeks.push(m.update(&live(100.0), 60.0, &doc).unwrap_or(-1.0));
+        }
+        assert!((seeks.last().unwrap() - 100.0).abs() < 0.5, "{seeks:?}");
+        assert!(seeks[..seeks.len() - 1].iter().all(|p| (p - 100.0).abs() > 5.0), "{seeks:?}");
+    }
+
+    #[test]
+    fn follow_live_does_not_ratchet_on_a_steady_beat() {
+        // 130 BPM four-on-the-floor: offsets a beat apart score alike. The
+        // live tap is the song plus noise (a DJ mix never matches the file).
+        let fps = 60.0;
+        let mut x: u32 = 777;
+        let mut rnd = move || {
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            (x % 1000) as f32 / 1000.0
+        };
+        let beat = 60.0 / 130.0;
+        let on: Vec<f32> = (0..(180.0 * fps) as usize)
+            .map(|i| {
+                let ph = (i as f64 / fps / beat).fract();
+                (if ph < 0.08 { 1.0 } else { 0.1 }) + 0.15 * rnd()
+            })
+            .collect();
+        let live_tap: Vec<f32> = on.iter().map(|v| v + 0.3 * rnd()).collect();
+        let c = Clip { onsets: on, onset_fps: fps, duration_s: 180.0, ..clip(0.0) };
+        let doc = Timeline { clips: vec![c], ..Timeline::default() };
+        let live = |end_s: f64| {
+            let e = (end_s * fps) as usize;
+            live_tap[e - 20 * 60..e].to_vec()
+        };
+        let mut m = Matcher::new();
+        m.update(&live(30.0), fps, &doc).expect("locks");
+        m.pos_s = 30.0; // start right; the test is about staying right
+        let mut t = 30.0;
+        while t < 170.0 {
+            // Coast like the render loop does between evaluations.
+            t += 0.5;
+            m.pos_s += 0.5;
+            m.coasted_at = Instant::now();
+            let p = m.update(&live(t), fps, &doc).unwrap_or(m.pos_s);
+            assert!((p - t).abs() < 0.3, "drifted to {p:.2} at true {t:.1}");
         }
     }
 

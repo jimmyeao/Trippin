@@ -833,7 +833,14 @@ mod tests {
             rx.recv_timeout(Duration::from_secs(2)).unwrap(),
             RemoteCmd::Thumb(n) if n == "comets"
         ));
-        let thumb = read_text(&mut ws);
+        // State pushes run at ~10 Hz on their own thread, so one can land
+        // ahead of the thumb; skip those.
+        let thumb = loop {
+            let f = read_text(&mut ws);
+            if f["type"] != "state" {
+                break f;
+            }
+        };
         assert_eq!(thumb["type"], "thumb");
         assert_eq!(thumb["scene"], "comets");
         assert_eq!(thumb["png_b64"], "AQIDBA==");

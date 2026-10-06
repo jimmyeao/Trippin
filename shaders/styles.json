@@ -112,7 +112,7 @@
   {
     "id": "pop",
     "name": "Pop",
-    "about": "Colourful and friendly: bright scenes, warm light and stage rigs, never dark or cold.",
+    "about": "Colourful and friendly: bright scenes and warm light, never dark or cold.",
     "scenes": {
       "include": [
         "bright",

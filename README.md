@@ -589,7 +589,10 @@ boundaries and cue transitions land on the "one", not just on beats.
 - **Follow live** is the adventurous bit: it correlates the room's live
   audio onset envelope against the track's stored envelope, locks on when
   the same song is playing in the room and fires the cues at the matching
-  position — a pre-programmed show that follows the DJ's deck.
+  position — a pre-programmed show that follows the DJ's deck. It's off
+  until you switch it on (the **follow live** button in the editor or on
+  the Timeline card): while it's locked, the timeline's cues run the
+  visuals instead of Auto.
 - **Strobe** (timeline cue, Cues library): while it runs the picture is
   black and cuts in on each drum hit — hard cuts, no fade — so it follows
   whatever the drums actually play.

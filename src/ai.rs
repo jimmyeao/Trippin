@@ -1007,6 +1007,9 @@ fn is_calm(kind: &str) -> bool {
 pub struct SceneMeta {
     pub about: String,
     pub energy: f32,
+    /// `energy` was measured (`scene_energy.json`), not the 0.5 default.
+    /// `unity_*` shows can't be snapped, so they never are.
+    pub rated: bool,
     pub flight: bool,
 }
 
@@ -1032,6 +1035,7 @@ pub fn scene_meta(name: &str) -> SceneMeta {
         .map(|src| scene_blurb(&src))
         .unwrap_or_default();
     let low = format!("{name} {}", about.to_lowercase());
+    let rated = energy.contains_key(name);
     let mut e = energy.get(name).copied().unwrap_or(0.5);
     if ["laser", "festival", "rave", "strobe", "club"].iter().any(|k| low.contains(k)) {
         e = e.max(0.6);
@@ -1042,7 +1046,7 @@ pub fn scene_meta(name: &str) -> SceneMeta {
     ]
     .iter()
     .any(|k| low.contains(k));
-    let m = SceneMeta { about, energy: e, flight };
+    let m = SceneMeta { about, energy: e, rated, flight };
     cache
         .lock()
         .unwrap_or_else(|e| e.into_inner())

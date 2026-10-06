@@ -45,6 +45,10 @@ pub struct Director {
     /// `next` came from the operator's "play next" — the mood fitter must
     /// not overwrite a human's pick.
     pub next_queued: bool,
+    /// The scenes that played before this one, newest last. Random picks
+    /// skip them so a small Style pool doesn't land the same scene over
+    /// and over (Party/Pop showed one scene 6 times in 3 minutes).
+    played: std::collections::VecDeque<usize>,
     /// Beat pos of the last cut the director made (any kind). Event cuts
     /// need ≥4 beats of clear air after it — a busy run of musical events
     /// must not strobe the scene list.
@@ -90,6 +94,9 @@ pub struct Director {
     vocal_cool: f64,
 }
 
+/// How many past scenes `recent` remembers.
+const RECENT_MAX: usize = 8;
+
 impl Director {
     pub fn new() -> Self {
         let rng = std::time::SystemTime::now()
@@ -114,6 +121,7 @@ impl Director {
             pending_cut: false,
             next: None,
             next_queued: false,
+            played: std::collections::VecDeque::new(),
             last_cut_pos: f64::MIN,
             energy_fast: 0.0,
             energy_slow: 0.5,
@@ -160,6 +168,12 @@ impl Director {
     }
 
     pub fn cut_to(&mut self, scene: usize) {
+        if scene != self.scene {
+            self.played.push_back(self.scene);
+            if self.played.len() > RECENT_MAX {
+                self.played.pop_front();
+            }
+        }
         self.scene = scene;
         self.scene_started = Instant::now();
         self.bars_in_scene = 0;
@@ -186,11 +200,14 @@ impl Director {
             return None;
         }
         Some(if random && usable.len() > 1 {
-            let others: Vec<usize> = usable
+            let mut others: Vec<usize> = usable
                 .iter()
                 .copied()
-                .filter(|&s| s != self.scene)
+                .filter(|&s| s != self.scene && !self.recent(s, usable.len()))
                 .collect();
+            if others.is_empty() {
+                others = usable.iter().copied().filter(|&s| s != self.scene).collect();
+            }
             others[(self.rand() * others.len() as f32) as usize % others.len()]
         } else {
             let i = usable
@@ -199,6 +216,13 @@ impl Director {
                 .map_or(0, |i| i + 1);
             usable[i % usable.len()]
         })
+    }
+
+    /// `scene` played within the last few cuts. The window is half the pool
+    /// (capped at `RECENT_MAX`), so a small pool still has picks left.
+    pub fn recent(&self, scene: usize, pool: usize) -> bool {
+        let n = (pool / 2).min(RECENT_MAX);
+        self.played.iter().rev().take(n).any(|&p| p == scene)
     }
 
     /// Queue a specific scene for the next cut — the panel's "play next".
@@ -557,6 +581,27 @@ impl Director {
 mod tests {
     use super::*;
     use crate::audio::Features;
+
+    #[test]
+    fn random_picks_skip_recent_scenes() {
+        let mut d = Director::new();
+        let pool: Vec<usize> = (0..10).collect();
+        // Over many cuts no scene comes back within the last 5 (half the pool).
+        let mut last: Vec<usize> = vec![d.scene];
+        for _ in 0..200 {
+            let n = d.pick_next(&pool, true).unwrap();
+            assert!(!last.iter().rev().take(5).any(|&p| p == n), "{n} repeated within 5: {last:?}");
+            d.cut_to(n);
+            last.push(n);
+        }
+        // A pool of two still alternates (the window shrinks with the pool).
+        let mut d = Director::new();
+        for _ in 0..10 {
+            let n = d.pick_next(&[0, 1], true).unwrap();
+            assert_ne!(n, d.scene);
+            d.cut_to(n);
+        }
+    }
 
     fn settings(mode: Mode) -> Settings {
         Settings {
