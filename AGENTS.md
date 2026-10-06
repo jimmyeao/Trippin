@@ -504,6 +504,20 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   `TRIPPIN_NO_NN=1` compares without the check, `TRIPPIN_NN_DEBUG=1` logs
   each window. `main` caps rten at 2 threads (`RTEN_NUM_THREADS`); it
   barely scales past 4 and would otherwise take every core.
+- **Drumless breaks coast** (`audio.rs` `frame`, the flywheel): a break
+  with pads/vocals isn't silent, so re-estimating every 0.5 s ran the
+  tempo autocorr and the phase comb on an envelope with no rhythm. The BPM
+  wandered (124 → 72 → 131 in a test), the beat count slipped (a whole
+  phrase in 32 s) and bars/phrases reset. After a confident lock
+  (`had_lock`), a beatless stretch (silence or `groove` < 0.22) now
+  freezes `estimate_tempo`, `correct_phase`, the downbeat vote and the
+  neural check (windows overlapping it are neither sent nor applied) and
+  coasts on the locked tempo. Leaving needs `groove` >= 0.6 for 2 s: stray
+  kicks in a build-up otherwise resumed tracking on a sparse envelope and
+  locked 74.9 BPM on a 130 track. Past `FLYWHEEL_MAX_S` (90 s) the lock is
+  forgotten so a kickless track still gets tracked. Test:
+  `grid_holds_through_drumless_break`; check with `--groove-test` on
+  D.O.D. – Set Me Free (breakdowns at about 38-66 s and 142-178 s).
 - **Tempo shadows** (`audio.rs` `estimate_tempo`): autocorrelation peaks at
   the *pattern* period, not the beat — a bassline cycling every 1.5 beats
   ("Injected With a Poison") makes the raw max sit at the 1.5x shadow
