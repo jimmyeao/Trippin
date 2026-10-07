@@ -56,6 +56,9 @@ pub struct Director {
     reanchor_pending: bool,
     /// Beat position silence began (MAX while not silent).
     silent_since: f64,
+    /// The grid was set by a drop or a tap (not just the first bar line):
+    /// a later drop may then only move it by whole 4-bar blocks.
+    phrase_confirmed: bool,
     rng: u64,
     pending_cut: bool,
     /// The scene the next cut will land on — picked when the current scene
@@ -136,6 +139,12 @@ const BREAKDOWN_CONFIRM_BEATS: f64 = 4.0;
 /// nearest the drop position minus this.
 const DROP_LAG_BEATS: f64 = 1.5;
 
+/// A breakdown must last this long for its drop to re-anchor the phrase
+/// grid. Build-ups with a snare roll can lift the groove for a moment and
+/// end a "breakdown" a few bars in (D.O.D. – Set Me Free at 149 s, 4 bars
+/// before the real drop); real breakdowns run 8-32 bars.
+const REANCHOR_MIN_BREAKDOWN_BEATS: f64 = 24.0;
+
 /// How many past scenes `recent` remembers.
 const RECENT_MAX: usize = 8;
 
@@ -164,6 +173,7 @@ impl Director {
             mark_pending: false,
             reanchor_pending: false,
             silent_since: f64::MAX,
+            phrase_confirmed: false,
             rng,
             pending_cut: false,
             next: None,
@@ -204,6 +214,12 @@ impl Director {
         let seg_start = self.scene_start_bar - (self.scene_start_bar - bar0).rem_euclid(l);
         let cut = self.next_grid_cut(bar0, l);
         ((self.last_bar - seg_start + 1).max(1) as u32, (cut - seg_start).max(1) as u32)
+    }
+
+    /// Beat position of the phrase start the grid is anchored to (NaN
+    /// before the first bar line) — for `--beat-eval`.
+    pub fn phrase_anchor(&self) -> f64 {
+        self.phrase_at
     }
 
     /// Bar index of the phrase start the grid is anchored to (under the
@@ -365,6 +381,7 @@ impl Director {
         if self.mark_pending {
             self.mark_pending = false;
             self.phrase_at = pos.round();
+            self.phrase_confirmed = true;
         }
         // Long silence: the next music is a new start (the first track, or
         // the next after a gap) and its first bar line opens a phrase.
@@ -431,9 +448,22 @@ impl Director {
         if ev.drop {
             self.last_drop_pos = pos;
             // A drop opens a phrase: re-anchor the grid to its bar line
-            // (the detector lags the drums by a beat or two).
+            // (the detector lags the drums by a beat or two). Once a drop
+            // has confirmed the grid, a later one may move it by whole
+            // 4-bar blocks (phrases run 8, 16 or 32 bars), but a shift of a
+            // bar or two is the detector, not the music.
             let down = f.downbeat as f64;
-            self.phrase_at = down + 4.0 * ((pos - DROP_LAG_BEATS - down) / 4.0).round();
+            let at = down + 4.0 * ((pos - DROP_LAG_BEATS - down) / 4.0).round();
+            let shift = if self.phrase_at.is_finite() { (at - self.phrase_at).rem_euclid(16.0) } else { 0.0 };
+            let on_blocks = shift < 0.5 || shift > 15.5;
+            if pos - self.breakdown_enter_pos >= REANCHOR_MIN_BREAKDOWN_BEATS
+                && (!self.phrase_confirmed || on_blocks)
+            {
+                self.phrase_at = at;
+                self.phrase_confirmed = true;
+            } else if std::env::var_os("TRIPPIN_DROP_DEBUG").is_some() {
+                eprintln!("drop: phrase grid kept (bar line {at:.0} is {shift:.0} beats off it)");
+            }
             if std::env::var_os("TRIPPIN_DROP_DEBUG").is_some() {
                 eprintln!(
                     "drop: breakdown exit at beat {pos:.1} (entered {:.1}, calm {:.2})",
@@ -493,6 +523,7 @@ impl Director {
         let line = f.downbeat as f64 + 4.0 * bar as f64;
         if !f.silent && (!self.phrase_at.is_finite() || self.reanchor_pending) {
             self.phrase_at = line;
+            self.phrase_confirmed = false;
             self.reanchor_pending = false;
         }
         if s.mode == Mode::Manual || f.silent {
@@ -1074,12 +1105,12 @@ mod tests {
         s.cut_on_drops = true;
         let (mut d, mut pos) = (Director::new(), 0.0f64);
         cut_log(&mut d, &groove(), &mut pos, 24.0, &s);
-        // A breakdown to beat 41.5: the drums came back on beat 40 (2 bars
+        // A breakdown to beat 73.5: the drums came back on beat 72 (2 bars
         // off the old 16-beat grid) and the detector sees it 1.5 beats late.
         let mut bd = groove();
         bd.calm = 1.0;
         bd.energy = 0.2;
-        cut_log(&mut d, &bd, &mut pos, 17.5, &s);
+        cut_log(&mut d, &bd, &mut pos, 49.5, &s);
         let drop_bar = ((pos - 1.5) / 4.0).round() * 4.0;
         assert!((drop_bar % 16.0 - 8.0).abs() < 0.01, "test setup: drop bar {drop_bar}");
         let cuts = cut_log(&mut d, &groove(), &mut pos, 40.0, &s);
@@ -1089,6 +1120,37 @@ mod tests {
             let k = (c - drop_bar) / 16.0;
             assert!((k - k.round()).abs() < 0.01, "grid cut at {c} not on the re-anchored phrase ({drop_bar}): {cuts:?}");
         }
+    }
+
+    /// Drop at `beat` + the detector lag after a breakdown from `from`.
+    fn breakdown_then_drop(d: &mut Director, pos: &mut f64, s: &Settings, beat: f64) {
+        let mut bd = groove();
+        bd.calm = 1.0;
+        bd.energy = 0.2;
+        cut_log(d, &bd, pos, beat + 1.5 - *pos, s);
+        cut_log(d, &groove(), pos, 2.0, s);
+    }
+
+    /// A snare roll that ends a "breakdown" four bars in is no drop for the
+    /// phrase grid; and once a drop has set the grid, a later drop a bar
+    /// off it leaves it alone, while one a whole 4-bar block off moves it.
+    #[test]
+    fn short_or_one_bar_off_drops_keep_the_grid() {
+        let s = settings(Mode::Auto);
+        let (mut d, mut pos) = (Director::new(), 0.0f64);
+        cut_log(&mut d, &groove(), &mut pos, 32.0, &s);
+        let start = d.phrase_anchor();
+        breakdown_then_drop(&mut d, &mut pos, &s, 52.0); // 20 beats: too short
+        assert_eq!(d.phrase_anchor(), start, "a 5-bar breakdown re-anchored");
+        cut_log(&mut d, &groove(), &mut pos, 20.0, &s);
+        breakdown_then_drop(&mut d, &mut pos, &s, 136.0); // 2 bars off the grid
+        assert_eq!(d.phrase_anchor(), 136.0, "the first real drop sets the grid");
+        cut_log(&mut d, &groove(), &mut pos, 20.0, &s);
+        breakdown_then_drop(&mut d, &mut pos, &s, 204.0); // 1 bar off it
+        assert_eq!(d.phrase_anchor(), 136.0, "a one-bar-off drop moved a confirmed grid");
+        cut_log(&mut d, &groove(), &mut pos, 20.0, &s);
+        breakdown_then_drop(&mut d, &mut pos, &s, 264.0); // 2 blocks of 4 bars on
+        assert_eq!(d.phrase_anchor(), 264.0);
     }
 
     /// A downbeat re-label keeps the phrase where it was musically and
