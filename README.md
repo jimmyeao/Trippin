@@ -106,6 +106,8 @@ cargo run --release                         # capture what you hear (loopback / 
 cargo run --release -- --list-devices       # list capture devices
 cargo run --release -- --probe-audio "Rane" # capture ~6 s from a device, print signal + BPM
 cargo run --release -- --beats track.flac   # old onset grid vs the Beat This! grid, with timings
+cargo run --release -- --beat-eval track.flac          # score live beat tracking + phrasing on a file
+cargo run --release -- --record-audio Mic 900 set.wav  # record an input for --beat-eval
 cargo run --release -- --list-midi          # list MIDI inputs (pad/key controllers)
 cargo run --release -- --device "Serato"    # a specific input (or output-as-loopback)
 cargo run --release -- --mic                # force the default input instead of system audio
@@ -153,14 +155,20 @@ the end of a long track. The ~80 MB model downloads once in the
 background; a song's first analysis takes a few seconds, then it's cached.
 **Build cues** in the AI show builder re-detects the grid of clips added
 before the model arrived. Live, it re-checks the last 15 s of audio every
-5 s on a background thread (two cores, ~0.5 s per check): it moves the beat
-onto the real beat when the tracker has locked onto off-beat bass or hats,
-and sets the bar's "one" — the hand-tap downbeat key stays as an override. Everything is saved to `trippin.json`, and
+5 s on a background thread (two cores, ~0.5 s per check) and fits the beat
+grid to it: that sets the tempo (no slow drift behind the beat) and eases
+the beat onto the real one — never jumping, so bars and phrases don't
+restart — and settles the bar's "one" over a few checks, so a single odd
+reading can't move it. The hand-tap downbeat key stays as an override.
+Through a breakdown the beat coasts on the tempo it had. Everything is saved to `trippin.json`, and
 the visuals keep animating while the panel is being moved — rendering runs
 on its own thread.
 
 **Modes:** *Auto* cuts scenes every phrase and early on drops, and the dancer
-follows the track. *Static* holds the current scene while the dancer still
+follows the track. Phrases are counted on the music, not from the last cut:
+the grid carries on through breakdowns, early cuts (a drop, a fill, a
+breakdown starting) don't shift it, and a drop after a breakdown marks the
+start of a new phrase. The panel's "bar N of M" is the bar in the phrase. *Static* holds the current scene while the dancer still
 changes with the phrases. *Manual* changes nothing by itself.
 
 Default keys (all rebindable in the panel):
@@ -405,7 +413,7 @@ slamming back in count as a drop.
 | Beat flashes (`beat_pulse`) | full | melt into a steady glow |
 | Onsets (`u.onset`) | full | damped 60% (melodic notes don't fire flashes) |
 | Camera clock (`u.flow`) | tempo speed | eases to ~0.55× (floaty) |
-| Scene cuts | every phrase, and on drops | every 2 phrases, soft flash |
+| Scene cuts | phrase boundaries, and on drops | every other phrase boundary, soft flash |
 | Dancer | driving routines allowed | re-picked to a graceful routine |
 
 **Synesthesia-style audio vocabulary**, for motion that feels alive:
