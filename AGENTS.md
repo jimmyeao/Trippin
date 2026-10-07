@@ -519,12 +519,16 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   restarts phrases. Guards, each from a failure on a real recording: a fit
   at 2x/0.5x the locked tempo is read at the live level (the model flips
   levels in builds); a different tempo, a >1% step, or (locked) a >1/4-beat
-  phase correction needs two windows to agree (a transition between two
-  tracks a fraction of a beat apart dragged the beat half a beat off for
-  19 s); loose fits only go half way. The bar is decaying per-slot downbeat
-  evidence (`nn_down_ev`) that moves only when another slot has twice the
-  current one's (the model's downbeats wobble 1<->3 on Deadmau5 – Not
-  Exactly); a manual downbeat tap outweighs ~10 windows. While fits are
+  phase correction needs two windows to agree, a >0.4-beat flip three
+  (a transition between two tracks a fraction of a beat apart dragged the
+  beat half a beat off for 19 s, and overlapping windows can share one
+  confusing stretch); loose fits only go half way. The bar is per-slot
+  downbeat evidence (`nn_down_ev`, decaying x0.8 per 5 s *of time*) that
+  moves only when another slot has twice the current one's, at most once
+  per 30 s (the model's downbeats wobble 1<->3 on Deadmau5 – Not Exactly;
+  a transition swung the bar 3>0>3>0 in 45 s); the bass vote can't touch
+  a bar the model set unless it has had no usable window for 3 minutes. A
+  manual downbeat tap outweighs about a minute of windows. While fits are
   fresh (`NN_FRESH_S`) the comb is off and the autocorrelation can't move
   the tempo. Without the model the comb path still runs, and it is poor
   (it was before too): mostly off-beat on house.
@@ -538,11 +542,22 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   track with exact truth (kicks, off-beat bass, 30 s pad breakdown, snare
   build, 128->130 ramp) caught what real tracks hid. `TRIPPIN_NN_DEBUG=1`
   logs every window's fit and decision, `TRIPPIN_NO_NN=1` runs the
-  fallback, `TRIPPIN_EVAL_DUMP=1` writes the hop log. The reference is a
+  fallback, `TRIPPIN_EVAL_DUMP=1` writes the hop log, `TRIPPIN_WIN_TEST=1`
+  compares the model on 15 s windows with the whole file (windows put
+  beats ~9 ms later on mic audio, 0-25 ms by window: the live beat's
+  residual lag, which `latency_ms` covers). The reference is a
   reference, not the truth: it flips to double time on mic audio and picks
   one of two grids in a transition. `main` caps rten at 2 threads
   (`RTEN_NUM_THREADS`); it barely scales past 4 and would otherwise take
   every core.
+- **Lost capture audio is put back as silence** (`build_stream`): the
+  analyser keeps time by counting samples, so an overrun (~1/min on the
+  owner's mic input under load) or a chunk dropped on a full channel left
+  the beat late for good, and the model can't see it (it counts samples
+  too). A buffer's capture timestamp (QPC on WASAPI, clean to ±0.03 ms)
+  later than the last buffer's length predicts, by over 1 ms, is filled
+  with that much silence; dropped chunks are owed and sent as silence.
+  `TRIPPIN_GAP_DEBUG=1` logs fills. macOS's sysaudio path doesn't do this.
 - **Drumless breaks coast** (`audio.rs` `frame`, the flywheel): a break
   with pads/vocals isn't silent, so re-estimating every 0.5 s ran the
   tempo autocorr and the phase comb on an envelope with no rhythm. The BPM

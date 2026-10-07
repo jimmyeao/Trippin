@@ -802,7 +802,11 @@ struct Analyzer {
     /// A different tempo seen by the last window(s), and how many in a row.
     nn_tempo_pending: Option<(f32, u32)>,
     /// A big phase correction seen by the last window, awaiting a second.
-    nn_phase_pending: Option<f64>,
+    nn_phase_pending: Option<(f64, u32)>,
+    /// Clock of the last bar move by the model.
+    nn_bar_moved_at: f32,
+    /// Clock the bar evidence was last updated.
+    nn_down_at: f32,
     /// Downbeat evidence per live bar slot, decaying window to window.
     nn_down_ev: [f32; 4],
     /// The bar has been set by a neural window: the bass vote stops moving it.
@@ -910,6 +914,8 @@ impl Analyzer {
             nn_tempo_pending: None,
             nn_down_ev: [0.0; 4],
             nn_phase_pending: None,
+            nn_bar_moved_at: f32::MIN,
+            nn_down_at: 0.0,
             nn_down_locked: false,
             beat_s: 0.0,
             slew: 0.0,
@@ -1164,17 +1170,24 @@ impl Analyzer {
             }
         } else {
             // A big phase correction once locked (over a quarter beat; through
-            // a breakdown, over 0.12) must be measured twice running: one
-            // window over a transition between two tracks a fraction of a
-            // beat apart pulled the live beat half a beat off for 19 s.
+            // a breakdown, over 0.12) must be measured twice running, a flip
+            // of nearly half a beat three times: one window over a transition
+            // between two tracks a fraction of a beat apart pulled the beat
+            // half a beat off for 19 s, and windows overlap by 10 s, so two
+            // in a row can share one confusing stretch (a half-beat flip and
+            // back 20 s later on a mic recording).
             let lim = if coasting { 0.12 } else { 0.25 };
             if locked && e.abs() > lim {
-                let confirmed = self.nn_phase_pending.is_some_and(|p| {
-                    let d = (e - p).rem_euclid(1.0);
-                    d.min(1.0 - d) < 0.1
-                });
-                if !confirmed {
-                    self.nn_phase_pending = Some(e);
+                let seen = match self.nn_phase_pending {
+                    Some((p, n)) if {
+                        let d = (e - p).rem_euclid(1.0);
+                        d.min(1.0 - d) < 0.1
+                    } => n + 1,
+                    _ => 1,
+                };
+                let need = if e.abs() > 0.4 { 3 } else { 2 };
+                if seen < need {
+                    self.nn_phase_pending = Some((e, seen));
                     self.nn_debug("phase change pending", &pts, Some(fit));
                     return;
                 }
@@ -1252,18 +1265,28 @@ impl Analyzer {
         if coasting || c.converted {
             return;
         }
+        // Decay by time (x0.8 per 5 s), not per window: after a stretch
+        // with no usable windows, a minute-old track's evidence mustn't
+        // outvote the one playing now.
+        let decay = 0.8f32.powf(((self.clock - self.nn_down_at) / NN_EVERY_S).max(1.0));
+        self.nn_down_at = self.clock;
         for (class, &v) in fit.down_votes.iter().enumerate() {
             let slot = ((n_e as i64) - c.anchor_n + class as i64).rem_euclid(4) as usize;
-            self.nn_down_ev[slot] = self.nn_down_ev[slot] * 0.8 + v;
+            self.nn_down_ev[slot] = self.nn_down_ev[slot] * decay + v;
         }
         let ev = self.nn_down_ev;
         let total: f32 = ev.iter().sum();
         let best = (0..4).max_by(|&a, &b| ev[a].total_cmp(&ev[b])).unwrap_or(0);
         let cur = self.downbeat as usize;
+        // After a move, hold for 30 s: a transition between two tracks whose
+        // bars disagree swung it 3>0>3>0 within 45 s on a mic recording.
         let take = if !self.nn_down_locked {
             ev[best] >= 2.0 && ev[best] >= 0.6 * total
         } else {
-            best != cur && ev[best] >= 4.0 && ev[best] > 2.0 * ev[cur]
+            best != cur
+                && ev[best] >= 4.0
+                && ev[best] > 2.0 * ev[cur]
+                && self.clock - self.nn_bar_moved_at >= 30.0
         };
         if std::env::var_os("TRIPPIN_NN_DEBUG").is_some() {
             eprintln!(
@@ -1274,6 +1297,9 @@ impl Analyzer {
             );
         }
         if take {
+            if best != cur {
+                self.nn_bar_moved_at = self.clock;
+            }
             self.set_downbeat(best as u64);
             self.nn_down_locked = true;
         } else if best == cur && ev[best] >= 2.0 {
@@ -1638,7 +1664,9 @@ impl Analyzer {
                 .unwrap_or(0) as u64;
             // Hysteresis so the downbeat doesn't flicker between candidates.
             // Once a neural window has set the bar, it owns it.
-            let nn_owns = self.nn_down_locked && self.clock - self.nn_lock_at < 60.0;
+            // (Through a long stretch with no usable windows too: the bass
+            // vote took the bar after 60 s of none and swung it mid-track.)
+            let nn_owns = self.nn_down_locked && self.clock - self.nn_lock_at < 180.0;
             // A few bars of votes first: on a handful of beats it flaps.
             if !nn_owns
                 && self.downbeat_votes.iter().sum::<f32>() > 0.0
