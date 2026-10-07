@@ -93,7 +93,7 @@ pub fn load(path: &Path) -> Result<Song> {
     })
 }
 
-fn decode(path: &Path) -> Result<(Vec<f32>, u32)> {
+pub(crate) fn decode(path: &Path) -> Result<(Vec<f32>, u32)> {
     use symphonia::core::codecs::audio::AudioDecoderOptions;
     use symphonia::core::errors::Error as SymphoniaError;
     use symphonia::core::formats::probe::Hint;

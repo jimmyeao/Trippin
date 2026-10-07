@@ -524,6 +524,18 @@ mod tests {
 
 /// `trippin --beats <file>`: the autocorrelation grid next to the Beat
 /// This! grid, with timings — for checking a track whose bars land wrong.
+/// Block until the model is downloaded (CLI tools).
+pub fn wait_ready() -> Result<()> {
+    ensure_models();
+    loop {
+        match state() {
+            ModelState::Ready => return Ok(()),
+            ModelState::Failed(e) => return Err(anyhow!("model download failed: {e}")),
+            _ => std::thread::sleep(std::time::Duration::from_millis(500)),
+        }
+    }
+}
+
 pub fn beat_test(path: &Path) -> Result<()> {
     ensure_models();
     let mut last = String::new();

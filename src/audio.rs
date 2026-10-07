@@ -14,6 +14,10 @@ use cpal::{FromSample, SampleFormat, SizedSample};
 use rustfft::FftPlanner;
 use rustfft::num_complex::Complex;
 
+#[path = "beateval.rs"]
+mod eval;
+pub use eval::beat_eval;
+
 pub const SPECTRUM_BINS: usize = 32;
 
 pub(crate) const FFT_SIZE: usize = 2048;
@@ -29,6 +33,17 @@ const HALF_TEMPO_ABOVE: f32 = 144.0;
 /// often one is sent (~0.5 s of one background core per window).
 const NN_WINDOW_S: f32 = 15.0;
 const NN_EVERY_S: f32 = 5.0;
+/// The first window after start-up is sent once this much audio is in.
+const NN_FIRST_S: f32 = 8.0;
+/// Seconds of beats (not breakdown) a window needs before it's worth sending.
+const NN_MIN_BEATS_S: f32 = 4.5;
+/// How long a neural fit keeps the onset comb and the autocorrelation's
+/// fine tempo out of it.
+const NN_FRESH_S: f32 = 45.0;
+/// Time constant of a phase correction: the live beat slews onto the
+/// measured one (rate-limited, so it never runs backwards) rather than
+/// jumping.
+const SLEW_S: f32 = 0.5;
 
 /// A window of recent audio for the neural downbeat worker; `start` is the
 /// absolute sample index of `samples[0]`.
@@ -38,8 +53,8 @@ struct NnJob {
     start: u64,
 }
 
-/// Detected downbeats: (absolute sample index, confidence).
-type NnResult = Result<Vec<(u64, f32)>, String>;
+/// Detected beats in a window.
+type NnResult = Result<Vec<NnBeat>, String>;
 
 /// The worker: loads the model once, then turns windows into downbeats.
 /// Always replies, even when inference panics, so the analyser never waits
@@ -66,8 +81,8 @@ fn spawn_nn_worker() -> (mpsc::Sender<NnJob>, mpsc::Receiver<NnResult>) {
                     let dur = job.samples.len() as f32 / job.sr as f32;
                     Ok(beats
                         .iter()
-                        .filter(|b| b.down && b.conf >= 0.5 && b.t > 1.0 && b.t < dur - 1.0)
-                        .map(|b| (job.start + (b.t * job.sr as f32) as u64, b.conf))
+                        .filter(|b| b.conf >= 0.5 && b.t > 1.0 && b.t < dur - 1.0)
+                        .map(|b| (job.start + (b.t * job.sr as f32) as u64, b.conf, b.down))
                         .collect())
                 }))
                 .unwrap_or_else(|_| Err("beat worker panicked".into()));
@@ -77,6 +92,155 @@ fn spawn_nn_worker() -> (mpsc::Sender<NnJob>, mpsc::Receiver<NnResult>) {
             }
         });
     (tx, rrx)
+}
+
+/// A beat from the neural worker: absolute sample index, confidence, and
+/// whether the model marked it a downbeat.
+type NnBeat = (u64, f32, bool);
+
+/// A straight beat grid through one window's beats: beat `n` at sample
+/// `icpt + period * n`.
+#[derive(Debug, Clone)]
+struct WindowFit {
+    /// Samples per beat.
+    period: f64,
+    icpt: f64,
+    /// Grid index of the last inlier beat.
+    n_last: i64,
+    /// Inlier count, and their summed confidence (the fit's weight).
+    count: usize,
+    score: f32,
+    /// Residual RMS, as a fraction of the period.
+    rms: f64,
+    /// Grid index mod 4 of the downbeats, when they agree.
+    down_class: Option<i64>,
+    /// The downbeats' summed confidence per grid index mod 4.
+    down_votes: [f32; 4],
+}
+
+impl WindowFit {
+    /// Sample index of grid beat `n`.
+    fn at(&self, n: i64) -> f64 {
+        self.icpt + self.period * n as f64
+    }
+    fn bpm(&self, sr: f32) -> f64 {
+        60.0 * sr as f64 / self.period
+    }
+}
+
+/// Candidate grids through a window's beats, one per trial period: the
+/// window's median interval, and `hint` (the live period) when given.
+/// Beats are numbered along the period from each of the first few beats
+/// (so an off-beat first detection can't drag the whole fit onto the
+/// off-beat); beats far from a grid line are left out, which keeps a
+/// double-time hi-hat run or a second track in the mix from breaking the fit.
+fn fit_window(pts: &[NnBeat], sr: f32, min: usize, hint: Option<f64>) -> Vec<WindowFit> {
+    if pts.len() < min {
+        return Vec::new();
+    }
+    let t: Vec<f64> = pts.iter().map(|b| b.0 as f64).collect();
+    let mut ibis: Vec<f64> = t.windows(2).map(|w| w[1] - w[0]).filter(|&d| d > 0.0).collect();
+    if ibis.is_empty() {
+        return Vec::new();
+    }
+    ibis.sort_by(f64::total_cmp);
+    let med = ibis[ibis.len() / 2];
+    let mut periods = vec![med];
+    if let Some(h) = hint.filter(|h| (h / med - 1.0).abs() > 0.02) {
+        periods.push(h);
+    }
+    let mut out = Vec::new();
+    for p0 in periods {
+        if !(55.0..=290.0).contains(&(60.0 * sr as f64 / p0)) {
+            continue;
+        }
+        let best = (0..pts.len().min(4))
+            .filter_map(|start| fit_from(&t, pts, start, p0, min, sr))
+            .max_by(|a, b| a.score.total_cmp(&b.score));
+        out.extend(best);
+    }
+    out
+}
+
+fn fit_from(t: &[f64], pts: &[NnBeat], start: usize, p0: f64, min: usize, sr: f32) -> Option<WindowFit> {
+    let len = pts.len();
+    // Recent beats weigh more (time constant 6 s), so a tempo ramp (a
+    // pitch-fader move) is followed rather than averaged over the window.
+    let tau = 6.0 * sr as f64;
+    let end = t[len - 1];
+    let mut n = vec![0i64; len];
+    let mut inl = vec![false; len];
+    inl[start] = true;
+    let mut prev = start;
+    for i in start + 1..len {
+        let x = (t[i] - t[prev]) / p0;
+        let k = x.round();
+        if k >= 1.0 && (x - k).abs() < 0.25 {
+            n[i] = n[prev] + k as i64;
+            inl[i] = true;
+            prev = i;
+        }
+    }
+    let numbered = inl.clone();
+    let (mut slope, mut icpt) = (p0, t[start]);
+    for _ in 0..3 {
+        let (mut sw, mut swn, mut swx, mut swnn, mut swnx) = (0.0f64, 0.0, 0.0, 0.0, 0.0);
+        for i in (0..len).filter(|&i| inl[i]) {
+            let (x, k) = (t[i], n[i] as f64);
+            let w = pts[i].1.max(0.05) as f64 * ((x - end) / tau).exp();
+            sw += w;
+            swn += w * k;
+            swx += w * x;
+            swnn += w * k * k;
+            swnx += w * k * x;
+        }
+        let den = sw * swnn - swn * swn;
+        if den.abs() < 1e-9 {
+            return None;
+        }
+        slope = (sw * swnx - swn * swx) / den;
+        icpt = (swx - slope * swn) / sw;
+        if slope <= 0.0 {
+            return None;
+        }
+        for i in 0..len {
+            inl[i] = numbered[i] && (t[i] - icpt - slope * n[i] as f64).abs() < 0.12 * slope;
+        }
+    }
+    let idx: Vec<usize> = (0..len).filter(|&i| inl[i]).collect();
+    let (&fi, &li) = (idx.first()?, idx.last()?);
+    let slots = (n[li] - n[fi] + 1) as f32;
+    // Most grid lines in the span must hold a beat.
+    if idx.len() < min || (idx.len() as f32) < 0.6 * slots {
+        return None;
+    }
+    let rms = (idx.iter().map(|&i| (t[i] - icpt - slope * n[i] as f64).powi(2)).sum::<f64>()
+        / idx.len() as f64)
+        .sqrt()
+        / slope;
+    if rms > 0.05 {
+        return None;
+    }
+    let mut votes = [0.0f32; 4];
+    let mut count = [0u32; 4];
+    for &i in idx.iter().filter(|&&i| pts[i].2) {
+        let c = n[i].rem_euclid(4) as usize;
+        votes[c] += pts[i].1;
+        count[c] += 1;
+    }
+    let total: f32 = votes.iter().sum();
+    let best = (0..4).max_by(|&a, &b| votes[a].total_cmp(&votes[b])).unwrap_or(0);
+    let down_class = (count[best] >= 2 && votes[best] >= 0.75 * total).then_some(best as i64);
+    Some(WindowFit {
+        period: slope,
+        icpt,
+        n_last: n[li],
+        count: idx.len(),
+        score: idx.iter().map(|&i| pts[i].1).sum(),
+        rms,
+        down_class,
+        down_votes: votes,
+    })
 }
 
 /// Snapshot of the analysis, shared with the renderer.
@@ -290,6 +454,15 @@ impl AudioEngine {
     /// there instead). Otherwise the first device whose name contains the
     /// string — inputs plus, on Windows, outputs via loopback.
     pub fn start(device: Option<&str>, mic: bool, tap: Option<SharedEnv>) -> Result<Self> {
+        let (rx, sample_rate, name, backend, dead) = Self::open(device, mic)?;
+        Self::spawn(rx, sample_rate, name, backend, tap, dead)
+    }
+
+    /// Open the capture stream: mono chunks on the returned channel.
+    fn open(
+        device: Option<&str>,
+        mic: bool,
+    ) -> Result<(mpsc::Receiver<Vec<f32>>, f32, String, Backend, Arc<AtomicBool>)> {
         let _ = mic; // only consulted on macOS (system-audio vs input choice)
         let (tx, rx) = mpsc::sync_channel::<Vec<f32>>(64);
 
@@ -297,14 +470,13 @@ impl AudioEngine {
         if device.is_none() && !mic {
             match crate::sysaudio::start(tx.clone()) {
                 Ok(cap) => {
-                    return Self::spawn(
+                    return Ok((
                         rx,
                         crate::sysaudio::SAMPLE_RATE,
                         "system audio".into(),
                         Backend::System(cap),
-                        tap,
                         Arc::new(AtomicBool::new(false)),
-                    );
+                    ));
                 }
                 Err(e) => eprintln!("system audio unavailable: {e:#} — using the default input"),
             }
@@ -355,8 +527,53 @@ impl AudioEngine {
             f => return Err(anyhow!("unsupported sample format {f:?}")),
         };
         stream.play()?;
+        Ok((rx, sample_rate, name, Backend::Cpal(stream), dead))
+    }
 
-        Self::spawn(rx, sample_rate, name, Backend::Cpal(stream), tap, dead)
+    /// `--record-audio [device] secs out.wav`: capture the analyser's mono
+    /// feed to a 32-bit float WAV, for replaying a live session offline
+    /// (`--beat-eval`).
+    pub fn record(device: Option<&str>, secs: f32, out: &std::path::Path) -> Result<()> {
+        use std::io::{Seek, SeekFrom, Write};
+        let (rx, sr, name, _backend, _dead) = Self::open(device, true)?;
+        println!("Recording {secs:.0} s from {name} ({sr} Hz) -> {}", out.display());
+        let mut w = std::io::BufWriter::new(std::fs::File::create(out)?);
+        let header = |n: u32| -> Vec<u8> {
+            let mut h = Vec::with_capacity(44);
+            h.extend_from_slice(b"RIFF");
+            h.extend_from_slice(&(36 + n * 4).to_le_bytes());
+            h.extend_from_slice(b"WAVEfmt ");
+            h.extend_from_slice(&16u32.to_le_bytes());
+            h.extend_from_slice(&3u16.to_le_bytes()); // IEEE float
+            h.extend_from_slice(&1u16.to_le_bytes());
+            h.extend_from_slice(&(sr as u32).to_le_bytes());
+            h.extend_from_slice(&(sr as u32 * 4).to_le_bytes());
+            h.extend_from_slice(&4u16.to_le_bytes());
+            h.extend_from_slice(&32u16.to_le_bytes());
+            h.extend_from_slice(b"data");
+            h.extend_from_slice(&(n * 4).to_le_bytes());
+            h
+        };
+        w.write_all(&header(0))?;
+        let total = (secs * sr) as u32;
+        let mut n = 0u32;
+        let mut next_note = sr as u32 * 60;
+        while n < total {
+            let chunk = rx.recv_timeout(Duration::from_secs(5))?;
+            for s in chunk {
+                w.write_all(&s.to_le_bytes())?;
+                n += 1;
+            }
+            if n >= next_note {
+                println!("  {} min", n / (sr as u32 * 60));
+                next_note += sr as u32 * 60;
+            }
+        }
+        w.seek(SeekFrom::Start(0))?;
+        w.write_all(&header(n))?;
+        w.flush()?;
+        println!("{:.1} s written", n as f32 / sr);
+        Ok(())
     }
 
     /// Play a timeline's clip regions: the player drives the analyser and
@@ -540,7 +757,8 @@ struct Analyzer {
     /// position (`beat_count + phase`) at each hop keyed by sample index,
     /// the total samples seen, and the worker channels (spawned lazily).
     nn_ring: VecDeque<f32>,
-    nn_hops: VecDeque<(u64, f64)>,
+    /// (sample index, beat position, beatless) per hop.
+    nn_hops: VecDeque<(u64, f64, bool)>,
     nn_samples: u64,
     nn_next: f32,
     nn_busy: bool,
@@ -551,11 +769,20 @@ struct Analyzer {
     nn_sync: bool,
     /// Windows that moved the downbeat vote (for `--groove-test`).
     nn_applied: u32,
-    /// Beat-phase bias learned from the neural beats (in beats): the onset
-    /// comb locks onto whatever onsets are strongest — the off-beat bass
-    /// and hats in a lot of house — so it's told where the real beat sits
-    /// relative to its pick.
-    nn_bias: f32,
+    /// Clock of the last neural fit taken (f32::MIN: none yet).
+    nn_lock_at: f32,
+    /// A different tempo seen by the last window(s), and how many in a row.
+    nn_tempo_pending: Option<(f32, u32)>,
+    /// A big phase correction seen by the last window, awaiting a second.
+    nn_phase_pending: Option<f64>,
+    /// Downbeat evidence per live bar slot, decaying window to window.
+    nn_down_ev: [f32; 4],
+    /// The bar has been set by a neural window: the bass vote stops moving it.
+    nn_down_locked: bool,
+    /// Seconds of continuous beats (not beatless) up to now.
+    beat_s: f32,
+    /// Phase correction still to apply, in beats (see `SLEW_S`).
+    slew: f32,
     /// Flywheel through drumless breaks: once the tempo has been locked with
     /// beats playing (`had_lock`), a beatless stretch (silence, or the kick
     /// density below the breakdown threshold) coasts on that tempo and phase
@@ -567,9 +794,8 @@ struct Analyzer {
     /// Seconds the kick density has been back at beat level (leaving a
     /// beatless stretch needs a bar of it).
     beats_back_for: f32,
-    /// Clock of the last beatless hop: neural windows overlapping it are
-    /// neither sent nor applied.
-    last_beatless: f32,
+    /// The flywheel is coasting this hop (for `--beat-eval`).
+    coasting: bool,
 }
 
 /// Longest a drumless stretch coasts on the old tempo. Past it the lock is
@@ -652,11 +878,17 @@ impl Analyzer {
             nn_rx: None,
             nn_sync: false,
             nn_applied: 0,
-            nn_bias: 0.0,
+            nn_lock_at: f32::MIN,
+            nn_tempo_pending: None,
+            nn_down_ev: [0.0; 4],
+            nn_phase_pending: None,
+            nn_down_locked: false,
+            beat_s: 0.0,
+            slew: 0.0,
             had_lock: false,
             beatless_since: None,
             beats_back_for: 0.0,
-            last_beatless: f32::MIN,
+            coasting: false,
         }
     }
 
@@ -689,28 +921,45 @@ impl Analyzer {
     /// Beat position (`beat_count + phase`) at an absolute sample index,
     /// interpolated between logged hops; None outside the log.
     fn beat_pos_at(&self, sample: u64) -> Option<f64> {
-        let i = self.nn_hops.partition_point(|&(s, _)| s <= sample);
+        let i = self.nn_hops.partition_point(|h| h.0 <= sample);
         if i == 0 || i >= self.nn_hops.len() {
             return None;
         }
-        let (s0, p0) = self.nn_hops[i - 1];
-        let (s1, p1) = self.nn_hops[i];
+        let (s0, p0, _) = self.nn_hops[i - 1];
+        let (s1, p1, _) = self.nn_hops[i];
         let f = (sample - s0) as f64 / (s1 - s0).max(1) as f64;
         Some(p0 + (p1 - p0) * f)
     }
 
+    /// Whether the beat was missing (silence, or a drumless stretch) at a
+    /// logged sample index.
+    fn beatless_at(&self, sample: u64) -> bool {
+        let i = self.nn_hops.partition_point(|h| h.0 <= sample);
+        i == 0 || self.nn_hops.get(i - 1).is_none_or(|h| h.2)
+    }
+
+    /// A neural fit landed recently: it owns tempo, phase and the bar, and
+    /// the onset comb and autocorrelation stand back.
+    fn nn_fresh(&self) -> bool {
+        self.clock - self.nn_lock_at < NN_FRESH_S
+    }
+
     /// Send a window to the neural worker when one is due, and fold any
-    /// finished window's downbeats into the downbeat vote.
-    fn nn_tick(&mut self, silent: bool) {
-        // Log this hop's beat position at the FFT frame's centre — the
-        // onset envelope (and so the phase) lags the newest sample by half
-        // a frame.
-        let at = self.nn_samples.saturating_sub(FFT_SIZE as u64 / 2);
+    /// finished window into the beat grid.
+    fn nn_tick(&mut self, silent: bool, beatless: bool) {
+        // Log this hop's beat position at the newest sample — the time the
+        // render loop reads it at (`phase_at`), so a neural fit puts the live
+        // beat on the real one as the app shows it.
         self.nn_hops
-            .push_back((at, self.beat_count as f64 + self.phase as f64));
-        let cap = ((NN_WINDOW_S + NN_EVERY_S * 2.0) * self.fps) as usize;
+            .push_back((self.nn_samples, self.beat_count as f64 + self.phase as f64, beatless));
+        let cap = ((NN_WINDOW_S + NN_EVERY_S * 3.0) * self.fps) as usize;
         while self.nn_hops.len() > cap {
             self.nn_hops.pop_front();
+        }
+        if beatless {
+            self.beat_s = 0.0;
+        } else {
+            self.beat_s += 1.0 / self.fps;
         }
         let results: Vec<NnResult> = self
             .nn_rx
@@ -720,15 +969,21 @@ impl Analyzer {
         for r in results {
             self.nn_busy = false;
             match r {
-                // `silent` here also means "the window overlapped a beatless
-                // stretch": its downbeats would be guesses over pads.
-                Ok(downs) if silent => drop(downs),
-                Ok(downs) => self.nn_vote(&downs),
-                Err(e) => eprintln!("neural downbeat check: {e}"),
+                Ok(beats) => self.nn_apply(&beats),
+                Err(e) => eprintln!("neural beat check: {e}"),
             }
         }
-        let need = (NN_WINDOW_S * self.sr) as usize;
-        if self.nn_busy || silent || self.clock < self.nn_next || self.nn_ring.len() < need {
+        // A window is worth sending once it holds a few seconds of beats —
+        // or, while coasting through a breakdown, to check the flywheel.
+        // Before the first lock a shorter window gets the grid right sooner.
+        let min_s = if self.nn_lock_at == f32::MIN { NN_FIRST_S } else { NN_WINDOW_S };
+        let have = self.nn_ring.len() as f32 / self.sr;
+        if self.nn_busy
+            || silent
+            || self.clock < self.nn_next
+            || have < min_s
+            || (self.beat_s < NN_MIN_BEATS_S && !self.coasting)
+        {
             return;
         }
         self.nn_next = self.clock + NN_EVERY_S;
@@ -747,98 +1002,285 @@ impl Analyzer {
             if self.nn_sync {
                 if let Some(Ok(r)) = self.nn_rx.as_ref().map(|rx| rx.recv()) {
                     self.nn_busy = false;
-                    if let Ok(downs) = r {
-                        self.nn_vote(&downs);
+                    if let Ok(beats) = r {
+                        self.nn_apply(&beats);
                     }
                 }
             }
         }
     }
 
-    /// Map the window's downbeats onto our beat count; when at least three
-    /// agree on a bar slot, weigh that slot in heavily. The bass vote stays
-    /// as the fallback and hysteresis still guards against flicker.
-    fn nn_vote(&mut self, downs: &[(u64, f32)]) {
-        // Beat phase first: where do the neural downbeats sit against our
-        // grid? Circular mean of their fractional positions; when they
-        // agree on an offset, shift the live phase onto the real beats and
-        // keep the offset as the comb's bias.
-        let pos: Vec<(f64, f32)> = downs
+    /// Fold one window's beats into the live grid. The window's beats are
+    /// fitted to a straight grid (period + phase, outliers rejected); the fit
+    /// sets the tempo outright, and the live phase slews onto it so the beat
+    /// count never jumps (a jump re-labels bars and restarts phrases).
+    /// While coasting through a breakdown only a fit that agrees with the
+    /// flywheel is taken — and then for phase alone, never the bar.
+    fn nn_apply(&mut self, beats: &[NnBeat]) {
+        let coasting = self.coasting;
+        // Beats from where the music had a beat; through a breakdown, all
+        // of them (the stricter coasting gates apply).
+        let mut pts: Vec<NnBeat> = beats
             .iter()
-            .filter_map(|&(s, c)| self.beat_pos_at(s).map(|p| (p, c)))
+            .copied()
+            .filter(|b| coasting || !self.beatless_at(b.0))
             .collect();
-        if pos.len() >= 3 {
-            let (mut sx, mut sy) = (0.0f64, 0.0f64);
-            for &(p, _) in &pos {
-                let a = std::f64::consts::TAU * (p - p.round());
-                sx += a.cos();
-                sy += a.sin();
-            }
-            let r = (sx * sx + sy * sy).sqrt() / pos.len() as f64;
-            let off = sy.atan2(sx) / std::f64::consts::TAU; // -0.5..0.5 beats
-            if r > 0.7 && off.abs() > 0.1 {
-                let p = self.beat_count as f64 + self.phase as f64 - off;
-                let p = p.max(0.0);
-                self.beat_count = p.floor() as u64;
-                self.phase = (p - p.floor()) as f32;
-                for h in self.nn_hops.iter_mut() {
-                    h.1 -= off;
+        pts.sort_by_key(|b| b.0);
+        let min = if coasting { 16 } else { 8 };
+        let locked = self.nn_lock_at != f32::MIN;
+        let live_p = self.period as f64 * HOP as f64;
+        let fits = fit_window(&pts, self.sr, min, locked.then_some(live_p));
+        // Each candidate at the live metrical level: a fit at double or half
+        // the locked tempo is the same grid counted differently (the model
+        // flips between levels in builds and on hats), not a tempo change.
+        // Unlocked, a double-time read runs at half tempo by convention.
+        struct Cand {
+            fit: WindowFit,
+            period: f64,
+            /// Anchor beat: sample index and its grid index in `fit`.
+            anchor: f64,
+            anchor_n: i64,
+            /// Converted between levels: its downbeats don't map onto bars.
+            converted: bool,
+            p_e: f64,
+        }
+        let mut cands: Vec<Cand> = Vec::new();
+        for f in fits {
+            let r = f.period / live_p;
+            let double = if locked {
+                (r - 0.5).abs() < 0.015
+            } else {
+                f.bpm(self.sr) > HALF_TEMPO_ABOVE as f64
+            };
+            let half = locked && (r - 2.0).abs() < 0.06;
+            let mut period = f.period;
+            let mut anchor_n = f.n_last;
+            if double {
+                period *= 2.0;
+                // Every other beat: the parity on the live beat when locked,
+                // else the downbeats' parity.
+                let pick = |n: i64| -> f64 {
+                    if locked {
+                        self.beat_pos_at(f.at(n).max(0.0) as u64)
+                            .map(|p| (p - p.round()).abs())
+                            .unwrap_or(1.0)
+                    } else {
+                        f.down_class.map_or(0.0, |c| ((n - c).rem_euclid(2)) as f64)
+                    }
+                };
+                if pick(f.n_last - 1) < pick(f.n_last) {
+                    anchor_n = f.n_last - 1;
                 }
-                let mut b = self.nn_bias - off as f32;
-                b -= b.round();
-                self.nn_bias = b;
+            } else if half {
+                period /= 2.0;
             }
+            let anchor = f.at(anchor_n);
+            let Some(p_e) = self.beat_pos_at(anchor.max(0.0) as u64) else { continue };
+            cands.push(Cand { fit: f, period, anchor, anchor_n, converted: double || half, p_e });
         }
-        let mut v = [0.0f32; 4];
-        let mut n = 0;
-        for &(s, c) in downs {
-            let Some(pos) = self.beat_pos_at(s) else { continue };
-            let k = pos.round();
-            // Off our beat grid entirely: the PLL is mid-correction.
-            if (pos - k).abs() > 0.25 {
-                continue;
-            }
-            v[(k as i64).rem_euclid(4) as usize] += c;
-            n += 1;
-        }
-        if std::env::var("TRIPPIN_NN_DEBUG").is_ok() {
-            let offs: Vec<String> = downs
+        // Prefer a candidate at the live tempo, and among those one that
+        // agrees with the live phase unless another is much stronger.
+        let agrees = |c: &Cand| (c.period / live_p - 1.0).abs() < 0.03;
+        let phase_ok = |c: &Cand| (c.p_e - c.p_e.round()).abs() < 0.25;
+        let pick = if locked && cands.iter().any(|c| agrees(c)) {
+            let best = cands
                 .iter()
-                .filter_map(|&(s, _)| self.beat_pos_at(s))
-                .map(|p| format!("{:+.2}", p - p.round()))
-                .collect();
-            eprintln!(
-                "nn t={:.0} downs {} mapped {n} votes {:?} cur {} | offsets {}",
-                self.clock,
-                downs.len(),
-                v.map(|x| (x * 10.0).round() / 10.0),
-                self.downbeat,
-                offs.join(" ")
-            );
-        }
-        let total: f32 = v.iter().sum();
-        let Some((slot, best)) = v
-            .iter()
-            .enumerate()
-            .max_by(|a, b| a.1.total_cmp(b.1))
-            .map(|(i, &b)| (i, b))
-        else {
+                .filter(|c| agrees(c))
+                .map(|c| c.fit.score)
+                .fold(0.0f32, f32::max);
+            cands
+                .iter()
+                .filter(|c| agrees(c) && phase_ok(c) && c.fit.score >= 0.7 * best)
+                .max_by(|a, b| a.fit.score.total_cmp(&b.fit.score))
+                .or_else(|| cands.iter().filter(|c| agrees(c)).max_by(|a, b| a.fit.score.total_cmp(&b.fit.score)))
+        } else {
+            cands.iter().max_by(|a, b| a.fit.score.total_cmp(&b.fit.score))
+        };
+        let Some(c) = pick else {
+            self.nn_debug("no fit", &pts, None);
             return;
         };
-        if n < 3 || best < 0.6 * total {
+        let fit = &c.fit;
+        let period = (c.period / HOP as f64) as f32;
+        let agrees = agrees(c);
+        let rel = period / self.period - 1.0;
+        // A clean fit: tight residuals over enough beats. Busy mixes (two
+        // tracks in a transition, mic bleed) give looser ones, which only
+        // nudge the phase and never set the tempo.
+        let clean = fit.rms <= 0.025 && fit.count >= if locked { 12 } else { 8 };
+        // Through a breakdown the flywheel's tempo stands: the model finds
+        // "beats" in pure pads too (129.2 on a 128 synthetic break, which
+        // slipped the grid a beat by the drop). A fit may only correct the
+        // phase, and only when it agrees with the flywheel closely.
+        let mean_conf = fit.score / fit.count.max(1) as f32;
+        if coasting && !(fit.rms < 0.04 && mean_conf >= 0.7 && rel.abs() < 0.005) {
+            self.nn_debug("coasting: fit disagrees", &pts, Some(fit));
             return;
         }
-        let sum: f32 = self.downbeat_votes.iter().sum();
-        if n >= 4 && best >= 0.85 * total {
-            // A clear verdict: take it now (like a tap on the downbeat key)
-            // rather than waiting for the decaying vote to come round.
-            self.downbeat_votes = [0.0; 4];
-            self.downbeat_votes[slot] = sum.max(1.0);
-            self.downbeat = slot as u64;
+        // The live position the anchor beat should have had: the nearest
+        // whole beat, so a correction is at most half a beat either way.
+        let n_e = c.p_e.round();
+        let e = c.p_e - n_e;
+        if !agrees {
+            // A different tempo (a new track) must be a clean fit, and once
+            // anything is locked, seen twice running.
+            let strong = fit.rms < 0.035 && fit.count >= if locked { 16 } else { 12 };
+            let votes = match self.nn_tempo_pending {
+                Some((p, n)) if (p / period - 1.0).abs() < 0.02 => n + 1,
+                _ => 1,
+            };
+            self.nn_tempo_pending = strong.then_some((period, votes));
+            if !strong || (locked && votes < 2) {
+                self.nn_debug("tempo change pending", &pts, Some(fit));
+                return;
+            }
         } else {
-            self.downbeat_votes[slot] += 0.5 * sum + 1.0;
+            // A big phase correction once locked (over a quarter beat; through
+            // a breakdown, over 0.12) must be measured twice running: one
+            // window over a transition between two tracks a fraction of a
+            // beat apart pulled the live beat half a beat off for 19 s.
+            let lim = if coasting { 0.12 } else { 0.25 };
+            if locked && e.abs() > lim {
+                let confirmed = self.nn_phase_pending.is_some_and(|p| {
+                    let d = (e - p).rem_euclid(1.0);
+                    d.min(1.0 - d) < 0.1
+                });
+                if !confirmed {
+                    self.nn_phase_pending = Some(e);
+                    self.nn_debug("phase change pending", &pts, Some(fit));
+                    return;
+                }
+            }
+            self.nn_phase_pending = None;
         }
+        // Tempo: a clean fit within 1% sets it; a bigger step (a pitch
+        // change) needs a second clean window to agree. Never while coasting.
+        let new_tempo = !agrees;
+        if agrees && clean && !coasting {
+            if rel.abs() < 0.01 {
+                // Weighted by how many beats back the fit: a full window
+                // sets the tempo, a short one (the run-out of a build) only
+                // moves it part way.
+                let w = (fit.count as f32 / 28.0).clamp(0.3, 1.0);
+                self.period += (period - self.period) * w;
+                self.nn_tempo_pending = None;
+            } else {
+                let votes = match self.nn_tempo_pending {
+                    Some((p, n)) if (p / period - 1.0).abs() < 0.005 => n + 1,
+                    _ => 1,
+                };
+                self.nn_tempo_pending = Some((period, votes));
+                if votes >= 2 {
+                    self.period = period;
+                    self.nn_tempo_pending = None;
+                }
+            }
+        } else if new_tempo {
+            self.period = period;
+            self.nn_tempo_pending = None;
+        }
+        // Where the live count should be now, against where it is.
+        let now = self.nn_samples;
+        let truth = n_e + (now as f64 - c.anchor) / c.period;
+        let live = self.beat_count as f64 + self.phase as f64;
+        let err = (truth - live) as f32;
+        if !new_tempo {
+            // A loose fit only goes half way.
+            self.slew = if clean || coasting { err } else { err * 0.5 };
+        } else {
+            // A tempo change re-anchors: jump onto the new grid, forward to
+            // the next beat so the count never runs backwards.
+            self.slew = 0.0;
+            let t = live + err.rem_euclid(1.0) as f64;
+            self.beat_count = t.floor() as u64;
+            self.phase = (t - t.floor()) as f32;
+            self.nn_phase_pending = None;
+        }
+        self.nn_lock_at = self.clock;
+        self.had_lock = true;
+        self.confidence = self.confidence.max(0.6);
         self.nn_applied += 1;
+        self.nn_debug(
+            if new_tempo { "fit: new tempo" } else if clean { "fit" } else { "fit (loose)" },
+            &pts,
+            Some(fit),
+        );
+        // Bar evidence comes from clean fits only.
+        if !clean && !new_tempo {
+            return;
+        }
+        // The bar: each window's downbeats vote for live bar slots, into
+        // evidence that decays over ~5 windows. The bar is a phrase-level
+        // fact, so it moves only when another slot clearly outweighs the
+        // current one — the model's downbeats wobble between the one and
+        // the three on some tracks (Deadmau5 – Not Exactly), and every move
+        // re-labels bars and restarts a phrase. Never moved while coasting,
+        // nor from a fit counted at another metrical level.
+        if !agrees {
+            // A new tempo is a new track: its bar starts from scratch.
+            self.nn_down_ev = [0.0; 4];
+            self.nn_down_locked = false;
+        }
+        if coasting || c.converted {
+            return;
+        }
+        for (class, &v) in fit.down_votes.iter().enumerate() {
+            let slot = ((n_e as i64) - c.anchor_n + class as i64).rem_euclid(4) as usize;
+            self.nn_down_ev[slot] = self.nn_down_ev[slot] * 0.8 + v;
+        }
+        let ev = self.nn_down_ev;
+        let total: f32 = ev.iter().sum();
+        let best = (0..4).max_by(|&a, &b| ev[a].total_cmp(&ev[b])).unwrap_or(0);
+        let cur = self.downbeat as usize;
+        let take = if !self.nn_down_locked {
+            ev[best] >= 2.0 && ev[best] >= 0.6 * total
+        } else {
+            best != cur && ev[best] >= 4.0 && ev[best] > 2.0 * ev[cur]
+        };
+        if std::env::var_os("TRIPPIN_NN_DEBUG").is_some() {
+            eprintln!(
+                "nn t={:.0} bar evidence {:?} cur {cur}{}",
+                self.clock,
+                ev.map(|v| (v * 10.0).round() / 10.0),
+                if take && best != cur { format!(" -> {best}") } else { String::new() }
+            );
+        }
+        if take {
+            self.set_downbeat(best as u64);
+            self.nn_down_locked = true;
+        } else if best == cur && ev[best] >= 2.0 {
+            self.nn_down_locked = true;
+        }
+    }
+
+    /// Move the bar's one, keeping the bass vote in agreement so the
+    /// fallback doesn't drag it straight back.
+    fn set_downbeat(&mut self, slot: u64) {
+        let sum: f32 = self.downbeat_votes.iter().sum();
+        self.downbeat_votes = [0.0; 4];
+        self.downbeat_votes[slot as usize] = sum.max(1.0);
+        self.downbeat = slot;
+    }
+
+    fn nn_debug(&self, what: &str, pts: &[NnBeat], fit: Option<&WindowFit>) {
+        if std::env::var_os("TRIPPIN_NN_DEBUG").is_none() {
+            return;
+        }
+        let live = 60.0 * self.fps / self.period;
+        match fit {
+            Some(f) => eprintln!(
+                "nn t={:.0} {what}: {} beats, {:.2} BPM (live {live:.2}) rms {:.3} down {:?} slew {:+.3} bar {}{}",
+                self.clock,
+                pts.len(),
+                60.0 * self.sr as f64 / f.period,
+                f.rms,
+                f.down_class,
+                self.slew,
+                self.downbeat,
+                if self.coasting { " coasting" } else { "" }
+            ),
+            None => eprintln!("nn t={:.0} {what}: {} beats (live {live:.2})", self.clock, pts.len()),
+        }
     }
 
     fn run(mut self, rx: mpsc::Receiver<Vec<f32>>) {
@@ -1084,7 +1526,6 @@ impl Analyzer {
         }
         let beatless = self.beatless_since.is_some();
         if let Some(since) = self.beatless_since {
-            self.last_beatless = self.clock;
             if self.clock - since > FLYWHEEL_MAX_S {
                 self.had_lock = false;
             }
@@ -1092,11 +1533,10 @@ impl Analyzer {
             self.had_lock = true;
         }
         let coast = beatless && self.had_lock;
-        // A neural window must hold beats throughout to say anything.
-        let nn_window_beatless = self.clock - self.last_beatless < NN_WINDOW_S;
+        self.coasting = coast;
 
         self.track_beats(silent || coast);
-        self.nn_tick(silent || nn_window_beatless);
+        self.nn_tick(silent, silent || beatless);
 
         self.frames_since_tempo += 1;
         if self.frames_since_tempo as f32 > self.fps * 0.5 && self.env.len() as f32 > self.fps * 4.0
@@ -1104,7 +1544,11 @@ impl Analyzer {
             self.frames_since_tempo = 0;
             if !silent && !coast {
                 self.estimate_tempo();
-                self.correct_phase();
+                // A recent neural fit knows where the beat is; the comb
+                // locks onto whatever onsets are strongest (off-beat bass).
+                if !self.nn_fresh() {
+                    self.correct_phase();
+                }
             }
         }
 
@@ -1119,6 +1563,11 @@ impl Analyzer {
                     self.downbeat = nearest % 4;
                     self.downbeat_votes = [0.0; 4];
                     self.downbeat_votes[self.downbeat as usize] = 10.0;
+                    // The operator's tap outweighs ~10 windows of the
+                    // model's downbeats.
+                    self.nn_down_ev = [0.0; 4];
+                    self.nn_down_ev[self.downbeat as usize] = 20.0;
+                    self.nn_down_locked = true;
                 }
             }
         }
@@ -1139,7 +1588,12 @@ impl Analyzer {
     /// how much bass the previous beat had (kicks + basslines land on the one).
     fn track_beats(&mut self, silent: bool) {
         self.beat_bass += self.bass_env.back().copied().unwrap_or(0.0);
-        self.phase += 1.0 / self.period;
+        // Phase corrections land as a brief change of speed (between 40% and
+        // 200%), so the position only ever moves forward.
+        let base = 1.0 / self.period;
+        let corr = (self.slew * (1.0 / (SLEW_S * self.fps)).min(1.0)).clamp(-0.6 * base, base);
+        self.slew -= corr;
+        self.phase += base + corr;
         while self.phase >= 1.0 {
             self.phase -= 1.0;
             let slot = (self.beat_count % 4) as usize;
@@ -1155,7 +1609,13 @@ impl Analyzer {
                 .max_by(|&a, &b| self.downbeat_votes[a].total_cmp(&self.downbeat_votes[b]))
                 .unwrap_or(0) as u64;
             // Hysteresis so the downbeat doesn't flicker between candidates.
-            if self.downbeat_votes[best as usize]
+            // Once a neural window has set the bar, it owns it.
+            let nn_owns = self.nn_down_locked && self.clock - self.nn_lock_at < 60.0;
+            // A few bars of votes first: on a handful of beats it flaps.
+            if !nn_owns
+                && self.downbeat_votes.iter().sum::<f32>() > 0.0
+                && self.beat_count >= 12
+                && self.downbeat_votes[best as usize]
                 > self.downbeat_votes[self.downbeat as usize] * 1.3
             {
                 self.downbeat = best;
@@ -1219,10 +1679,25 @@ impl Analyzer {
         }
         let conf = (acs[lag] / zero.max(1e-12)).clamp(0.0, 1.0);
         self.confidence += (conf - self.confidence) * 0.3;
+        // A recent neural fit measured the tempo over a whole window of
+        // beats; the autocorrelation (often 0.1-0.3 BPM off) stays out.
+        if self.nn_fresh() {
+            return;
+        }
+        // With the model on hand, a neural fit owns tempo changes: the
+        // autocorrelation's big jumps (2/3 shadows on a sparse build
+        // envelope: 133 -> 87.8 on a mic recording) wait until the fits
+        // have been absent for a couple of minutes.
+        let nn_recent = crate::beats::ready()
+            && self.nn_lock_at != f32::MIN
+            && self.clock - self.nn_lock_at < 120.0;
 
         let rel = (period - self.period).abs() / self.period;
         if rel < 0.04 {
             self.period += (period - self.period) * 0.25;
+            self.pending_bpm = None;
+            self.held_bpm = None;
+        } else if nn_recent {
             self.pending_bpm = None;
             self.held_bpm = None;
         } else {
@@ -1329,7 +1804,7 @@ impl Analyzer {
         // `off` frames ago there was a beat, so the phase now is off/period —
         // shifted by what the neural check learned about where the real
         // beat sits relative to the strongest onsets.
-        let target = (best.0 as f32 / period + self.nn_bias).rem_euclid(1.0);
+        let target = (best.0 as f32 / period).rem_euclid(1.0);
         let mut err = target - self.phase;
         if err > 0.5 {
             err -= 1.0;
@@ -1337,14 +1812,7 @@ impl Analyzer {
             err += 1.0;
         }
         let gain = if self.confidence > 0.2 { 0.35 } else { 0.1 };
-        self.phase += err * gain;
-        if self.phase < 0.0 {
-            self.phase += 1.0;
-            self.beat_count = self.beat_count.saturating_sub(1);
-        } else if self.phase >= 1.0 {
-            self.phase -= 1.0;
-            self.beat_count += 1;
-        }
+        self.slew = err * gain;
     }
 }
 
@@ -1540,37 +2008,90 @@ pub fn dump_feed(path: &std::path::Path, out: &std::path::Path, palette: &str) -
 mod tests {
     use super::*;
 
-    /// The tracker locked 0.4 beat off the real beats (off-beat bass), with
-    /// the real downbeats on its beat 2: one neural window must shift the
-    /// phase onto the beats, teach the comb the bias, and set the bar.
-    #[test]
-    fn nn_vote_fixes_offbeat_lock_and_bar() {
+    /// An analyser 0.4 beat behind the real beats at 120 BPM (24000
+    /// samples a beat), with the hop log filled in to `beats` beats.
+    fn behind(beats: u64) -> Analyzer {
         let (_tx, rx) = mpsc::channel();
         let shared: SharedFeatures = Arc::new(Mutex::new(Features::default()));
         let mut a = Analyzer::new(48000.0, shared, rx, None);
-        // 1000 samples per beat, a hop every 100.
-        for i in 0..400u64 {
-            a.nn_hops.push_back((i * 100, i as f64 * 0.1));
+        a.period = 24000.0 / HOP as f32;
+        let mut s = 0u64;
+        while s <= beats * 24000 {
+            a.nn_hops.push_back((s, s as f64 / 24000.0 - 0.4, false));
+            s += HOP as u64;
         }
-        a.beat_count = 40;
+        a.nn_samples = beats * 24000;
+        let live = beats as f64 - 0.4;
+        a.beat_count = live.floor() as u64;
+        a.phase = (live - live.floor()) as f32;
+        a
+    }
+
+    /// Model beats at whole beats `from..to`, downbeats where `k % 4 == down`.
+    fn model_beats(from: u64, to: u64, down: u64) -> Vec<NnBeat> {
+        (from..to).map(|k| (k * 24000, 0.9, k % 4 == down)).collect()
+    }
+
+    /// The tracker locked 0.4 beat off the real beats (off-beat bass), with
+    /// the real downbeats on its beat 2: one window must slew the phase onto
+    /// the beats (no jump) and set the bar; a lone window voting another
+    /// bar must not move it.
+    #[test]
+    fn nn_fit_fixes_offbeat_lock_and_bar() {
+        let mut a = behind(41);
+        a.nn_apply(&model_beats(10, 40, 2));
+        assert!((a.slew - 0.4).abs() < 0.01, "slew {}", a.slew);
+        assert!((a.period - 24000.0 / HOP as f32).abs() < 0.01);
+        assert_eq!(a.downbeat, 2);
+        // The slew lands within two seconds, moving forward all the way.
+        let mut last = a.beat_count as f64 + a.phase as f64;
+        for _ in 0..200 {
+            a.track_beats(false);
+            let p = a.beat_count as f64 + a.phase as f64;
+            assert!(p > last, "position ran backwards");
+            last = p;
+        }
+        assert!(a.slew.abs() < 0.02, "slew left {}", a.slew);
+        // One window says the bar is elsewhere: evidence, not a move.
+        let mut b = behind(41);
+        b.nn_apply(&model_beats(10, 40, 2));
+        b.nn_apply(&model_beats(10, 40, 0));
+        assert_eq!(b.downbeat, 2, "a single odd window moved the bar");
+    }
+
+    /// Double-time detections (a hi-hat run read as beats): with the live
+    /// tempo locked, the fit stays at the live tempo on the live phase.
+    #[test]
+    fn nn_fit_ignores_double_time_detections() {
+        let mut a = behind(41);
+        a.nn_lock_at = 0.0;
+        a.clock = 1.0;
+        a.beat_count = 41;
         a.phase = 0.0;
-        let downs: Vec<(u64, f32)> = [2.4, 6.4, 10.4, 14.4, 18.4]
-            .iter()
-            .map(|p| ((p * 1000.0) as u64, 0.9))
-            .collect();
-        a.nn_vote(&downs);
-        let pos = a.beat_count as f64 + a.phase as f64;
-        assert!((pos - 39.6).abs() < 1e-3, "pos {pos}");
-        assert!((a.nn_bias + 0.4).abs() < 1e-3, "bias {}", a.nn_bias);
-        assert_eq!(a.downbeat, 2);
-        // A second window on the corrected grid changes nothing.
-        let downs: Vec<(u64, f32)> = [22.4, 26.4, 30.4, 34.4]
-            .iter()
-            .map(|p| ((p * 1000.0) as u64, 0.9))
-            .collect();
-        a.nn_vote(&downs);
-        assert!((a.nn_bias + 0.4).abs() < 1e-3);
-        assert_eq!(a.downbeat, 2);
+        for h in a.nn_hops.iter_mut() {
+            h.1 += 0.4;
+        }
+        let mut beats = model_beats(10, 40, 2);
+        beats.extend((10..40).map(|k| (k * 24000 + 12000, 0.8, false)));
+        beats.sort_by_key(|b| b.0);
+        a.nn_apply(&beats);
+        let bpm = 60.0 * a.fps / a.period;
+        assert!((bpm - 120.0).abs() < 0.5, "tempo {bpm}");
+        assert!(a.slew.abs() < 0.05, "phase moved {}", a.slew);
+    }
+
+    /// Through a breakdown the flywheel's tempo stands, even when the model
+    /// finds a consistent grid in the pads.
+    #[test]
+    fn coasting_keeps_tempo_against_model() {
+        let mut a = behind(41);
+        a.nn_lock_at = 0.0;
+        a.clock = 1.0;
+        a.coasting = true;
+        let beats: Vec<NnBeat> = (10..40).map(|k| ((k as f64 * 24000.0 * 0.99) as u64, 0.9, false)).collect();
+        let before = a.period;
+        a.nn_apply(&beats);
+        assert_eq!(a.period, before);
     }
 
     /// Beats (kick + pad) → breakdown (pad only) → drop (kick + pad):
