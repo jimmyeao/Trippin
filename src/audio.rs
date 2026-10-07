@@ -645,9 +645,33 @@ where
     f32: FromSample<T>,
 {
     let rate = config.sample_rate;
+    // The analyser keeps time by counting samples, so lost audio leaves
+    // the beat late for good (the neural check can't see it: it counts
+    // samples too). An overrun drops captured audio, and so does a full
+    // channel when analysis stalls; both are put back as silence of the
+    // same length. A gap shows as a buffer's capture time (QPC on WASAPI,
+    // within ±0.03 ms) later than the last buffer's length predicts.
+    let gap_debug = std::env::var_os("TRIPPIN_GAP_DEBUG").is_some();
+    let mut last_capture: Option<(cpal::StreamInstant, usize)> = None;
+    let mut owed: usize = 0;
     let stream = dev.build_input_stream::<T, _, _>(
         config.clone(),
-        move |data: &[T], _| {
+        move |data: &[T], info: &cpal::InputCallbackInfo| {
+            let frames = data.len() / channels.max(1);
+            let ts = info.timestamp().capture;
+            if let Some((lt, ln)) = last_capture {
+                if let Some(d) = ts.checked_duration_since(lt) {
+                    let gap = d.as_secs_f64() - ln as f64 / rate as f64;
+                    // Over a second is a stall the watchdog handles, not a glitch.
+                    if gap > 0.001 && gap < 1.0 {
+                        owed += (gap * rate as f64).round() as usize;
+                        if gap_debug {
+                            eprintln!("audio gap {:.1} ms filled", gap * 1000.0);
+                        }
+                    }
+                }
+            }
+            last_capture = Some((ts, frames));
             // Clip recorder: first two channels, interleaved.
             let out_ch = channels.min(2);
             crate::rec::audio_in(rate, out_ch as u16, || {
@@ -655,14 +679,18 @@ where
                     .flat_map(|f| f[..out_ch].iter().map(|&s| s.to_sample::<f32>()))
                     .collect()
             });
-            let mono: Vec<f32> = data
-                .chunks(channels)
-                .map(|frame| {
-                    frame.iter().map(|&s| s.to_sample::<f32>()).sum::<f32>() / channels as f32
-                })
-                .collect();
-            // Drop audio rather than block the audio thread if analysis stalls.
-            let _ = tx.try_send(mono);
+            let mut mono: Vec<f32> = Vec::with_capacity(owed + frames);
+            mono.resize(owed, 0.0);
+            mono.extend(data.chunks(channels).map(|frame| {
+                frame.iter().map(|&s| s.to_sample::<f32>()).sum::<f32>() / channels as f32
+            }));
+            // Drop audio rather than block the audio thread if analysis
+            // stalls — but owe it, so the beat clock keeps real time.
+            let n = mono.len();
+            owed = match tx.try_send(mono) {
+                Ok(()) => 0,
+                Err(_) => n.min(rate as usize),
+            };
         },
         move |e| {
             eprintln!("audio stream error: {e}");

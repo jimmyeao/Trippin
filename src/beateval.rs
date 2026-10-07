@@ -211,6 +211,37 @@ fn write_wav(path: &Path, sr: u32, mono: &[f32]) -> Result<()> {
 
 fn score(path: &Path, mono: &[f32], sr: u32, sim: Sim) -> Result<()> {
     let gt = ground_truth(path, mono, sr)?;
+    // TRIPPIN_WIN_TEST=1: the model on 15 s windows (as live) against the
+    // model on the whole file — does the window shift its beat times?
+    if std::env::var_os("TRIPPIN_WIN_TEST").is_some() {
+        let mut tr = crate::beats::Tracker::load()?;
+        let w = (15.0 * sr as f32) as usize;
+        let mut start = 0usize;
+        let mut all: Vec<f64> = Vec::new();
+        while start + w <= mono.len() {
+            let beats = tr.detect(&mono[start..start + w], sr)?;
+            let mut d: Vec<f64> = beats
+                .iter()
+                .filter(|b| b.conf >= 0.5 && b.t > 1.0 && b.t < 14.0)
+                .filter_map(|b| {
+                    let t = start as f64 / sr as f64 + b.t as f64;
+                    let g = gt.iter().filter(|g| g.conf >= 0.5).min_by(|x, y| ((x.t as f64 - t).abs()).total_cmp(&(y.t as f64 - t).abs()))?;
+                    let e = (t - g.t as f64) * 1000.0;
+                    (e.abs() < 60.0).then_some(e)
+                })
+                .collect();
+            d.sort_by(f64::total_cmp);
+            if !d.is_empty() {
+                println!("win {:5.0}s  {} beats  window - whole file: median {:+.1} ms", start as f64 / sr as f64, d.len(), d[d.len() / 2]);
+            }
+            all.extend(d);
+            start += (5.0 * sr as f32) as usize;
+        }
+        all.sort_by(f64::total_cmp);
+        if !all.is_empty() {
+            println!("window vs whole file: median {:+.1} ms over {} beats", all[all.len() / 2], all.len());
+        }
+    }
     let Sim { hops, cuts, anchors, from, to, .. } = sim;
     let hop_at = |t: f64| -> Option<(f64, &Hop)> {
         let i = hops.partition_point(|h| h.t <= t);
