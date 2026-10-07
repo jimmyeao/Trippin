@@ -60,27 +60,84 @@ fn ground_truth(path: &Path, mono: &[f32], sr: u32) -> Result<Vec<Beat>> {
     Ok(beats)
 }
 
+/// The live analyser's log over a run, plus the auto-pilot on default
+/// settings fed every hop: its cuts and phrase re-anchors show what the
+/// phrasing does on this audio.
+struct Sim {
+    hops: Vec<Hop>,
+    dir: crate::director::Director,
+    settings: crate::config::Settings,
+    usable: Vec<usize>,
+    /// (t, pos, bars since the last cut)
+    cuts: Vec<(f64, f64, i64)>,
+    /// (t, anchor shift in beats)
+    anchors: Vec<(f64, f64)>,
+    last_anchor: f64,
+    last_cut_pos: f64,
+    from: f64,
+    to: f64,
+}
+
+impl Sim {
+    fn new(span: Option<(f64, f64)>) -> Self {
+        let (from, to) = span.unwrap_or((0.0, f64::MAX));
+        Self {
+            hops: Vec::new(),
+            dir: crate::director::Director::new(),
+            settings: crate::config::Settings::default(),
+            usable: (0..24).collect(),
+            cuts: Vec::new(),
+            anchors: Vec::new(),
+            last_anchor: f64::NAN,
+            last_cut_pos: 0.0,
+            from,
+            to,
+        }
+    }
+
+    /// One analysis hop whose newest sample is at `t` seconds.
+    fn hop(&mut self, a: &Analyzer, t: f64) {
+        let pos = a.beat_count as f64 + a.phase as f64;
+        if t >= self.from && t <= self.to {
+            let ev = self.dir.update(&a.f, pos, 1.0 / a.fps, &self.usable, &self.settings);
+            if ev.cut {
+                self.cuts.push((t, pos, ((pos - self.last_cut_pos) / 4.0).round() as i64));
+                self.last_cut_pos = pos;
+            }
+            let anc = self.dir.phrase_anchor();
+            if anc.is_finite() && anc != self.last_anchor {
+                if self.last_anchor.is_finite() {
+                    self.anchors.push((t, anc - self.last_anchor));
+                }
+                self.last_anchor = anc;
+            }
+        }
+        self.hops.push(Hop {
+            t,
+            pos,
+            down: a.downbeat,
+            bpm: a.f.bpm,
+            calm: a.f.calm,
+            coast: a.coasting,
+        });
+    }
+}
+
 pub fn beat_eval(path: &Path, span: Option<(f64, f64)>) -> Result<()> {
     let (mono, sr) = crate::song::decode(path)?;
-    let gt = ground_truth(path, &mono, sr)?;
-    let (from, to) = span.unwrap_or((0.0, f64::MAX));
-
     let (_tx, rx) = mpsc::channel();
     let shared: SharedFeatures = Arc::new(Mutex::new(Features::default()));
     let mut a = Analyzer::new(sr as f32, shared, rx, None);
     a.nn_sync = true;
-    let mut hops: Vec<Hop> = Vec::with_capacity(mono.len() / HOP + 1);
+    // TRIPPIN_NO_NN=1: the fallback without the model (onset comb only).
+    if std::env::var_os("TRIPPIN_NO_NN").is_some() {
+        crate::beats::set_enabled(false);
+    }
+    let mut sim = Sim::new(span);
     let t0 = Instant::now();
     for (i, &s) in mono.iter().enumerate() {
         if a.push(s) {
-            hops.push(Hop {
-                t: (i + 1) as f64 / sr as f64,
-                pos: a.beat_count as f64 + a.phase as f64,
-                down: a.downbeat,
-                bpm: a.f.bpm,
-                calm: a.f.calm,
-                coast: a.coasting,
-            });
+            sim.hop(&a, (i + 1) as f64 / sr as f64);
         }
     }
     println!(
@@ -89,6 +146,72 @@ pub fn beat_eval(path: &Path, span: Option<(f64, f64)>) -> Result<()> {
         mono.len() as f64 / sr as f64,
         t0.elapsed().as_secs_f32()
     );
+    score(path, &mono, sr, sim)
+}
+
+/// `--beat-eval-live <device|""> <secs> out.wav`: the real-time path — the
+/// analyser runs on live capture with the neural windows on their own
+/// thread (results land ~0.5 s late, as in the app) while the input is
+/// recorded; then the live log is scored against the recording.
+pub fn beat_eval_live(device: Option<&str>, secs: f32, out: &Path) -> Result<()> {
+    if std::env::var_os("TRIPPIN_NO_NN").is_some() {
+        crate::beats::set_enabled(false);
+    } else {
+        crate::beats::wait_ready()?;
+    }
+    let (rx, sr, name, _backend, _dead) = AudioEngine::open(device, true)?;
+    println!("Live: {secs:.0} s from {name} ({sr} Hz) -> {}", out.display());
+    let (_ctx, crx) = mpsc::channel();
+    let shared: SharedFeatures = Arc::new(Mutex::new(Features::default()));
+    let mut a = Analyzer::new(sr, shared, crx, None);
+    let mut sim = Sim::new(None);
+    let total = (secs * sr) as usize;
+    let mut mono: Vec<f32> = Vec::with_capacity(total);
+    let mut next_note = sr as usize * 60;
+    while mono.len() < total {
+        let chunk = rx.recv_timeout(Duration::from_secs(5))?;
+        for s in chunk {
+            mono.push(s);
+            if a.push(s) {
+                sim.hop(&a, mono.len() as f64 / sr as f64);
+            }
+        }
+        if mono.len() >= next_note {
+            println!("  {} min  {:.1} BPM  bar {}", mono.len() / (sr as usize * 60), a.f.bpm, a.downbeat);
+            next_note += sr as usize * 60;
+        }
+    }
+    write_wav(out, sr as u32, &mono)?;
+    score(out, &mono, sr as u32, sim)
+}
+
+/// 32-bit float mono WAV.
+fn write_wav(path: &Path, sr: u32, mono: &[f32]) -> Result<()> {
+    use std::io::Write;
+    let n = mono.len() as u32;
+    let mut w = std::io::BufWriter::new(std::fs::File::create(path)?);
+    w.write_all(b"RIFF")?;
+    w.write_all(&(36 + n * 4).to_le_bytes())?;
+    w.write_all(b"WAVEfmt ")?;
+    w.write_all(&16u32.to_le_bytes())?;
+    w.write_all(&3u16.to_le_bytes())?;
+    w.write_all(&1u16.to_le_bytes())?;
+    w.write_all(&sr.to_le_bytes())?;
+    w.write_all(&(sr * 4).to_le_bytes())?;
+    w.write_all(&4u16.to_le_bytes())?;
+    w.write_all(&32u16.to_le_bytes())?;
+    w.write_all(b"data")?;
+    w.write_all(&(n * 4).to_le_bytes())?;
+    for s in mono {
+        w.write_all(&s.to_le_bytes())?;
+    }
+    w.flush()?;
+    Ok(())
+}
+
+fn score(path: &Path, mono: &[f32], sr: u32, sim: Sim) -> Result<()> {
+    let gt = ground_truth(path, mono, sr)?;
+    let Sim { hops, cuts, anchors, from, to, .. } = sim;
     let hop_at = |t: f64| -> Option<(f64, &Hop)> {
         let i = hops.partition_point(|h| h.t <= t);
         if i == 0 || i >= hops.len() {
@@ -302,6 +425,21 @@ pub fn beat_eval(path: &Path, span: Option<(f64, f64)>) -> Result<()> {
         }
     }
     println!("live grid  {} bar moves/jumps  {}", moves.len(), fmt(&moves));
+    let on_bar = cuts
+        .iter()
+        .filter(|c| hop_at(c.0).is_some_and(|(p, h)| (p - h.down as f64).rem_euclid(4.0) < 0.15))
+        .count();
+    println!(
+        "phrasing  {} cuts ({} on a bar line), re-anchors {}: {}",
+        cuts.len(),
+        on_bar,
+        anchors.len(),
+        fmt(&anchors.iter().map(|&(t, d)| (t, format!("({d:+.0})"))).collect::<Vec<_>>())
+    );
+    println!(
+        "cuts       {}",
+        fmt(&cuts.iter().map(|&(t, _, b)| (t, format!("[{b}]"))).collect::<Vec<_>>())
+    );
 
     // Independent reference, no model involved: the low-band (kick) onset
     // strength averaged by live beat phase. Where the live beat sits on the

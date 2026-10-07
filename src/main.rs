@@ -3400,6 +3400,15 @@ fn main() -> Result<()> {
     }
     // `--beat-eval rec.wav [from-to]`: score the live tracker against Beat
     // This! on a recording (see audio::beat_eval).
+    // `--beat-eval-live <device|""> <secs> out.wav`: the same on live
+    // capture, with the neural windows async as in the app.
+    if let Some(i) = args.iter().position(|a| a == "--beat-eval-live") {
+        let (Some(dev), Some(secs), Some(out)) = (args.get(i + 1), args.get(i + 2), args.get(i + 3)) else {
+            anyhow::bail!("usage: --beat-eval-live <device|\"\"> <secs> out.wav");
+        };
+        let dev = Some(dev.as_str()).filter(|d| !d.is_empty());
+        return audio::beat_eval_live(dev, secs.parse()?, std::path::Path::new(out));
+    }
     if let Some(p) = arg_value(&args, "--beat-eval") {
         let span = args
             .iter()

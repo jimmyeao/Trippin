@@ -16,7 +16,7 @@ use rustfft::num_complex::Complex;
 
 #[path = "beateval.rs"]
 mod eval;
-pub use eval::beat_eval;
+pub use eval::{beat_eval, beat_eval_live};
 
 pub const SPECTRUM_BINS: usize = 32;
 
