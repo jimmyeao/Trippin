@@ -39,6 +39,23 @@ pub struct Director {
     last_downbeat: u64,
     /// Lowest energy seen over the last few bars (a breakdown).
     recent_low: f32,
+    // --- Phrase grid -----------------------------------------------------
+    // Phrases are a musical grid, not a count of bars since the last cut:
+    // `phrase_at` is the beat position of a phrase's first bar line, and
+    // boundaries fall every `phrase_bars` bars from it. The grid coasts
+    // through breakdowns with the beat, ignores off-grid event cuts, and
+    // moves only on real evidence of a new phrase: a drop after a
+    // breakdown, music after silence, or a manual phrase tap.
+    /// Beat position of a phrase start (NaN until the first bar line).
+    phrase_at: f64,
+    /// Bar index the current scene started in.
+    scene_start_bar: i64,
+    /// Re-anchor the grid to the beat nearest the next frame (a tap).
+    mark_pending: bool,
+    /// Re-anchor the grid on the next bar line (music back after silence).
+    reanchor_pending: bool,
+    /// Beat position silence began (MAX while not silent).
+    silent_since: f64,
     rng: u64,
     pending_cut: bool,
     /// The scene the next cut will land on — picked when the current scene
@@ -114,6 +131,11 @@ pub struct Director {
 /// (intensity, `u.calm`) without a cut.
 const BREAKDOWN_CONFIRM_BEATS: f64 = 4.0;
 
+/// How late the breakdown detector sees a drop, in beats (the groove has
+/// to fill again first: ~1-2 beats). The phrase re-anchors to the bar line
+/// nearest the drop position minus this.
+const DROP_LAG_BEATS: f64 = 1.5;
+
 /// How many past scenes `recent` remembers.
 const RECENT_MAX: usize = 8;
 
@@ -137,6 +159,11 @@ impl Director {
             last_bar: i64::MIN,
             last_downbeat: u64::MAX,
             recent_low: 1.0,
+            phrase_at: f64::NAN,
+            scene_start_bar: 0,
+            mark_pending: false,
+            reanchor_pending: false,
+            silent_since: f64::MAX,
             rng,
             pending_cut: false,
             next: None,
@@ -165,15 +192,48 @@ impl Director {
         }
     }
 
-    /// (current bar in the scene, bars the scene will run) — for the
-    /// panel's "bar 2 of 4" readout. Breakdowns double the phrase length.
+    /// (bar, bars) for the panel's "bar 2 of 16 · cut in 14": the bar
+    /// counts from the phrase boundary the scene started in, so it reads
+    /// the musical position (an off-grid cut doesn't restart it at 1), and
+    /// `bars` runs to the boundary the next grid cut will land on.
     pub fn bars_progress(&self, phrase_bars: u32) -> (u32, u32) {
-        let total = if self.calm > 0.5 {
-            phrase_bars.max(1) * 2
-        } else {
-            phrase_bars.max(1)
+        let l = phrase_bars.max(1) as i64;
+        let Some(bar0) = self.phrase_bar0(self.last_downbeat) else {
+            return (1, l as u32);
         };
-        ((self.bars_in_scene + 1).min(total), total)
+        let seg_start = self.scene_start_bar - (self.scene_start_bar - bar0).rem_euclid(l);
+        let cut = self.next_grid_cut(bar0, l);
+        ((self.last_bar - seg_start + 1).max(1) as u32, (cut - seg_start).max(1) as u32)
+    }
+
+    /// Bar index of the phrase start the grid is anchored to (under the
+    /// given downbeat slot); None before the first bar line.
+    fn phrase_bar0(&self, downbeat: u64) -> Option<i64> {
+        if !self.phrase_at.is_finite() || self.last_bar == i64::MIN {
+            return None;
+        }
+        Some(((self.phrase_at - downbeat as f64) / 4.0).round() as i64)
+    }
+
+    /// Bars a scene must have run before a phrase boundary may cut it:
+    /// half a phrase, or in a breakdown a phrase and a half (so breakdowns
+    /// breathe, cutting every other boundary).
+    fn min_bars(&self, l: i64) -> i64 {
+        if self.calm > 0.5 {
+            l + l / 2
+        } else {
+            (l / 2).max(2)
+        }
+    }
+
+    /// The phrase boundary (bar index) the next grid cut lands on.
+    fn next_grid_cut(&self, bar0: i64, l: i64) -> i64 {
+        let next = self.last_bar + 1;
+        let mut b = next + (bar0 - next).rem_euclid(l);
+        while b - self.scene_start_bar < self.min_bars(l) {
+            b += l;
+        }
+        b
     }
 
     pub fn rand(&mut self) -> f32 {
@@ -188,7 +248,9 @@ impl Director {
     /// baseline so a previous section's quiet patch can't skew detection.
     pub fn mark_phrase(&mut self) {
         self.bars_in_scene = 0;
+        self.scene_start_bar = self.last_bar;
         self.recent_low = 1.0;
+        self.mark_pending = true;
     }
 
     pub fn cut_to(&mut self, scene: usize) {
@@ -201,6 +263,7 @@ impl Director {
         self.scene = scene;
         self.scene_started = Instant::now();
         self.bars_in_scene = 0;
+        self.scene_start_bar = self.last_bar;
         self.hue = (self.hue + 0.2 + self.rand() * 0.5).fract();
         self.seed = self.rand() * 100.0;
         // A cut in a breakdown is a soft dissolve-ish lift, not a white-out.
@@ -297,6 +360,23 @@ impl Director {
         };
         self.flash = (self.flash - dt * 2.5).max(0.0);
         self.calm = f.calm;
+        // A phrase tap: the beat nearest the tap starts a phrase (the
+        // analyser moves the bar's one there too).
+        if self.mark_pending {
+            self.mark_pending = false;
+            self.phrase_at = pos.round();
+        }
+        // Long silence: the next music is a new start (the first track, or
+        // the next after a gap) and its first bar line opens a phrase.
+        if f.silent {
+            if self.silent_since == f64::MAX {
+                self.silent_since = pos;
+            } else if pos - self.silent_since >= 8.0 {
+                self.reanchor_pending = true;
+            }
+        } else {
+            self.silent_since = f64::MAX;
+        }
         // A fresh scene gets its next pick right away so the panel can show
         // what's coming — in every mode that ever cuts by itself.
         if self.next.is_none() && s.mode != Mode::Manual {
@@ -350,6 +430,10 @@ impl Director {
         // flagged the same one again at the next downbeat (M2, real feed).
         if ev.drop {
             self.last_drop_pos = pos;
+            // A drop opens a phrase: re-anchor the grid to its bar line
+            // (the detector lags the drums by a beat or two).
+            let down = f.downbeat as f64;
+            self.phrase_at = down + 4.0 * ((pos - DROP_LAG_BEATS - down) / 4.0).round();
             if std::env::var_os("TRIPPIN_DROP_DEBUG").is_some() {
                 eprintln!(
                     "drop: breakdown exit at beat {pos:.1} (entered {:.1}, calm {:.2})",
@@ -384,17 +468,33 @@ impl Director {
         }
 
         let bar = ((pos - f.downbeat as f64) / 4.0).floor() as i64;
-        // A re-marked downbeat re-anchors the grid — not a new bar.
-        if f.downbeat != self.last_downbeat {
+        // A re-marked downbeat re-labels the bars — not a new bar. The
+        // phrase start moves to the nearest bar line under the new labels,
+        // and the scene keeps its age.
+        if self.last_downbeat == u64::MAX {
+            self.last_downbeat = f.downbeat;
+        } else if f.downbeat != self.last_downbeat {
+            if self.phrase_at.is_finite() {
+                let d = (f.downbeat as f64 - self.phrase_at).rem_euclid(4.0);
+                self.phrase_at += if d > 2.0 { d - 4.0 } else { d };
+            }
             self.last_downbeat = f.downbeat;
             self.last_bar = bar;
+            self.scene_start_bar = bar - self.bars_in_scene as i64;
         }
-        if bar == self.last_bar {
+        // Only a forward bar line counts (a position nudged back across a
+        // bar line must not count as a new bar).
+        if bar <= self.last_bar {
             self.recent_low = self.recent_low.min(f.energy);
             return ev;
         }
         self.last_bar = bar;
         self.bars_in_scene += 1;
+        let line = f.downbeat as f64 + 4.0 * bar as f64;
+        if !f.silent && (!self.phrase_at.is_finite() || self.reanchor_pending) {
+            self.phrase_at = line;
+            self.reanchor_pending = false;
+        }
         if s.mode == Mode::Manual || f.silent {
             self.recent_low = f.energy;
             return ev;
@@ -426,9 +526,12 @@ impl Director {
                 f.energy, self.recent_low
             );
         }
-        // Breakdowns breathe: phrases run twice as long before a cut.
-        let bars = if f.calm > 0.5 { s.phrase_bars.max(1) * 2 } else { s.phrase_bars.max(1) };
-        let phrase_end = self.bars_in_scene >= bars;
+        // Phrase boundaries on the grid; a scene must have run long enough
+        // (`min_bars`: breakdowns breathe, skipping every other one).
+        let l = s.phrase_bars.max(1) as i64;
+        let boundary = self.phrase_bar0(f.downbeat).is_some_and(|b0| (bar - b0).rem_euclid(l) == 0);
+        let phrase_end = boundary
+            && (s.mode != Mode::Auto || self.bars_in_scene as i64 >= self.min_bars(l));
         if drop || phrase_end {
             if s.mode == Mode::Auto {
                 self.next_scene(usable, s.random_order);
@@ -437,6 +540,7 @@ impl Director {
                 self.last_cut_pos = pos;
             } else {
                 self.bars_in_scene = 0;
+                self.scene_start_bar = bar;
                 ev.phrase = true;
             }
         }
@@ -523,14 +627,17 @@ impl Director {
         if f.calm > 0.6 || f.silent {
             return;
         }
-        let bars = if f.calm > 0.5 {
-            s.phrase_bars.max(1) * 2
-        } else {
-            s.phrase_bars.max(1)
-        };
         // A fill into the phrase boundary always cuts — that IS the
-        // section change. A really big fill can cut mid-phrase too.
-        let due = self.bars_in_scene + 1 >= bars || self.fill_peak > 3.0;
+        // section change (the fill ends in the phrase's last bar, or just
+        // past the boundary). A really big fill can cut mid-phrase too.
+        let l = s.phrase_bars.max(1) as i64;
+        let into_boundary = self.phrase_bar0(f.downbeat).is_some_and(|b0| {
+            let bar = ((pos - f.downbeat as f64) / 4.0).floor() as i64;
+            let k = (bar - b0).rem_euclid(l);
+            let into_bar = (pos - f.downbeat as f64).rem_euclid(4.0);
+            k == l - 1 || (k == 0 && into_bar < 1.5)
+        });
+        let due = into_boundary || self.fill_peak > 3.0;
         if s.mode == Mode::Auto
             && s.cut_on_drops
             && due
@@ -918,6 +1025,85 @@ mod tests {
         hot.energy = 1.0;
         let cuts = run(&mut d, &hot, &mut pos, 1.5, &s);
         assert_eq!(cuts, 0, "the gap blocks back-to-back event cuts");
+    }
+
+    /// Positions of the cuts over `beats` beats (30 frames a beat).
+    fn cut_log(d: &mut Director, f: &Features, pos: &mut f64, beats: f64, s: &Settings) -> Vec<f64> {
+        let usable = [0usize, 1, 2, 3];
+        let mut v = Vec::new();
+        for _ in 0..(beats * 30.0) as usize {
+            *pos += 1.0 / 30.0;
+            if d.update(f, *pos, 0.016, &usable, s).cut {
+                v.push(*pos);
+            }
+        }
+        v
+    }
+
+    /// An off-grid event cut mid-phrase leaves the phrase grid alone: the
+    /// next grid cut still lands on the musical boundary, and the panel's
+    /// bar count keeps reading the phrase position.
+    #[test]
+    fn event_cuts_keep_the_phrase_grid() {
+        let mut s = settings(Mode::Auto);
+        s.phrase_bars = 4;
+        let (mut d, mut pos) = (Director::new(), 0.0f64);
+        let cuts = cut_log(&mut d, &groove(), &mut pos, 34.0, &s);
+        // Grid cuts every 16 beats from the first bar line.
+        assert!(cuts.iter().all(|c| (c / 16.0 - (c / 16.0).round()).abs() < 0.01), "{cuts:?}");
+        // A vocal break cuts off the grid at ~beat 39-40.
+        let mut vocal = groove();
+        vocal.lvl4 = [0.1, 0.5, 0.4, 0.2];
+        let ev = cut_log(&mut d, &vocal, &mut pos, 6.0, &s);
+        assert_eq!(ev.len(), 1, "{ev:?}");
+        assert!(ev[0] % 16.0 > 1.0, "the event cut should be off the grid: {ev:?}");
+        let (bar, _) = d.bars_progress(4);
+        assert!(bar > 1, "the bar count restarted at an off-grid cut");
+        // The next cut is the boundary at beat 48, not 16 beats after the event.
+        let next = cut_log(&mut d, &groove(), &mut pos, 12.0, &s);
+        assert_eq!(next.len(), 1, "{next:?}");
+        assert!((next[0] - 48.0).abs() < 0.05, "grid cut at {next:?}, expected 48");
+    }
+
+    /// A drop after a real breakdown opens a phrase: the grid re-anchors to
+    /// the drop's bar line, and the grid cuts that follow count from there.
+    #[test]
+    fn a_drop_reanchors_the_phrase_grid() {
+        let mut s = settings(Mode::Auto);
+        s.phrase_bars = 4;
+        s.cut_on_drops = true;
+        let (mut d, mut pos) = (Director::new(), 0.0f64);
+        cut_log(&mut d, &groove(), &mut pos, 24.0, &s);
+        // A breakdown to beat 41.5: the drums came back on beat 40 (2 bars
+        // off the old 16-beat grid) and the detector sees it 1.5 beats late.
+        let mut bd = groove();
+        bd.calm = 1.0;
+        bd.energy = 0.2;
+        cut_log(&mut d, &bd, &mut pos, 17.5, &s);
+        let drop_bar = ((pos - 1.5) / 4.0).round() * 4.0;
+        assert!((drop_bar % 16.0 - 8.0).abs() < 0.01, "test setup: drop bar {drop_bar}");
+        let cuts = cut_log(&mut d, &groove(), &mut pos, 40.0, &s);
+        assert!(!cuts.is_empty());
+        // The drop cut, then grid cuts every 16 beats from the drop's bar.
+        for c in cuts.iter().skip(1) {
+            let k = (c - drop_bar) / 16.0;
+            assert!((k - k.round()).abs() < 0.01, "grid cut at {c} not on the re-anchored phrase ({drop_bar}): {cuts:?}");
+        }
+    }
+
+    /// A downbeat re-label keeps the phrase where it was musically and
+    /// doesn't count a bar.
+    #[test]
+    fn a_downbeat_change_keeps_the_phrase() {
+        let mut s = settings(Mode::Auto);
+        s.phrase_bars = 4;
+        let (mut d, mut pos) = (Director::new(), 0.0f64);
+        cut_log(&mut d, &groove(), &mut pos, 20.0, &s);
+        let mut moved = groove();
+        moved.downbeat = 1;
+        let cuts = cut_log(&mut d, &moved, &mut pos, 30.0, &s);
+        // Boundaries now at 1 mod 4: the nearest to the old 32 is 33.
+        assert!(cuts.iter().any(|c| (c - 33.0).abs() < 0.05), "{cuts:?}");
     }
 
     #[test]
