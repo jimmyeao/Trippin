@@ -116,6 +116,9 @@ struct Scene {
     /// `// @title <display name>` — human label for pickers; the id (file
     /// stem) stays the key everywhere else.
     title: Option<String>,
+    /// `// @no-dancer` in the header: the scene draws its own people (a
+    /// crowd), so the dancer overlay stays off it.
+    no_dancer: bool,
 }
 
 /// Parse `// @title <rest of line>` — the display-name header directive.
@@ -126,6 +129,11 @@ pub fn header_title(body: &str) -> Option<String> {
         let t = l[i + "@title".len()..].trim();
         (!t.is_empty()).then(|| t.to_string())
     })
+}
+
+/// `// @no-dancer` in the header: the scene has its own crowd.
+pub fn header_no_dancer(body: &str) -> bool {
+    body.lines().take(8).any(|l| l.contains("@no-dancer"))
 }
 
 /// Parse the `// @tag value` header directives of a scene file.
@@ -1006,6 +1014,14 @@ impl Renderer {
         self.heavy_ok
     }
 
+    /// The dancer overlay stays off this scene: it has its own figures —
+    /// robots and androids (tagged `character`) or a crowd (`@no-dancer`).
+    pub fn scene_no_dancer(&self, i: usize) -> bool {
+        self.scenes.get(i).is_some_and(|s| {
+            s.no_dancer || crate::styles::catalog().tags.has(&s.name, "character")
+        })
+    }
+
     /// Per-scene `@heavy` flags, parallel with `scene_names`.
     pub fn scene_heavy(&self) -> Vec<bool> {
         self.scenes.iter().map(|s| s.heavy).collect()
@@ -1068,6 +1084,7 @@ impl Renderer {
             if let Ok(body) = std::fs::read_to_string(&s.path) {
                 (s.heavy, s.bloom, s.tonemap) = header_tags(&body);
                 s.title = header_title(&body);
+                s.no_dancer = header_no_dancer(&body);
             }
             match self.compile(&common, &s.path, s.kind) {
                 Ok(p) => {
@@ -1982,6 +1999,15 @@ mod tests {
 
     /// `// @title` in the first eight lines wins the display name; the rest
     /// of the header tags still parse alongside it.
+    #[test]
+    fn crowd_scenes_keep_the_dancer_off() {
+        for name in ["stage_rig", "laser_show"] {
+            let body = std::fs::read_to_string(format!("shaders/scenes/{name}.wgsl")).unwrap();
+            assert!(header_no_dancer(&body), "{name} draws a crowd: needs @no-dancer");
+            assert_eq!(header_tags(&body).1 > 0.0, true, "{name}: the tag broke @bloom parsing");
+        }
+    }
+
     #[test]
     fn header_title_parses_with_other_tags() {
         let body = "// @title Neon Alley\n// @heavy\n// @bloom 0.7\n// @tonemap agx\n\n@fragment\n";

@@ -1482,7 +1482,9 @@ fn render_loop(
         repick_for_mood(&mut dir, &r, &usable, &f, &s);
 
         // Dancer follows the settings; auto-pilot changes it on cuts and phrases.
-        dancer.enabled = s.dancer_enabled;
+        // Not over scenes with their own figures (robots, a crowd): the
+        // dancer fades out on the cut and back in on the next scene.
+        dancer.enabled = s.dancer_enabled && !r.scene_no_dancer(dir.scene);
         if let Some(style) = s.dancer_style {
             dancer.style = style;
         }
@@ -3349,6 +3351,15 @@ fn main() -> Result<()> {
             Ok(())
         };
     }
+    // `--record-audio <device|""> <secs> out.wav`: capture the analyser's
+    // mono input to a WAV (replay it with `--beat-eval`).
+    if let Some(i) = args.iter().position(|a| a == "--record-audio") {
+        let (Some(dev), Some(secs), Some(out)) = (args.get(i + 1), args.get(i + 2), args.get(i + 3)) else {
+            anyhow::bail!("usage: --record-audio <device|\"\"> <secs> out.wav");
+        };
+        let dev = Some(dev.as_str()).filter(|d| !d.is_empty());
+        return AudioEngine::record(dev, secs.parse()?, std::path::Path::new(out));
+    }
     // `--list-midi`: print MIDI input port names (what the Keys page lists).
     if args.iter().any(|a| a == "--list-midi") {
         let ports = midi::ports();
@@ -3388,6 +3399,26 @@ fn main() -> Result<()> {
         };
         let pal = args.get(i + 3).filter(|p| !p.starts_with("--")).map(String::as_str).unwrap_or("sunset");
         return audio::dump_feed(std::path::Path::new(track), std::path::Path::new(out), pal);
+    }
+    // `--beat-eval rec.wav [from-to]`: score the live tracker against Beat
+    // This! on a recording (see audio::beat_eval).
+    // `--beat-eval-live <device|""> <secs> out.wav`: the same on live
+    // capture, with the neural windows async as in the app.
+    if let Some(i) = args.iter().position(|a| a == "--beat-eval-live") {
+        let (Some(dev), Some(secs), Some(out)) = (args.get(i + 1), args.get(i + 2), args.get(i + 3)) else {
+            anyhow::bail!("usage: --beat-eval-live <device|\"\"> <secs> out.wav");
+        };
+        let dev = Some(dev.as_str()).filter(|d| !d.is_empty());
+        return audio::beat_eval_live(dev, secs.parse()?, std::path::Path::new(out));
+    }
+    if let Some(p) = arg_value(&args, "--beat-eval") {
+        let span = args
+            .iter()
+            .skip_while(|a| *a != "--beat-eval")
+            .nth(2)
+            .and_then(|v| v.split_once('-'))
+            .and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?)));
+        return audio::beat_eval(std::path::Path::new(&p), span);
     }
     if let Some(p) = arg_value(&args, "--groove-test") {
         return audio::groove_test(std::path::Path::new(&p));

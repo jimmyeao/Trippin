@@ -24,7 +24,15 @@ and strobes detected drum fills — a burst of onsets well above the section's
 per-beat onset-density baseline, capped at a bar. When the fill collapses the
 new section lands, so Auto can cut there even mid-bar (`director.rs`'s
 `update_fill`; cuts ride `cut_on_drops` and a 2-bar minimum scene length,
-fills never strobe on tunnel/flight scenes or in Manual mode). The bar grid
+fills never strobe on tunnel/flight scenes or in Manual mode). Phrases are
+an absolute grid (`Director::phrase_at`, boundaries every `phrase_bars`
+bars), not a count since the last cut: it coasts through breakdowns with
+the beat, event cuts don't move it, and it re-anchors only on a drop after
+a breakdown of 6+ bars (to the drop's bar line, allowing the detector's
+~1.5-beat lag; once confirmed, a later drop may move it only by whole
+4-bar blocks — a one-bar shift was a snare-roll false drop), music after
+silence, or a phrase tap. Grid cuts need half a phrase in the scene (a
+phrase and a half in breakdowns). The bar grid
 is a backstop, not the score: Auto also cuts off-grid on section events —
 the breakdown detector committing and holding for a bar
 (`BREAKDOWN_CONFIRM_BEATS`: a pre-drop drum gap is 1-2 bars and gets only
@@ -171,6 +179,9 @@ cargo run --release -- --nowplaying       # prints what each now-playing source 
 cargo run --release -- --list-devices     # capture devices (names for --device / the Audio in picker)
 cargo run --release -- --probe-audio [name]   # capture ~6 s, print band peaks + BPM; exits nonzero on silence
 cargo run --release -- --beats track.flac     # onset grid vs Beat This! grid + timings (TRIPPIN_BEATS_DEBUG=1: per-30 s tempo)
+cargo run --release -- --beat-eval track.flac [from-to]   # score the live beat tracker + phrasing on a file (see §7 "Live beat tracking")
+cargo run --release -- --record-audio Microphone 900 set.wav   # capture an input to WAV for --beat-eval
+cargo run --release -- --beat-eval-live Microphone 600 out.wav # the same, live: async neural windows, real timing
 cargo run --release -- --spout-grab <name> out.png   # receive one Spout frame (Windows)
 cargo run --release -- --ndi-monitor [name]
 cargo run --release -- --list-midi          # MIDI input ports (pad/key controllers)
@@ -262,7 +273,10 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   Styles (docs/design/looks-styles-packs.md) pick scene pools by these tags, so
   tag by what the scene looks and moves like, not by who made it.
 - **Header tags** go in the first 8 lines: `// @heavy`, `// @bloom 0.7`,
-  `// @tonemap agx` and `// @title Display Name`. `@title` is the scene's
+  `// @tonemap agx`, `// @title Display Name` and `// @no-dancer`. The
+  dancer overlay stays off scenes with their own figures: `@no-dancer` for
+  a drawn crowd (`stage_rig`, `laser_show`), and every scene tagged
+  `character` (robots, androids) automatically (`Renderer::scene_no_dancer`). `@title` is the scene's
   human name in pickers/remotes — the file stem stays the id; without it
   the id is title-cased (`config::titleize`, acronym-aware).
 - **Display names vs ids:** settings, timelines, remote commands and
@@ -493,26 +507,76 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   residual outliers and refit, and let only accepted beats' downbeats vote.
   Check changes with `--beats` on several tracks: real tempos come out as
   round numbers (125.00, 130.01, 140.87).
-- **Live beat phase** (`audio.rs` `nn_vote`): the onset comb locks onto the
-  strongest onsets, which in a lot of house are the off-beat bass/hats —
-  measured with `--groove-test`, the live "one" was on the bar only 5-30%
-  of the time. The neural window measures where real downbeats sit on the
-  live grid (circular mean), shifts the phase and stores `nn_bias`, which
-  `correct_phase` adds to the comb target so it doesn't drag the phase
-  back. Then the downbeats vote the bar (decisive when >=4 agree at 85%).
-  `--groove-test` prints `bar N` (live "one" vs the file grid; 0 = right),
-  `TRIPPIN_NO_NN=1` compares without the check, `TRIPPIN_NN_DEBUG=1` logs
-  each window. `main` caps rten at 2 threads (`RTEN_NUM_THREADS`); it
-  barely scales past 4 and would otherwise take every core.
+- **Live beat tracking** (`audio.rs` `nn_apply`, `fit_window`): the onset
+  comb locks onto the strongest onsets — off-beat bass and hats in a lot of
+  house — and the autocorrelation reads 0.1-0.3 BPM low, so the beat slid
+  behind and sat on the off-beat for whole sections. Beat This! now runs on
+  a 15 s window every 5 s (8 s for the first) and each window's beats are
+  fitted to a straight grid: numbered along the median interval *and* the
+  live period, from each of the first four beats, beats off the grid lines
+  skipped (double-time hats, a second track in a transition), outliers
+  dropped, recent beats weighted (6 s) so pitch ramps are followed. A clean
+  fit (rms <= 2.5% of a beat) sets the tempo (blended by beat count); the
+  live phase **slews** onto it (`slew`, `SLEW_S`, 40-200% speed, never
+  backwards) — never jump the beat count, a jump re-labels bars and
+  restarts phrases. Guards, each from a failure on a real recording: a fit
+  at 2x/0.5x the locked tempo is read at the live level (the model flips
+  levels in builds); a different tempo, a >1% step, or (locked) a >1/4-beat
+  phase correction needs two windows to agree, a >0.4-beat flip three
+  (a transition between two tracks a fraction of a beat apart dragged the
+  beat half a beat off for 19 s, and overlapping windows can share one
+  confusing stretch); loose fits only go half way. The bar is per-slot
+  downbeat evidence (`nn_down_ev`, decaying x0.8 per 5 s *of time*) that
+  moves only when another slot has twice the current one's, at most once
+  per 30 s (the model's downbeats wobble 1<->3 on Deadmau5 – Not Exactly;
+  a transition swung the bar 3>0>3>0 in 45 s); the bass vote can't touch
+  a bar the model set unless it has had no usable window for 3 minutes. A
+  manual downbeat tap outweighs about a minute of windows. While fits are
+  fresh (`NN_FRESH_S`) the comb is off and the autocorrelation can't move
+  the tempo. Nothing may publish a tempo over `HALF_TEMPO_ABOVE` (150, the
+  owner's rule: a 160 read is 80): every fit over it is read at half tempo,
+  locked or not, and `frame` halves the period as a last guard; song
+  analysis (`song.rs`, `song_grid`) uses the same constant. Without the model the comb path still runs, and it is poor
+  (it was before too): mostly off-beat on house.
+  **Measure every change** with `--beat-eval` on several tracks *and* the
+  mic recordings: it reports phase error vs Beat This! over the whole file
+  (cached `<file>.gt.tsv`; skipping beats where the reference runs at
+  another metrical level), slips, bar accuracy, live grid events (bar
+  moves / position jumps), the director's cuts and phrase re-anchors, and,
+  independently of the model, where the low-band onsets land on the live
+  beat (`sharpness`: higher = the beat sits on the kicks). A synthetic
+  track with exact truth (kicks, off-beat bass, 30 s pad breakdown, snare
+  build, 128->130 ramp) caught what real tracks hid. `TRIPPIN_NN_DEBUG=1`
+  logs every window's fit and decision, `TRIPPIN_NO_NN=1` runs the
+  fallback, `TRIPPIN_EVAL_DUMP=1` writes the hop log, `TRIPPIN_WIN_TEST=1`
+  compares the model on 15 s windows with the whole file (windows put
+  beats ~9 ms later on mic audio, 0-25 ms by window: the live beat's
+  residual lag, which `latency_ms` covers). The reference is a
+  reference, not the truth: it flips to double time on mic audio and picks
+  one of two grids in a transition. `main` caps rten at 2 threads
+  (`RTEN_NUM_THREADS`); it barely scales past 4 and would otherwise take
+  every core.
+- **Lost capture audio is put back as silence** (`build_stream`): the
+  analyser keeps time by counting samples, so an overrun (~1/min on the
+  owner's mic input under load) or a chunk dropped on a full channel left
+  the beat late for good, and the model can't see it (it counts samples
+  too). A buffer's capture timestamp (QPC on WASAPI, clean to ±0.03 ms)
+  later than the last buffer's length predicts, by over 1 ms, is filled
+  with that much silence; dropped chunks are owed and sent as silence.
+  `TRIPPIN_GAP_DEBUG=1` logs fills. macOS's sysaudio path doesn't do this.
 - **Drumless breaks coast** (`audio.rs` `frame`, the flywheel): a break
   with pads/vocals isn't silent, so re-estimating every 0.5 s ran the
   tempo autocorr and the phase comb on an envelope with no rhythm. The BPM
   wandered (124 → 72 → 131 in a test), the beat count slipped (a whole
   phrase in 32 s) and bars/phrases reset. After a confident lock
   (`had_lock`), a beatless stretch (silence or `groove` < 0.22) now
-  freezes `estimate_tempo`, `correct_phase`, the downbeat vote and the
-  neural check (windows overlapping it are neither sent nor applied) and
-  coasts on the locked tempo. Leaving needs `groove` >= 0.6 for 2 s: stray
+  freezes `estimate_tempo`, `correct_phase` and the downbeat vote, and
+  coasts on the locked tempo. Neural windows still run, but only their
+  beats from where the beat was present count; through the breakdown
+  itself a fit may only nudge the phase (tempo within 0.5%, phase within
+  0.12 beat, or a bigger correction seen twice) and never the tempo or the
+  bar: the model finds a consistent "grid" in pure pads (129.2 BPM on a
+  128 synthetic break, which slipped the count a beat by the drop). Leaving needs `groove` >= 0.6 for 2 s: stray
   kicks in a build-up otherwise resumed tracking on a sparse envelope and
   locked 74.9 BPM on a 130 track. Past `FLYWHEEL_MAX_S` (90 s) the lock is
   forgotten so a kickless track still gets tracked. Test:

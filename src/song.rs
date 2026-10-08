@@ -61,7 +61,7 @@ pub fn load(path: &Path) -> Result<Song> {
     // the end of a track) and real downbeats for the bar phase. Weak
     // downbeat agreement keeps its tempo but votes the bar by bass.
     if crate::beats::ready() {
-        match crate::beats::song_grid(path, &mono, sr, 144.0) {
+        match crate::beats::song_grid(path, &mono, sr, crate::audio::HALF_TEMPO_ABOVE as f64) {
             Ok(g) => {
                 bpm = g.bpm;
                 first_beat = if g.phase_agreement >= 0.5 {
@@ -93,7 +93,7 @@ pub fn load(path: &Path) -> Result<Song> {
     })
 }
 
-fn decode(path: &Path) -> Result<(Vec<f32>, u32)> {
+pub(crate) fn decode(path: &Path) -> Result<(Vec<f32>, u32)> {
     use symphonia::core::codecs::audio::AudioDecoderOptions;
     use symphonia::core::errors::Error as SymphoniaError;
     use symphonia::core::formats::probe::Hint;
@@ -243,10 +243,10 @@ fn estimate_bpm(env: &[f32], fps: f32) -> Option<(f64, f64)> {
     };
     let mut period = lag as f32 + off;
     // Octave fix, same rule as the live tracker: a raw estimate above
-    // 144 BPM is nearly always the double-time harmonic — run the grid
-    // at half-tempo (174 → 87). The comb then also picks the beat parity
-    // with the stronger onsets.
-    if 60.0 * fps / period > 144.0 {
+    // `HALF_TEMPO_ABOVE` is nearly always the double-time harmonic — run
+    // the grid at half-tempo (174 → 87). The comb then also picks the beat
+    // parity with the stronger onsets.
+    if 60.0 * fps / period > crate::audio::HALF_TEMPO_ABOVE {
         period *= 2.0;
     }
     let bpm = 60.0 * fps as f64 / period as f64;

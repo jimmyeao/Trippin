@@ -1,4 +1,4 @@
-// @bloom 0.9 @tonemap agx
+// @bloom 0.9 @tonemap agx @no-dancer
 // Festival laser rig: volumetric beam fans sweeping from a point behind the
 // crowd, side rigs crossing overhead, haze catching it all. Sweeps are on the
 // tempo clock, brightness rides the beat, and the fans open wider as the
