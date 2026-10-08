@@ -1482,7 +1482,9 @@ fn render_loop(
         repick_for_mood(&mut dir, &r, &usable, &f, &s);
 
         // Dancer follows the settings; auto-pilot changes it on cuts and phrases.
-        dancer.enabled = s.dancer_enabled;
+        // Not over scenes with their own figures (robots, a crowd): the
+        // dancer fades out on the cut and back in on the next scene.
+        dancer.enabled = s.dancer_enabled && !r.scene_no_dancer(dir.scene);
         if let Some(style) = s.dancer_style {
             dancer.style = style;
         }

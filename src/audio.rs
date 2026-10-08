@@ -27,8 +27,9 @@ const MIN_BPM: f32 = 70.0;
 const MAX_BPM: f32 = 180.0;
 /// DJ convention: detected tempos above this are almost always a
 /// double-time read (DnB, hard techno) — the tracker runs them at
-/// half-tempo so visuals breathe on the half-time pulse.
-const HALF_TEMPO_ABOVE: f32 = 144.0;
+/// half-tempo so visuals breathe on the half-time pulse (a 160 read is 80).
+/// Every path that sets the tempo obeys it, and `frame` enforces it last.
+pub(crate) const HALF_TEMPO_ABOVE: f32 = 150.0;
 /// Neural downbeat check: seconds of audio per Beat This! window, and how
 /// often one is sent (~0.5 s of one background core per window).
 const NN_WINDOW_S: f32 = 15.0;
@@ -1081,11 +1082,10 @@ impl Analyzer {
         let mut cands: Vec<Cand> = Vec::new();
         for f in fits {
             let r = f.period / live_p;
-            let double = if locked {
-                (r - 0.5).abs() < 0.015
-            } else {
-                f.bpm(self.sr) > HALF_TEMPO_ABOVE as f64
-            };
+            // Over the half-tempo line always (locked or not: a clean 160
+            // read once locked used to be taken as a tempo change).
+            let double = f.bpm(self.sr) > HALF_TEMPO_ABOVE as f64
+                || (locked && (r - 0.5).abs() < 0.015);
             let half = locked && (r - 2.0).abs() < 0.06;
             let mut period = f.period;
             let mut anchor_n = f.n_last;
@@ -1627,6 +1627,10 @@ impl Analyzer {
         }
 
         self.f.silent = silent;
+        // The half-tempo line, whatever set the period.
+        while 60.0 * self.fps / self.period > HALF_TEMPO_ABOVE {
+            self.period *= 2.0;
+        }
         self.f.bpm = 60.0 * self.fps / self.period;
         self.f.beat_phase = self.phase;
         self.f.beat_count = self.beat_count;
@@ -1728,7 +1732,7 @@ impl Analyzer {
             0.0
         };
         let mut period = lag as f32 + offset;
-        // Octave fix: a raw estimate above 144 BPM is nearly always the
+        // Octave fix: a raw estimate above HALF_TEMPO_ABOVE is nearly always the
         // double-time harmonic — drop to half-tempo (174 → 87).
         if 60.0 * self.fps / period > HALF_TEMPO_ABOVE {
             period *= 2.0;
@@ -2134,6 +2138,20 @@ mod tests {
         let bpm = 60.0 * a.fps / a.period;
         assert!((bpm - 120.0).abs() < 0.5, "tempo {bpm}");
         assert!(a.slew.abs() < 0.05, "phase moved {}", a.slew);
+    }
+
+    /// A clean read over the half-tempo line, once locked, settles at half
+    /// tempo (160 -> 80), never at 160.
+    #[test]
+    fn tempo_never_runs_over_the_half_tempo_line() {
+        let mut a = behind(41);
+        a.nn_lock_at = 0.0;
+        a.clock = 1.0;
+        let beats: Vec<NnBeat> = (0..40).map(|k| (240_000 + k * 18_000, 0.9, k % 4 == 0)).collect();
+        a.nn_apply(&beats);
+        a.nn_apply(&beats);
+        let bpm = 60.0 * a.fps / a.period;
+        assert!((bpm - 80.0).abs() < 0.5, "tempo {bpm}");
     }
 
     /// Through a breakdown the flywheel's tempo stands, even when the model

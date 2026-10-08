@@ -613,7 +613,7 @@ pub fn beat_test(path: &Path) -> Result<()> {
             w += 30.0;
         }
     }
-    match fit_grid(&beats, 144.0) {
+    match fit_grid(&beats, crate::audio::HALF_TEMPO_ABOVE as f64) {
         Some(g) => {
             let bar = 4.0 * 60.0 / g.bpm;
             let shift = ((song.first_beat - g.first_downbeat) / (60.0 / g.bpm)).round() as i64;

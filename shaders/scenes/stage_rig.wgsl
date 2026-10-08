@@ -1,4 +1,4 @@
-// @heavy — 2026 tier. @bloom 0.85 @tonemap agx
+// @heavy — 2026 tier. @bloom 0.85 @tonemap agx @no-dancer
 // Festival main stage from inside the crowd: a giant LED wall, truss towers
 // and a roof rig firing beams up into the night haze, flame jets along the
 // stage lip on the big moments, and the crowd in front — heads and raised

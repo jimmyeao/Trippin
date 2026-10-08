@@ -273,7 +273,10 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   Styles (docs/design/looks-styles-packs.md) pick scene pools by these tags, so
   tag by what the scene looks and moves like, not by who made it.
 - **Header tags** go in the first 8 lines: `// @heavy`, `// @bloom 0.7`,
-  `// @tonemap agx` and `// @title Display Name`. `@title` is the scene's
+  `// @tonemap agx`, `// @title Display Name` and `// @no-dancer`. The
+  dancer overlay stays off scenes with their own figures: `@no-dancer` for
+  a drawn crowd (`stage_rig`, `laser_show`), and every scene tagged
+  `character` (robots, androids) automatically (`Renderer::scene_no_dancer`). `@title` is the scene's
   human name in pickers/remotes — the file stem stays the id; without it
   the id is title-cased (`config::titleize`, acronym-aware).
 - **Display names vs ids:** settings, timelines, remote commands and
@@ -530,7 +533,10 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   a bar the model set unless it has had no usable window for 3 minutes. A
   manual downbeat tap outweighs about a minute of windows. While fits are
   fresh (`NN_FRESH_S`) the comb is off and the autocorrelation can't move
-  the tempo. Without the model the comb path still runs, and it is poor
+  the tempo. Nothing may publish a tempo over `HALF_TEMPO_ABOVE` (150, the
+  owner's rule: a 160 read is 80): every fit over it is read at half tempo,
+  locked or not, and `frame` halves the period as a last guard; song
+  analysis (`song.rs`, `song_grid`) uses the same constant. Without the model the comb path still runs, and it is poor
   (it was before too): mostly off-beat on house.
   **Measure every change** with `--beat-eval` on several tracks *and* the
   mic recordings: it reports phase error vs Beat This! over the whole file
