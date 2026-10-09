@@ -3218,7 +3218,8 @@ fn clip_tile(
     let p = ui.painter();
     let live = st.clip.as_deref() == Some(name) || st.clip.as_deref() == Some(twin.as_str());
     let on = !s.disabled_clips.iter().any(|d| d == name);
-    let mir_on = !s.disabled_clips.iter().any(|d| d == &twin);
+    // The twin is out with its base (dancer::unticked), whatever its own entry says.
+    let mir_on = on && !s.disabled_clips.iter().any(|d| d == &twin);
     let dim = if on { 1.0 } else { 0.45 };
 
     p.rect_filled(rect, 6.0, CARD);

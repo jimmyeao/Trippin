@@ -410,7 +410,7 @@ fn fire_cue(
             s.dancer_enabled = true;
         }
         CueKind::NextClip => {
-            dancer.next_clip();
+            dancer.next_clip(&s.disabled_clips);
             dancer.showing = true;
             s.dancer_enabled = true;
         }
@@ -1860,7 +1860,7 @@ fn apply_render(
             dancer.showing = true;
         }
         Action::NextClip => {
-            dancer.next_clip();
+            dancer.next_clip(&s.disabled_clips);
             dancer.showing = true;
         }
         Action::NextStyle => s.dancer_style = Some((dancer.style + 1) % dancer::STYLES.len()),
@@ -3512,7 +3512,7 @@ fn main() -> Result<()> {
         let first = dancer
             .clips
             .iter()
-            .position(|c| !settings.disabled_clips.contains(&c.name))
+            .position(|c| !dancer::unticked(&c.name, &settings.disabled_clips))
             .unwrap_or(0);
         dancer.request(first);
     }

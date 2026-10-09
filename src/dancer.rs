@@ -97,6 +97,16 @@ pub struct DancerUniforms {
     pub _pad2: [f32; 2],
 }
 
+/// Whether routine `name` is out of the Auto rotation. A `_mir` twin is out
+/// with its base clip: the panel shows the pair as one tile, so unticking it
+/// must take both out (the "mir" badge only removes the twin on its own).
+pub fn unticked(name: &str, disabled: &[String]) -> bool {
+    disabled.iter().any(|d| d == name)
+        || name
+            .strip_suffix("_mir")
+            .is_some_and(|base| disabled.iter().any(|d| d == base))
+}
+
 pub fn find_dancer_dir() -> Option<PathBuf> {
     let mut candidates = vec![PathBuf::from("dancers")];
     if let Ok(exe) = std::env::current_exe() {
@@ -373,11 +383,19 @@ impl DancerLayer {
         self.pinned = true;
     }
 
-    pub fn next_clip(&mut self) {
-        if !self.clips.is_empty() {
-            let next = self.current().map_or(0, |c| (c + 1) % self.clips.len());
-            self.pin(next);
+    /// Step to the next routine, skipping unticked ones (all of them unticked:
+    /// step through everything).
+    pub fn next_clip(&mut self, disabled: &[String]) {
+        let n = self.clips.len();
+        if n == 0 {
+            return;
         }
+        let start = self.current().map_or(n - 1, |c| c);
+        let next = (1..=n)
+            .map(|k| (start + k) % n)
+            .find(|&i| !unticked(&self.clips[i].name, disabled))
+            .unwrap_or((start + 1) % n);
+        self.pin(next);
     }
 
     pub fn clip_names(&self) -> Vec<String> {
@@ -405,13 +423,24 @@ impl DancerLayer {
             let free: Vec<usize> = (0..self.clips.len())
                 .filter(|i| !taken.contains(i) && self.clip_allowed(*i, disabled))
                 .collect();
-            // Too few ticked routines to go round: at least differ from the main dancer.
-            let pool: Vec<usize> = if free.is_empty() {
-                (0..self.clips.len())
-                    .filter(|i| Some(*i) != self.slots[0].current)
-                    .collect()
-            } else {
+            // Too few ticked routines to go round: repeat a ticked one (one the
+            // main dancer isn't doing if possible) rather than play an unticked one.
+            let ticked: Vec<usize> = (0..self.clips.len())
+                .filter(|&i| !unticked(&self.clips[i].name, disabled))
+                .collect();
+            let not_main: Vec<usize> = ticked
+                .iter()
+                .copied()
+                .filter(|&i| Some(i) != self.slots[0].current)
+                .collect();
+            let pool = if !free.is_empty() {
                 free
+            } else if !not_main.is_empty() {
+                not_main
+            } else if !ticked.is_empty() {
+                ticked
+            } else {
+                (0..self.clips.len()).collect()
             };
             if !pool.is_empty() {
                 let pick = pool[(self.rand() * pool.len() as f32) as usize % pool.len()];
@@ -432,7 +461,7 @@ impl DancerLayer {
     }
 
     fn clip_allowed(&self, i: usize, disabled: &[String]) -> bool {
-        !disabled.contains(&self.clips[i].name) && self.clips[i].energy <= self.energy_cap() + 1e-3
+        !unticked(&self.clips[i].name, disabled) && self.clips[i].energy <= self.energy_cap() + 1e-3
     }
 
     pub fn pick_for(&mut self, intensity: f32, r: f32, disabled: &[String]) {
@@ -443,7 +472,7 @@ impl DancerLayer {
         // Everything over the cap (or disabled): fall back to the gentlest.
         if order.is_empty() {
             order = (0..self.clips.len())
-                .filter(|&i| Some(i) != current && !disabled.contains(&self.clips[i].name))
+                .filter(|&i| Some(i) != current && !unticked(&self.clips[i].name, disabled))
                 .collect();
             order.sort_by(|&a, &b| self.clips[a].energy.total_cmp(&self.clips[b].energy));
             order.truncate(1);
@@ -495,7 +524,7 @@ impl DancerLayer {
         };
         let cap = self.energy_cap();
         let current = self.current().and_then(|i| self.clips.get(i));
-        let current_ok = current.is_some_and(|c| !disabled.contains(&c.name) && c.energy <= cap + 1e-3);
+        let current_ok = current.is_some_and(|c| !unticked(&c.name, disabled) && c.energy <= cap + 1e-3);
         let energy = current.map_or(0.5, |c| c.energy);
         // Calm sections always want a gentle routine: never let a stormer
         // ride out a breakdown.
@@ -578,10 +607,15 @@ impl DancerLayer {
         }
         // Canon switched on by hand, or the main routine changed to one a
         // companion was showing: make sure all three dance something different.
+        // A companion unticked in the panel is swapped out straight away too.
         if self.canon && self.slots[1..].iter().all(|s| s.loader.is_none()) {
+            let any_ticked = self.clips.iter().any(|c| !unticked(&c.name, disabled));
             let clash = (1..SLOTS).any(|s| {
                 let c = self.slots[s].current;
-                c.is_none() || (0..s).any(|o| self.slots[o].current == c)
+                c.is_none()
+                    || (0..s).any(|o| self.slots[o].current == c)
+                    || (any_ticked
+                        && c.is_some_and(|i| unticked(&self.clips[i].name, disabled)))
             });
             if clash {
                 self.refresh_companions(disabled);
@@ -591,6 +625,17 @@ impl DancerLayer {
         // is pinned by hand, so a clicked dancer can't be swapped out from
         // under you.
         if auto_pick && !self.pinned {
+            // Unticked in the panel while it plays: swap it now, not at the
+            // next cut (a phrase can be 8+ bars away).
+            if self.slots[0].loader.is_none()
+                && self
+                    .current()
+                    .and_then(|i| self.clips.get(i))
+                    .is_some_and(|c| unticked(&c.name, disabled))
+            {
+                let r = self.rand();
+                self.pick_for(intensity, r, disabled);
+            }
             // Calm-section watchdog: on_cut only fires on phrase boundaries,
             // so an energetic routine could otherwise ride out a whole
             // breakdown. Swap once per calm spell, never mid-load.
@@ -663,5 +708,93 @@ mod tests {
         assert_eq!(dl.style, 3);
         dl.on_cut(0.8, || 0.5, Some(99), Tristate::Off, &[]);
         assert_eq!(dl.style, STYLES.len() - 1, "an out-of-range look is clamped");
+    }
+
+    /// Four routines (a..d) with no files behind them: loads fail quietly.
+    fn layer() -> DancerLayer {
+        let mut dl = DancerLayer::new();
+        dl.clips = ["a", "b", "c", "d"]
+            .iter()
+            .map(|n| ClipEntry {
+                name: n.to_string(),
+                title: n.to_string(),
+                path: PathBuf::from(format!("no-such-dancer-{n}")),
+                energy: 0.5,
+            })
+            .collect();
+        dl.bpm = 126.0;
+        dl
+    }
+
+    fn names(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// Unticked routines never play in Auto, not even as canon companions
+    /// when too few are ticked to give the trio three different ones.
+    #[test]
+    fn auto_pilot_skips_unticked_routines() {
+        let disabled = names(&["b", "c", "d"]);
+        for seed in 0..50u64 {
+            let mut dl = layer();
+            dl.rng ^= seed.wrapping_mul(0x9E37_79B9);
+            let mut k = seed as f32 * 0.37;
+            dl.on_cut(
+                0.8,
+                || {
+                    k = (k + 0.618).fract();
+                    k
+                },
+                None,
+                Tristate::On,
+                &disabled,
+            );
+            for (s, slot) in dl.slots.iter().enumerate() {
+                if let Some(i) = slot.current {
+                    assert_eq!(dl.clips[i].name, "a", "slot {s} plays an unticked routine");
+                }
+            }
+        }
+    }
+
+    /// The panel's tile is a routine and its `_mir` twin: unticking the tile
+    /// takes both out; the badge can take out just the twin.
+    #[test]
+    fn mirror_twin_follows_its_routine() {
+        let off = names(&["band_drummer", "stock_spin_mir"]);
+        assert!(unticked("band_drummer", &off));
+        assert!(unticked("band_drummer_mir", &off));
+        assert!(!unticked("band_drummer_side_mir", &off));
+        assert!(!unticked("stock_spin", &off));
+        assert!(unticked("stock_spin_mir", &off));
+    }
+
+    /// Unticking the routine on screen swaps it at once in Auto, and the
+    /// next-routine key steps over unticked ones.
+    #[test]
+    fn unticking_the_live_routine_swaps_it() {
+        let mut dl = layer();
+        dl.request(1);
+        dl.slots[0].loader = None;
+        dl.slots[0].loaded = Some(ClipInfo {
+            name: "b".into(),
+            duration: 4.0,
+            beats: 8.0,
+            frames: 1,
+            aspect: 0.5,
+            accent: 0.0,
+        });
+        dl.opacity = 1.0;
+        let disabled = names(&["b", "c"]);
+        dl.uniforms(0.0, 0, 126.0, 0.6, 1.0 / 60.0, 1.0, false, &disabled, true);
+        let now = dl.current().map(|i| dl.clips[i].name.clone());
+        assert!(matches!(now.as_deref(), Some("a" | "d")), "still on {now:?}");
+
+        let mut dl = layer();
+        dl.request(0);
+        dl.next_clip(&disabled);
+        assert_eq!(dl.current(), Some(3), "a -> d, past the unticked b and c");
+        dl.next_clip(&disabled);
+        assert_eq!(dl.current(), Some(0), "wraps round to a");
     }
 }
