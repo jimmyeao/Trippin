@@ -97,6 +97,16 @@ pub struct DancerUniforms {
     pub _pad2: [f32; 2],
 }
 
+/// Whether routine `name` is out of the Auto rotation. A `_mir` twin is out
+/// with its base clip: the panel shows the pair as one tile, so unticking it
+/// must take both out (the "mir" badge only removes the twin on its own).
+pub fn unticked(name: &str, disabled: &[String]) -> bool {
+    disabled.iter().any(|d| d == name)
+        || name
+            .strip_suffix("_mir")
+            .is_some_and(|base| disabled.iter().any(|d| d == base))
+}
+
 pub fn find_dancer_dir() -> Option<PathBuf> {
     let mut candidates = vec![PathBuf::from("dancers")];
     if let Ok(exe) = std::env::current_exe() {
@@ -383,7 +393,7 @@ impl DancerLayer {
         let start = self.current().map_or(n - 1, |c| c);
         let next = (1..=n)
             .map(|k| (start + k) % n)
-            .find(|&i| !disabled.contains(&self.clips[i].name))
+            .find(|&i| !unticked(&self.clips[i].name, disabled))
             .unwrap_or((start + 1) % n);
         self.pin(next);
     }
@@ -416,7 +426,7 @@ impl DancerLayer {
             // Too few ticked routines to go round: repeat a ticked one (one the
             // main dancer isn't doing if possible) rather than play an unticked one.
             let ticked: Vec<usize> = (0..self.clips.len())
-                .filter(|&i| !disabled.contains(&self.clips[i].name))
+                .filter(|&i| !unticked(&self.clips[i].name, disabled))
                 .collect();
             let not_main: Vec<usize> = ticked
                 .iter()
@@ -451,7 +461,7 @@ impl DancerLayer {
     }
 
     fn clip_allowed(&self, i: usize, disabled: &[String]) -> bool {
-        !disabled.contains(&self.clips[i].name) && self.clips[i].energy <= self.energy_cap() + 1e-3
+        !unticked(&self.clips[i].name, disabled) && self.clips[i].energy <= self.energy_cap() + 1e-3
     }
 
     pub fn pick_for(&mut self, intensity: f32, r: f32, disabled: &[String]) {
@@ -462,7 +472,7 @@ impl DancerLayer {
         // Everything over the cap (or disabled): fall back to the gentlest.
         if order.is_empty() {
             order = (0..self.clips.len())
-                .filter(|&i| Some(i) != current && !disabled.contains(&self.clips[i].name))
+                .filter(|&i| Some(i) != current && !unticked(&self.clips[i].name, disabled))
                 .collect();
             order.sort_by(|&a, &b| self.clips[a].energy.total_cmp(&self.clips[b].energy));
             order.truncate(1);
@@ -514,7 +524,7 @@ impl DancerLayer {
         };
         let cap = self.energy_cap();
         let current = self.current().and_then(|i| self.clips.get(i));
-        let current_ok = current.is_some_and(|c| !disabled.contains(&c.name) && c.energy <= cap + 1e-3);
+        let current_ok = current.is_some_and(|c| !unticked(&c.name, disabled) && c.energy <= cap + 1e-3);
         let energy = current.map_or(0.5, |c| c.energy);
         // Calm sections always want a gentle routine: never let a stormer
         // ride out a breakdown.
@@ -599,13 +609,13 @@ impl DancerLayer {
         // companion was showing: make sure all three dance something different.
         // A companion unticked in the panel is swapped out straight away too.
         if self.canon && self.slots[1..].iter().all(|s| s.loader.is_none()) {
-            let any_ticked = self.clips.iter().any(|c| !disabled.contains(&c.name));
+            let any_ticked = self.clips.iter().any(|c| !unticked(&c.name, disabled));
             let clash = (1..SLOTS).any(|s| {
                 let c = self.slots[s].current;
                 c.is_none()
                     || (0..s).any(|o| self.slots[o].current == c)
                     || (any_ticked
-                        && c.is_some_and(|i| disabled.contains(&self.clips[i].name)))
+                        && c.is_some_and(|i| unticked(&self.clips[i].name, disabled)))
             });
             if clash {
                 self.refresh_companions(disabled);
@@ -621,7 +631,7 @@ impl DancerLayer {
                 && self
                     .current()
                     .and_then(|i| self.clips.get(i))
-                    .is_some_and(|c| disabled.contains(&c.name))
+                    .is_some_and(|c| unticked(&c.name, disabled))
             {
                 let r = self.rand();
                 self.pick_for(intensity, r, disabled);
@@ -745,6 +755,18 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The panel's tile is a routine and its `_mir` twin: unticking the tile
+    /// takes both out; the badge can take out just the twin.
+    #[test]
+    fn mirror_twin_follows_its_routine() {
+        let off = names(&["band_drummer", "stock_spin_mir"]);
+        assert!(unticked("band_drummer", &off));
+        assert!(unticked("band_drummer_mir", &off));
+        assert!(!unticked("band_drummer_side_mir", &off));
+        assert!(!unticked("stock_spin", &off));
+        assert!(unticked("stock_spin_mir", &off));
     }
 
     /// Unticking the routine on screen swaps it at once in Auto, and the

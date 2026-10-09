@@ -3512,7 +3512,7 @@ fn main() -> Result<()> {
         let first = dancer
             .clips
             .iter()
-            .position(|c| !settings.disabled_clips.contains(&c.name))
+            .position(|c| !dancer::unticked(&c.name, &settings.disabled_clips))
             .unwrap_or(0);
         dancer.request(first);
     }
