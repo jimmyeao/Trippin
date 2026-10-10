@@ -305,6 +305,8 @@ pub struct DancerLayer {
     /// timeline clip cue): the calm/tempo watchdogs mustn't swap it away.
     /// Lifts as soon as the auto-pilot itself picks a routine.
     pinned: bool,
+    /// The unticked list as of the last frame, to notice it changing.
+    seen_disabled: Vec<String>,
     /// Last beat position / downbeat slot seen — where a routine requested
     /// between frames should start.
     last_pos: f64,
@@ -329,6 +331,7 @@ impl DancerLayer {
             calm_swap: false,
             bpm: 120.0,
             pinned: false,
+            seen_disabled: Vec::new(),
             last_pos: 0.0,
             last_downbeat: 0,
         }
@@ -591,6 +594,12 @@ impl DancerLayer {
     ) -> Option<DancerUniforms> {
         self.last_pos = pos;
         self.last_downbeat = downbeat;
+        // Noted before any early return, so a list that changed while nothing
+        // was loaded isn't mistaken for a change on a later pin.
+        let disabled_changed = self.seen_disabled != disabled;
+        if disabled_changed {
+            self.seen_disabled = disabled.to_vec();
+        }
         let target = if self.enabled && self.showing {
             1.0
         } else {
@@ -624,6 +633,21 @@ impl DancerLayer {
         // Auto-pilot watchdogs: skipped in Manual mode and while a routine
         // is pinned by hand, so a clicked dancer can't be swapped out from
         // under you.
+        // Unticking a routine that was hand-picked (tile click, C key, a
+        // cue, the remote) lifts the pin, or the watchdog below would never
+        // swap it. Only a *change* of the list does this, so previewing an
+        // unticked tile on purpose still sticks.
+        if disabled_changed {
+            if auto_pick
+                && self.pinned
+                && self
+                    .current()
+                    .and_then(|i| self.clips.get(i))
+                    .is_some_and(|c| unticked(&c.name, disabled))
+            {
+                self.pinned = false;
+            }
+        }
         if auto_pick && !self.pinned {
             // Unticked in the panel while it plays: swap it now, not at the
             // next cut (a phrase can be 8+ bars away).
@@ -796,5 +820,39 @@ mod tests {
         assert_eq!(dl.current(), Some(3), "a -> d, past the unticked b and c");
         dl.next_clip(&disabled);
         assert_eq!(dl.current(), Some(0), "wraps round to a");
+    }
+
+    /// A hand-picked (pinned) routine is swapped when it is then unticked,
+    /// but a pick of an already-unticked routine sticks.
+    #[test]
+    fn unticking_a_pinned_routine_swaps_it() {
+        let live = |dl: &mut DancerLayer, name: &str| {
+            dl.slots[0].loader = None;
+            dl.slots[0].loaded = Some(ClipInfo {
+                name: name.into(),
+                duration: 4.0,
+                beats: 8.0,
+                frames: 1,
+                aspect: 0.5,
+                accent: 0.0,
+            });
+            dl.opacity = 1.0;
+        };
+        let mut dl = layer();
+        dl.pin(1);
+        live(&mut dl, "b");
+        let none: Vec<String> = Vec::new();
+        dl.uniforms(0.0, 0, 126.0, 0.6, 1.0 / 60.0, 1.0, false, &none, true);
+        assert_eq!(dl.current(), Some(1), "ticked pin holds");
+        let off = names(&["b"]);
+        dl.uniforms(0.0, 0, 126.0, 0.6, 1.0 / 60.0, 1.0, false, &off, true);
+        assert_ne!(dl.current(), Some(1), "unticked pin must go");
+
+        let mut dl = layer();
+        dl.uniforms(0.0, 0, 126.0, 0.6, 1.0 / 60.0, 1.0, false, &off, true);
+        dl.pin(1);
+        live(&mut dl, "b");
+        dl.uniforms(0.0, 0, 126.0, 0.6, 1.0 / 60.0, 1.0, false, &off, true);
+        assert_eq!(dl.current(), Some(1), "previewing an unticked tile sticks");
     }
 }
