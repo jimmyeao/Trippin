@@ -1530,7 +1530,8 @@ fn render_loop(
         flow_speed += (speed_target - flow_speed) * (dt * 0.8).min(1.0);
         flow = (flow + dt as f64 * flow_bpm as f64 / 60.0 * flow_speed as f64) % 4096.0;
         // Energy clocks: whole mix, bass, mid, high (mid-high folds into
-        // high). Rate in beats/s = tempo x (0.3 + 2.4 x level^1.6): about
+        // high). Rate in beats/s = tempo x `audio::clock_rate` (0.3 + 2.4 x
+        // level^1.6, soft-capped so loud/fast material can't race): about
         // 0.4x in a breakdown, ~1.1x on a drop (measured on real tracks).
         let whole = (f.lvl4[0] * 0.45 + f.lvl4[1] * 0.3 + f.lvl4[2] * 0.15 + f.lvl4[3] * 0.1).min(1.0);
         let src = [whole, f.lvl4[0], f.lvl4[1], f.lvl4[2].max(f.lvl4[3])];
@@ -1538,7 +1539,7 @@ fn render_loop(
         for i in 0..4 {
             let target = if f.silent { 0.0 } else { src[i] };
             clock_lvl[i] += (target - clock_lvl[i]) * k;
-            let rate = 0.3 + 2.4 * clock_lvl[i].powf(1.6);
+            let rate = crate::audio::clock_rate(clock_lvl[i], flow_bpm);
             clock4[i] = (clock4[i] + dt as f64 * flow_bpm as f64 / 60.0 * rate as f64) % 4096.0;
         }
         let target = if blackout { 0.0 } else { 1.0 };

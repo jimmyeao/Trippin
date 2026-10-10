@@ -15,7 +15,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let a = 2.0 + floor(u.pres4.x * 4.0 + 0.5);
     let b = 3.0 + floor(u.pres4.z * 4.0 + 0.5);
     // Shape: the phase (and so the figure) morphs with the energy clock.
-    let ph = u.clock4.z * 0.6;
+    let ph = u.clock4.z * 0.4;
 
     // Distance to the curve as a polyline (segments between samples), so
     // fast figures stay continuous instead of breaking into dots.

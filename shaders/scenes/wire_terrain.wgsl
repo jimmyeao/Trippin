@@ -14,7 +14,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
     // Energy: flight speed follows the mix; shape: the ground rises with
     // bass presence (smooth) and a kick.
-    let z = u.clock4.x * 5.0;
+    let z = u.clock4.x * 2.5;
     let lift = u.pres4.x + 0.4 * u.hits4.x;
 
     // Swoop: altitude and heading drift with the phrase, kick dips low.

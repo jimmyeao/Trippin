@@ -395,6 +395,23 @@ pub struct AudioEngine {
     pub dead: Arc<AtomicBool>,
 }
 
+/// Energy-clock rate as a multiple of tempo, for a smoothed band level.
+/// The raw curve (0.3 + 2.4 x level^1.6) reaches 2.7x, so loud, hat-heavy or
+/// fast material made every scene driven by `clock4` "race" (Lissajous).
+/// Soft-knee above 1.4x (asymptote 1.9x), plus an absolute ceiling of
+/// `CLOCK_MAX_BEATS_S` beats/s so a fast tempo can't multiply it further.
+pub fn clock_rate(level: f32, bpm: f32) -> f32 {
+    const KNEE: f32 = 1.4;
+    const CLOCK_MAX_BEATS_S: f32 = 4.5;
+    let raw = 0.3 + 2.4 * level.clamp(0.0, 1.0).powf(1.6);
+    let soft = if raw > KNEE {
+        KNEE + 0.5 * ((raw - KNEE) / 0.5).tanh()
+    } else {
+        raw
+    };
+    soft.min(CLOCK_MAX_BEATS_S * 60.0 / bpm.max(60.0))
+}
+
 pub fn list_devices() -> Result<()> {
     let host = cpal::default_host();
     #[cfg(target_os = "windows")]
@@ -1935,7 +1952,7 @@ pub fn groove_test(path: &std::path::Path) -> anyhow::Result<()> {
             let l = &a.f.lvl4;
             let whole = (l[0] * 0.45 + l[1] * 0.3 + l[2] * 0.15 + l[3] * 0.1).min(1.0);
             clk += (whole - clk) * ((1.0 / a.fps) / 0.35).min(1.0);
-            rate_acc += 0.3 + 2.4 * clk.powf(1.6);
+            rate_acc += clock_rate(clk, a.f.bpm);
             rate_n += 1;
             let t = i as f32 / song.sr as f32;
             if let Some((g0, g1)) = gate {
@@ -2021,7 +2038,7 @@ pub fn dump_feed(path: &std::path::Path, out: &std::path::Path, palette: &str) -
             for c in 0..4 {
                 let target = if f.silent { 0.0 } else { src[c] };
                 clock_lvl[c] += (target - clock_lvl[c]) * k;
-                let rate = 0.3 + 2.4 * clock_lvl[c].powf(1.6);
+                let rate = clock_rate(clock_lvl[c], flow_bpm);
                 clock4[c] = (clock4[c] + dt as f64 * flow_bpm as f64 / 60.0 * rate as f64) % 4096.0;
             }
             intensity += ((0.3 + 0.7 * f.energy.min(1.0)) - intensity) * (dt * 0.6).min(1.0);
