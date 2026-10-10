@@ -98,6 +98,11 @@ overlays.
     re-spaces everything and jerks. Keep the count fixed and fade the edges.
   - For travel and rotation use `u.flow` or `u.clock4` (the smooth energy
     clocks), and phrase-length sines for direction swings.
+- **Scenes must not race.** `audio::clock_rate` caps the energy clocks (soft knee
+  above 1.4x tempo, 4.5 beats/s ceiling). Size a flight scene's travel so the
+  cap doesn't pass more than about two repeats of its structure per beat
+  (ring_runner, bass_blocks and wire_terrain were 4-5 units/beat on 1.25-3.2
+  unit spacing and strobed).
 - **No beat-synced flashes in tunnels or flight scenes.** They read as
   "jerky".
 - **Add scenes; don't replace them.** Removing or reworking a scene is the
@@ -391,6 +396,10 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   `Status { a: lock(&m).x, b: lock(&m).y }` deadlocks the render thread.
   Take one guard first.
 - **Lock order:** never hold the `timeline` lock while locking `settings`.
+- **Unticking a dancer routine lifts a hand pin** (`DancerLayer::uniforms`,
+  `seen_disabled`): a clicked/cued/remote routine is pinned and the
+  watchdogs skip it, so a drummer unticked while pinned stayed on screen.
+  Only a *change* of the list lifts it, so previewing an unticked tile sticks.
 - Settings changed on the render thread must set `shared.dirty` to be
   saved. Timeline cue playback must **not** persist (`fire_cue(…, persist:
   false)`); show state must never leak into `trippin.json`.
