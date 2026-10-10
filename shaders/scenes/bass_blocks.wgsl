@@ -67,7 +67,7 @@ fn windows(pos: vec3<f32>, h: Hit) -> vec3<f32> {
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
     // Energy: the drive speeds up and slows with the mix.
-    let z = u.clock4.x * 4.0;
+    let z = u.clock4.x * 3.0;
 
     // Street-centre camera; dips on the kick, sways lazily.
     // Direction: weave from lane side to side, reversing each phrase.
