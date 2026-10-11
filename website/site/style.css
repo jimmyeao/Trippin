@@ -160,7 +160,7 @@ nav ul a.on{color:var(--text)}
 }
 
 /* hero reel */
-.hero.reel{aspect-ratio:16/9;min-height:560px;max-height:max(100svh,560px);display:flex;align-items:center;justify-content:center;padding:110px 0 100px;isolation:isolate}
+.hero.reel{width:100%;aspect-ratio:16/9;min-height:560px;max-height:max(100svh,560px);display:flex;align-items:center;justify-content:center;padding:110px 0 100px;isolation:isolate}
 .hero.reel::before{display:none}
 .reel-bg{position:absolute;inset:0;z-index:-1;background:#000 center/cover}
 .reel-bg video{width:100%;height:100%;object-fit:cover;display:block}
