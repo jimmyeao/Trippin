@@ -30,7 +30,7 @@ directly.
 - **Name:** Trippin Remote
 - **Tagline:** Run your Trippin visuals from the booth. Cut scenes on the beat, fire the strobe, and swap palettes and dancers from your iPhone or iPad over Wi-Fi.
 - **Needs:** Trippin running on a Mac or Windows PC on the same network, with the remote turned on in Trippin's Settings. Free.
-- **App Store:** in review (submitted 2026-10-03). Add the link once it's live.
+- **App Store:** live, https://apps.apple.com/us/app/trippin-remote/id6818795447 (linked from `pages/remote.html`).
 - **Privacy:** collects no data. Policy: `ios/TrippinRemote/PRIVACY.md`.
 
 Regenerate these with the `test7_StoreShots` and `test8_PreviewTour` UI
