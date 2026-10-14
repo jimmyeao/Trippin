@@ -35,7 +35,7 @@ SHELL = """<!doctype html>
 <footer>
   <div class="wrap">
     <span>© <span id="yr">2026</span> Trippin · trippin.club</span>
-    <span><a href="start.html">Get started</a> · <a href="remote.html">Remote app</a> · <a href="privacy.html">Privacy</a> · <a href="https://github.com/jimmyeao/Trippin">GitHub</a> · <a href="https://github.com/jimmyeao/Trippin/issues">Support</a></span>
+    <span><a href="start.html">Get started</a> · <a href="remote.html">Remote app</a> · <a href="privacy.html">Privacy</a> · <a href="https://mixdis.com" target="_blank" rel="noopener">Mixdis</a> · <a href="https://beatdis.co.uk" target="_blank" rel="noopener">Beatdis</a> · <a href="https://github.com/jimmyeao/Trippin">GitHub</a> · <a href="https://github.com/jimmyeao/Trippin/issues">Support</a></span>
   </div>
 </footer>
 <script src="site.js?v={ver}"></script>
