@@ -422,6 +422,8 @@ fn fire_cue(
         CueKind::Canon(t) => s.canon = *t,
         CueKind::Blackout(b) => *blackout = *b,
         CueKind::Strobe(b) => STROBE.store(*b, Ordering::Relaxed),
+        // The ramp is positional — applied per frame to `master` below.
+        CueKind::FadeOut => {}
         CueKind::Fx(f) => {
             s.fx_auto = false;
             s.fx = *f;
@@ -675,6 +677,8 @@ fn render_loop(
     let mut clock_lvl = [0.0f32; 4];
     let mut blackout = false;
     let mut master = 1.0f32;
+    // Progress through the covering `FadeOut` cue's block, or -1.
+    let mut fade_p = -1.0f32;
     // `palette = "auto"` mood matcher (palettes::Auto).
     let mut auto_pal = palettes::Auto::default();
     // The selected Style's auto-palette families, cached by Style id.
@@ -1301,6 +1305,19 @@ fn render_loop(
                     }
                     new_fired = t;
                 }
+                fade_p = doc
+                    .cues
+                    .iter()
+                    .find_map(|c| {
+                        if !matches!(c.kind, CueKind::FadeOut) {
+                            return None;
+                        }
+                        let (s, e) = (doc.cue_time(c)?, doc.cue_end_s(c)?);
+                        (tl.pos_s >= s && tl.pos_s < e).then(|| {
+                            ((tl.pos_s - s) / (e - s).max(0.05)).clamp(0.0, 1.0) as f32
+                        })
+                    })
+                    .unwrap_or(-1.0);
             }
             drop(guard);
             fired_past = new_fired;
@@ -1544,6 +1561,12 @@ fn render_loop(
         }
         let target = if blackout { 0.0 } else { 1.0 };
         master += (target - master) * (dt * 3.0).min(1.0);
+        if fade_p >= 0.0 {
+            // Fade-out cue: drive master down a smoothstep ramp across the
+            // block — the eased blackout move is far too quick, and void
+            // hard-cuts.
+            master = 1.0 - fade_p * fade_p * (3.0 - 2.0 * fade_p);
+        }
         // Strobe: black, with a hard cut to the picture on each drum hit the
         // analyser hears (`onset` jumps on a hit and decays over ~0.12 s, so
         // each flash lasts ~70 ms). It follows the actual fill — rolls that
@@ -1943,6 +1966,9 @@ struct App {
     panel: Option<Panel>,
     /// Dedicated timeline-editor window (separate from the small panel).
     editor: Option<editor::Editor>,
+    /// Live modifier state — egui's staged input can lag a key event by a
+    /// frame, which once made Ctrl+C fire C's binding instead of copy.
+    mods: winit::keyboard::ModifiersState,
     /// Moved into the render thread once the window exists.
     director: Option<Director>,
     dancer: Option<DancerLayer>,
@@ -2861,6 +2887,9 @@ impl ApplicationHandler<AppEvent> for App {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        if let WindowEvent::ModifiersChanged(m) = &event {
+            self.mods = m.state();
+        }
         let is_editor = self.editor.as_ref().is_some_and(|e| e.window.id() == id);
         if is_editor {
             match &event {
@@ -2903,7 +2932,7 @@ impl ApplicationHandler<AppEvent> for App {
                         // The hotkey map keys on the letter alone, so Ctrl+C
                         // would otherwise fire C's binding (next routine).
                         let ctrl_char = matches!(event.logical_key, Key::Character(_))
-                            && self.editor.as_ref().is_some_and(|e| e.command_held());
+                            && self.mods.control_key();
                         // Text-producing keys plus the editing keys belong to a
                         // focused field; arrows stay global (scene next/prev).
                         let text_like = matches!(event.logical_key, Key::Character(_))
@@ -2919,6 +2948,25 @@ impl ApplicationHandler<AppEvent> for App {
                                 )
                             );
                         if (typing && text_like) || ctrl_char {
+                            // The queued op and the Copy/Cut/Paste event
+                            // egui-winit generates for the same press merge
+                            // into one action in the editor's run_ui.
+                            if ctrl_char
+                                && !typing
+                                && let Some(ed) = self.editor.as_mut()
+                                && let winit::keyboard::PhysicalKey::Code(code) =
+                                    event.physical_key
+                            {
+                                let op = match code {
+                                    winit::keyboard::KeyCode::KeyC => 'c',
+                                    winit::keyboard::KeyCode::KeyX => 'x',
+                                    winit::keyboard::KeyCode::KeyV => 'v',
+                                    _ => '\0',
+                                };
+                                if op != '\0' {
+                                    ed.queue_edit(op);
+                                }
+                            }
                             // fall through to egui
                         } else if matches!(
                             event.logical_key,
@@ -3534,6 +3582,7 @@ fn main() -> Result<()> {
         gpu: None,
         panel: None,
         editor: None,
+        mods: winit::keyboard::ModifiersState::empty(),
         director: Some(Director::new()),
         dancer: Some(dancer),
         settings,

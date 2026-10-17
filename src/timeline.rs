@@ -126,6 +126,9 @@ pub enum CueKind {
     /// the eighth notes, beat-synced, with no fade (blackout eases over a
     /// third of a second — far too slow for a strobe).
     Strobe(bool),
+    /// Fade the picture to black over the block's span, releasing at the
+    /// end — the gentle alternative to cutting to `void`.
+    FadeOut,
     /// Apply a transform (also turns auto-pick off).
     Fx(Fx),
     FxAuto(bool),
@@ -153,6 +156,7 @@ impl CueKind {
             Self::Canon(_) => "Canon",
             Self::Blackout(_) => "Blackout",
             Self::Strobe(_) => "Strobe",
+            Self::FadeOut => "Fade out",
             Self::Fx(_) => "Transform",
             Self::FxAuto(_) => "Auto FX",
             Self::Palette(_) => "Palette",
@@ -174,7 +178,9 @@ impl CueKind {
             | Self::Trails(_)
             | Self::Canon(_) => 1,
             Self::Fx(_) | Self::FxAuto(_) => 2,
-            Self::Mode(_) | Self::Blackout(_) | Self::Strobe(_) | Self::Palette(_) => 3,
+            Self::Mode(_) | Self::Blackout(_) | Self::Strobe(_) | Self::FadeOut | Self::Palette(_) => {
+                3
+            }
             Self::Text(s) => 4 + (s.lane as usize % crate::text::TEXT_SLOTS),
             Self::TextOff(lane) => 4 + (*lane as usize % crate::text::TEXT_SLOTS),
         }
@@ -205,6 +211,7 @@ impl CueKind {
             Self::Dancer(on) => format!("dancer {}", if *on { "on" } else { "off" }),
             Self::Blackout(on) => format!("blackout {}", if *on { "on" } else { "off" }),
             Self::Strobe(on) => format!("strobe {}", if *on { "on" } else { "off" }),
+            Self::FadeOut => "fade out".into(),
             Self::Fx(f) => f.label().to_string(),
             Self::FxAuto(on) => format!("auto FX {}", if *on { "on" } else { "off" }),
             Self::Look(l) => match l {
@@ -485,6 +492,8 @@ impl Timeline {
                 CueKind::Canon(c) => st.canon = c,
                 CueKind::Blackout(b) => st.blackout = b,
                 CueKind::Strobe(b) => st.strobe = b,
+                // Positional ramp — driven per frame, no folded state.
+                CueKind::FadeOut => {}
                 CueKind::Fx(f) => {
                     st.fx = f;
                     st.fx_auto = false;
