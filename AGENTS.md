@@ -167,6 +167,14 @@ overlays.
   Windows installer and publishes the release. Only when asked.
 - **Never commit:** `trippin.json` (user settings), `snaps/`, `target/`,
   recordings, or API keys.
+- **Timeline editor:** cue blocks draw clamped to the next same-track cue's
+  start (`vis_end` in `editor.rs`) — AI scene cues all run to the song end
+  and would otherwise stack. egui-winit turns Ctrl+X/C/V into
+  `Event::Cut`/`Copy`/`Paste`, never `Event::Key`, and `Paste` only fires
+  while the OS clipboard holds text — so cue copy also `ctx.copy_text`s a
+  `trippin-cue\n` JSON blob (pasteable across instances). Space is
+  hard-wired to transport Toggle in the editor window (the default
+  MarkDownbeat binding must not win there).
 - **If your change is a durable rule or gotcha, add it here** in the same
   commit, so the next agent doesn't relearn it.
 

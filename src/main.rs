@@ -2898,6 +2898,12 @@ impl ApplicationHandler<AppEvent> for App {
                 WindowEvent::KeyboardInput { event, .. } => {
                     if event.state == ElementState::Pressed && !event.repeat {
                         let typing = self.editor.as_ref().is_some_and(|e| e.wants_keyboard());
+                        // Ctrl/Cmd combos belong to the editor — its
+                        // copy/paste keys and a focused field's own editing.
+                        // The hotkey map keys on the letter alone, so Ctrl+C
+                        // would otherwise fire C's binding (next routine).
+                        let ctrl_char = matches!(event.logical_key, Key::Character(_))
+                            && self.editor.as_ref().is_some_and(|e| e.command_held());
                         // Text-producing keys plus the editing keys belong to a
                         // focused field; arrows stay global (scene next/prev).
                         let text_like = matches!(event.logical_key, Key::Character(_))
@@ -2912,23 +2918,24 @@ impl ApplicationHandler<AppEvent> for App {
                                         | winit::keyboard::NamedKey::Tab
                                 )
                             );
-                        if typing && text_like {
+                        if (typing && text_like) || ctrl_char {
                             // fall through to egui
                         } else if matches!(
                             event.logical_key,
                             Key::Named(winit::keyboard::NamedKey::Space)
                         ) {
-                            // An explicit Space binding wins; only an
-                            // unbound Space toggles transport here.
-                            let key = event.logical_key.clone();
-                            if !self.key(event_loop, &key) {
-                                self.send(Msg::Transport(SongCtl::Toggle));
-                            }
+                            // Space is the transport key in a timeline
+                            // editor — its default MarkDownbeat binding
+                            // would otherwise win over play/pause.
+                            self.send(Msg::Transport(SongCtl::Toggle));
                             return;
                         } else {
                             let key = event.logical_key.clone();
-                            self.key(event_loop, &key);
-                            return;
+                            // Bound keys fire their action; unbound ones
+                            // (Delete, …) fall through to the editor UI.
+                            if self.key(event_loop, &key) {
+                                return;
+                            }
                         }
                     }
                 }
