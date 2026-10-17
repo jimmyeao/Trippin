@@ -45,6 +45,8 @@ pub struct Editor {
     pending_edit: Option<char>,
     /// Cue the pointer is over — a change previews the block's effect.
     hover_cue: Option<usize>,
+    /// Library item the pointer is over — a change previews its kind.
+    hover_lib: Option<egui::Id>,
     /// Pointer position when a right-click opened a lane menu — the menu
     /// body runs later frames too, when the pointer is over menu buttons.
     menu_at: Option<egui::Pos2>,
@@ -130,6 +132,7 @@ impl Editor {
             pending_edit: None,
             menu_at: None,
             hover_cue: None,
+            hover_lib: None,
             file_pick: Arc::new(Mutex::new(None)),
             zoom_fit: false,
             scrub: false,
@@ -254,6 +257,7 @@ impl Editor {
         let (pan, clipboard) = (&mut self.pan, &mut self.clipboard);
         let (pending_edit, menu_at) = (&mut self.pending_edit, &mut self.menu_at);
         let hover_cue = &mut self.hover_cue;
+        let hover_lib = &mut self.hover_lib;
         let (pps, scroll) = (&mut self.px_per_s, &mut self.scroll_s);
         let (zoom_fit, scrub, sb_grab) = (&mut self.zoom_fit, &mut self.scrub, &mut self.sb_grab);
         let (thumbs, want_thumbs) = (&mut self.thumbs, &mut self.want_thumbs);
@@ -754,7 +758,7 @@ impl Editor {
                     );
                     ui.add_space(4.0);
                     ui.label(
-                        egui::RichText::new("drag onto the timeline · click = preview")
+                        egui::RichText::new("drag onto the timeline · hover = preview")
                             .size(10.0)
                             .color(t::FAINT),
                     );
@@ -772,7 +776,7 @@ impl Editor {
                                         ui, &key, thumbs, want_thumbs, None, &mut cmd,
                                     );
                                     let kind = CueKind::Scene(name.clone());
-                                    if lib_item(ui, name, &kind, tex) {
+                                    if lib_item(ui, name, &kind, tex, &mut cmd, hover_lib) {
                                         cmd.push(UiCommand::FireCue(kind));
                                     }
                                 }
@@ -793,7 +797,7 @@ impl Editor {
                                 .into_iter()
                                 .filter(|(l, _)| show(l))
                                 {
-                                    if lib_item(ui, lbl, &kind, None) {
+                                    if lib_item(ui, lbl, &kind, None, &mut cmd, hover_lib) {
                                         cmd.push(UiCommand::FireCue(kind));
                                     }
                                 }
@@ -801,7 +805,7 @@ impl Editor {
                                     t::section_label(ui, "looks");
                                     for (i, n) in STYLES.iter().enumerate() {
                                         let kind = CueKind::Look(Some(i));
-                                        if lib_item(ui, n, &kind, None) {
+                                        if lib_item(ui, n, &kind, None, &mut cmd, hover_lib) {
                                             cmd.push(UiCommand::FireCue(kind));
                                         }
                                     }
@@ -818,7 +822,7 @@ impl Editor {
                                         &mut cmd,
                                     );
                                     let kind = CueKind::Clip(name.clone());
-                                    if lib_item(ui, name, &kind, tex) {
+                                    if lib_item(ui, name, &kind, tex, &mut cmd, hover_lib) {
                                         cmd.push(UiCommand::FireCue(kind));
                                     }
                                 }
@@ -837,7 +841,7 @@ impl Editor {
                                     if !show(lbl) {
                                         continue;
                                     }
-                                    if lib_item(ui, lbl, &kind, None) {
+                                    if lib_item(ui, lbl, &kind, None, &mut cmd, hover_lib) {
                                         cmd.push(UiCommand::FireCue(kind));
                                     }
                                 }
@@ -857,7 +861,7 @@ impl Editor {
                                 .into_iter()
                                 .filter(|(l, _)| show(l))
                                 {
-                                    if lib_item(ui, lbl, &kind, None) {
+                                    if lib_item(ui, lbl, &kind, None, &mut cmd, hover_lib) {
                                         cmd.push(UiCommand::FireCue(kind));
                                     }
                                 }
@@ -867,7 +871,7 @@ impl Editor {
                                     .filter(|n| show(n))
                                 {
                                     let kind = CueKind::Palette(name.to_string());
-                                    if lib_item(ui, name, &kind, None) {
+                                    if lib_item(ui, name, &kind, None, &mut cmd, hover_lib) {
                                         cmd.push(UiCommand::FireCue(kind));
                                     }
                                 }
@@ -930,6 +934,8 @@ impl Editor {
                                             &format!("“{}”", text_draft.text),
                                             &kind,
                                             None,
+                                            &mut cmd,
+                                            hover_lib,
                                         ) {
                                             cmd.push(UiCommand::FireCue(kind));
                                         }
@@ -1019,6 +1025,8 @@ fn lib_item(
     label: &str,
     kind: &CueKind,
     thumb: Option<&egui::TextureHandle>,
+    cmd: &mut Vec<UiCommand>,
+    hover_lib: &mut Option<egui::Id>,
 ) -> bool {
     let col = cue_color(kind);
     let w = ui.available_width();
@@ -1051,7 +1059,19 @@ fn lib_item(
                 });
         })
         .response
-        .on_hover_text("click to preview — drag onto the timeline");
+        .on_hover_text("click or hover to preview — drag onto the timeline");
+    // Hover previews the kind on the visuals window, once per item —
+    // never a recording, and only for absolute-state kinds.
+    if resp.hovered() {
+        if *hover_lib != Some(id) {
+            *hover_lib = Some(id);
+            if previewable(kind) {
+                cmd.push(UiCommand::PreviewCue(kind.clone()));
+            }
+        }
+    } else if *hover_lib == Some(id) {
+        *hover_lib = None;
+    }
     let ctx = ui.ctx();
     let (released, origin) =
         ctx.input(|i| (i.pointer.primary_released(), i.pointer.press_origin()));
