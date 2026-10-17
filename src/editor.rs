@@ -43,6 +43,8 @@ pub struct Editor {
     /// Ctrl+X/C/V queued from the winit side ('x'/'c'/'v') — merged into the
     /// same flags as egui's Cut/Copy/Paste events next frame.
     pending_edit: Option<char>,
+    /// Cue the pointer is over — a change previews the block's effect.
+    hover_cue: Option<usize>,
     /// Pointer position when a right-click opened a lane menu — the menu
     /// body runs later frames too, when the pointer is over menu buttons.
     menu_at: Option<egui::Pos2>,
@@ -127,6 +129,7 @@ impl Editor {
             clipboard: None,
             pending_edit: None,
             menu_at: None,
+            hover_cue: None,
             file_pick: Arc::new(Mutex::new(None)),
             zoom_fit: false,
             scrub: false,
@@ -250,6 +253,7 @@ impl Editor {
         );
         let (pan, clipboard) = (&mut self.pan, &mut self.clipboard);
         let (pending_edit, menu_at) = (&mut self.pending_edit, &mut self.menu_at);
+        let hover_cue = &mut self.hover_cue;
         let (pps, scroll) = (&mut self.px_per_s, &mut self.scroll_s);
         let (zoom_fit, scrub, sb_grab) = (&mut self.zoom_fit, &mut self.scrub, &mut self.sb_grab);
         let (thumbs, want_thumbs) = (&mut self.thumbs, &mut self.want_thumbs);
@@ -962,6 +966,7 @@ impl Editor {
                     pan,
                     clipboard,
                     menu_at,
+                    hover_cue,
                     zoom_fit,
                     scrub,
                     sb_grab,
@@ -1109,6 +1114,20 @@ fn cue_drag_mode(px: f32, x0: f32, x1: f32) -> CueDrag {
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Can hovering a block preview the kind live? Absolute-state cues only —
+/// a latched blackout/strobe or a Next/Prev step isn't a preview.
+fn previewable(k: &CueKind) -> bool {
+    matches!(
+        k,
+        CueKind::Scene(_)
+            | CueKind::Clip(_)
+            | CueKind::Look(_)
+            | CueKind::Fx(_)
+            | CueKind::Palette(_)
+            | CueKind::Text(_)
+    )
+}
+
 /// Put `cue` on the clip under global time `t` and select it — shared by
 /// Ctrl+V (t = playhead) and the lane context menus (t = click point).
 fn paste_cue(
@@ -1156,6 +1175,7 @@ fn canvas(
     pan: &mut Option<(f32, f64)>,
     clipboard: &mut Option<Cue>,
     menu_at: &mut Option<egui::Pos2>,
+    hover_cue: &mut Option<usize>,
     zoom_fit: &mut bool,
     scrub: &mut bool,
     sb_grab: &mut Option<f32>,
@@ -1785,6 +1805,14 @@ fn canvas(
     };
     if let Some(p) = cue_resp.interact_pointer_pos() {
         if let Some((i, mode, _grab)) = cue_at(&doc.cues, p) {
+            if *hover_cue != Some(i) {
+                *hover_cue = Some(i);
+                // Hovering a block previews its effect on the visuals window,
+                // once per target — never a recording.
+                if previewable(&doc.cues[i].kind) {
+                    cmd.push(UiCommand::PreviewCue(doc.cues[i].kind.clone()));
+                }
+            }
             // Show the affordance before the press: grab in the middle,
             // resize on the trim edges.
             ui.ctx().set_cursor_icon(match mode {
@@ -1797,6 +1825,7 @@ fn canvas(
                 clicked_thing = true;
             }
         } else {
+            *hover_cue = None;
             // Empty lane space grabs to pan.
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
         }

@@ -165,6 +165,8 @@ pub enum UiCommand {
     SaveTimeline,
     /// Fire a cue's effect immediately (editor preview).
     FireCue(CueKind),
+    /// Same, without recording — hovering a timeline block previews it.
+    PreviewCue(CueKind),
     /// Transport control for the song player.
     Song(SongCtl),
     /// Ask the render thread to produce a scene thumbnail.

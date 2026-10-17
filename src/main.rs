@@ -2637,6 +2637,7 @@ impl App {
                 self.record_cue(kind.clone());
                 self.send(Msg::FireCue(kind));
             }
+            UiCommand::PreviewCue(kind) => self.send(Msg::FireCue(kind)),
             UiCommand::Song(ctl) => self.send(Msg::Transport(ctl)),
             UiCommand::Thumb(name) => self.send(Msg::Thumb(name)),
             UiCommand::ApplyLook(id) => {
