@@ -165,6 +165,8 @@ pub enum UiCommand {
     SaveTimeline,
     /// Fire a cue's effect immediately (editor preview).
     FireCue(CueKind),
+    /// Same, without recording — hovering a timeline block previews it.
+    PreviewCue(CueKind),
     /// Transport control for the song player.
     Song(SongCtl),
     /// Ask the render thread to produce a scene thumbnail.
@@ -3705,7 +3707,7 @@ pub(crate) fn cue_color(k: &CueKind) -> egui::Color32 {
         | CueKind::Look(_)
         | CueKind::Trails(_)
         | CueKind::Canon(_) => t::LANE_DANCER,
-        CueKind::Blackout(_) | CueKind::Strobe(_) => t::DANGER,
+        CueKind::Blackout(_) | CueKind::Strobe(_) | CueKind::FadeOut => t::DANGER,
         CueKind::Mode(_) | CueKind::Palette(_) => t::LANE_SHOW,
         CueKind::Text(_) | CueKind::TextOff(_) => t::LANE_TEXT,
     }

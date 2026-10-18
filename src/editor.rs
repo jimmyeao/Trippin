@@ -36,6 +36,20 @@ pub struct Editor {
     cue_drag: Option<(usize, CueDrag, f64)>,
     /// Clip being dragged: (index, grab offset in global seconds).
     clip_drag: Option<(usize, f64)>,
+    /// Pan by grabbing empty lane space: (grab x in px, scroll at grab).
+    pan: Option<(f32, f64)>,
+    /// Copied cue block, pasted at the playhead with Ctrl+V.
+    clipboard: Option<Cue>,
+    /// Ctrl+X/C/V queued from the winit side ('x'/'c'/'v') — merged into the
+    /// same flags as egui's Cut/Copy/Paste events next frame.
+    pending_edit: Option<char>,
+    /// Cue the pointer is over — a change previews the block's effect.
+    hover_cue: Option<usize>,
+    /// Library item the pointer is over — a change previews its kind.
+    hover_lib: Option<egui::Id>,
+    /// Pointer position when a right-click opened a lane menu — the menu
+    /// body runs later frames too, when the pointer is over menu buttons.
+    menu_at: Option<egui::Pos2>,
     /// File-picked audio or timeline path, written by a dialog thread.
     file_pick: Arc<Mutex<Option<PathBuf>>>,
     /// Set by the toolbar's "fit" button; consumed by the canvas.
@@ -113,6 +127,12 @@ impl Editor {
             sel_clip: None,
             cue_drag: None,
             clip_drag: None,
+            pan: None,
+            clipboard: None,
+            pending_edit: None,
+            menu_at: None,
+            hover_cue: None,
+            hover_lib: None,
             file_pick: Arc::new(Mutex::new(None)),
             zoom_fit: false,
             scrub: false,
@@ -141,6 +161,13 @@ impl Editor {
 
     pub fn wants_keyboard(&self) -> bool {
         self.win.wants_keyboard()
+    }
+
+    /// Queue an edit op for the next frame ('c'/'x'/'v'). The winit side
+    /// feeds both this and egui's Cut/Copy/Paste event for the same press;
+    /// they merge into one action in run_ui.
+    pub fn queue_edit(&mut self, op: char) {
+        self.pending_edit = Some(op);
     }
 
     pub fn present(&mut self, frame: Frame) {
@@ -227,6 +254,10 @@ impl Editor {
             &mut self.cue_drag,
             &mut self.clip_drag,
         );
+        let (pan, clipboard) = (&mut self.pan, &mut self.clipboard);
+        let (pending_edit, menu_at) = (&mut self.pending_edit, &mut self.menu_at);
+        let hover_cue = &mut self.hover_cue;
+        let hover_lib = &mut self.hover_lib;
         let (pps, scroll) = (&mut self.px_per_s, &mut self.scroll_s);
         let (zoom_fit, scrub, sb_grab) = (&mut self.zoom_fit, &mut self.scrub, &mut self.sb_grab);
         let (thumbs, want_thumbs) = (&mut self.thumbs, &mut self.want_thumbs);
@@ -603,6 +634,93 @@ impl Editor {
                 *ai_open = open;
             }
 
+            // --- Edit keys: copy/paste/delete the selected block ----------
+            // Space transport is handled on the winit side (main.rs). egui-
+            // winit turns Ctrl+X/C/V into Copy/Cut/Paste events — they never
+            // arrive as `Event::Key` — so read the event list. A focused
+            // text field keeps these events for itself.
+            if !ui.ctx().text_edit_focused() {
+                let (mut copy, mut cut, mut pasted, del) = ui.ctx().input(|i| {
+                    let mut copy = false;
+                    let mut cut = false;
+                    let mut pasted = false;
+                    for e in &i.events {
+                        match e {
+                            egui::Event::Copy => copy = true,
+                            egui::Event::Cut => cut = true,
+                            egui::Event::Paste(_) => pasted = true,
+                            _ => {}
+                        }
+                    }
+                    (
+                        copy,
+                        cut,
+                        pasted,
+                        i.key_pressed(egui::Key::Delete)
+                            || i.key_pressed(egui::Key::Backspace),
+                    )
+                });
+                match pending_edit.take() {
+                    Some('c') => copy = true,
+                    Some('x') => cut = true,
+                    Some('v') => pasted = true,
+                    _ => {}
+                }
+                if let Some(doc) = doc_opt.as_mut() {
+                    if copy || cut {
+                        if let Some(cue) = sel_cue.and_then(|i| doc.cues.get(i)) {
+                            *clipboard = Some(cue.clone());
+                            // The OS clipboard gets the cue as JSON — a Paste
+                            // event only fires while it holds text, and
+                            // another Trippin instance can read it too.
+                            if let Ok(json) = serde_json::to_string(cue) {
+                                ui.ctx().copy_text(format!("trippin-cue\n{json}"));
+                            }
+                        }
+                        if cut && let Some(i) = sel_cue.take() && i < doc.cues.len() {
+                            doc.cues.remove(i);
+                            *dirty = true;
+                        }
+                    }
+                    if pasted {
+                        // Prefer the OS clipboard text (another Trippin's
+                        // copy), else the last cue copied in this window.
+                        let cue = ui
+                            .ctx()
+                            .input(|i| {
+                                i.events.iter().find_map(|e| {
+                                    if let egui::Event::Paste(t) = e {
+                                        t.strip_prefix("trippin-cue\n").and_then(|j| {
+                                            serde_json::from_str::<Cue>(j).ok()
+                                        })
+                                    } else {
+                                        None
+                                    }
+                                })
+                            })
+                            .or_else(|| clipboard.clone());
+                        // Paste lands on the clip under the playhead, at the
+                        // playhead — the cue's own track keeps it lane-fixed.
+                        if let Some(cue) = cue {
+                            paste_cue(doc, cue, *cursor_s, *snap, sel_cue, sel_clip, dirty);
+                        }
+                    }
+                    if del {
+                        if let Some(i) = *sel_cue {
+                            if i < doc.cues.len() {
+                                doc.cues.remove(i);
+                                *sel_cue = None;
+                                *dirty = true;
+                            }
+                        } else if let Some(i) = *sel_clip {
+                            doc.remove_clip(i);
+                            *sel_clip = None;
+                            *dirty = true;
+                        }
+                    }
+                }
+            }
+
             // --- Inspector (right, mockup 1d): selected cue / clip ----------
             egui::Panel::right("ed_insp")
                 .resizable(true)
@@ -640,7 +758,7 @@ impl Editor {
                     );
                     ui.add_space(4.0);
                     ui.label(
-                        egui::RichText::new("drag onto the timeline · click = preview")
+                        egui::RichText::new("drag onto the timeline · hover = preview")
                             .size(10.0)
                             .color(t::FAINT),
                     );
@@ -658,7 +776,7 @@ impl Editor {
                                         ui, &key, thumbs, want_thumbs, None, &mut cmd,
                                     );
                                     let kind = CueKind::Scene(name.clone());
-                                    if lib_item(ui, name, &kind, tex) {
+                                    if lib_item(ui, name, &kind, tex, &mut cmd, hover_lib) {
                                         cmd.push(UiCommand::FireCue(kind));
                                     }
                                 }
@@ -679,7 +797,7 @@ impl Editor {
                                 .into_iter()
                                 .filter(|(l, _)| show(l))
                                 {
-                                    if lib_item(ui, lbl, &kind, None) {
+                                    if lib_item(ui, lbl, &kind, None, &mut cmd, hover_lib) {
                                         cmd.push(UiCommand::FireCue(kind));
                                     }
                                 }
@@ -687,7 +805,7 @@ impl Editor {
                                     t::section_label(ui, "looks");
                                     for (i, n) in STYLES.iter().enumerate() {
                                         let kind = CueKind::Look(Some(i));
-                                        if lib_item(ui, n, &kind, None) {
+                                        if lib_item(ui, n, &kind, None, &mut cmd, hover_lib) {
                                             cmd.push(UiCommand::FireCue(kind));
                                         }
                                     }
@@ -704,7 +822,7 @@ impl Editor {
                                         &mut cmd,
                                     );
                                     let kind = CueKind::Clip(name.clone());
-                                    if lib_item(ui, name, &kind, tex) {
+                                    if lib_item(ui, name, &kind, tex, &mut cmd, hover_lib) {
                                         cmd.push(UiCommand::FireCue(kind));
                                     }
                                 }
@@ -723,7 +841,7 @@ impl Editor {
                                     if !show(lbl) {
                                         continue;
                                     }
-                                    if lib_item(ui, lbl, &kind, None) {
+                                    if lib_item(ui, lbl, &kind, None, &mut cmd, hover_lib) {
                                         cmd.push(UiCommand::FireCue(kind));
                                     }
                                 }
@@ -738,11 +856,12 @@ impl Editor {
                                     ("manual mode", CueKind::Mode(crate::config::Mode::Manual)),
                                     ("blackout", CueKind::Blackout(true)),
                                     ("strobe", CueKind::Strobe(true)),
+                                    ("fade out", CueKind::FadeOut),
                                 ]
                                 .into_iter()
                                 .filter(|(l, _)| show(l))
                                 {
-                                    if lib_item(ui, lbl, &kind, None) {
+                                    if lib_item(ui, lbl, &kind, None, &mut cmd, hover_lib) {
                                         cmd.push(UiCommand::FireCue(kind));
                                     }
                                 }
@@ -752,7 +871,7 @@ impl Editor {
                                     .filter(|n| show(n))
                                 {
                                     let kind = CueKind::Palette(name.to_string());
-                                    if lib_item(ui, name, &kind, None) {
+                                    if lib_item(ui, name, &kind, None, &mut cmd, hover_lib) {
                                         cmd.push(UiCommand::FireCue(kind));
                                     }
                                 }
@@ -815,6 +934,8 @@ impl Editor {
                                             &format!("“{}”", text_draft.text),
                                             &kind,
                                             None,
+                                            &mut cmd,
+                                            hover_lib,
                                         ) {
                                             cmd.push(UiCommand::FireCue(kind));
                                         }
@@ -848,6 +969,10 @@ impl Editor {
                     sel_clip,
                     cue_drag,
                     clip_drag,
+                    pan,
+                    clipboard,
+                    menu_at,
+                    hover_cue,
                     zoom_fit,
                     scrub,
                     sb_grab,
@@ -900,6 +1025,8 @@ fn lib_item(
     label: &str,
     kind: &CueKind,
     thumb: Option<&egui::TextureHandle>,
+    cmd: &mut Vec<UiCommand>,
+    hover_lib: &mut Option<egui::Id>,
 ) -> bool {
     let col = cue_color(kind);
     let w = ui.available_width();
@@ -932,7 +1059,19 @@ fn lib_item(
                 });
         })
         .response
-        .on_hover_text("click to preview — drag onto the timeline");
+        .on_hover_text("click or hover to preview — drag onto the timeline");
+    // Hover previews the kind on the visuals window, once per item —
+    // never a recording, and only for absolute-state kinds.
+    if resp.hovered() {
+        if *hover_lib != Some(id) {
+            *hover_lib = Some(id);
+            if previewable(kind) {
+                cmd.push(UiCommand::PreviewCue(kind.clone()));
+            }
+        }
+    } else if *hover_lib == Some(id) {
+        *hover_lib = None;
+    }
     let ctx = ui.ctx();
     let (released, origin) =
         ctx.input(|i| (i.pointer.primary_released(), i.pointer.press_origin()));
@@ -995,6 +1134,50 @@ fn cue_drag_mode(px: f32, x0: f32, x1: f32) -> CueDrag {
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Can hovering a block preview the kind live? Absolute-state cues only —
+/// a latched blackout/strobe or a Next/Prev step isn't a preview.
+fn previewable(k: &CueKind) -> bool {
+    matches!(
+        k,
+        CueKind::Scene(_)
+            | CueKind::Clip(_)
+            | CueKind::Look(_)
+            | CueKind::Fx(_)
+            | CueKind::Palette(_)
+            | CueKind::Text(_)
+    )
+}
+
+/// Put `cue` on the clip under global time `t` and select it — shared by
+/// Ctrl+V (t = playhead) and the lane context menus (t = click point).
+fn paste_cue(
+    doc: &mut crate::timeline::Timeline,
+    mut cue: Cue,
+    t: f64,
+    snap: bool,
+    sel_cue: &mut Option<usize>,
+    sel_clip: &mut Option<usize>,
+    dirty: &mut bool,
+) {
+    let Some((ci, c)) = doc.clip_at(t) else {
+        return;
+    };
+    let mut beat = c.beat_at(t - c.offset_s);
+    if snap {
+        beat = (beat * 4.0).round() / 4.0;
+    }
+    cue.clip = ci;
+    cue.beat = beat.max(0.0);
+    doc.cues.push(cue.clone());
+    doc.sort_cues();
+    *sel_cue = doc
+        .cues
+        .iter()
+        .position(|c| c.clip == cue.clip && c.beat == cue.beat && c.kind == cue.kind);
+    *sel_clip = None;
+    *dirty = true;
+}
+
 fn canvas(
     ui: &mut egui::Ui,
     doc_opt: &mut Option<Timeline>,
@@ -1009,6 +1192,10 @@ fn canvas(
     sel_clip: &mut Option<usize>,
     cue_drag: &mut Option<(usize, CueDrag, f64)>,
     clip_drag: &mut Option<(usize, f64)>,
+    pan: &mut Option<(f32, f64)>,
+    clipboard: &mut Option<Cue>,
+    menu_at: &mut Option<egui::Pos2>,
+    hover_cue: &mut Option<usize>,
     zoom_fit: &mut bool,
     scrub: &mut bool,
     sb_grab: &mut Option<f32>,
@@ -1069,10 +1256,29 @@ fn canvas(
             *scroll = (*scroll - ds as f64 / *pps).max(0.0);
         }
     }
-    // Middle-drag pans the timeline.
-    if resp.dragged_by(egui::PointerButton::Middle) {
-        let d = resp.drag_delta();
-        *scroll = (*scroll - d.x as f64 / *pps).max(0.0);
+    // Middle-drag pans the timeline — inside the cue lane the lane widget
+    // owns the drag, so check both responses.
+    let mid = if resp.dragged_by(egui::PointerButton::Middle) {
+        resp.drag_delta()
+    } else if cue_resp.dragged_by(egui::PointerButton::Middle) {
+        cue_resp.drag_delta()
+    } else {
+        egui::Vec2::ZERO
+    };
+    if mid.x != 0.0 {
+        *scroll = (*scroll - mid.x as f64 / *pps).max(0.0);
+    }
+    // A left-drag that grabbed empty lane space pans too — the grab is
+    // classified by the clip/cue hit-tests further down.
+    if let Some((x0, s0)) = *pan {
+        if ui.ctx().input(|i| i.pointer.any_down()) {
+            if let Some(p) = pointer() {
+                *scroll = (s0 - (p.x - x0) as f64 / *pps).max(0.0);
+            }
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+        } else {
+            *pan = None;
+        }
     }
     if *zoom_fit {
         *zoom_fit = false;
@@ -1178,7 +1384,7 @@ fn canvas(
     };
 
     // --- Clip regions ---------------------------------------------------------
-    let mut clip_del: Option<usize> = None;
+
     for (i, c) in doc.clips.iter_mut().enumerate() {
         let r = Rect::from_min_max(
             pos2(x_at(c.offset_s), clip_lane.top() + 3.0),
@@ -1295,42 +1501,46 @@ fn canvas(
     // --- Clip interactions ----------------------------------------------------
     // Click selects, drag moves, right-click removes — all via `resp`, which
     // owns the clip lane and ruler (the cue lane belongs to cue_resp).
+    let clip_hit = |clips: &[crate::timeline::Clip], p: egui::Pos2| -> Option<usize> {
+        clips.iter().position(|c| {
+            Rect::from_min_max(
+                pos2(x_at(c.offset_s), clip_lane.top()),
+                pos2(x_at(c.end_s()), clip_lane.bottom()),
+            )
+            .contains(p)
+        })
+    };
     let mut clicked_thing = false;
-    if let Some(p) = resp.interact_pointer_pos() {
-        if cue_drag.is_none() && clip_lane.contains(p) {
-            let hit = doc.clips.iter().enumerate().find(|(_, c)| {
-                let r = Rect::from_min_max(
-                    pos2(x_at(c.offset_s), clip_lane.top()),
-                    pos2(x_at(c.end_s()), clip_lane.bottom()),
-                );
-                r.contains(p)
-            });
-            if let Some((i, _)) = hit {
-                if resp.secondary_clicked() {
-                    clip_del = Some(i);
-                } else if resp.clicked() {
+    if let Some(p) = resp
+        .interact_pointer_pos()
+        .filter(|p| cue_drag.is_none() && clip_lane.contains(*p))
+    {
+        match clip_hit(&doc.clips, p) {
+            Some(i) => {
+                if resp.clicked() {
                     *sel_clip = Some(i);
                     *sel_cue = None;
                     clicked_thing = true;
                 }
             }
+            // Empty clip space is a grab-to-pan affordance.
+            None => ui.ctx().set_cursor_icon(egui::CursorIcon::Grab),
         }
     }
     // Clip drags classify by press position too (see the cue code below).
-    if resp.drag_started() {
-        if let Some(p) = ui.ctx().input(|i| i.pointer.press_origin()) {
-            if cue_drag.is_none() && clip_lane.contains(p) {
-                let hit = doc.clips.iter().enumerate().find(|(_, c)| {
-                    let r = Rect::from_min_max(
-                        pos2(x_at(c.offset_s), clip_lane.top()),
-                        pos2(x_at(c.end_s()), clip_lane.bottom()),
-                    );
-                    r.contains(p)
-                });
-                if let Some((i, c)) = hit {
-                    *clip_drag = Some((i, t_at(p.x) - c.offset_s));
-                }
-            }
+    if resp.drag_started_by(egui::PointerButton::Primary)
+        && let Some(p) = ui.ctx().input(|i| i.pointer.press_origin())
+    {
+        if cue_drag.is_none()
+            && clip_lane.contains(p)
+            && let Some(i) = clip_hit(&doc.clips, p)
+        {
+            *clip_drag = Some((i, t_at(p.x) - doc.clips[i].offset_s));
+        }
+        // A drag on empty strip space pans the view; a click on the
+        // same spot still seeks, and the ruler scrubs.
+        if clip_drag.is_none() && content.contains(p) && !ruler.contains(p) {
+            *pan = Some((p.x, *scroll));
         }
     }
     if let Some((i, grab)) = *clip_drag {
@@ -1365,12 +1575,6 @@ fn canvas(
             *clip_drag = None;
         }
     }
-    if let Some(i) = clip_del {
-        doc.remove_clip(i);
-        *dirty = true;
-        *sel_clip = None;
-    }
-
     // --- Cue lane -------------------------------------------------------------
     // Palette drops land anywhere on the strip (the cue lane gets first pick).
     let drop = cue_resp
@@ -1412,7 +1616,7 @@ fn canvas(
         );
     }
 
-    let mut cue_del: Option<usize> = None;
+
     // Clip timing constants, copied out so cue iteration can be mutable.
     let clip_ts: Vec<(f64, f64, f64)> = doc
         .clips
@@ -1432,11 +1636,33 @@ fn canvas(
             .unwrap_or(f64::MAX)
     };
 
+    // A block's visible span ends where the next block on its track starts —
+    // a covering block occludes its tail. AI shows emit scene cues that all
+    // run to the song's end (scene state latches, so the length is nominal);
+    // drawn full-length they stack on the same row and every click landed on
+    // the bottom-most block instead of the one it saw.
+    let mut vis_end: Vec<f64> = doc.cues.iter().map(|c| cue_ge(c)).collect();
+    for (i, c) in doc.cues.iter().enumerate() {
+        let gi = cue_gt(c);
+        if !gi.is_finite() {
+            continue;
+        }
+        for (j, d) in doc.cues.iter().enumerate() {
+            if i == j || d.kind.track() != c.kind.track() {
+                continue;
+            }
+            let gj = cue_gt(d);
+            if gj > gi && gj < vis_end[i] {
+                vis_end[i] = gj;
+            }
+        }
+    }
+
     // --- Cue blocks (Resolve-style: label + thumbnails + trim handles) ---------
     let mut want: Vec<String> = Vec::new();
     for (i, cue) in doc.cues.iter().enumerate() {
         let gt = cue_gt(cue);
-        let ge = cue_ge(cue);
+        let ge = vis_end[i];
         if !gt.is_finite() || !ge.is_finite() {
             continue;
         }
@@ -1560,14 +1786,14 @@ fn canvas(
     // Cue hit-testing — blocks on cue_resp. The hit row covers the whole
     // track height and overshoots the block's edges by EDGE_OUT, so aiming
     // at the visible edge line (or a hair outside it) still trims.
-    let cue_at = |p: egui::Pos2| -> Option<(usize, CueDrag, f64)> {
+    let cue_at = |cues: &[Cue], p: egui::Pos2| -> Option<(usize, CueDrag, f64)> {
         if !cue_lane.contains(p) {
             return None;
         }
         let mut best: Option<(usize, CueDrag, f64, f32)> = None;
-        for (i, c) in doc.cues.iter().enumerate() {
+        for (i, c) in cues.iter().enumerate() {
             let gt = cue_gt(c);
-            let ge = cue_ge(c);
+            let ge = vis_end[i];
             if !gt.is_finite() || !ge.is_finite() {
                 continue;
             }
@@ -1590,36 +1816,49 @@ fn canvas(
                 0.0
             };
             let d = (p.y - row.center().y).abs();
-            if best.is_none_or(|b| d < b.3) {
+            // Overlapping blocks: the later one paints on top, so it wins.
+            if best.is_none_or(|b| d <= b.3) {
                 best = Some((i, mode, grab, d));
             }
         }
         best.map(|(i, m, g, _)| (i, m, g))
     };
     if let Some(p) = cue_resp.interact_pointer_pos() {
-        if let Some((i, mode, _grab)) = cue_at(p) {
+        if let Some((i, mode, _grab)) = cue_at(&doc.cues, p) {
+            if *hover_cue != Some(i) {
+                *hover_cue = Some(i);
+                // Hovering a block previews its effect on the visuals window,
+                // once per target — never a recording.
+                if previewable(&doc.cues[i].kind) {
+                    cmd.push(UiCommand::PreviewCue(doc.cues[i].kind.clone()));
+                }
+            }
             // Show the affordance before the press: grab in the middle,
             // resize on the trim edges.
             ui.ctx().set_cursor_icon(match mode {
                 CueDrag::Move => egui::CursorIcon::Grab,
                 _ => egui::CursorIcon::ResizeHorizontal,
             });
-            if cue_resp.secondary_clicked() {
-                cue_del = Some(i);
-            } else if cue_resp.clicked() {
+            if cue_resp.clicked() {
                 *sel_cue = Some(i);
                 *sel_clip = None;
                 clicked_thing = true;
             }
+        } else {
+            *hover_cue = None;
+            // Empty lane space grabs to pan.
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
         }
     }
     // Classify drags by where the button went DOWN, not where the pointer
     // is when the drag registers — a fast flick off an edge can already be
     // outside the row by then, which used to start no drag at all.
-    if cue_resp.drag_started() {
+    if cue_resp.drag_started_by(egui::PointerButton::Primary) {
         if let Some(p) = ui.ctx().input(|i| i.pointer.press_origin()) {
-            if let Some((i, mode, grab)) = cue_at(p) {
-                *cue_drag = Some((i, mode, grab));
+            match cue_at(&doc.cues, p) {
+                Some((i, mode, grab)) => *cue_drag = Some((i, mode, grab)),
+                // Empty lane space: the drag pans the view instead.
+                None => *pan = Some((p.x, *scroll)),
             }
         }
     }
@@ -1690,19 +1929,103 @@ fn canvas(
             doc.sort_cues();
         }
     }
-    if let Some(i) = cue_del {
-        doc.cues.remove(i);
-        *dirty = true;
-        if *sel_cue == Some(i) {
-            *sel_cue = None;
-        }
+    // --- Right-click menus -----------------------------------------------------
+    // Blocks get copy/cut/split/delete; the clip lane gets remove-clip;
+    // anywhere gets paste while the clipboard has a block. `menu_at` holds
+    // the click point — the menu body re-runs while open, by which time the
+    // pointer is over menu buttons.
+    if cue_resp.secondary_clicked() || resp.secondary_clicked() {
+        *menu_at = pointer();
     }
+    cue_resp.context_menu(|ui| {
+        let p = (*menu_at).unwrap_or_else(|| cue_lane.center());
+        let hit = cue_at(&doc.cues, p);
+        if let Some((i, _, _)) = hit {
+            if ui.button("copy").clicked() {
+                *sel_cue = Some(i);
+                *clipboard = doc.cues.get(i).cloned();
+                if let Some(c) = clipboard.as_ref()
+                    && let Ok(j) = serde_json::to_string(c)
+                {
+                    ui.ctx().copy_text(format!("trippin-cue\n{j}"));
+                }
+                ui.close();
+            }
+            if ui.button("cut").clicked() {
+                *clipboard = doc.cues.get(i).cloned();
+                doc.cues.remove(i);
+                *sel_cue = None;
+                *dirty = true;
+                ui.close();
+            }
+            if ui.button("split").clicked() {
+                // Cut the block into two at the click point's beat.
+                if let Some(c) = doc.cues.get(i).and_then(|q| doc.clips.get(q.clip)) {
+                    let mut b = c.beat_at(t_at(p.x) - c.offset_s);
+                    if snap {
+                        b = (b * 4.0).round() / 4.0;
+                    }
+                    let (s0, s1) = (doc.cues[i].beat, doc.cues[i].beat + doc.cues[i].beats);
+                    if b > s0 + 0.05 && b < s1 - 0.05 {
+                        let mut tail = doc.cues[i].clone();
+                        tail.beat = b;
+                        tail.beats = s1 - b;
+                        doc.cues[i].beats = b - s0;
+                        doc.cues.push(tail);
+                        doc.sort_cues();
+                        *dirty = true;
+                    }
+                }
+                ui.close();
+            }
+            if ui.button("delete").clicked() {
+                doc.cues.remove(i);
+                *sel_cue = None;
+                *dirty = true;
+                ui.close();
+            }
+        }
+        if let Some(cue) = clipboard.as_ref().filter(|_| hit.is_none()).cloned() {
+            if ui.button("paste").clicked() {
+                paste_cue(doc, cue, t_at(p.x), snap, sel_cue, sel_clip, dirty);
+                ui.close();
+            }
+        } else if hit.is_none() {
+            ui.add_enabled(false, egui::Button::new("paste"));
+        }
+    });
+    resp.context_menu(|ui| {
+        let p = (*menu_at).unwrap_or_else(|| clip_lane.center());
+        if clip_lane.contains(p)
+            && let Some(i) = clip_hit(&doc.clips, p)
+            && ui.button("remove clip").clicked()
+        {
+            doc.remove_clip(i);
+            *sel_clip = None;
+            *dirty = true;
+            ui.close();
+        }
+        if let Some(cue) = clipboard.clone()
+            && ui.button("paste").clicked()
+        {
+            paste_cue(doc, cue, t_at(p.x), snap, sel_cue, sel_clip, dirty);
+            ui.close();
+        }
+    });
 
     // --- Scrub, cursor, playhead ----------------------------------------------
     // Drag starting on the ruler scrubs the playhead; a click anywhere on
     // empty strip space moves it (Seek works stopped or playing).
-    if resp.drag_started() && clip_drag.is_none() && cue_drag.is_none() {
-        if pointer().is_some_and(|p| ruler.contains(p) && p.x >= lane_x) {
+    if resp.drag_started_by(egui::PointerButton::Primary)
+        && clip_drag.is_none()
+        && cue_drag.is_none()
+        && pan.is_none()
+    {
+        if ui
+            .ctx()
+            .input(|i| i.pointer.press_origin())
+            .is_some_and(|p| ruler.contains(p) && p.x >= lane_x)
+        {
             *scrub = true;
         }
     }
@@ -2010,8 +2333,10 @@ fn inspector(
         for line in [
             "click a block to edit it",
             "drag edges to resize · drag body to move",
+            "Ctrl+C / Ctrl+V copies a block · Del removes it",
             "right-click a block to delete",
             "drag from the library to add",
+            "space plays · drag empty space pans",
             "Ctrl+scroll zooms · wheel pans",
         ] {
             ui.label(egui::RichText::new(line).size(11.0).color(t::MUTED));
