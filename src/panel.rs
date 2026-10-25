@@ -1114,6 +1114,9 @@ fn perform_tab(
         });
     });
     // Stats line: counts left, all on/off at the library's right edge.
+    // They act on the scenes shown (the chip and the search), so "all off",
+    // then Video, then "all on" leaves only the video scenes rotating.
+    let scope = if shown.len() == scenes.len() { "all" } else { "shown" };
     // allocate_ui_with_layout pins the right edge to the real content width
     // (a panel doesn't shrink the parent's max_rect — right_to_left on the
     // parent would anchor into the inspector's gutter).
@@ -1139,20 +1142,24 @@ fn perform_tab(
             |ui| {
                 if ui
                     .add(egui::Button::new(
-                        egui::RichText::new("all off").size(11.0).color(ACCENT),
+                        egui::RichText::new(format!("{scope} off")).size(11.0).color(ACCENT),
                     ).fill(egui::Color32::TRANSPARENT).frame(false))
                     .clicked()
                 {
-                    s.disabled_scenes = scenes.to_vec();
+                    for &i in &shown {
+                        if !s.disabled_scenes.contains(&scenes[i]) {
+                            s.disabled_scenes.push(scenes[i].clone());
+                        }
+                    }
                 }
                 ui.label(egui::RichText::new("·").size(11.0).color(FAINT));
                 if ui
                     .add(egui::Button::new(
-                        egui::RichText::new("all on").size(11.0).color(ACCENT),
+                        egui::RichText::new(format!("{scope} on")).size(11.0).color(ACCENT),
                     ).fill(egui::Color32::TRANSPARENT).frame(false))
                     .clicked()
                 {
-                    s.disabled_scenes.clear();
+                    s.disabled_scenes.retain(|n| !shown.iter().any(|&i| &scenes[i] == n));
                 }
             },
         );
