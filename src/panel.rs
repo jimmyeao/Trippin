@@ -268,6 +268,8 @@ enum LibChip {
     Seasonal,
     /// Starred scenes only (Settings.favourite_scenes).
     Fav,
+    /// Video clip scenes (`video_*`, Settings > Video clips).
+    Video,
 }
 
 impl Tab {
@@ -997,12 +999,18 @@ fn perform_tab(
                 LibChip::Heavy => is_heavy,
                 LibChip::Seasonal => in_season(n, date).is_some(),
                 LibChip::Fav => s.favourite_scenes.iter().any(|f| f == n),
+                LibChip::Video => n.starts_with("video_"),
             }
         })
         .collect();
     let rotating: Vec<usize> = (0..scenes.len())
         .filter(|&i| {
-            !s.disabled_scenes.contains(&scenes[i])
+            // Video scenes rotate only with the setting on and the clip on
+            // disk (the same gate as the auto-pilot's).
+            let video_ok = !scenes[i].starts_with("video_")
+                || (s.video_clips && crate::video::scene_ready(&scenes[i]));
+            video_ok
+                && !s.disabled_scenes.contains(&scenes[i])
                 && if heavy.get(i).copied().unwrap_or(false) {
                     heavy_on
                 } else {
@@ -1043,6 +1051,7 @@ fn perform_tab(
             (LibChip::Heavy, "3D"),
             (LibChip::Seasonal, "Seasonal"),
             (LibChip::Fav, "fav"),
+            (LibChip::Video, "Video"),
         ] {
             let on = *chip == c;
             let b = egui::Button::new(
@@ -1362,6 +1371,8 @@ fn scene_tile(
     // bundled font has no ❄ glyph.
     let tag = if seasonal {
         "season"
+    } else if name.starts_with("video_") {
+        "video"
     } else if is_heavy {
         "3D"
     } else {
