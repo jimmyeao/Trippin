@@ -412,9 +412,8 @@ pub struct Settings {
     /// over UDP and take frames back from a Spout sender as the
     /// `unity_stage` scene.
     pub unity_link: bool,
-    /// Video clip scenes (`video_*`): download the clip pack and put them
-    /// in rotation. Off by default — it's a large download.
-    pub video_clips: bool,
+    /// Effects packs switched off (ids; packs.rs). Read at startup.
+    pub disabled_packs: Vec<String>,
     /// Per-show controls for the Unity shows (scene → control id → value;
     /// missing = default). See showparams.rs.
     pub show_params: std::collections::BTreeMap<String, std::collections::BTreeMap<String, f32>>,
@@ -542,7 +541,7 @@ impl Default for Settings {
             ai_web_search: true,
             beat_model: true,
             unity_link: false,
-            video_clips: false,
+            disabled_packs: Vec::new(),
             show_params: Default::default(),
             link_port: 9137,
             latency_ms: 30.0,

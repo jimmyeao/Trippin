@@ -1029,14 +1029,18 @@ pub fn scene_meta(name: &str) -> SceneMeta {
     }
     let dir = crate::render::find_shader_dir().ok();
     let energy = ENERGY.get_or_init(|| {
+        // Built in plus the loaded effects packs' (packs.rs).
         dir.as_ref()
-            .and_then(|d| std::fs::read_to_string(d.join("scene_energy.json")).ok())
-            .and_then(|t| serde_json::from_str::<HashMap<String, f32>>(&t).ok())
+            .map(|d| crate::packs::merged_json(d, "scene_energy.json"))
             .unwrap_or_default()
+            .into_iter()
+            .filter_map(|(k, v)| Some((k, v.as_f64()? as f32)))
+            .collect()
     });
     let about = dir
         .as_ref()
-        .and_then(|d| std::fs::read_to_string(d.join("scenes").join(format!("{name}.wgsl"))).ok())
+        .and_then(|d| crate::packs::scene_file(d, name))
+        .and_then(|p| std::fs::read_to_string(p).ok())
         .map(|src| scene_blurb(&src))
         .unwrap_or_default();
     let low = format!("{name} {}", about.to_lowercase());

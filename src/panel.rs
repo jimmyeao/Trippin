@@ -1005,11 +1005,9 @@ fn perform_tab(
         .collect();
     let rotating: Vec<usize> = (0..scenes.len())
         .filter(|&i| {
-            // Video scenes rotate only with the setting on and the clip on
-            // disk (the same gate as the auto-pilot's).
-            let video_ok = !scenes[i].starts_with("video_")
-                || (s.video_clips && crate::video::scene_ready(&scenes[i]));
-            video_ok
+            // Video scenes rotate only with their clip on disk (the same
+            // gate as the auto-pilot's).
+            crate::video::scene_ready(&scenes[i])
                 && !s.disabled_scenes.contains(&scenes[i])
                 && if heavy.get(i).copied().unwrap_or(false) {
                     heavy_on
@@ -3917,6 +3915,83 @@ pub(crate) fn cue_param_ui(
     }
 }
 
+/// Effects packs (packs.rs): what's installed, switch on/off, remove, the
+/// catalog, and "Add pack from file" for packs bought or shared elsewhere.
+/// The scene list is fixed for the run, so every change says "restart".
+fn effects_packs(ui: &mut egui::Ui, s: &mut Settings) {
+    use crate::packs;
+    use crate::ui_theme::*;
+    section_label(ui, "effects packs");
+    ui.small("Extra scenes that install apart from the app, such as the video clip scenes.");
+    ui.add_space(4.0);
+    let mut restart = packs::CHANGED.load(std::sync::atomic::Ordering::Acquire);
+    for p in packs::all() {
+        let font = egui::FontId::proportional(12.5);
+        ui.horizontal(|ui| {
+            let mut on = !s.disabled_packs.contains(&p.id);
+            if ui.checkbox(&mut on, "").on_hover_text("Load this pack's scenes (after a restart)").changed() {
+                if on {
+                    s.disabled_packs.retain(|d| d != &p.id);
+                } else {
+                    s.disabled_packs.push(p.id.clone());
+                }
+            }
+            restart |= on == p.disabled;
+            let w = (ui.available_width() - 70.0).max(60.0);
+            let label = format!("{} · v{}{}", p.name, p.version, if p.installed { "" } else { " · dev" });
+            ui.label(egui::RichText::new(ellipsize(ui.painter(), &label, &font, w)).font(font.clone()))
+                .on_hover_text(&p.about);
+            if p.installed && ui.small_button("Remove").clicked() {
+                if let Err(e) = packs::remove(&p.id) {
+                    *packs::STATUS.lock().unwrap_or_else(|e| e.into_inner()) = format!("{e:#}");
+                }
+            }
+        });
+        if let Some(why) = &p.problem {
+            ui.small(format!("  not loaded: {why}"));
+        }
+    }
+    let have = |id: &str| packs::all().iter().any(|p| p.id == id) || packs::root().join(id).is_dir();
+    let missing: Vec<&packs::CatalogEntry> = packs::CATALOG.iter().filter(|c| !have(c.id)).collect();
+    if !missing.is_empty() {
+        ui.add_space(4.0);
+        ui.small("Available:");
+        for c in missing {
+            ui.horizontal(|ui| {
+                let font = egui::FontId::proportional(12.5);
+                let w = (ui.available_width() - 90.0).max(60.0);
+                let label = format!("{} · {} MB", c.name, c.size_mb);
+                ui.label(egui::RichText::new(ellipsize(ui.painter(), &label, &font, w)).font(font))
+                    .on_hover_text(c.about);
+                let published = !c.asset.1.is_empty();
+                let b = ui.add_enabled(published && !packs::busy(), egui::Button::new("Install").small());
+                if !published {
+                    b.on_hover_text("Not published yet");
+                } else if b.clicked() {
+                    packs::install_catalog_bg(c.id);
+                }
+            });
+        }
+    }
+    ui.add_space(4.0);
+    if ui
+        .add_enabled(!packs::busy(), egui::Button::new("Add pack from file…"))
+        .on_hover_text("Install a .trippinpack file")
+        .clicked()
+    {
+        if let Some(p) = rfd::FileDialog::new().add_filter("Trippin pack", &["trippinpack", "zip"]).pick_file() {
+            packs::install_file_bg(p);
+        }
+    }
+    let st = packs::STATUS.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    if !st.is_empty() {
+        ui.small(st);
+    }
+    if restart {
+        ui.small(egui::RichText::new("Restart Trippin to apply pack changes.").color(ACCENT));
+    }
+}
+
 /// Settings page: app-wide preferences that aren't part of performing —
 /// audio source & sync, what the auto-pilot may do, and the AI show
 /// builder's provider. Two bounded columns, like the Stream page (A1).
@@ -4108,20 +4183,11 @@ fn settings_tab(
                     format!("Unity engine: {st}")
                 });
             }
-            // Video clip scenes (video.rs): a one-off download, then the
-            // video_* scenes join the rotation.
-            ui.checkbox(&mut s.video_clips, "Video clips")
-                .on_hover_text(
-                    "Adds video scenes: night drives, clubs, ink and smoke, played \
-                     at a speed that follows the music. Downloads the clip pack \
-                     (about 320 MB) once.",
-                );
-            if s.video_clips {
-                let st = crate::video::STATUS.lock().unwrap_or_else(|e| e.into_inner()).clone();
-                if !st.is_empty() {
-                    ui.small(format!("Video clips: {st}"));
-                }
-            }
+        });
+        ui.add_space(12.0);
+        card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            effects_packs(ui, s);
         });
         ui.add_space(12.0);
         card().show(ui, |ui| {

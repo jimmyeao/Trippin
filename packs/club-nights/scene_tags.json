@@ -1,0 +1,6 @@
+{
+  "video_club_lasers": ["stage", "neon", "driving"],
+  "video_club_lights": ["stage", "dark", "driving"],
+  "video_fpv_club": ["stage", "neon", "flight", "driving"],
+  "video_fpv_warehouse": ["stage", "flight", "dark", "driving"]
+}

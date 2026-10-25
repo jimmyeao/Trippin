@@ -1,9 +1,9 @@
 //! Video clip scenes. A scene named `video_<clip>` plays `<clip>.tvid`: a
 //! short loop (generated offline, packed by `tools/video_pack.py`) stored as
 //! JPEG frames plus an index, so playback needs no codec or ffmpeg on the
-//! user's machine. The clips are a separate download (`VIDEO_ASSET`, like
-//! the Unity engine), so `video_*` scenes are only in rotation once their
-//! clip is on disk (`has`).
+//! user's machine. The clips ship in effects packs (packs.rs) beside their
+//! scenes, and a `video_*` scene is only in rotation while its clip is on
+//! disk (`scene_ready`).
 //!
 //! Playback never jumps with the audio: the rate follows a smoothed drive
 //! (`Player::tick`), and the shader blends the two frames around the play
@@ -16,7 +16,6 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
@@ -24,17 +23,6 @@ use anyhow::{anyhow, bail, Context, Result};
 
 use crate::gfx::{VID_H, VID_W};
 
-/// The clip pack on GitHub. Bump with a new `video-clips-vN` release when
-/// clips are added; an empty checksum means it isn't published yet.
-const RELEASE_BASE: &str = "https://github.com/jimmyeao/Trippin/releases/download/video-clips-v1";
-const VIDEO_ASSET: (&str, &str) = ("TrippinVideos-v1.zip", "");
-/// Written into the unpacked folder; a pack without the current stamp is
-/// stale and gets replaced.
-const STAMP: &str = "VIDEOS_VERSION";
-
-/// Download progress / result for the Settings tab.
-pub static STATUS: Mutex<String> = Mutex::new(String::new());
-static DOWNLOADING: AtomicBool = AtomicBool::new(false);
 /// Clip names found on disk (refreshed by `rescan`).
 static AVAILABLE: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
@@ -92,23 +80,15 @@ impl Clip {
     }
 }
 
-/// Folders searched for `<clip>.tvid`: `TRIPPIN_VIDEOS`, the downloaded
-/// pack, and `videos/` in the repo (dev builds, git-ignored).
+/// Folders searched for `<clip>.tvid`: `TRIPPIN_VIDEOS`, then each loaded
+/// pack's `videos/`.
 fn dirs() -> Vec<PathBuf> {
     let mut d = Vec::new();
     if let Some(p) = std::env::var_os("TRIPPIN_VIDEOS") {
         d.push(PathBuf::from(p));
     }
-    let data = pack_dir();
-    if std::fs::read_to_string(data.join(STAMP)).is_ok_and(|s| s.trim() == VIDEO_ASSET.0) {
-        d.push(data);
-    }
-    d.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("videos"));
+    d.extend(crate::packs::video_dirs());
     d
-}
-
-fn pack_dir() -> PathBuf {
-    crate::config::data_dir().join("videos")
 }
 
 pub fn clip_path(name: &str) -> Option<PathBuf> {
@@ -138,49 +118,6 @@ pub fn scene_ready(scene: &str) -> bool {
         Some(clip) => lock(&AVAILABLE).iter().any(|c| c == clip),
         None => true,
     }
-}
-
-/// Does the clip pack need fetching? (Nothing to fetch until it's published.)
-pub fn pack_missing() -> bool {
-    !VIDEO_ASSET.1.is_empty()
-        && !std::fs::read_to_string(pack_dir().join(STAMP)).is_ok_and(|s| s.trim() == VIDEO_ASSET.0)
-}
-
-/// Fetch the clip pack in the background (Settings > Video clips). Safe to
-/// call every frame: one download at a time, and only while it's missing.
-pub fn ensure_pack() {
-    if VIDEO_ASSET.1.is_empty() {
-        let mut st = lock(&STATUS);
-        if st.is_empty() {
-            *st = "the clip pack isn't published yet".into();
-        }
-        return;
-    }
-    if !pack_missing() || DOWNLOADING.swap(true, Ordering::AcqRel) {
-        return;
-    }
-    std::thread::Builder::new()
-        .name("video-dl".into())
-        .spawn(|| {
-            let set = |s: String| *lock(&STATUS) = s;
-            let r = crate::engine::install_zip(
-                &format!("{RELEASE_BASE}/{}", VIDEO_ASSET.0),
-                VIDEO_ASSET,
-                &pack_dir(),
-                STAMP,
-                "video clips",
-                &set,
-            );
-            match r {
-                Ok(()) => {
-                    rescan();
-                    set(format!("{} clips ready", lock(&AVAILABLE).len()));
-                }
-                Err(e) => set(format!("download failed: {e:#}")),
-            }
-            DOWNLOADING.store(false, Ordering::Release);
-        })
-        .ok();
 }
 
 /// What the decoder has ready for the clip on air.

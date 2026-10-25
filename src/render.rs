@@ -1065,11 +1065,8 @@ impl Renderer {
         };
 
         // Pick up newly added scene files.
-        let mut paths: Vec<PathBuf> = std::fs::read_dir(self.shader_dir.join("scenes"))
-            .map(|rd| rd.filter_map(|e| e.ok().map(|e| e.path())).collect())
-            .unwrap_or_default();
-        paths.retain(|p| p.extension().is_some_and(|e| e == "wgsl"));
-        paths.sort();
+        // Built-in scenes plus the loaded effects packs' (packs.rs).
+        let paths = crate::packs::scene_files(&self.shader_dir);
         for p in paths {
             if !self.scenes.iter().any(|s| s.path == p) {
                 let name = p.file_stem().unwrap().to_string_lossy().into_owned();

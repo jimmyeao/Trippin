@@ -412,8 +412,9 @@ fires a burst that blooms into swirls.
 
 ### Video scenes
 
-Settings → **Video clips** adds sixteen scenes built from short video
-loops: night drives through a neon city and a road tunnel, a flight over the
+Video scenes come in **effects packs**, which install separately from the
+app (Settings → **Effects packs**). Three packs hold sixteen scenes built
+from short video loops: night drives through a neon city and a road tunnel, a flight over the
 city, a neon alley, highway light trails, club lasers and a club light rig,
 ink in water, coloured smoke and liquid chrome, plus six flights seen from
 the camera: down a neon avenue, low over the rooftops, diving between
@@ -423,9 +424,23 @@ track builds and slows in breakdowns, and the music reshapes its lights
 (streaks, glints and light trails) or, on the fluid clips, the fluid
 itself. Buildings and roads never warp.
 
-The clips are a one-off download of about 320 MB the first time you switch
-the setting on. They're generated with an image-to-video model and packed
-by `tools/video_pack.py` (see its docstring to make your own).
+| Pack | Scenes | Download |
+|---|---|---|
+| Night City | drives, flights, the alley and highway trails (9) | about 290 MB |
+| Club Nights | club lasers and rig, crowd and warehouse flights (4) | about 105 MB |
+| Liquid | ink, smoke and liquid chrome (3) | about 90 MB |
+
+On the Effects packs card, **Install** downloads a pack, **Add pack from
+file…** installs a `.trippinpack` you were given, the tick box switches a
+pack off without removing it, and **Remove** deletes it. Changes apply the
+next time Trippin starts. From the command line:
+`trippin --install-pack file.trippinpack` and `trippin --list-packs`.
+
+To make a pack, put `pack.json`, `scenes/*.wgsl`, `videos/*.tvid` (packed
+by `tools/video_pack.py`), `scene_tags.json` and `scene_energy.json` in a
+folder, then run `python tools/pack_build.py <folder>`. See `src/packs.rs`
+and the packs in `packs/`. The clips here were generated with an
+image-to-video model.
 
 ## Beats vs breakdowns
 

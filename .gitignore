@@ -10,6 +10,7 @@ __pycache__/
 /tools/.stock_cache
 /snaps/
 /videos/
+/packs/*/videos/
 HANDOFF-ADD-SITE.md
 /models/
 /beatcache/

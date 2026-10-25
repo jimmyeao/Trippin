@@ -63,6 +63,7 @@ mod text;
 mod timeline;
 mod ui_theme;
 mod showparams;
+mod packs;
 mod video;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -261,8 +262,8 @@ fn allowed_scenes(r: &Renderer, s: &Settings) -> Vec<usize> {
         // via an explicit cue, never by autopilot or next/prev.
         .filter(|&i| names[i] != "void")
         .filter(|&i| !names[i].starts_with("unity_") || EXT_LIVE.load(Ordering::Relaxed))
-        // video_* scenes: Settings > Video clips on, and their clip on disk.
-        .filter(|&i| !names[i].starts_with("video_") || (s.video_clips && video::scene_ready(&names[i])))
+        // video_* scenes (from effects packs): only with their clip on disk.
+        .filter(|&i| video::scene_ready(&names[i]))
         .filter(|&i| !s.disabled_scenes.contains(&names[i]))
         .filter(|&i| heavy_on || !heavy[i])
         .filter(|&i| s.flat_scenes || heavy[i])
@@ -1657,9 +1658,6 @@ fn render_loop(
             // y: video frame blend (vid() in common.wgsl).
             misc4: [0.0, video.blend, 0.0, 0.0],
         };
-        if s.video_clips {
-            video::ensure_pack();
-        }
         // External engine link: Trippin runs the Unity engine itself (see
         // engine.rs) — show state out over UDP, frames back through shared
         // memory. Cross-platform; nothing for the user to start.
@@ -3347,11 +3345,7 @@ fn load_icon() -> Option<Icon> {
 fn check_shaders() -> Result<()> {
     let dir = render::find_shader_dir()?;
     let common = std::fs::read_to_string(dir.join("common.wgsl"))?;
-    let mut paths: Vec<std::path::PathBuf> = std::fs::read_dir(dir.join("scenes"))?
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .collect();
-    paths.retain(|p| p.extension().is_some_and(|e| e == "wgsl"));
-    paths.sort();
+    let mut paths = packs::scene_files(&dir);
     paths.push(dir.join("present.wgsl"));
     paths.push(dir.join("dancer.wgsl"));
     paths.push(dir.join("text.wgsl"));
@@ -3392,15 +3386,7 @@ fn check_shaders() -> Result<()> {
 fn ai_build(path: &std::path::Path) -> Result<()> {
     let song = song::load(path)?;
     let clip = timeline::Clip::from_song(&song, 0.0);
-    let mut scenes: Vec<String> = std::fs::read_dir(render::find_shader_dir()?.join("scenes"))?
-        .filter_map(|e| e.ok())
-        .filter_map(|e| {
-            let p = e.path();
-            (p.extension().is_some_and(|x| x == "wgsl"))
-                .then(|| p.file_stem().unwrap().to_string_lossy().into_owned())
-        })
-        .collect();
-    scenes.sort();
+    let scenes = packs::scene_names(&render::find_shader_dir()?);
     let routines: Vec<String> = dancer::find_dancer_dir()
         .map(|d| dancer::list_clips(&d).into_iter().map(|c| c.name).collect())
         .unwrap_or_default();
@@ -3546,6 +3532,30 @@ fn main() -> Result<()> {
     if args.iter().any(|a| a == "--check-shaders") {
         return check_shaders();
     }
+    // `--install-pack x.trippinpack`: install an effects pack (packs.rs),
+    // as Settings > Add pack from file does.
+    if let Some(p) = arg_value(&args, "--install-pack") {
+        let name = packs::install_file(std::path::Path::new(&p))?;
+        println!("{name} installed in {}", packs::root().display());
+        return Ok(());
+    }
+    // `--list-packs`: every pack found and the scenes it adds.
+    if args.iter().any(|a| a == "--list-packs") {
+        let dir = render::find_shader_dir()?;
+        for p in packs::all() {
+            let n = packs::scene_names(&dir).iter().filter(|s| packs::owner(s).is_some_and(|o| o.id == p.id)).count();
+            println!(
+                "{:<14} {:<12} v{:<4} {:>2} scenes  {}{}",
+                p.id,
+                p.name,
+                p.version,
+                n,
+                p.dir.display(),
+                p.problem.as_deref().map(|w| format!("  (not loaded: {w})")).unwrap_or_default()
+            );
+        }
+        return Ok(());
+    }
     // `--analyze track.mp3` prints the per-bar feature summary the AI show
     // builder sends to the model — the prompt-tuning / sanity-check path.
     if let Some(p) = arg_value(&args, "--analyze") {
@@ -3575,6 +3585,10 @@ fn main() -> Result<()> {
     let env = audio::EnvLog::new();
 
     let mut settings = Settings::load();
+    // Effects packs: the scene list is fixed for the run, so which packs
+    // load is decided here, before anything lists scenes.
+    packs::init(&settings.disabled_packs);
+    packs::tidy();
     // Neural beat tracking: fetch the model in the background on first run.
     beats::set_enabled(settings.beat_model);
     if settings.beat_model {

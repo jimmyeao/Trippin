@@ -369,11 +369,8 @@ pub fn run(args: &[String]) -> Result<()> {
         }
     };
 
-    let mut scenes: Vec<PathBuf> = std::fs::read_dir(dir.join("scenes"))?
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().is_some_and(|e| e == "wgsl"))
-        .collect();
-    scenes.sort();
+    // Built in plus the effects packs' scenes (packs.rs).
+    let mut scenes: Vec<PathBuf> = crate::packs::scene_files(&dir);
     if which != "all" {
         let want: Vec<&str> = which.split(',').collect();
         scenes.retain(|p| {
@@ -572,14 +569,22 @@ pub fn run(args: &[String]) -> Result<()> {
             let below = energy_rows.iter().filter(|r| col(r) < v).count();
             below as f32 / (energy_rows.len() - 1).max(1) as f32
         };
-        let mut out = serde_json::Map::new();
+        // Ranked over every scene, then each written where it lives: the
+        // built-in file, or its pack's own (the AI builder merges them).
+        let mut files: std::collections::BTreeMap<PathBuf, serde_json::Map<String, serde_json::Value>> =
+            Default::default();
         for r in &energy_rows {
             let e = 0.5 * pct(&|x| x.1, r.1) + 0.25 * pct(&|x| x.2, r.2) + 0.25 * pct(&|x| x.3, r.3);
-            out.insert(r.0.clone(), serde_json::json!((e as f64 * 100.0).round() / 100.0));
+            let home = crate::packs::owner(&r.0).map_or_else(|| dir.clone(), |p| p.dir.clone());
+            files
+                .entry(home.join("scene_energy.json"))
+                .or_default()
+                .insert(r.0.clone(), serde_json::json!((e as f64 * 100.0).round() / 100.0));
         }
-        let file = dir.join("scene_energy.json");
-        std::fs::write(&file, serde_json::to_string_pretty(&out)? + "\n")?;
-        println!("wrote {}", file.display());
+        for (file, out) in files {
+            std::fs::write(&file, serde_json::to_string_pretty(&out)? + "\n")?;
+            println!("wrote {}", file.display());
+        }
     }
     if !report.is_empty() {
         report.sort_by(|a, b| b.1.total_cmp(&a.1));

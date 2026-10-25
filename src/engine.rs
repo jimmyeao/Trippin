@@ -454,16 +454,55 @@ pub fn install_zip(
     what: &str,
     set: &dyn Fn(String),
 ) -> Result<()> {
-    use sha2::{Digest, Sha256};
-    use std::io::{Read, Write};
     // Unpack beside the final folder and rename it into place at the end:
     // the reader sees the content the moment it exists, and launching a
     // half-unpacked player fails (sharing violation).
     let parent = final_dir.parent().ok_or_else(|| anyhow!("no parent for {}", final_dir.display()))?;
+    let zip_path = download_verified(url, (name, sha), parent, what, set)?;
     let dir = final_dir.with_extension("part");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir)?;
-    let zip_path = parent.join(format!("{name}.part"));
+    set(format!("unpacking {what}…"));
+    let mut zip = zip::ZipArchive::new(std::fs::File::open(&zip_path)?)?;
+    for i in 0..zip.len() {
+        let mut e = zip.by_index(i)?;
+        let Some(rel) = e.enclosed_name() else { continue };
+        let out = dir.join(rel);
+        if e.is_dir() {
+            std::fs::create_dir_all(&out)?;
+            continue;
+        }
+        if let Some(p) = out.parent() {
+            std::fs::create_dir_all(p)?;
+        }
+        let mut f = std::fs::File::create(&out)?;
+        std::io::copy(&mut e, &mut f)?;
+        #[cfg(unix)]
+        if let Some(mode) = e.unix_mode() {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&out, std::fs::Permissions::from_mode(mode))?;
+        }
+    }
+    let _ = std::fs::remove_file(&zip_path);
+    std::fs::write(dir.join(stamp), name)?;
+    let _ = std::fs::remove_dir_all(final_dir);
+    std::fs::rename(&dir, final_dir).with_context(|| format!("installing {what}"))?;
+    Ok(())
+}
+
+/// Download `url` to `<dir>/<name>.part`, checking its sha256 on the way;
+/// returns the file's path. A mismatch deletes it.
+pub fn download_verified(
+    url: &str,
+    (name, sha): (&str, &str),
+    dir: &Path,
+    what: &str,
+    set: &dyn Fn(String),
+) -> Result<PathBuf> {
+    use sha2::{Digest, Sha256};
+    use std::io::{Read, Write};
+    std::fs::create_dir_all(dir)?;
+    let zip_path = dir.join(format!("{name}.part"));
     let agent = ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(1800)))
         .tls_config(crate::config::tls())
@@ -496,32 +535,7 @@ pub fn install_zip(
         let _ = std::fs::remove_file(&zip_path);
         return Err(anyhow!("{name}: checksum mismatch"));
     }
-    set(format!("unpacking {what}…"));
-    let mut zip = zip::ZipArchive::new(std::fs::File::open(&zip_path)?)?;
-    for i in 0..zip.len() {
-        let mut e = zip.by_index(i)?;
-        let Some(rel) = e.enclosed_name() else { continue };
-        let out = dir.join(rel);
-        if e.is_dir() {
-            std::fs::create_dir_all(&out)?;
-            continue;
-        }
-        if let Some(p) = out.parent() {
-            std::fs::create_dir_all(p)?;
-        }
-        let mut f = std::fs::File::create(&out)?;
-        std::io::copy(&mut e, &mut f)?;
-        #[cfg(unix)]
-        if let Some(mode) = e.unix_mode() {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&out, std::fs::Permissions::from_mode(mode))?;
-        }
-    }
-    let _ = std::fs::remove_file(&zip_path);
-    std::fs::write(dir.join(stamp), name)?;
-    let _ = std::fs::remove_dir_all(final_dir);
-    std::fs::rename(&dir, final_dir).with_context(|| format!("installing {what}"))?;
-    Ok(())
+    Ok(zip_path)
 }
 
 /// Poll the frame file; copy out each new, complete frame.
