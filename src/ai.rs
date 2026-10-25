@@ -748,7 +748,12 @@ pub fn build_show(
         return Err(anyhow!("no clips on the timeline"));
     }
     // The external engine's scene is only live while it runs — never plan on it.
-    let scenes: Vec<String> = scenes.iter().filter(|s| !s.starts_with("unity_")).cloned().collect();
+    // Video scenes likewise only once their clip is downloaded.
+    let scenes: Vec<String> = scenes
+        .iter()
+        .filter(|s| !s.starts_with("unity_") && crate::video::scene_ready(s))
+        .cloned()
+        .collect();
     let scenes = scenes.as_slice();
     let mut notes = Vec::new();
     let mut analyses = Vec::new();

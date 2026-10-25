@@ -67,6 +67,9 @@ struct U {
 // External frame (Spout in, e.g. the Unity stage) — black when nothing's
 // connected. Scenes sample it with ext_frame().
 @group(0) @binding(8) var ext_tex: texture_2d<f32>;
+// Video clip frames for `video_*` scenes (src/video.rs): two frames stacked
+// (top/bottom halves). Sample through vid(), which blends them.
+@group(0) @binding(9) var vid_tex: texture_2d<f32>;
 
 struct VsOut {
     @builtin(position) pos: vec4<f32>,
@@ -288,4 +291,70 @@ fn laser_line(p: vec2<f32>, o: vec2<f32>, ang: f32) -> vec2<f32> {
     // Scatter: a tight glow plus a broad one that lights whole clouds.
     let halo = exp(-perp / (0.012 + along * 0.02)) + 0.35 * exp(-perp / (0.08 + along * 0.1));
     return vec2<f32>(core, halo);
+}
+
+// ---- Video clip scenes (src/video.rs) ------------------------------------
+
+// The clip frame at uv (0..1, y down), blended between the two decoded
+// frames around the play head (u.misc4.y = weight of the lower slot), so
+// slow playback glides instead of stepping. Display-referred colour.
+fn vid(uv: vec2<f32>) -> vec3<f32> {
+    // Half a texel in from each slot's edge: no bleed between the frames.
+    let q = vec2<f32>(clamp(uv.x, 0.0, 1.0), clamp(uv.y, 0.0007, 0.9993) * 0.5);
+    let a = textureSampleLevel(vid_tex, samp, q, 0.0).rgb;
+    let b = textureSampleLevel(vid_tex, samp, q + vec2<f32>(0.0, 0.5), 0.0).rgb;
+    return mix(a, b, u.misc4.y);
+}
+
+// Undo present's exposure + ACES so footage comes out looking like itself
+// (same inverse as the unity_* scenes). y is display-referred 0..1.
+fn untonemap(c: vec3<f32>) -> vec3<f32> {
+    let y = clamp(c, vec3<f32>(0.0), vec3<f32>(0.985));
+    let a = 2.51 - 2.43 * y;
+    let b = 0.03 - 0.59 * y;
+    let x = (-b + sqrt(b * b + 4.0 * a * 0.14 * y)) / (2.0 * a);
+    return x / (0.75 + 0.35 * u.intensity);
+}
+
+// Video with the scene's reactive camera: zoom (>1 = closer) about the
+// centre, panned by `pan` (fraction of the frame), sampled with the source's
+// 16:9 frame covering the output whatever its aspect.
+fn vid_cam(uv: vec2<f32>, zoom: f32, pan: vec2<f32>) -> vec3<f32> {
+    var d = uv - 0.5;
+    // Cover: fit the shorter side.
+    let ar = aspect() / (16.0 / 9.0);
+    d = select(d * vec2<f32>(1.0, 1.0 / ar), d * vec2<f32>(ar, 1.0), ar < 1.0);
+    return vid(0.5 + d / zoom + pan);
+}
+
+// The bright part of a display-referred colour (lights, neon, headlamps):
+// what video scenes reshape, since the architecture in footage must stay put.
+fn vid_hl(c: vec3<f32>) -> vec3<f32> {
+    let l = dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
+    return c * smoothstep(0.5, 0.95, l);
+}
+
+// Light streaks: the clip's highlights smeared along rays from `centre`
+// (uv), `len` = fraction of the distance to the centre. Zoom-blur on the
+// lights only — 12 taps, nearest weighted most. Display-referred.
+fn vid_streak(uv: vec2<f32>, zoom: f32, pan: vec2<f32>, centre: vec2<f32>, len: f32) -> vec3<f32> {
+    var acc = vec3<f32>(0.0);
+    var wsum = 0.0;
+    let j = bluen(uv * vec2<f32>(u.res_x, u.res_y));
+    for (var i = 0; i < 12; i++) {
+        let k = (f32(i) + j) / 12.0;
+        let w = 1.0 - k;
+        acc += vid_hl(vid_cam(centre + (uv - centre) * (1.0 - len * k), zoom, pan)) * w;
+        wsum += w;
+    }
+    return acc / wsum;
+}
+
+// Pull a clip's colour toward the live palette: highlights take the palette
+// hue (so palette changes read), shadows keep the footage. amt 0..1.
+fn vid_grade(c: vec3<f32>, t: f32, amt: f32) -> vec3<f32> {
+    let l = dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
+    let p = palette(t);
+    let tinted = l * p * p * 2.2;
+    return mix(c, tinted, amt * smoothstep(0.05, 0.6, l));
 }

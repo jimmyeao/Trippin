@@ -26,10 +26,18 @@ pub struct Statics {
     /// frame arrives. Sampled by `ext_tex` in common.wgsl.
     pub ext: wgpu::Texture,
     pub ext_view: wgpu::TextureView,
+    /// Video clip frames (`video.rs`): two VID_W x VID_H slots stacked
+    /// vertically, so playback can blend between consecutive frames.
+    /// Sampled by `vid()` in common.wgsl. Its own texture, so the Unity
+    /// engine and a video scene never overwrite each other.
+    pub vid: wgpu::Texture,
+    pub vid_view: wgpu::TextureView,
 }
 
 pub const EXT_W: u32 = 1920;
 pub const EXT_H: u32 = 1080;
+pub const VID_W: u32 = 1280;
+pub const VID_H: u32 = 720;
 
 impl Statics {
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
@@ -126,6 +134,20 @@ impl Statics {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
+        let vid = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("video frames"),
+            size: wgpu::Extent3d {
+                width: VID_W,
+                height: VID_H * 2,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
         Self {
             noise3_view: noise3.create_view(&Default::default()),
             _noise3: noise3,
@@ -134,6 +156,8 @@ impl Statics {
             repeat,
             ext_view: ext.create_view(&Default::default()),
             ext,
+            vid_view: vid.create_view(&Default::default()),
+            vid,
         }
     }
 }

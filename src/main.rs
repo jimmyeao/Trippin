@@ -62,6 +62,7 @@ mod tags;
 mod text;
 mod timeline;
 mod ui_theme;
+mod video;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -259,6 +260,8 @@ fn allowed_scenes(r: &Renderer, s: &Settings) -> Vec<usize> {
         // via an explicit cue, never by autopilot or next/prev.
         .filter(|&i| names[i] != "void")
         .filter(|&i| !names[i].starts_with("unity_") || EXT_LIVE.load(Ordering::Relaxed))
+        // video_* scenes need their clip on disk (Settings > Video clips).
+        .filter(|&i| video::scene_ready(&names[i]))
         .filter(|&i| !s.disabled_scenes.contains(&names[i]))
         .filter(|&i| heavy_on || !heavy[i])
         .filter(|&i| s.flat_scenes || heavy[i])
@@ -665,6 +668,9 @@ fn render_loop(
     let mut link_out: Option<link::Link> = None;
     let mut engine: Option<engine::Engine> = None;
     let mut ext_seq = 0u64;
+    // Video clip scenes (video.rs): play head + decoder thread.
+    let mut video = video::Player::new();
+    video::rescan();
     let mut flow_bpm = 120.0f32;
     let groove_log = std::env::var_os("TRIPPIN_GROOVE_LOG").is_some();
     let mut last_groove_log = Instant::now();
@@ -880,6 +886,18 @@ fn render_loop(
                 Msg::Thumb(key) => {
                     // Editor keys thumbs "scene:<name>"; render by bare name.
                     let name = key.strip_prefix("scene:").unwrap_or(&key);
+                    // A video scene's tile is a frame of its clip; without
+                    // the clip it would cache black, so wait (the panel
+                    // asks again).
+                    if let Some(clip) = name.strip_prefix("video_") {
+                        match video::frames_at(clip, 2.0) {
+                            Some((a, _, _)) => {
+                                r.upload_video(0, &a);
+                                video.invalidate();
+                            }
+                            None => continue,
+                        }
+                    }
                     match r.scene_names().iter().position(|n| *n == name) {
                         Some(i) => match r.thumbnail(i, 128, 72) {
                             Some(px) => {
@@ -1583,6 +1601,12 @@ fn render_loop(
             1.0
         };
 
+        // Video clip scenes: advance the play head (speed follows the
+        // smoothed drive) and upload the frames around it.
+        for (slot, px) in video.tick(r.scene_name(dir.scene), dt, dir.intensity, f.calm) {
+            r.upload_video(slot, &px);
+        }
+
         let (w, h) = r.size();
         let mut spectrum = [0.0; audio::SPECTRUM_BINS];
         spectrum.copy_from_slice(&f.spectrum);
@@ -1629,8 +1653,12 @@ fn render_loop(
             hits4: f.hits4,
             pres4: f.pres4,
             clock4: clock4.map(|c| c as f32),
-            misc4: [0.0; 4],
+            // y: video frame blend (vid() in common.wgsl).
+            misc4: [0.0, video.blend, 0.0, 0.0],
         };
+        if s.video_clips {
+            video::ensure_pack();
+        }
         // External engine link: Trippin runs the Unity engine itself (see
         // engine.rs) — show state out over UDP, frames back through shared
         // memory. Cross-platform; nothing for the user to start.

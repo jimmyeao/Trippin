@@ -4054,6 +4054,20 @@ fn settings_tab(
                     format!("Unity engine: {st}")
                 });
             }
+            // Video clip scenes (video.rs): a one-off download, then the
+            // video_* scenes join the rotation.
+            ui.checkbox(&mut s.video_clips, "Video clips")
+                .on_hover_text(
+                    "Adds video scenes: night drives, clubs, ink and smoke, played \
+                     at a speed that follows the music. Downloads the clip pack \
+                     (about 160 MB) once.",
+                );
+            if s.video_clips {
+                let st = crate::video::STATUS.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                if !st.is_empty() {
+                    ui.small(format!("Video clips: {st}"));
+                }
+            }
         });
         ui.add_space(12.0);
         card().show(ui, |ui| {

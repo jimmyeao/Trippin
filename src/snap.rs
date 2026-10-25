@@ -215,6 +215,7 @@ pub fn run(args: &[String]) -> Result<()> {
             repeat: &statics.repeat,
             bloom: bloom.view(),
             ext: &statics.ext_view,
+            vid: &statics.vid_view,
         },
     );
     let out = device.create_texture(&wgpu::TextureDescriptor {
@@ -418,9 +419,27 @@ pub fn run(args: &[String]) -> Result<()> {
         }
         let mut cur = 0usize;
         let mut frame = 0u32;
+        // video_* scenes: the clip plays at 1x on the snapshot clock.
+        let vclip = name
+            .strip_prefix("video_")
+            .and_then(crate::video::clip_path)
+            .and_then(|p| crate::video::Clip::open(&p).ok());
+        if name.starts_with("video_") && vclip.is_none() {
+            eprintln!("{name}: no clip on disk (videos/ or TRIPPIN_VIDEOS) — it renders black");
+        }
         // One full frame: scene → bloom → present.
         let step = |t: f32, frame: u32, cur: &mut usize| {
-            let u = groove(t, w, h, frame, bloom_amt, tonemap, calm);
+            let mut u = groove(t, w, h, frame, bloom_amt, tonemap, calm);
+            if let Some(c) = &vclip {
+                let fpos = t as f64 * c.fps as f64;
+                let f0 = fpos.floor() as usize;
+                for (slot, f) in [(0, f0), (1, f0 + 1)] {
+                    if let Ok(px) = c.decode(f) {
+                        render::upload_video(&queue, &statics.vid, slot, &px);
+                    }
+                }
+                u.misc4[1] = fpos.fract() as f32;
+            }
             queue.write_buffer(&ubuf, 0, bytemuck::bytes_of(&u));
             let next = 1 - *cur;
             let mut enc = device.create_command_encoder(&Default::default());
