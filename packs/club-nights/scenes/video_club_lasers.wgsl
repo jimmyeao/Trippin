@@ -1,8 +1,9 @@
 // @bloom 0.6
 // @title Club Lasers
-// Lasers fanning through the haze over a dancing crowd (video clip). The beams and lights flare into star glints on the
-// drums, the footage runs faster as the track builds, and the camera sways
-// with the phrase.
+// @video-lock
+// Lasers fanning through the haze over a dancing crowd (video clip, locked to the tempo: the footage surges on each
+// beat, its own light hits land on the beats). The beams and lights flare
+// into star glints on the drums, and the camera sways with the phrase.
 
 fn glints(uv: vec2<f32>, zoom: f32, pan: vec2<f32>, len: f32) -> vec3<f32> {
     var acc = vec3<f32>(0.0);

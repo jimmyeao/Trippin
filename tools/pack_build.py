@@ -36,6 +36,10 @@ def main():
             z.write(os.path.join(a.pack, 'scenes', f), 'scenes/' + f)
         for f in videos:
             z.write(os.path.join(vdir, f), 'videos/' + f)
+            # The clip's own hits (tools/video_beats.py), when it has a rhythm.
+            beats = os.path.join(vdir, f[:-5] + '.beats.json')
+            if os.path.exists(beats):
+                z.write(beats, 'videos/' + f[:-5] + '.beats.json')
     h = hashlib.sha256()
     with open(out, 'rb') as f:
         for b in iter(lambda: f.read(1 << 20), b''):

@@ -338,6 +338,8 @@ fn allowed(rel: &Path) -> bool {
         || rel == Path::new("scene_energy.json")
         || top("scenes", "wgsl")
         || top("videos", "tvid")
+        // A clip's own hits (tools/video_beats.py): `<clip>.beats.json`.
+        || (top("videos", "json") && rel.to_string_lossy().ends_with(".beats.json"))
 }
 
 /// Unpack a `.trippinpack` into `<root>/<id>`, replacing an older copy.
@@ -480,10 +482,10 @@ mod tests {
 
     #[test]
     fn only_pack_files_are_unpacked() {
-        for ok in ["pack.json", "scene_tags.json", "scenes/video_x.wgsl", "videos/x.tvid"] {
+        for ok in ["pack.json", "scene_tags.json", "scenes/video_x.wgsl", "videos/x.tvid", "videos/x.beats.json"] {
             assert!(allowed(Path::new(ok)), "{ok}");
         }
-        for bad in ["trippin.exe", "scenes/x.exe", "scenes/a/b.wgsl", "videos/x.wgsl", "common.wgsl", "x/pack.json"] {
+        for bad in ["trippin.exe", "scenes/x.exe", "scenes/a/b.wgsl", "videos/x.wgsl", "common.wgsl", "x/pack.json", "videos/x.json"] {
             assert!(!allowed(Path::new(bad)), "{bad}");
         }
     }

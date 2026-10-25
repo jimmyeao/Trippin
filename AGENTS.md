@@ -364,6 +364,16 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   pack scene whose name is taken is skipped. Bump `packs::API` when
   common.wgsl changes a helper packs call. `--snap-energy` writes each pack's
   scenes into that pack's `scene_energy.json`.
+- **Tempo-matched video** (owner: the best video scenes are the ones whose
+  footage moves *to the beat*). Generated footage has almost no rhythm of
+  its own, so a locked scene's head is *pumped* within each beat
+  (`video::pump`: it surges on the beat, eases before the next; motion
+  measured ~2x higher in the first quarter of a beat). Clips with a real
+  rhythm get `<clip>.beats.json` from `tools/video_beats.py` (run it on new
+  clips before `pack_build.py`): their own hits land on the beats. The video
+  model leaves a 2/4-frame highlight flicker and 8-frame chunk rhythm in
+  every clip — the analyser box-filters and skips those, or every clip
+  "has" a beat.
 - **Bar-locked video** (`// @video-lock` in a scene header, `video.rs`
   `lock_step`): the loop spans a power-of-two number of bars nearest its
   natural length (an 11.3 s clip at 128 BPM is 8 bars, 0.75x), doubled in
