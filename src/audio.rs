@@ -28,8 +28,14 @@ const MAX_BPM: f32 = 180.0;
 /// DJ convention: detected tempos above this are almost always a
 /// double-time read (DnB, hard techno) — the tracker runs them at
 /// half-tempo so visuals breathe on the half-time pulse (a 160 read is 80).
-/// Every path that sets the tempo obeys it, and `frame` enforces it last.
+/// Every path that sets the tempo obeys it (and `DOUBLE_TEMPO_BELOW`),
+/// and `frame` enforces both last.
 pub(crate) const HALF_TEMPO_ABOVE: f32 = 150.0;
+/// The other end of the same octave: a read below this counts every other
+/// beat (Beat This! does on sparse intros) and runs at double tempo, so a
+/// 130 set never shows 65. Exactly half the top line, so every tempo has
+/// one reading — any other value lets the two folds undo each other.
+pub(crate) const DOUBLE_TEMPO_BELOW: f32 = HALF_TEMPO_ABOVE / 2.0;
 /// Neural downbeat check: seconds of audio per Beat This! window, and how
 /// often one is sent (~0.5 s of one background core per window).
 const NN_WINDOW_S: f32 = 15.0;
@@ -1101,9 +1107,14 @@ impl Analyzer {
             let r = f.period / live_p;
             // Over the half-tempo line always (locked or not: a clean 160
             // read once locked used to be taken as a tempo change).
-            let double = f.bpm(self.sr) > HALF_TEMPO_ABOVE as f64
-                || (locked && (r - 0.5).abs() < 0.015);
-            let half = locked && (r - 2.0).abs() < 0.06;
+            // Under the double-tempo line likewise: once locked there (at
+            // 65), the live-level rule turned every correct 130 fit back
+            // into 65, so the line goes first.
+            let bpm = f.bpm(self.sr);
+            let slow = bpm < DOUBLE_TEMPO_BELOW as f64;
+            let double = bpm > HALF_TEMPO_ABOVE as f64
+                || (locked && (r - 0.5).abs() < 0.015 && bpm * 0.5 >= DOUBLE_TEMPO_BELOW as f64);
+            let half = slow || (locked && (r - 2.0).abs() < 0.06 && bpm * 2.0 <= HALF_TEMPO_ABOVE as f64);
             let mut period = f.period;
             let mut anchor_n = f.n_last;
             if double {
@@ -1644,9 +1655,12 @@ impl Analyzer {
         }
 
         self.f.silent = silent;
-        // The half-tempo line, whatever set the period.
+        // The half- and double-tempo lines, whatever set the period.
         while 60.0 * self.fps / self.period > HALF_TEMPO_ABOVE {
             self.period *= 2.0;
+        }
+        while 60.0 * self.fps / self.period < DOUBLE_TEMPO_BELOW {
+            self.period *= 0.5;
         }
         self.f.bpm = 60.0 * self.fps / self.period;
         self.f.beat_phase = self.phase;
@@ -1753,6 +1767,9 @@ impl Analyzer {
         // double-time harmonic — drop to half-tempo (174 → 87).
         if 60.0 * self.fps / period > HALF_TEMPO_ABOVE {
             period *= 2.0;
+        }
+        if 60.0 * self.fps / period < DOUBLE_TEMPO_BELOW {
+            period *= 0.5;
         }
         let conf = (acs[lag] / zero.max(1e-12)).clamp(0.0, 1.0);
         self.confidence += (conf - self.confidence) * 0.3;
@@ -2169,6 +2186,40 @@ mod tests {
         a.nn_apply(&beats);
         let bpm = 60.0 * a.fps / a.period;
         assert!((bpm - 80.0).abs() < 0.5, "tempo {bpm}");
+    }
+
+    /// A window where the model found every other beat (a sparse intro)
+    /// runs at double tempo before anything is locked: 65 reads as 130.
+    #[test]
+    fn slow_read_runs_at_double_tempo() {
+        let (_tx, rx) = mpsc::channel();
+        let shared: SharedFeatures = Arc::new(Mutex::new(Features::default()));
+        let mut a = Analyzer::new(48000.0, shared, rx, None);
+        let p = 48000.0 * 60.0 / 65.0;
+        let beats: Vec<NnBeat> = (0..24).map(|k| ((240_000.0 + k as f64 * p) as u64, 0.9, k % 2 == 0)).collect();
+        for s in (0..=beats[23].0 + 4800).step_by(HOP) {
+            a.nn_hops.push_back((s as u64, s as f64 / 24000.0, false));
+        }
+        a.nn_samples = beats[23].0 + 4800;
+        a.nn_apply(&beats);
+        let bpm = 60.0 * a.fps / a.period;
+        assert!((bpm - 130.0).abs() < 0.5, "tempo {bpm}");
+    }
+
+    /// Locked at 65 (as builds before the double-tempo line could be),
+    /// clean 130 reads take the tempo back, and the frame line keeps it.
+    #[test]
+    fn locked_half_tempo_recovers() {
+        let mut a = behind(41);
+        a.nn_lock_at = 0.0;
+        a.clock = 1.0;
+        a.period = 60.0 * a.fps / 65.0;
+        let p = 48000.0 * 60.0 / 130.0;
+        let beats: Vec<NnBeat> = (0..40).map(|k| ((60_000.0 + k as f64 * p) as u64, 0.9, k % 4 == 0)).collect();
+        a.nn_apply(&beats);
+        a.nn_apply(&beats);
+        let bpm = 60.0 * a.fps / a.period;
+        assert!((bpm - 130.0).abs() < 0.5, "tempo {bpm}");
     }
 
     /// Through a breakdown the flywheel's tempo stands, even when the model
