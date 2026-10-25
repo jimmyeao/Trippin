@@ -423,7 +423,7 @@ itself. Buildings and roads never warp.
 
 | Pack | Scenes | Download |
 |---|---|---|
-| Night City | drives, flights, the alley and highway trails (9) | about 290 MB |
+| Night City | drives, flights, the alley and highway trails (9) | about 307 MB |
 | Club Nights | club lasers and rig, crowd and warehouse flights (4) | about 105 MB |
 | Liquid | ink, smoke and liquid chrome (3) | about 90 MB |
 | Club Nights 2 | the decks, a speaker cone, an LED wall, a laser tunnel (4), locked to the bar | about 100 MB |

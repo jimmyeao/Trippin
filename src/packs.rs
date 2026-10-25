@@ -49,8 +49,8 @@ pub const CATALOG: &[CatalogEntry] = &[
         about: "Nine video scenes: night drives through a neon city and a road tunnel, flights \
                 down an avenue, over the rooftops, between towers and under a bridge, a neon \
                 alley and highway light trails.",
-        size_mb: 290,
-        asset: ("night-city-1.trippinpack", ""),
+        size_mb: 307,
+        asset: ("night-city-1.trippinpack", "a7291e13c690aa42cebfba1f31de5ea73a2059cb0df1ba343fcb02debdd4ca5a"),
     },
     CatalogEntry {
         id: "club-nights",
@@ -58,22 +58,22 @@ pub const CATALOG: &[CatalogEntry] = &[
         about: "Four video scenes: club lasers, a club light rig, and flights over a club crowd \
                 and through a warehouse rave.",
         size_mb: 105,
-        asset: ("club-nights-1.trippinpack", ""),
+        asset: ("club-nights-1.trippinpack", "405851def9b325dc8d98d00512163cc36980eab7d8b7578f429ea4f453136483"),
     },
     CatalogEntry {
         id: "liquid",
         name: "Liquid",
         about: "Three video scenes: ink blooming in water, coloured smoke and liquid chrome, \
                 swirled by the music.",
-        size_mb: 90,
-        asset: ("liquid-1.trippinpack", ""),
+        size_mb: 87,
+        asset: ("liquid-1.trippinpack", "3f74bdad986c67862eccb8a7883c1d14d2528489989653252e5c3b22350ee1b7"),
     },
     CatalogEntry {
         id: "club-nights-2",
         name: "Club Nights 2",
         about: "Four club scenes locked to the bar: the decks, a speaker cone, an LED wall and a                 laser tunnel. The lights flare on the kicks, fills stutter, drops scratch.",
         size_mb: 100,
-        asset: ("club-nights-2-1.trippinpack", ""),
+        asset: ("club-nights-2-1.trippinpack", "c373ed66cfa01e4f7b6b30718f9a5c58ef79a7a6a599576c9664510557129ee0"),
     },
 ];
 
