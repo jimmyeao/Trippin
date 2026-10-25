@@ -101,6 +101,35 @@ Build from the CLI (Unity 6000.3.25f1):
 
 Run `Build/TrippinStage.exe`. With no Trippin feed it cycles every 16 bars; `-cycleBars N` changes that and `-tourShows a,b,c` cycles only the named shows, for a quick recorded tour (e.g. `-tourShows unity_helix,unity_warp -cycleBars 4 -record tour -recordSeconds 30`). `-replayFeed feed.jsonl [-replayFrom 95]` plays a feed recorded from a real track (made with `trippin --dump-feed track.flac feed.jsonl [palette]`, which runs the file through the live analyser: tempo tracker, neural downbeat check, breakdown detector) instead of the synthetic groove, looping at 60 fps, so shows can be tested on real music without audio capture. `-uncapped` removes the 60 fps cap so the `[Stage] ms/frame` log shows the real cost. `-record <dir> -recordSeconds 64` writes a fixed-30-fps JPEG sequence and quits (encode with ffmpeg).
 
+## Show controls (`ShowParams.cs`)
+
+Trippin's sidebar has a **Show controls** card for the `unity_*` show on air
+(`src/showparams.rs`). Speed and Reactivity work on every show and need
+nothing here: Trippin re-integrates the travel clocks (`flow`, `clock4`) at
+the chosen speed and scales the audio levels in the feed it sends.
+
+A show adds its own knobs by tagging public float fields:
+
+    [TrippinParam("Swirl", 0f, 80f)] public float swirl = 40f;
+
+At startup `ShowManager` collects every show's tagged fields (at most 8, in
+declaration order; the initial value is the default) and writes a manifest
+to the path Trippin passes with `-trippinParams`. Each frame the feed's
+`knobs` array (values for the show on air, in manifest order) is written
+back into the fields. The field's id in Trippin's settings is its name in
+lower case, so renaming a field resets what users saved for it.
+
+## Fluid (`FluidShow.cs`, `Fluid.compute`, `FluidView.shader`)
+
+`unity_fluid` runs stable fluids on the GPU: a 256x144 velocity grid
+(advection, vorticity confinement, a 24-step Jacobi pressure solve, gradient
+subtraction) and a 1280x720 dye field advected through it, drawn as glossy
+paint (dye density read as height for a normal, a key light and specular).
+All sim textures are ARGBHalf with random write, the safest format across
+D3D and Metal. Test it headless on a real track with
+`-show unity_fluid -replayFeed feed.jsonl -replayFrom 60 -record out -recordSeconds 16`
+(`trippin --dump-feed track.flac feed.jsonl` makes the feed).
+
 ## Crowd meshes
 
 The stage crowd uses generated people from Alice (the owner's generation server; external agent API `POST /api/agent/crowd {"count": N}` at alice.deviousweb.com, key in the untracked `alice.env`; Cloudflare rejects Python's default User-Agent, so send a curl-like one). Prepare a batch zip with:

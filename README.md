@@ -397,6 +397,31 @@ Settings tab shows its status. The auto-pilot only picks `unity_*` scenes
 while the engine is sending frames, and the AI show builder never uses them.
 Developer notes are in `unity/README.md`.
 
+**Show controls.** While a Unity show is on air, the sidebar's **Show
+controls** card adjusts it: **Speed** (how fast it travels and turns) and
+**Reactivity** (how hard it answers the music) for every show, plus the
+show's own knobs where it has them (for example `unity_fluid`: swirl, dye
+life, flow life, splat size, force and shine). Values are remembered per
+show; **Reset** puts the show back to its defaults.
+
+`unity_fluid` is a real-time fluid simulation drawn as glossy liquid paint:
+three emitters pour and push with the bass, mids and highs, and every kick
+fires a burst that blooms into swirls.
+
+### Video scenes
+
+Settings → **Video clips** adds ten scenes built from short video loops:
+night drives through a neon city and a road tunnel, a flight over the city,
+a neon alley, highway light trails, club lasers and a club light rig, ink
+in water, coloured smoke and liquid chrome. The footage plays faster as the
+track builds and slows in breakdowns, and the music reshapes its lights
+(streaks, glints and light trails) or, on the fluid clips, the fluid
+itself. Buildings and roads never warp.
+
+The clips are a one-off download of about 160 MB the first time you switch
+the setting on. They're generated with an image-to-video model and packed
+by `tools/video_pack.py` (see its docstring to make your own).
+
 ## Beats vs breakdowns
 
 The audio analyser counts kick hits over the last 2.5 s against the beats

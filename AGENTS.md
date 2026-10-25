@@ -272,7 +272,9 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
 | `ios/TrippinRemote/` | The iOS/iPadOS remote app (SwiftUI, iOS 17+): Bonjour discovery, PIN pairing in the Keychain, pads, scene grid with thumbnails, look/FX, dancer and transport pages, plus a built-in `DemoServer` for use without a rig (and for App Review). The `.xcodeproj` is generated: run `xcodegen` in that folder (it's git-ignored). Speaks the `remote.rs` protocol; UI tests in `UITests/`. See its README. |
 | `src/osc.rs` | OSC UDP input (9139) for TouchOSC/Lemur — maps addresses onto the same `RemoteCmd`s as the app. |
 | `src/snap.rs` | Headless snapshot and benchmark rendering. |
-| `src/engine.rs`, `src/link.rs`, `unity/` | Unity engine (shows `unity_stage`, `unity_crystals`, `unity_flow`, `unity_leviathan`, `unity_sculpture`, `unity_colossus`, `unity_tidal_cathedral`, `unity_lightstorm`, `unity_prism`, `unity_aurora`, `unity_basscore`, `unity_pillars`, `unity_helix`, `unity_tesseract`, `unity_polyhedra`, `unity_knot`, `unity_gyroscope`, `unity_lattice`, `unity_pendulum`, `unity_spectrum`, `unity_eclipse`, `unity_lightrain`, `unity_warp`, `unity_ledwall`, `unity_fountain`, `unity_galaxy`, `unity_nebula`, `unity_ocean`, `unity_chladni`, `unity_tunnel`, `unity_orb`, `unity_radar`, `unity_djbot`, `unity_robot_rave`, `unity_assembly`, `unity_robot_club`, `unity_robot_band`, `unity_dj_battle`; any `unity_*` scene is gated on live frames and hidden from the AI builder). `engine.rs` launches the player headless and supervises it; frames come back through a memory-mapped file (seqlock, top row first) into `gfx::Statics::ext` (binding 8 `ext_tex`); `link.rs` sends the show state over UDP. Cross-platform, nothing to start by hand. See `unity/README.md`. |
+| `src/video.rs`, `tools/video_pack.py` | Video clip scenes (`video_<clip>.wgsl`). Clips are packed offline into `.tvid` (JPEG frames + index; no codec at runtime) and downloaded as a release asset (`VIDEO_ASSET`, Settings > Video clips); dev builds read `videos/` in the repo (git-ignored) or `TRIPPIN_VIDEOS`. A decoder thread feeds two stacked frames into `vid_tex` (binding 9); `vid()` / `vid_cam()` / `vid_streak()` / `vid_grade()` in common.wgsl blend and shape them. |
+| `src/showparams.rs` | Per-show controls for the `unity_*` shows (sidebar card): built-in Speed/Reactivity applied to the feed in `link.rs`, plus `[TrippinParam]` knobs from the engine's manifest (`-trippinParams`). |
+| `src/engine.rs`, `src/link.rs`, `unity/` | Unity engine (shows `unity_stage`, `unity_crystals`, `unity_flow`, `unity_leviathan`, `unity_sculpture`, `unity_colossus`, `unity_tidal_cathedral`, `unity_lightstorm`, `unity_prism`, `unity_aurora`, `unity_basscore`, `unity_pillars`, `unity_helix`, `unity_tesseract`, `unity_polyhedra`, `unity_knot`, `unity_gyroscope`, `unity_lattice`, `unity_pendulum`, `unity_spectrum`, `unity_eclipse`, `unity_lightrain`, `unity_warp`, `unity_ledwall`, `unity_fountain`, `unity_galaxy`, `unity_nebula`, `unity_ocean`, `unity_chladni`, `unity_tunnel`, `unity_orb`, `unity_radar`, `unity_djbot`, `unity_robot_rave`, `unity_assembly`, `unity_robot_club`, `unity_robot_band`, `unity_dj_battle`, `unity_highlands`, `unity_coaster`, `unity_fluid`; any `unity_*` scene is gated on live frames and hidden from the AI builder). `engine.rs` launches the player headless and supervises it; frames come back through a memory-mapped file (seqlock, top row first) into `gfx::Statics::ext` (binding 8 `ext_tex`); `link.rs` sends the show state over UDP. Cross-platform, nothing to start by hand. See `unity/README.md`. |
 | `tools/*.py` | Offline pipelines: mocap and stock video to dancer clips, and so on. |
 
 ## 6. Writing a scene
@@ -346,6 +348,13 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   `rd.xz` for level scenes.
 - Domain-repeated cities and facades: evaluate the current cell only, and
   clamp the march step.
+- **Video scenes** (`video_*`): footage is display-referred, so pass it
+  through `untonemap()` (present's inverse) or it comes out washed and
+  dark. Never warp footage of buildings or roads (architecture rule):
+  reshape its *lights* (`vid_hl`, `vid_streak`) instead; only abstract
+  fluid footage may be displaced. Driving/flight clips must say "driving"
+  or "flying" in their blurb so `scene_meta` flags them (no strobe fills).
+  Playback speed is the CPU play rate (`video.rs`), eased from the drive.
 
 ### Adding a dancer/musician clip
 
@@ -470,6 +479,11 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   steps up `rate*dt` then eases back — a two-frame judder (this made the
   branding logo wobble horizontally whenever the DJ name was off). Guard
   the at-rest case (see `overlay.rs::ease_vis`).
+- **Unity show controls** (`showparams.rs`, `ShowParams.cs`): Speed must
+  re-integrate the clocks (`link.rs::apply`), never multiply them, or a
+  slider move jumps every show's camera. Knob values are keyed by the C#
+  field name, lower-cased. `TRIPPIN_ENGINE=<exe>` runs a dev player build in
+  the app, so a new show can be tested without publishing an engine.
 - **HTTP clients use the OS trust store** (`config::tls()`, ureq's
   `platform-verifier` feature). ureq's default bundled roots failed with
   `invalid certificate: UnknownIssuer` on the owner's M2, whose network
