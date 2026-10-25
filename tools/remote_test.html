@@ -31,6 +31,9 @@
   .tile.next span { color:#fd5; }
   h3 { color:#888; font-weight:normal; letter-spacing:.08em;
        text-transform:lowercase; margin:18px 0 8px; }
+  .ctl { display:grid; grid-template-columns:110px 1fr 56px; gap:10px;
+         align-items:center; max-width:560px; margin-bottom:6px; }
+  .ctl output { font-variant-numeric:tabular-nums; color:#9ad; }
   #log { font:11px/1.5 monospace; color:#778; height:90px;
          overflow-y:auto; border-top:1px solid #333; padding-top:6px; }
 </style>
@@ -51,6 +54,10 @@
 <h3>scenes <small style="color:#555">click = go · shift-click = queue next</small>
   <button id="thumbs">reload thumbs</button></h3>
 <div id="scenes" class="grid"></div>
+
+<h3 id="sch" hidden>show controls <span id="scname" style="color:#9ad"></span>
+  <button id="screset">reset</button></h3>
+<div id="sc"></div>
 
 <h3>dancers</h3>
 <div id="clips" class="bar"></div>
@@ -127,6 +134,7 @@ function loadThumbs() {
     setTimeout(() => send({cmd:"thumb", scene:n}), i * 40));
 }
 $("thumbs").onclick = loadThumbs;
+$("screset").onclick = () => send({cmd:"set", key:"show_params_reset", value:true});
 
 function thumb(m) {
   for (const el of document.querySelectorAll(".tile")) {
@@ -135,7 +143,45 @@ function thumb(m) {
   }
 }
 
+// Show controls of the Unity show on air (state.show_controls). Rebuilt
+// when the show or its control list changes; values follow the server
+// except on the slider being dragged.
+let scKey = "", scDrag = null;
+function showControls(m) {
+  const sc = m.show_controls || [];
+  $("sch").hidden = sc.length === 0;
+  $("scname").textContent = m.scene_title || m.scene_name || "";
+  const key = (m.scene_name || "") + "|" + sc.map(c => c.id).join(",");
+  if (key !== scKey) {
+    scKey = key;
+    const box = $("sc");
+    box.innerHTML = "";
+    for (const c of sc) {
+      const row = document.createElement("div");
+      row.className = "ctl";
+      const step = (c.max - c.min) / 200;
+      row.innerHTML = `<span>${c.label}</span><input type="range" min="${c.min}" max="${c.max}" step="${step}"><output></output>`;
+      const r = row.querySelector("input"), o = row.querySelector("output");
+      r.dataset.id = c.id;
+      r.addEventListener("pointerdown", () => scDrag = c.id);
+      r.addEventListener("pointerup", () => scDrag = null);
+      r.addEventListener("input", () => {
+        o.textContent = (+r.value).toFixed(2);
+        send({ cmd: "set", key: "show_param:" + c.id, value: +r.value });
+      });
+      box.appendChild(row);
+    }
+  }
+  for (const c of sc) {
+    const r = document.querySelector(`#sc input[data-id="${c.id}"]`);
+    if (!r || scDrag === c.id) continue;
+    r.value = c.value;
+    r.nextElementSibling.textContent = c.value.toFixed(2);
+  }
+}
+
 function state(m) {
+  showControls(m);
   cur = m.scene; next = m.next_scene ?? -1;
   $("state").textContent =
     `${(m.bpm||0).toFixed(1)} bpm · ${m.scene_name||"?"} → ${m.next_scene_name||"—"}` +

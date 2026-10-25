@@ -817,6 +817,11 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   `RemoteCmd`s. Buttons fire on press only — a falsy first arg is the
   release (the MIDI note-off lesson); `/set/*` and `/scene/goto|queue`
   read their arg verbatim.
+- **Unity show controls over the remote:** `set` with
+  `key:"show_param:<id>"` (clamped to the control's range) or
+  `"show_params_reset"`; the state push carries `show_controls`
+  (`{id,label,min,max,value}`) for the Unity show on air. The browser
+  harness renders them; the iOS app doesn't yet.
 - First enable pops the Windows firewall prompt once — expected.
 - **trippin-agent:** never `match` on a `MutexGuard`'s contents
   (`match link.lock()…rigs.first()` kept the guard alive through the

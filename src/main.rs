@@ -2390,6 +2390,12 @@ impl App {
             // thread produces it ("scene:<name>" in shared.thumbs).
             R::Thumb(name) => self.send(Msg::Thumb(format!("scene:{name}"))),
             R::Set(k) => {
+                // The on-air scene, read before settings (lock order:
+                // status, then settings, never nested).
+                let on_air = {
+                    let st = lock(&sh.status);
+                    sh.scene_names.get(st.scene).cloned().unwrap_or_default()
+                };
                 {
                     let mut s = self.settings_mut();
                     match k {
@@ -2414,6 +2420,17 @@ impl App {
                         SetKey::BrandOpacity(v) => s.brand_opacity = v,
                         SetKey::TickerSpeed(v) => s.ticker_speed = v,
                         SetKey::TickerText(t) => s.ticker_text = t,
+                        SetKey::ShowParam(id, v) => {
+                            let defs = showparams::builtin().into_iter().chain(showparams::show_defs(&on_air));
+                            let Some(d) = defs.into_iter().find(|d| d.id == id) else { return };
+                            if !showparams::has_controls(&on_air) {
+                                return;
+                            }
+                            s.show_params.entry(on_air).or_default().insert(id, v.clamp(d.min, d.max));
+                        }
+                        SetKey::ShowParamsReset => {
+                            s.show_params.remove(&on_air);
+                        }
                     }
                 }
                 self.mark_dirty();
@@ -2480,7 +2497,22 @@ impl App {
                 // order the panel uses.
                 let st = lock(&state_sh.status).clone();
                 let s = lock(&state_sh.settings);
+                // The on-air Unity show's controls (showparams.rs).
+                let on_air = state_sh.scene_names.get(st.scene).map(String::as_str).unwrap_or("");
+                let show_controls: Vec<serde_json::Value> = if showparams::has_controls(on_air) {
+                    showparams::builtin()
+                        .into_iter()
+                        .chain(showparams::show_defs(on_air))
+                        .map(|d| {
+                            let v = showparams::value(&s.show_params, on_air, &d);
+                            serde_json::json!({ "id": d.id, "label": d.label, "min": d.min, "max": d.max, "value": v })
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
                 serde_json::json!({
+                    "show_controls": show_controls,
                     "type": "state",
                     "bpm": st.bpm,
                     "conf": st.confidence,
