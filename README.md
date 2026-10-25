@@ -418,7 +418,7 @@ track builds and slows in breakdowns, and the music reshapes its lights
 (streaks, glints and light trails) or, on the fluid clips, the fluid
 itself. Buildings and roads never warp.
 
-The clips are a one-off download of about 160 MB the first time you switch
+The clips are a one-off download of about 190 MB the first time you switch
 the setting on. They're generated with an image-to-video model and packed
 by `tools/video_pack.py` (see its docstring to make your own).
 
