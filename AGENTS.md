@@ -105,6 +105,12 @@ overlays.
   unit spacing and strobed).
 - **No beat-synced flashes in tunnels or flight scenes.** They read as
   "jerky".
+- **Video footage** (owner's verdicts on Club Nights 2): no camera zoom
+  punch on the beat — it doesn't work on footage; react through the lights
+  (glints, streaks) instead. No crowds moving in unison or arms raised
+  together under white light (read as a gym class or a rally), no disco
+  balls (tacky), no cryo-jet shots. Close-ups (decks, a speaker cone) and
+  light-led shots (LED walls, lasers) work.
 - **Add scenes; don't replace them.** Removing or reworking a scene is the
   owner's call.
 - **Removed or disliked scenes; don't bring them back:** event_horizon,

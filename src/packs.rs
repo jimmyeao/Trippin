@@ -71,8 +71,8 @@ pub const CATALOG: &[CatalogEntry] = &[
     CatalogEntry {
         id: "club-nights-2",
         name: "Club Nights 2",
-        about: "Eight club scenes locked to the bar: a disco ball, the decks, a speaker cone,                 warehouse strobes, an LED wall, cryo jets, a laser tunnel and a jumping crowd.                 Kicks punch the camera in, fills stutter, drops scratch.",
-        size_mb: 220,
+        about: "Four club scenes locked to the bar: the decks, a speaker cone, an LED wall and a                 laser tunnel. The lights flare on the kicks, fills stutter, drops scratch.",
+        size_mb: 100,
         asset: ("club-nights-2-1.trippinpack", ""),
     },
 ];
