@@ -325,6 +325,27 @@ const SLOW_HZ: f32 = 8.0;
 /// the change sweeps across the room; dim and slow through breakdowns, off
 /// on blackout. Each light's own state is saved first and put back when the
 /// lights stop.
+/// Saved states of the bulbs `slow_worker` has taken, and their bridge, so
+/// quitting can put them back (`restore_on_quit`).
+static TAKEN: Mutex<Option<(crate::hue::HueBridge, Vec<crate::hue::Saved>)>> = Mutex::new(None);
+static QUITTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Held while a command to a bulb is in flight.
+static SENDING: Mutex<()> = Mutex::new(());
+
+/// Quit: put the bar-by-bar bulbs back as they were (the worker thread dies
+/// with the process). Called from `ApplicationHandler::exiting`.
+pub fn restore_on_quit() {
+    // Stop the worker first, and wait out a command it has in flight: one
+    // landing after the restore left a bulb on its show colour.
+    QUITTING.store(true, std::sync::atomic::Ordering::Release);
+    let _sending = lock(&SENDING);
+    if let Some((b, saved)) = lock(&TAKEN).take() {
+        for s in &saved {
+            crate::hue::restore_light(&b, s);
+        }
+    }
+}
+
 fn slow_worker(sh: Arc<Mutex<Shared>>) {
     let mut saved: Vec<crate::hue::Saved> = Vec::new();
     let mut bridge = crate::hue::HueBridge::default();
@@ -349,6 +370,7 @@ fn slow_worker(sh: Arc<Mutex<Shared>>) {
         }
         if !want {
             last_bar = None;
+            *lock(&TAKEN) = None;
             continue;
         }
         bridge = conf.hue.clone();
@@ -380,10 +402,16 @@ fn slow_worker(sh: Arc<Mutex<Shared>>) {
         } else if last_bar.is_none() {
             last_bar = Some(bar);
         }
+        *lock(&TAKEN) = Some((bridge.clone(), saved.clone()));
         if let Some((id, rgb, fade)) = queue.pop_front() {
+            let sending = lock(&SENDING);
+            if QUITTING.load(std::sync::atomic::Ordering::Acquire) {
+                return;
+            }
             if let Err(e) = crate::hue::set_light(&bridge, &id, rgb, fade) {
                 *lock(&HUE_STATUS) = format!("{e:#}");
             }
+            drop(sending);
             std::thread::sleep(gap);
         }
     }

@@ -2783,6 +2783,7 @@ impl ApplicationHandler<AppEvent> for App {
                 hue::stop(&b);
             }
         }
+        lights::restore_on_quit();
     }
 
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
