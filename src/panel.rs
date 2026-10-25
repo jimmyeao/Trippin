@@ -3866,6 +3866,87 @@ pub(crate) fn cue_param_ui(
 /// Settings page: app-wide preferences that aren't part of performing —
 /// audio source & sync, what the auto-pilot may do, and the AI show
 /// builder's provider. Two bounded columns, like the Stream page (A1).
+/// Lights (lights.rs): WLED strips that follow the show. Find adds the
+/// strips on the network (off until ticked); Test runs a rainbow on one for
+/// 3 s, even with the lights off.
+fn lights_card(ui: &mut egui::Ui, s: &mut Settings) {
+    use crate::lights;
+    use crate::ui_theme::*;
+    section_label(ui, "lights");
+    ui.checkbox(&mut s.lights_on, "Lights follow the show")
+        .on_hover_text("WLED strips pulse on the beat in the palette, chase the bar and breathe through breakdowns.");
+    ui.horizontal(|ui| {
+        ui.label("Brightness");
+        ui.add(egui::Slider::new(&mut s.light_level, 0.0..=1.0).show_value(false));
+    });
+    ui.checkbox(&mut s.light_flashes, "Allow white flashes")
+        .on_hover_text("Strobe cues and drum fills flash the strips white, at most 3 times a second. Never on tunnel or flight scenes.");
+    ui.add_space(4.0);
+    let status = lights::STATUS.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let mut remove = None;
+    for (i, w) in s.wled.iter_mut().enumerate() {
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut w.on, "");
+            let font = egui::FontId::proportional(12.5);
+            let label = format!("{} · {} LEDs", w.name, w.leds);
+            let width = (ui.available_width() - 150.0).max(60.0);
+            ui.label(egui::RichText::new(ellipsize(ui.painter(), &label, &font, width)).font(font))
+                .on_hover_text(&w.host);
+            if ui.small_button("Test").clicked() {
+                *lights::TEST.lock().unwrap_or_else(|e| e.into_inner()) = Some(w.host.clone());
+            }
+            if ui.small_button("Remove").clicked() {
+                remove = Some(i);
+            }
+        });
+        if w.on {
+            ui.horizontal(|ui| {
+                ui.add_space(24.0);
+                ui.label(egui::RichText::new("lead").size(11.0).color(MUTED));
+                ui.add(egui::DragValue::new(&mut w.lead_ms).range(0.0..=300.0).speed(1.0).suffix(" ms"))
+                    .on_hover_text("Send the beat this far early, so the strip lights on the kick (network and LED delay)");
+                ui.checkbox(&mut w.reverse, "reverse");
+                if let Some(st) = status.iter().find(|st| st.host == w.host) {
+                    if !st.error.is_empty() {
+                        ui.label(egui::RichText::new(&st.error).size(11.0).color(ACCENT));
+                    }
+                }
+            });
+        }
+    }
+    if let Some(i) = remove {
+        s.wled.remove(i);
+    }
+    ui.horizontal(|ui| {
+        let searching = lights::SEARCHING.load(std::sync::atomic::Ordering::Acquire);
+        if ui.add_enabled(!searching, egui::Button::new("Find WLED")).clicked() {
+            lights::find_wled();
+        }
+        if searching {
+            ui.spinner();
+        }
+    });
+    // Add what the search found (off until ticked); refresh names and LED
+    // counts of strips already listed.
+    let found = std::mem::take(&mut *lights::FOUND.lock().unwrap_or_else(|e| e.into_inner()));
+    for f in found {
+        match s.wled.iter_mut().find(|w| w.host == f.host) {
+            Some(w) => {
+                w.name = f.name;
+                w.leds = f.leds;
+            }
+            None => s.wled.push(crate::config::WledLight {
+                name: f.name,
+                host: f.host,
+                leds: f.leds,
+                on: false,
+                lead_ms: 60.0,
+                reverse: false,
+            }),
+        }
+    }
+}
+
 fn settings_tab(
     ui: &mut egui::Ui,
     s: &mut Settings,
@@ -4182,6 +4263,11 @@ fn settings_tab(
                          (about a cent each) per build.",
                     );
             });
+        });
+        ui.add_space(12.0);
+        card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            lights_card(ui, s);
         });
         ui.add_space(12.0);
         card().show(ui, |ui| {

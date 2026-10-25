@@ -31,6 +31,7 @@ mod ai;
 mod audio;
 mod beats;
 mod engine;
+mod lights;
 mod link;
 mod looks;
 mod config;
@@ -663,6 +664,10 @@ fn render_loop(
     let mut flow = 0.0f64;
     // External engine link (Settings > unity_link).
     let mut link_out: Option<link::Link> = None;
+    // Lights (WLED): a worker thread; the loop hands it a frame each tick.
+    let lights = lights::Lights::start();
+    let mut light_lut: (String, std::sync::Arc<[u8; palettes::LUT_SIZE * 4]>) =
+        (String::new(), std::sync::Arc::new([0u8; palettes::LUT_SIZE * 4]));
     let mut engine: Option<engine::Engine> = None;
     let mut ext_seq = 0u64;
     let mut flow_bpm = 120.0f32;
@@ -1631,6 +1636,33 @@ fn render_loop(
             clock4: clock4.map(|c| c as f32),
             misc4: [0.0; 4],
         };
+        // Lights follow the show (lights.rs). The palette LUT is rebuilt
+        // only when the palette changes.
+        if s.lights_on || !s.wled.is_empty() {
+            if light_lut.0 != pal {
+                light_lut = (pal.to_string(), std::sync::Arc::new(palettes::lut(pal)));
+            }
+            lights.update(
+                lights::LightFrame {
+                    at: now,
+                    lut: light_lut.1.clone(),
+                    hue: dir.hue,
+                    pos,
+                    bpm: f.bpm,
+                    beat_in_bar,
+                    calm: f.calm,
+                    intensity: dir.intensity,
+                    energy: f.energy,
+                    hits4: f.hits4,
+                    pres4: f.pres4,
+                    master,
+                    strobe_live,
+                    strobe_open: strobe_gate > 0.5,
+                    smooth: crate::ai::scene_meta(r.scene_name(dir.scene)).flight,
+                },
+                &s,
+            );
+        }
         // External engine link: Trippin runs the Unity engine itself (see
         // engine.rs) — show state out over UDP, frames back through shared
         // memory. Cross-platform; nothing for the user to start.
@@ -3482,6 +3514,16 @@ fn main() -> Result<()> {
     }
     if args.iter().any(|a| a == "--check-shaders") {
         return check_shaders();
+    }
+    // `--lights-demo <host> [seconds]`: a synthetic groove on one WLED strip.
+    if let Some(h) = arg_value(&args, "--lights-demo") {
+        let secs = args
+            .iter()
+            .position(|a| a == "--lights-demo")
+            .and_then(|i| args.get(i + 2))
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(12.0);
+        return lights::demo(&h, secs);
     }
     // `--analyze track.mp3` prints the per-bar feature summary the AI show
     // builder sends to the model — the prompt-tuning / sanity-check path.

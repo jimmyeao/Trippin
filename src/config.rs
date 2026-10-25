@@ -345,6 +345,21 @@ pub enum Tristate {
     Off,
 }
 
+/// One WLED strip the lights drive (lights.rs).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WledLight {
+    pub name: String,
+    /// IP or host name.
+    pub host: String,
+    pub leds: u32,
+    pub on: bool,
+    /// Send this far ahead of the beat, for network + LED latency.
+    pub lead_ms: f32,
+    /// Run the patterns from the other end.
+    pub reverse: bool,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -412,6 +427,12 @@ pub struct Settings {
     /// over UDP and take frames back from a Spout sender as the
     /// `unity_stage` scene.
     pub unity_link: bool,
+    /// Lights follow the show (lights.rs): master switch, brightness
+    /// 0..1, white flashes allowed (strobe cues and fills), and the strips.
+    pub lights_on: bool,
+    pub light_level: f32,
+    pub light_flashes: bool,
+    pub wled: Vec<WledLight>,
     /// UDP port the show-state feed goes to (127.0.0.1).
     pub link_port: u16,
     pub latency_ms: f32,
@@ -536,6 +557,10 @@ impl Default for Settings {
             ai_web_search: true,
             beat_model: true,
             unity_link: false,
+            lights_on: false,
+            light_level: 0.8,
+            light_flashes: false,
+            wled: Vec::new(),
             link_port: 9137,
             latency_ms: 30.0,
             audio_in: String::new(),
