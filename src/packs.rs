@@ -488,17 +488,17 @@ mod tests {
         }
     }
 
-    /// A show the pinned engine can't draw stays out of the scene list
-    /// (auto-pilot, Library, remote), but its shader is still checked.
+    /// Every unity_* show in the repo can be drawn by the pinned engine (a
+    /// show for a newer one would be hidden: engine::scene_supported), and
+    /// the full list still holds hidden ones for --check-shaders.
     #[test]
-    fn shows_for_a_newer_engine_are_hidden() {
-        if std::env::var_os("TRIPPIN_ENGINE").is_some() {
-            return;
-        }
+    fn unity_shows_match_the_pinned_engine() {
         let d = crate::render::find_shader_dir().unwrap();
-        assert!(!scene_names(&d).iter().any(|s| s == "unity_fluid"));
-        assert!(scene_names_all(&d).iter().any(|s| s == "unity_fluid"));
-        assert!(scene_names(&d).iter().any(|s| s == "unity_colossus"));
+        let shown = scene_names(&d);
+        for s in scene_names_all(&d).iter().filter(|s| s.starts_with("unity_")) {
+            assert_eq!(shown.contains(s), crate::engine::scene_supported(s), "{s}");
+        }
+        assert!(crate::engine::scene_supported("unity_fluid"), "engine v16 draws unity_fluid");
     }
 
     #[test]

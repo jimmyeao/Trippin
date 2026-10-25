@@ -159,23 +159,23 @@ pub fn sweep_stale_players() {
 /// installers stay small and CI needs no Unity licence. Rebuild + upload a
 /// new `unity-engine-vN` release when the Unity project changes, and bump
 /// these. An empty checksum means no build for this platform yet.
-const RELEASE_BASE: &str = "https://github.com/jimmyeao/Trippin/releases/download/unity-engine-v15";
+const RELEASE_BASE: &str = "https://github.com/jimmyeao/Trippin/releases/download/unity-engine-v16";
 #[cfg(target_os = "macos")]
 const ASSET: (&str, &str) = (
-    "TrippinEngine-macos-v15.zip",
-    "6b91e0dad38ff954dae4e0fe4ab7dd5ef455002a38b4b30259a765d339caa745",
+    "TrippinEngine-macos-v16.zip",
+    "541db21329f37181be7ecd40f03c4da86050bff262f53da43629aa6250b6f742",
 );
 #[cfg(not(target_os = "macos"))]
 const ASSET: (&str, &str) = (
-    "TrippinEngine-windows-x64-v15.zip",
-    "17be255939951923fc6b6a8552f1b9e75a09562998e778b206a912fac6619dc8",
+    "TrippinEngine-windows-x64-v16.zip",
+    "a6b97dca2223cdcd49418ceebf1245e4fa36a81dccbf19c11e077c43d9a10f5e",
 );
 /// Written into the unpacked folder; a download whose stamp isn't the
 /// current `ASSET` is stale and gets replaced.
 const STAMP: &str = "ENGINE_VERSION";
 
 /// The engine release the app downloads (`RELEASE_BASE`).
-pub const ENGINE_VERSION: u32 = 15;
+pub const ENGINE_VERSION: u32 = 16;
 
 /// Can the engine the app runs draw this `unity_*` show? A show added in a
 /// newer engine than the pinned one stays out of the scene list until that
