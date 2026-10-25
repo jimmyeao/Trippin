@@ -4096,7 +4096,7 @@ fn settings_tab(
                 .on_hover_text(
                     "Adds video scenes: night drives, clubs, ink and smoke, played \
                      at a speed that follows the music. Downloads the clip pack \
-                     (about 190 MB) once.",
+                     (about 320 MB) once.",
                 );
             if s.video_clips {
                 let st = crate::video::STATUS.lock().unwrap_or_else(|e| e.into_inner()).clone();

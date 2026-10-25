@@ -412,15 +412,18 @@ fires a burst that blooms into swirls.
 
 ### Video scenes
 
-Settings → **Video clips** adds ten scenes built from short video loops:
-night drives through a neon city and a road tunnel, a flight over the city,
-a neon alley, highway light trails, club lasers and a club light rig, ink
-in water, coloured smoke and liquid chrome. The footage plays faster as the
+Settings → **Video clips** adds sixteen scenes built from short video
+loops: night drives through a neon city and a road tunnel, a flight over the
+city, a neon alley, highway light trails, club lasers and a club light rig,
+ink in water, coloured smoke and liquid chrome, plus six flights seen from
+the camera: down a neon avenue, low over the rooftops, diving between
+skyscrapers, over a club crowd to the DJ booth, through a warehouse rave's
+roof beams, and over a river under a lit bridge. The footage plays faster as the
 track builds and slows in breakdowns, and the music reshapes its lights
 (streaks, glints and light trails) or, on the fluid clips, the fluid
 itself. Buildings and roads never warp.
 
-The clips are a one-off download of about 190 MB the first time you switch
+The clips are a one-off download of about 320 MB the first time you switch
 the setting on. They're generated with an image-to-video model and packed
 by `tools/video_pack.py` (see its docstring to make your own).
 
