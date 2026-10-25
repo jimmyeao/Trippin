@@ -436,7 +436,7 @@ On the Effects packs card, **Install** downloads a pack, **Add pack from
 file…** installs a `.trippinpack` you were given, the tick box switches a
 pack off without removing it, and **Remove** deletes it. Changes apply the
 next time Trippin starts. From the command line:
-`trippin --install-pack file.trippinpack` and `trippin --list-packs`.
+`trippin --install-pack file.trippinpack` (or a pack id such as `night-city`, which downloads it) and `trippin --list-packs`.
 
 To make a pack, put `pack.json`, `scenes/*.wgsl`, `videos/*.tvid` (packed
 by `tools/video_pack.py`), `scene_tags.json` and `scene_energy.json` in a

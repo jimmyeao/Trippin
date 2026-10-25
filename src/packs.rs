@@ -417,27 +417,28 @@ pub fn install_file_bg(path: PathBuf) {
 }
 
 /// Download a catalog pack and install it, in the background.
+/// Download a catalog pack (checksum-verified) and install it.
+pub fn install_catalog(id: &str, set: &dyn Fn(String)) -> Result<String> {
+    let c = CATALOG.iter().find(|c| c.id == id).ok_or_else(|| anyhow!("no pack {id:?} in the catalog"))?;
+    if c.asset.1.is_empty() {
+        bail!("{} isn't published yet", c.name);
+    }
+    let zip = crate::engine::download_verified(&format!("{RELEASE_BASE}/{}", c.asset.0), c.asset, &root(), c.name, set)?;
+    let r = install_file(&zip);
+    let _ = std::fs::remove_file(&zip);
+    r
+}
+
 pub fn install_catalog_bg(id: &str) {
     let Some(c) = CATALOG.iter().find(|c| c.id == id) else { return };
     if c.asset.1.is_empty() || BUSY.swap(true, Ordering::AcqRel) {
         return;
     }
-    let (name, asset) = (c.name, c.asset);
+    let (id, name) = (c.id, c.name);
     std::thread::Builder::new()
         .name("pack-dl".into())
         .spawn(move || {
-            let r = (|| -> Result<String> {
-                let zip = crate::engine::download_verified(
-                    &format!("{RELEASE_BASE}/{}", asset.0),
-                    asset,
-                    &root(),
-                    name,
-                    &set_status,
-                )?;
-                let r = install_file(&zip);
-                let _ = std::fs::remove_file(&zip);
-                r
-            })();
+            let r = install_catalog(id, &set_status);
             match r {
                 Ok(name) => set_status(format!("{name} installed: restart Trippin to load it")),
                 Err(e) => set_status(format!("{name}: {e:#}")),

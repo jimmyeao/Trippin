@@ -3590,9 +3590,15 @@ fn main() -> Result<()> {
         return check_shaders();
     }
     // `--install-pack x.trippinpack`: install an effects pack (packs.rs),
-    // as Settings > Add pack from file does.
+    // as Settings > Add pack from file does; a catalog id (`night-city`)
+    // downloads it, as the Install button does.
     if let Some(p) = arg_value(&args, "--install-pack") {
-        let name = packs::install_file(std::path::Path::new(&p))?;
+        let path = std::path::Path::new(&p);
+        let name = if path.is_file() {
+            packs::install_file(path)?
+        } else {
+            packs::install_catalog(&p, &|s| eprintln!("{s}"))?
+        };
         println!("{name} installed in {}", packs::root().display());
         return Ok(());
     }
