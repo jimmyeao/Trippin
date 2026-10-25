@@ -1,0 +1,11 @@
+{
+  "video_aerial_city": ["urban", "flight", "slow", "dark"],
+  "video_city_drive": ["urban", "neon", "flight", "dark"],
+  "video_fpv_bridge": ["urban", "flight", "dark", "driving"],
+  "video_fpv_city": ["urban", "neon", "flight", "driving"],
+  "video_fpv_dive": ["urban", "flight", "dark", "driving"],
+  "video_fpv_rooftops": ["urban", "flight", "dark", "driving"],
+  "video_highway_trails": ["urban", "dark", "driving"],
+  "video_neon_alley": ["urban", "neon", "dark", "slow"],
+  "video_tunnel_drive": ["urban", "flight", "driving"]
+}

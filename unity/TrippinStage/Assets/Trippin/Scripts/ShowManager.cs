@@ -46,6 +46,7 @@ namespace TrippinStage
                 if (a[i] == "-tourShows") _tour = a[i + 1].Split(',');
             }
             for (int i = 0; i < shows.Length; i++) shows[i].SetActive(false);
+            ShowParams.Init(shows, names);
         }
 
         string _forced;
@@ -71,6 +72,8 @@ namespace TrippinStage
                 _cur = idx;
                 _ftSum = 0; _ftN = 0; _ftLast = Time.unscaledTime;
             }
+            // Trippin's per-show controls for the show on air.
+            if (TrippinLink.Live && want == names[_cur]) ShowParams.Apply(_cur, s.knobs);
 
             // Frame time for whichever show is up (was StageDirector-only).
             _ftSum += Time.unscaledDeltaTime;

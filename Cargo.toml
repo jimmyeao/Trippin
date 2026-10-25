@@ -11,7 +11,7 @@ cpal = "0.18.2"
 egui = "0.36"
 egui-wgpu = "0.36"
 egui-winit = "0.36"
-image = { version = "0.25.10", default-features = false, features = ["png"] }
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
 libloading = "0.8.9"
 pollster = "1.0.1"
 rfd = "0.17.2"
@@ -37,6 +37,9 @@ if-addrs = "0.15"
 mdns-sd = "0.21.4"
 rosc = "0.11.4"
 base64 = "0.23.1"
+webrtc-dtls = "0.12"
+tokio = { version = "1", default-features = false, features = ["rt", "net", "time"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 
 [build-dependencies]
 # Embeds logo.ico as the exe's icon resource on Windows.

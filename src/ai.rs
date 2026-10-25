@@ -748,7 +748,12 @@ pub fn build_show(
         return Err(anyhow!("no clips on the timeline"));
     }
     // The external engine's scene is only live while it runs — never plan on it.
-    let scenes: Vec<String> = scenes.iter().filter(|s| !s.starts_with("unity_")).cloned().collect();
+    // Video scenes likewise only once their clip is downloaded.
+    let scenes: Vec<String> = scenes
+        .iter()
+        .filter(|s| !s.starts_with("unity_") && crate::video::scene_ready(s))
+        .cloned()
+        .collect();
     let scenes = scenes.as_slice();
     let mut notes = Vec::new();
     let mut analyses = Vec::new();
@@ -1024,14 +1029,18 @@ pub fn scene_meta(name: &str) -> SceneMeta {
     }
     let dir = crate::render::find_shader_dir().ok();
     let energy = ENERGY.get_or_init(|| {
+        // Built in plus the loaded effects packs' (packs.rs).
         dir.as_ref()
-            .and_then(|d| std::fs::read_to_string(d.join("scene_energy.json")).ok())
-            .and_then(|t| serde_json::from_str::<HashMap<String, f32>>(&t).ok())
+            .map(|d| crate::packs::merged_json(d, "scene_energy.json"))
             .unwrap_or_default()
+            .into_iter()
+            .filter_map(|(k, v)| Some((k, v.as_f64()? as f32)))
+            .collect()
     });
     let about = dir
         .as_ref()
-        .and_then(|d| std::fs::read_to_string(d.join("scenes").join(format!("{name}.wgsl"))).ok())
+        .and_then(|d| crate::packs::scene_file(d, name))
+        .and_then(|p| std::fs::read_to_string(p).ok())
         .map(|src| scene_blurb(&src))
         .unwrap_or_default();
     let low = format!("{name} {}", about.to_lowercase());
@@ -2547,6 +2556,28 @@ fn find_name(want: &str, pool: &[String]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn driving_and_flying_video_scenes_are_flight_scenes() {
+        // No strobe fills on them (AGENTS.md): the flag comes from the
+        // scene's blurb, so the wording of each video scene matters.
+        for s in [
+            "video_city_drive",
+            "video_tunnel_drive",
+            "video_aerial_city",
+            "video_fpv_city",
+            "video_fpv_rooftops",
+            "video_fpv_dive",
+            "video_fpv_club",
+            "video_fpv_warehouse",
+            "video_fpv_bridge",
+        ] {
+            assert!(scene_meta(s).flight, "{s} should be a flight scene");
+        }
+        for s in ["video_club_lasers", "video_club_lights", "video_ink_water", "video_smoke_colour", "video_liquid_chrome"] {
+            assert!(!scene_meta(s).flight, "{s} isn't a flight scene");
+        }
+    }
 
     fn clip() -> Clip {
         Clip {

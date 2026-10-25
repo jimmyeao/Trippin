@@ -48,11 +48,10 @@ impl SceneTags {
     /// Read `scene_tags.json` from the shaders directory. A missing or broken
     /// file gives an empty set (every query answers "no tags"), never an error:
     /// tags only steer choices, so the app must run without them.
+    /// The loaded effects packs' own `scene_tags.json` are merged in.
     pub fn load(shader_dir: &Path) -> SceneTags {
-        std::fs::read_to_string(shader_dir.join("scene_tags.json"))
-            .ok()
-            .map(|t| SceneTags::parse(t.trim_start_matches('\u{feff}')))
-            .unwrap_or_default()
+        let m = crate::packs::merged_json(shader_dir, "scene_tags.json");
+        SceneTags::parse(&serde_json::Value::Object(m).to_string())
     }
 
     pub fn parse(json: &str) -> SceneTags {
@@ -86,16 +85,9 @@ mod tests {
         crate::render::find_shader_dir().expect("shaders dir")
     }
 
+    /// Built-in and pack scenes (`load` merges the packs' tags too).
     fn scene_ids(dir: &Path) -> Vec<String> {
-        let mut v: Vec<String> = std::fs::read_dir(dir.join("scenes"))
-            .unwrap()
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .filter(|p| p.extension().is_some_and(|e| e == "wgsl"))
-            .map(|p| p.file_stem().unwrap().to_string_lossy().into_owned())
-            .collect();
-        v.sort();
-        v
+        crate::packs::scene_names_all(dir)
     }
 
     #[test]

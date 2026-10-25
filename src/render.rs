@@ -166,11 +166,12 @@ pub struct FrameRes<'a> {
     pub repeat: &'a wgpu::Sampler,
     pub bloom: &'a wgpu::TextureView,
     pub ext: &'a wgpu::TextureView,
+    pub vid: &'a wgpu::TextureView,
 }
 
 impl FrameRes<'_> {
-    /// Bind group entries 3..=8 (after uniforms, feedback and sampler).
-    pub fn entries(&self) -> [wgpu::BindGroupEntry<'_>; 6] {
+    /// Bind group entries 3..=9 (after uniforms, feedback and sampler).
+    pub fn entries(&self) -> [wgpu::BindGroupEntry<'_>; 7] {
         [
             wgpu::BindGroupEntry {
                 binding: 3,
@@ -195,6 +196,10 @@ impl FrameRes<'_> {
             wgpu::BindGroupEntry {
                 binding: 8,
                 resource: wgpu::BindingResource::TextureView(self.ext),
+            },
+            wgpu::BindGroupEntry {
+                binding: 9,
+                resource: wgpu::BindingResource::TextureView(self.vid),
             },
         ]
     }
@@ -247,6 +252,8 @@ pub fn frame_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
             tex_entry(7, D2),
             // External frame (Spout in) — gfx::Statics::ext.
             tex_entry(8, D2),
+            // Video clip frames (two stacked slots) — gfx::Statics::vid.
+            tex_entry(9, D2),
         ],
     })
 }
@@ -670,6 +677,7 @@ impl Renderer {
                 repeat: &statics.repeat,
                 bloom: bloom.view(),
                 ext: &statics.ext_view,
+                vid: &statics.vid_view,
             },
         );
 
@@ -802,7 +810,7 @@ impl Renderer {
     ) -> [wgpu::BindGroup; 2] {
         let make = |t: &wgpu::Texture| {
             let view = t.create_view(&Default::default());
-            let [e3, e4, e5, e6, e7, e8] = res.entries();
+            let [e3, e4, e5, e6, e7, e8, e9] = res.entries();
             device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: None,
                 layout,
@@ -825,6 +833,7 @@ impl Renderer {
                     e6,
                     e7,
                     e8,
+                    e9,
                 ],
             })
         };
@@ -853,6 +862,7 @@ impl Renderer {
             repeat: &self.statics.repeat,
             bloom: self.bloom.view(),
             ext: &self.statics.ext_view,
+                vid: &self.statics.vid_view,
         };
         self.bind_groups = Self::make_bind_groups(
             &self.device,
@@ -974,6 +984,12 @@ impl Renderer {
         self.scenes.get(i).map_or("", |s| s.name.as_str())
     }
 
+    /// Upload one video frame (RGBA8, VID_W x VID_H) into slot 0 (top) or
+    /// 1 (bottom) of `vid_tex`.
+    pub fn upload_video(&self, slot: u32, rgba: &[u8]) {
+        upload_video(&self.queue, &self.statics.vid, slot, rgba);
+    }
+
     /// Upload an external frame (RGBA8, EXT_W x EXT_H) for `ext_tex`.
     pub fn upload_external(&self, rgba: &[u8]) {
         use crate::gfx::{EXT_H, EXT_W};
@@ -1049,11 +1065,8 @@ impl Renderer {
         };
 
         // Pick up newly added scene files.
-        let mut paths: Vec<PathBuf> = std::fs::read_dir(self.shader_dir.join("scenes"))
-            .map(|rd| rd.filter_map(|e| e.ok().map(|e| e.path())).collect())
-            .unwrap_or_default();
-        paths.retain(|p| p.extension().is_some_and(|e| e == "wgsl"));
-        paths.sort();
+        // Built-in scenes plus the loaded effects packs' (packs.rs).
+        let paths = crate::packs::scene_files(&self.shader_dir);
         for p in paths {
             if !self.scenes.iter().any(|s| s.path == p) {
                 let name = p.file_stem().unwrap().to_string_lossy().into_owned();
@@ -1669,6 +1682,7 @@ impl Renderer {
                 repeat: &self.statics.repeat,
                 bloom: self.bloom.view(),
                 ext: &self.statics.ext_view,
+                vid: &self.statics.vid_view,
             },
             c.clone(),
         ) {
@@ -1791,6 +1805,7 @@ impl Renderer {
                 repeat: &self.statics.repeat,
                 bloom: self.bloom.view(),
                 ext: &self.statics.ext_view,
+                vid: &self.statics.vid_view,
             },
         );
         // The present pipeline is built for the surface format (usually
@@ -2027,4 +2042,32 @@ mod tests {
         assert_eq!(header_title(&body), None);
         assert_eq!(header_title("// @title\n// nothing after the tag\n"), None);
     }
+}
+
+/// Write one video frame into a slot of `gfx::Statics::vid` (shared by the
+/// renderer and `--snap`).
+pub fn upload_video(queue: &wgpu::Queue, tex: &wgpu::Texture, slot: u32, rgba: &[u8]) {
+    use crate::gfx::{VID_H, VID_W};
+    if rgba.len() != (VID_W * VID_H * 4) as usize || slot > 1 {
+        return;
+    }
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: tex,
+            mip_level: 0,
+            origin: wgpu::Origin3d { x: 0, y: slot * VID_H, z: 0 },
+            aspect: wgpu::TextureAspect::All,
+        },
+        rgba,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(VID_W * 4),
+            rows_per_image: Some(VID_H),
+        },
+        wgpu::Extent3d {
+            width: VID_W,
+            height: VID_H,
+            depth_or_array_layers: 1,
+        },
+    );
 }

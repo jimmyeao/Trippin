@@ -24,6 +24,8 @@ namespace TrippinStage
         public float[] palette = new float[24];
         public string scene = "";
         public bool cut, drums = true;
+        /// The on-air show's [TrippinParam] values, in manifest order (ShowParams).
+        public float[] knobs = new float[0];
     }
 
     [DefaultExecutionOrder(-100)]

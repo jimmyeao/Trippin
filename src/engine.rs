@@ -173,6 +173,21 @@ const ASSET: (&str, &str) = (
 /// Written into the unpacked folder; a download whose stamp isn't the
 /// current `ASSET` is stale and gets replaced.
 const STAMP: &str = "ENGINE_VERSION";
+
+/// The engine release the app downloads (`RELEASE_BASE`).
+pub const ENGINE_VERSION: u32 = 15;
+
+/// Can the engine the app runs draw this `unity_*` show? A show added in a
+/// newer engine than the pinned one stays out of the scene list until that
+/// engine is published (bump `ENGINE_VERSION`). `TRIPPIN_ENGINE` (a dev
+/// player build) runs everything.
+pub fn scene_supported(name: &str) -> bool {
+    let needs = match name {
+        "unity_fluid" => 16,
+        _ => 0,
+    };
+    needs <= ENGINE_VERSION || std::env::var_os("TRIPPIN_ENGINE").is_some()
+}
 const HEADER: usize = 64;
 
 /// The latest frame from the engine, RGBA8 at `EXT_W` x `EXT_H`.
@@ -186,6 +201,10 @@ pub struct InFrame {
 /// Where the player executable lives: bundled next to Trippin (installer /
 /// .app), downloaded into the data dir, or the dev build in the repo.
 pub fn player_path() -> Option<PathBuf> {
+    // TRIPPIN_ENGINE=<player exe>: a dev build anywhere (testing a new show).
+    if let Some(p) = std::env::var_os("TRIPPIN_ENGINE").map(PathBuf::from).filter(|p| p.is_file()) {
+        return Some(p);
+    }
     let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
     let data = crate::config::data_dir().join("unity");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("unity").join("TrippinStage");
@@ -212,6 +231,13 @@ pub fn player_path() -> Option<PathBuf> {
         c.retain(|p| !p.starts_with(&data));
     }
     c.into_iter().find(|p| p.is_file())
+}
+
+/// The engine's show-param manifest (absolute, like the log: the macOS
+/// player resolves relative paths beside its .app).
+pub fn params_path() -> PathBuf {
+    let p = crate::config::data_dir().join("unity-params.json");
+    std::path::absolute(&p).unwrap_or(p)
 }
 
 /// Supervises the engine process and owns the frame file + reader thread.
@@ -369,6 +395,10 @@ impl Engine {
         cmd.arg("-batchmode")
             .arg("-trippinFrame")
             .arg(&self.path)
+            // Where the player lists its shows' [TrippinParam] controls
+            // (showparams.rs). Older players ignore the flag.
+            .arg("-trippinParams")
+            .arg(params_path())
             .arg("-trippinPort")
             .arg(self.port.to_string())
             .arg("-logFile")
@@ -411,57 +441,43 @@ impl Drop for Engine {
 /// Download this platform's player zip, verify it, unpack into
 /// `<data dir>/unity/`. Progress goes into `st`.
 fn download(st: &Mutex<Result<String, String>>) -> Result<()> {
-    use sha2::{Digest, Sha256};
-    use std::io::{Read, Write};
     let (name, sha) = ASSET;
     if sha.is_empty() {
         return Err(anyhow!("no Unity engine build for this platform yet"));
     }
     let set = |s: String| *st.lock().unwrap_or_else(|p| p.into_inner()) = Ok(s);
+    install_zip(
+        &format!("{RELEASE_BASE}/{name}"),
+        ASSET,
+        &crate::config::data_dir().join("unity"),
+        STAMP,
+        "the Unity engine",
+        &set,
+    )?;
+    set("starting".into());
+    Ok(())
+}
+
+/// Download `url` (release asset `name`, pinned by `sha`), verify it and
+/// unpack it into `final_dir` with a `stamp` file naming the asset. Shared
+/// by the Unity engine and the video clip pack. `what` labels progress.
+pub fn install_zip(
+    url: &str,
+    (name, sha): (&str, &str),
+    final_dir: &Path,
+    stamp: &str,
+    what: &str,
+    set: &dyn Fn(String),
+) -> Result<()> {
     // Unpack beside the final folder and rename it into place at the end:
-    // player_path() sees the exe the moment it exists, and launching a
+    // the reader sees the content the moment it exists, and launching a
     // half-unpacked player fails (sharing violation).
-    let final_dir = crate::config::data_dir().join("unity");
-    let dir = crate::config::data_dir().join("unity.part");
+    let parent = final_dir.parent().ok_or_else(|| anyhow!("no parent for {}", final_dir.display()))?;
+    let zip_path = download_verified(url, (name, sha), parent, what, set)?;
+    let dir = final_dir.with_extension("part");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir)?;
-    let zip_path = crate::config::data_dir().join(format!("{name}.part"));
-    let agent = ureq::Agent::config_builder()
-        .timeout_global(Some(Duration::from_secs(1800)))
-        .tls_config(crate::config::tls())
-        .build()
-        .new_agent();
-    let resp = agent
-        .get(&format!("{RELEASE_BASE}/{name}"))
-        .call()
-        .with_context(|| format!("downloading {name}"))?;
-    let total: u64 = resp
-        .headers()
-        .get("content-length")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
-    let mut reader = resp.into_body().into_reader();
-    let mut file = std::fs::File::create(&zip_path)?;
-    let mut hasher = Sha256::new();
-    let mut buf = vec![0u8; 1 << 16];
-    let mut got = 0u64;
-    loop {
-        let n = reader.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        file.write_all(&buf[..n])?;
-        hasher.update(&buf[..n]);
-        got += n as u64;
-        set(format!("downloading the Unity engine… {} / {} MB", got >> 20, total >> 20));
-    }
-    drop(file);
-    if format!("{:x}", hasher.finalize()) != sha {
-        let _ = std::fs::remove_file(&zip_path);
-        return Err(anyhow!("{name}: checksum mismatch"));
-    }
-    set("unpacking the Unity engine…".into());
+    set(format!("unpacking {what}…"));
     let mut zip = zip::ZipArchive::new(std::fs::File::open(&zip_path)?)?;
     for i in 0..zip.len() {
         let mut e = zip.by_index(i)?;
@@ -483,11 +499,58 @@ fn download(st: &Mutex<Result<String, String>>) -> Result<()> {
         }
     }
     let _ = std::fs::remove_file(&zip_path);
-    std::fs::write(dir.join(STAMP), name)?;
-    let _ = std::fs::remove_dir_all(&final_dir);
-    std::fs::rename(&dir, &final_dir).context("installing the Unity engine")?;
-    set("starting".into());
+    std::fs::write(dir.join(stamp), name)?;
+    let _ = std::fs::remove_dir_all(final_dir);
+    std::fs::rename(&dir, final_dir).with_context(|| format!("installing {what}"))?;
     Ok(())
+}
+
+/// Download `url` to `<dir>/<name>.part`, checking its sha256 on the way;
+/// returns the file's path. A mismatch deletes it.
+pub fn download_verified(
+    url: &str,
+    (name, sha): (&str, &str),
+    dir: &Path,
+    what: &str,
+    set: &dyn Fn(String),
+) -> Result<PathBuf> {
+    use sha2::{Digest, Sha256};
+    use std::io::{Read, Write};
+    std::fs::create_dir_all(dir)?;
+    let zip_path = dir.join(format!("{name}.part"));
+    let agent = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(1800)))
+        .tls_config(crate::config::tls())
+        .build()
+        .new_agent();
+    let resp = agent.get(url).call().with_context(|| format!("downloading {name}"))?;
+    let total: u64 = resp
+        .headers()
+        .get("content-length")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    let mut reader = resp.into_body().into_reader();
+    let mut file = std::fs::File::create(&zip_path)?;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 1 << 16];
+    let mut got = 0u64;
+    loop {
+        let n = reader.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        file.write_all(&buf[..n])?;
+        hasher.update(&buf[..n]);
+        got += n as u64;
+        set(format!("downloading {what}… {} / {} MB", got >> 20, total >> 20));
+    }
+    drop(file);
+    if format!("{:x}", hasher.finalize()) != sha {
+        let _ = std::fs::remove_file(&zip_path);
+        return Err(anyhow!("{name}: checksum mismatch"));
+    }
+    Ok(zip_path)
 }
 
 /// Poll the frame file; copy out each new, complete frame.

@@ -1,0 +1,6 @@
+{
+  "video_club_decks": ["stage", "dark"],
+  "video_club_lasertunnel": ["stage", "neon", "driving"],
+  "video_club_ledwall": ["stage", "neon", "driving"],
+  "video_club_speaker": ["abstract", "dark"]
+}

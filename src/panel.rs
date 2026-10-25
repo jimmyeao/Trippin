@@ -268,6 +268,8 @@ enum LibChip {
     Seasonal,
     /// Starred scenes only (Settings.favourite_scenes).
     Fav,
+    /// Video clip scenes (`video_*`, Settings > Video clips).
+    Video,
 }
 
 impl Tab {
@@ -997,12 +999,16 @@ fn perform_tab(
                 LibChip::Heavy => is_heavy,
                 LibChip::Seasonal => in_season(n, date).is_some(),
                 LibChip::Fav => s.favourite_scenes.iter().any(|f| f == n),
+                LibChip::Video => n.starts_with("video_"),
             }
         })
         .collect();
     let rotating: Vec<usize> = (0..scenes.len())
         .filter(|&i| {
-            !s.disabled_scenes.contains(&scenes[i])
+            // Video scenes rotate only with their clip on disk (the same
+            // gate as the auto-pilot's).
+            crate::video::scene_ready(&scenes[i])
+                && !s.disabled_scenes.contains(&scenes[i])
                 && if heavy.get(i).copied().unwrap_or(false) {
                     heavy_on
                 } else {
@@ -1043,6 +1049,7 @@ fn perform_tab(
             (LibChip::Heavy, "3D"),
             (LibChip::Seasonal, "Seasonal"),
             (LibChip::Fav, "fav"),
+            (LibChip::Video, "Video"),
         ] {
             let on = *chip == c;
             let b = egui::Button::new(
@@ -1105,6 +1112,9 @@ fn perform_tab(
         });
     });
     // Stats line: counts left, all on/off at the library's right edge.
+    // They act on the scenes shown (the chip and the search), so "all off",
+    // then Video, then "all on" leaves only the video scenes rotating.
+    let scope = if shown.len() == scenes.len() { "all" } else { "shown" };
     // allocate_ui_with_layout pins the right edge to the real content width
     // (a panel doesn't shrink the parent's max_rect — right_to_left on the
     // parent would anchor into the inspector's gutter).
@@ -1130,20 +1140,24 @@ fn perform_tab(
             |ui| {
                 if ui
                     .add(egui::Button::new(
-                        egui::RichText::new("all off").size(11.0).color(ACCENT),
+                        egui::RichText::new(format!("{scope} off")).size(11.0).color(ACCENT),
                     ).fill(egui::Color32::TRANSPARENT).frame(false))
                     .clicked()
                 {
-                    s.disabled_scenes = scenes.to_vec();
+                    for &i in &shown {
+                        if !s.disabled_scenes.contains(&scenes[i]) {
+                            s.disabled_scenes.push(scenes[i].clone());
+                        }
+                    }
                 }
                 ui.label(egui::RichText::new("·").size(11.0).color(FAINT));
                 if ui
                     .add(egui::Button::new(
-                        egui::RichText::new("all on").size(11.0).color(ACCENT),
+                        egui::RichText::new(format!("{scope} on")).size(11.0).color(ACCENT),
                     ).fill(egui::Color32::TRANSPARENT).frame(false))
                     .clicked()
                 {
-                    s.disabled_scenes.clear();
+                    s.disabled_scenes.retain(|n| !shown.iter().any(|&i| &scenes[i] == n));
                 }
             },
         );
@@ -1362,6 +1376,8 @@ fn scene_tile(
     // bundled font has no ❄ glyph.
     let tag = if seasonal {
         "season"
+    } else if name.starts_with("video_") {
+        "video"
     } else if is_heavy {
         "3D"
     } else {
@@ -1813,6 +1829,12 @@ fn inspector_body(
         });
     });
 
+    // Unity show controls (showparams.rs) while a unity_* show is on air.
+    if let Some(name) = scenes.get(st.scene).filter(|n| crate::showparams::has_controls(n)) {
+        let title = st.scene_titles.get(st.scene).map(String::as_str).unwrap_or(name);
+        ui.add_space(8.0);
+        show_controls(ui, s, name, title);
+    }
 }
 
 /// A summary row — label left, monospaced value right, chevron — that
@@ -2470,6 +2492,36 @@ fn palette_column(ui: &mut egui::Ui, s: &mut Settings) {
 }
 
 /// A labelled control row for the inspector — tighter than `row`.
+/// Speed / Reactivity for the Unity show on air, plus the controls the
+/// show declares itself (`[TrippinParam]`, read from the engine's
+/// manifest). Values persist per show; Reset puts its defaults back.
+fn show_controls(ui: &mut egui::Ui, s: &mut Settings, scene: &str, title: &str) {
+    use crate::showparams as sp;
+    use crate::ui_theme::*;
+    section_label(ui, "show controls");
+    card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        // Width captured here, not inside the rows (layout rule, AGENTS.md).
+        let slider_w = (ui.available_width() - 60.0 - 70.0).max(60.0);
+        let shown = ellipsize(ui.painter(), title, &egui::FontId::proportional(12.0), ui.available_width());
+        ui.label(egui::RichText::new(shown).size(12.0).color(MUTED));
+        let defs: Vec<sp::ParamDef> = sp::builtin().into_iter().chain(sp::show_defs(scene)).collect();
+        for d in &defs {
+            let mut v = sp::value(&s.show_params, scene, d);
+            ctl_row(ui, &d.label, |ui| {
+                ui.spacing_mut().slider_width = slider_w;
+                if ui.add(egui::Slider::new(&mut v, d.min..=d.max).max_decimals(2)).changed() {
+                    s.show_params.entry(scene.to_string()).or_default().insert(d.id.clone(), v);
+                }
+            });
+        }
+        let custom = s.show_params.get(scene).is_some_and(|m| !m.is_empty());
+        if ui.add_enabled(custom, egui::Button::new("Reset")).clicked() {
+            s.show_params.remove(scene);
+        }
+    });
+}
+
 fn ctl_row(ui: &mut egui::Ui, label: &str, body: impl FnOnce(&mut egui::Ui)) {
     ui.horizontal(|ui| {
         ui.add_sized(
@@ -3863,9 +3915,278 @@ pub(crate) fn cue_param_ui(
     }
 }
 
+/// Effects packs (packs.rs): what's installed, switch on/off, remove, the
+/// catalog, and "Add pack from file" for packs bought or shared elsewhere.
+/// The scene list is fixed for the run, so every change says "restart".
+fn effects_packs(ui: &mut egui::Ui, s: &mut Settings) {
+    use crate::packs;
+    use crate::ui_theme::*;
+    section_label(ui, "effects packs");
+    ui.small("Extra scenes that install apart from the app, such as the video clip scenes.");
+    ui.add_space(4.0);
+    let mut restart = packs::CHANGED.load(std::sync::atomic::Ordering::Acquire);
+    // Label widths from the card: `available_width` inside a `horizontal`
+    // sees the parent's max_rect and can overflow (AGENTS.md).
+    let card_w = ui.available_width();
+    for p in packs::all() {
+        let font = egui::FontId::proportional(12.5);
+        ui.horizontal(|ui| {
+            let mut on = !s.disabled_packs.contains(&p.id);
+            if ui.checkbox(&mut on, "").on_hover_text("Load this pack's scenes (after a restart)").changed() {
+                if on {
+                    s.disabled_packs.retain(|d| d != &p.id);
+                } else {
+                    s.disabled_packs.push(p.id.clone());
+                }
+            }
+            restart |= on == p.disabled;
+            let w = (card_w - 100.0).max(60.0);
+            let label = format!("{} · v{}{}", p.name, p.version, if p.installed { "" } else { " · dev" });
+            ui.label(egui::RichText::new(ellipsize(ui.painter(), &label, &font, w)).font(font.clone()))
+                .on_hover_text(&p.about);
+            if p.installed && ui.small_button("Remove").clicked() {
+                if let Err(e) = packs::remove(&p.id) {
+                    *packs::STATUS.lock().unwrap_or_else(|e| e.into_inner()) = format!("{e:#}");
+                }
+            }
+        });
+        if let Some(why) = &p.problem {
+            ui.small(format!("  not loaded: {why}"));
+        }
+    }
+    let have = |id: &str| packs::all().iter().any(|p| p.id == id) || packs::root().join(id).is_dir();
+    let missing: Vec<&packs::CatalogEntry> = packs::CATALOG.iter().filter(|c| !have(c.id)).collect();
+    if !missing.is_empty() {
+        ui.add_space(4.0);
+        ui.small("Available:");
+        for c in missing {
+            ui.horizontal(|ui| {
+                let font = egui::FontId::proportional(12.5);
+                let w = (card_w - 90.0).max(60.0);
+                let label = format!("{} · {} MB", c.name, c.size_mb);
+                ui.label(egui::RichText::new(ellipsize(ui.painter(), &label, &font, w)).font(font))
+                    .on_hover_text(c.about);
+                let published = !c.asset.1.is_empty();
+                let b = ui.add_enabled(published && !packs::busy(), egui::Button::new("Install").small());
+                if !published {
+                    b.on_hover_text("Not published yet");
+                } else if b.clicked() {
+                    packs::install_catalog_bg(c.id);
+                }
+            });
+        }
+    }
+    ui.add_space(4.0);
+    if ui
+        .add_enabled(!packs::busy(), egui::Button::new("Add pack from file…"))
+        .on_hover_text("Install a .trippinpack file")
+        .clicked()
+    {
+        if let Some(p) = rfd::FileDialog::new().add_filter("Trippin pack", &["trippinpack", "zip"]).pick_file() {
+            packs::install_file_bg(p);
+        }
+    }
+    let st = packs::STATUS.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    if !st.is_empty() {
+        ui.small(st);
+    }
+    if restart {
+        ui.small(egui::RichText::new("Restart Trippin to apply pack changes.").color(ACCENT));
+    }
+}
+
 /// Settings page: app-wide preferences that aren't part of performing —
 /// audio source & sync, what the auto-pilot may do, and the AI show
 /// builder's provider. Two bounded columns, like the Stream page (A1).
+/// Lights (lights.rs): WLED strips that follow the show. Find adds the
+/// strips on the network (off until ticked); Test runs a rainbow on one for
+/// 3 s, even with the lights off.
+fn lights_card(ui: &mut egui::Ui, s: &mut Settings) {
+    use crate::lights;
+    use crate::ui_theme::*;
+    section_label(ui, "lights");
+    ui.checkbox(&mut s.lights_on, "Lights follow the show")
+        .on_hover_text("WLED strips pulse on the beat in the palette, chase the bar and breathe through breakdowns.");
+    ui.horizontal(|ui| {
+        ui.label("Brightness");
+        ui.add(egui::Slider::new(&mut s.light_level, 0.0..=1.0).show_value(false));
+    });
+    ui.checkbox(&mut s.light_flashes, "Allow white flashes")
+        .on_hover_text("Strobe cues and drum fills flash the strips white, at most 3 times a second. Never on tunnel or flight scenes.");
+    ui.add_space(4.0);
+    let status = lights::STATUS.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let mut remove = None;
+    // Widths from the card, not inside the rows: `available_width` in a
+    // `horizontal` sees the parent's max_rect and can overflow (AGENTS.md).
+    let label_w = (ui.available_width() - 150.0).max(60.0);
+    for (i, w) in s.wled.iter_mut().enumerate() {
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut w.on, "");
+            let font = egui::FontId::proportional(12.5);
+            let label = format!("{} · {} LEDs", w.name, w.leds);
+            let width = label_w;
+            ui.label(egui::RichText::new(ellipsize(ui.painter(), &label, &font, width)).font(font))
+                .on_hover_text(&w.host);
+            if ui.small_button("Test").clicked() {
+                *lights::TEST.lock().unwrap_or_else(|e| e.into_inner()) = Some(w.host.clone());
+            }
+            if ui.small_button("Remove").clicked() {
+                remove = Some(i);
+            }
+        });
+        if w.on {
+            ui.horizontal(|ui| {
+                ui.add_space(24.0);
+                ui.label(egui::RichText::new("lead").size(11.0).color(MUTED));
+                ui.add(egui::DragValue::new(&mut w.lead_ms).range(0.0..=300.0).speed(1.0).suffix(" ms"))
+                    .on_hover_text("Send the beat this far early, so the strip lights on the kick (network and LED delay)");
+                ui.checkbox(&mut w.reverse, "reverse");
+                if let Some(st) = status.iter().find(|st| st.host == w.host) {
+                    if !st.error.is_empty() {
+                        ui.label(egui::RichText::new(&st.error).size(11.0).color(ACCENT));
+                    }
+                }
+            });
+        }
+    }
+    if let Some(i) = remove {
+        s.wled.remove(i);
+    }
+    ui.horizontal(|ui| {
+        let searching = lights::SEARCHING.load(std::sync::atomic::Ordering::Acquire);
+        if ui.add_enabled(!searching, egui::Button::new("Find WLED")).clicked() {
+            lights::find_wled();
+        }
+        if searching {
+            ui.spinner();
+        }
+    });
+    // Add what the search found (off until ticked); refresh names and LED
+    // counts of strips already listed.
+    let found = std::mem::take(&mut *lights::FOUND.lock().unwrap_or_else(|e| e.into_inner()));
+    for f in found {
+        match s.wled.iter_mut().find(|w| w.host == f.host) {
+            Some(w) => {
+                w.name = f.name;
+                w.leds = f.leds;
+            }
+            None => s.wled.push(crate::config::WledLight {
+                name: f.name,
+                host: f.host,
+                leds: f.leds,
+                on: false,
+                lead_ms: 60.0,
+                reverse: false,
+            }),
+        }
+    }
+    hue_section(ui, s, label_w);
+}
+
+/// Philips Hue: find and pair a bridge, pick an entertainment area, stream.
+fn hue_section(ui: &mut egui::Ui, s: &mut Settings, label_w: f32) {
+    use crate::hue;
+    use crate::ui_theme::*;
+    ui.add_space(8.0);
+    ui.label(egui::RichText::new("Philips Hue").strong());
+    let (busy, msg, found, areas) = {
+        let mut u = hue::UI.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(b) = u.paired.take() {
+            s.hue = b;
+        }
+        (u.busy, u.msg.clone(), u.found.clone(), u.areas.clone())
+    };
+    let font = egui::FontId::proportional(12.5);
+    if s.hue.user.is_empty() {
+        ui.small("Pair a Hue bridge, then pick an entertainment area (made in the Hue app).");
+        ui.horizontal(|ui| {
+            if ui.add_enabled(!busy, egui::Button::new("Find bridge")).clicked() {
+                hue::find_bg();
+            }
+            if busy {
+                ui.spinner();
+            }
+        });
+        for (ip, name) in &found {
+            ui.horizontal(|ui| {
+                let label = format!("{name} · {ip}");
+                ui.label(egui::RichText::new(ellipsize(ui.painter(), &label, &font, label_w)).font(font.clone()));
+                if ui.add_enabled(!busy, egui::Button::new("Pair").small()).on_hover_text("Then press the link button on the bridge").clicked() {
+                    hue::pair_bg(ip.clone(), name.clone());
+                }
+            });
+        }
+    } else {
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut s.hue_on, "");
+            let label = format!("{} · {}", s.hue.name, if s.hue.area_name.is_empty() { "no area" } else { &s.hue.area_name });
+            ui.label(egui::RichText::new(ellipsize(ui.painter(), &label, &font, label_w)).font(font.clone()));
+            if ui.small_button("Forget").on_hover_text("Unpair this bridge").clicked() {
+                s.hue = Default::default();
+                s.hue_on = false;
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.add_space(24.0);
+            let mut pick = None;
+            egui::ComboBox::from_id_salt("hue_area")
+                .selected_text(if s.hue.area_name.is_empty() { "choose area" } else { &s.hue.area_name })
+                .show_ui(ui, |ui| {
+                    for (id, name, n) in &areas {
+                        if ui.selectable_label(*id == s.hue.area, format!("{name} ({n})")).clicked() {
+                            pick = Some((id.clone(), name.clone()));
+                        }
+                    }
+                });
+            if let Some((id, name)) = pick {
+                s.hue.area = id;
+                s.hue.area_name = name;
+            }
+            if ui.add_enabled(!busy, egui::Button::new("reload").small()).on_hover_text("Reload the areas").clicked()
+                || (areas.is_empty() && !busy && msg.is_empty())
+            {
+                hue::areas_bg(s.hue.clone());
+            }
+            ui.label(egui::RichText::new("lead").size(11.0).color(MUTED));
+            ui.add(egui::DragValue::new(&mut s.hue_lead_ms).range(0.0..=400.0).speed(1.0).suffix(" ms"))
+                .on_hover_text("Send the beat this far early: Hue bulbs lag more than LED strips");
+        });
+        let st = crate::lights::HUE_STATUS.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if s.hue_on && !st.is_empty() {
+            ui.small(st);
+        }
+        // Bulbs that can't join an entertainment area (non-Hue makes): a
+        // colour change each bar, one light at a time (hue.rs).
+        let all = hue::LIGHTS.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let slow: Vec<&hue::BridgeLight> = all.iter().filter(|l| l.colour && !l.streams).collect();
+        egui::CollapsingHeader::new(format!("Other colour lights on the bridge ({})", slow.len()))
+            .id_salt("hue_slow")
+            .show(ui, |ui| {
+                ui.small("These can't stream, so they change colour once a bar instead of on every beat.");
+                if all.is_empty() && !busy {
+                    hue::lights_bg(s.hue.clone());
+                }
+                for l in slow {
+                    let mut on = s.hue_slow.contains(&l.id);
+                    let label = format!("{} · {}", l.name, l.maker);
+                    if ui
+                        .checkbox(&mut on, egui::RichText::new(ellipsize(ui.painter(), &label, &font, label_w)).font(font.clone()))
+                        .changed()
+                    {
+                        if on {
+                            s.hue_slow.push(l.id.clone());
+                        } else {
+                            s.hue_slow.retain(|x| x != &l.id);
+                        }
+                    }
+                }
+            });
+    }
+    if !msg.is_empty() {
+        ui.small(egui::RichText::new(msg).color(MUTED));
+    }
+}
+
 fn settings_tab(
     ui: &mut egui::Ui,
     s: &mut Settings,
@@ -4058,6 +4379,11 @@ fn settings_tab(
         ui.add_space(12.0);
         card().show(ui, |ui| {
             ui.set_width(ui.available_width());
+            effects_packs(ui, s);
+        });
+        ui.add_space(12.0);
+        card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
             section_label(ui, "gpu baseline");
             if let Some((done, total, cur)) = &st.perf_prog {
                 ui.horizontal(|ui| {
@@ -4182,6 +4508,11 @@ fn settings_tab(
                          (about a cent each) per build.",
                     );
             });
+        });
+        ui.add_space(12.0);
+        card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            lights_card(ui, s);
         });
         ui.add_space(12.0);
         card().show(ui, |ui| {

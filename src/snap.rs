@@ -215,6 +215,7 @@ pub fn run(args: &[String]) -> Result<()> {
             repeat: &statics.repeat,
             bloom: bloom.view(),
             ext: &statics.ext_view,
+            vid: &statics.vid_view,
         },
     );
     let out = device.create_texture(&wgpu::TextureDescriptor {
@@ -368,11 +369,8 @@ pub fn run(args: &[String]) -> Result<()> {
         }
     };
 
-    let mut scenes: Vec<PathBuf> = std::fs::read_dir(dir.join("scenes"))?
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().is_some_and(|e| e == "wgsl"))
-        .collect();
-    scenes.sort();
+    // Built in plus the effects packs' scenes (packs.rs).
+    let mut scenes: Vec<PathBuf> = crate::packs::scene_files_all(&dir);
     if which != "all" {
         let want: Vec<&str> = which.split(',').collect();
         scenes.retain(|p| {
@@ -418,9 +416,27 @@ pub fn run(args: &[String]) -> Result<()> {
         }
         let mut cur = 0usize;
         let mut frame = 0u32;
+        // video_* scenes: the clip plays at 1x on the snapshot clock.
+        let vclip = name
+            .strip_prefix("video_")
+            .and_then(crate::video::clip_path)
+            .and_then(|p| crate::video::Clip::open(&p).ok());
+        if name.starts_with("video_") && vclip.is_none() {
+            eprintln!("{name}: no clip on disk (videos/ or TRIPPIN_VIDEOS) — it renders black");
+        }
         // One full frame: scene → bloom → present.
         let step = |t: f32, frame: u32, cur: &mut usize| {
-            let u = groove(t, w, h, frame, bloom_amt, tonemap, calm);
+            let mut u = groove(t, w, h, frame, bloom_amt, tonemap, calm);
+            if let Some(c) = &vclip {
+                let fpos = t as f64 * c.fps as f64;
+                let f0 = fpos.floor() as usize;
+                for (slot, f) in [(0, f0), (1, f0 + 1)] {
+                    if let Ok(px) = c.decode(f) {
+                        render::upload_video(&queue, &statics.vid, slot, &px);
+                    }
+                }
+                u.misc4[1] = fpos.fract() as f32;
+            }
             queue.write_buffer(&ubuf, 0, bytemuck::bytes_of(&u));
             let next = 1 - *cur;
             let mut enc = device.create_command_encoder(&Default::default());
@@ -527,7 +543,11 @@ pub fn run(args: &[String]) -> Result<()> {
         if energy_mode {
             let (m, b, c) = frame_stats(&grabs);
             println!("{name:<18} motion {m:.4} bright {b:.3} colour {c:.3}");
-            energy_rows.push((name, m, b, c));
+            // unity_* shows only draw with the engine running: a snap is
+            // black, and a 0.0 rating would mark them as dead calm.
+            if !name.starts_with("unity_") {
+                energy_rows.push((name, m, b, c));
+            }
             continue;
         }
         if bench > 0 {
@@ -553,14 +573,22 @@ pub fn run(args: &[String]) -> Result<()> {
             let below = energy_rows.iter().filter(|r| col(r) < v).count();
             below as f32 / (energy_rows.len() - 1).max(1) as f32
         };
-        let mut out = serde_json::Map::new();
+        // Ranked over every scene, then each written where it lives: the
+        // built-in file, or its pack's own (the AI builder merges them).
+        let mut files: std::collections::BTreeMap<PathBuf, serde_json::Map<String, serde_json::Value>> =
+            Default::default();
         for r in &energy_rows {
             let e = 0.5 * pct(&|x| x.1, r.1) + 0.25 * pct(&|x| x.2, r.2) + 0.25 * pct(&|x| x.3, r.3);
-            out.insert(r.0.clone(), serde_json::json!((e as f64 * 100.0).round() / 100.0));
+            let home = crate::packs::owner(&r.0).map_or_else(|| dir.clone(), |p| p.dir.clone());
+            files
+                .entry(home.join("scene_energy.json"))
+                .or_default()
+                .insert(r.0.clone(), serde_json::json!((e as f64 * 100.0).round() / 100.0));
         }
-        let file = dir.join("scene_energy.json");
-        std::fs::write(&file, serde_json::to_string_pretty(&out)? + "\n")?;
-        println!("wrote {}", file.display());
+        for (file, out) in files {
+            std::fs::write(&file, serde_json::to_string_pretty(&out)? + "\n")?;
+            println!("wrote {}", file.display());
+        }
     }
     if !report.is_empty() {
         report.sort_by(|a, b| b.1.total_cmp(&a.1));

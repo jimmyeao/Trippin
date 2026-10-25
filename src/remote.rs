@@ -12,6 +12,9 @@
 //! C→S  {"cmd":"look","look":"club-red"|"3"}        — a saved Look by id or slot
 //! C→S  {"cmd":"style","style":"rock"|"off"}       — the Style steering the auto-pilot
 //! C→S  {"cmd":"set","key":"palette","value":"sunset"}     — SetKey whitelist
+//! C→S  {"cmd":"set","key":"show_param:swirl","value":55}  — a control of the
+//!      Unity show on air (ids in state.show_controls); clamped to its range
+//! C→S  {"cmd":"set","key":"show_params_reset","value":true} — its defaults
 //! C→S  {"cmd":"transport","op":"toggle"|"stop"|"seek","pos":12.0}
 //! C→S  {"cmd":"now_playing","artist":"..","title":"..","source":"Serato"}
 //!      — the companion agent's push; empty strings clear it. A client's
@@ -26,6 +29,8 @@
 //!      (all absent from older servers).
 //! S→C  {"type":"state",...}           — show state, ~10 Hz; `scene_name`
 //!      etc are ids, `scene_title`/`clip_title` the display names.
+//!      `show_controls` lists the on-air Unity show's controls as
+//!      `{id,label,min,max,value}` (empty for other scenes).
 //! S→C  {"type":"thumb","scene":...,"png_b64":...}
 //! S→C  {"type":"err","msg":...}
 //! ```
@@ -92,6 +97,10 @@ pub enum SetKey {
     BrandOpacity(f32),
     TickerSpeed(f32),
     TickerText(String),
+    /// A control of the on-air Unity show (showparams.rs), by id.
+    ShowParam(String, f32),
+    /// Put the on-air Unity show's controls back to their defaults.
+    ShowParamsReset,
 }
 
 /// A command a remote client sent — arrives on the event thread as
@@ -728,6 +737,14 @@ pub(crate) fn parse_set(key: &str, value: Value) -> Result<SetKey> {
         "np_size" => SetKey::NpSize(f(0.5..=2.0)?),
         "brand_opacity" => SetKey::BrandOpacity(f(0.1..=1.0)?),
         "ticker_speed" => SetKey::TickerSpeed(f(0.3..=3.0)?),
+        "show_params_reset" => SetKey::ShowParamsReset,
+        k if k.starts_with("show_param:") => {
+            let v = value.as_f64().ok_or_else(|| anyhow!("{key}: expected a number"))? as f32;
+            if !v.is_finite() {
+                return Err(anyhow!("{key}: not a number"));
+            }
+            SetKey::ShowParam(k["show_param:".len()..].to_string(), v)
+        }
         "ticker_text" => SetKey::TickerText(
             value
                 .as_str()
@@ -928,5 +945,11 @@ mod tests {
             SetKey::Palette(p) if p == "sunset"
         ));
         assert!(parse_set("midi_in", json!("x")).is_err());
+        assert!(matches!(
+            parse_set("show_param:swirl", json!(55)).unwrap(),
+            SetKey::ShowParam(id, v) if id == "swirl" && v == 55.0
+        ));
+        assert!(parse_set("show_param:swirl", json!("lots")).is_err());
+        assert!(matches!(parse_set("show_params_reset", json!(true)).unwrap(), SetKey::ShowParamsReset));
     }
 }

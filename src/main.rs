@@ -31,6 +31,8 @@ mod ai;
 mod audio;
 mod beats;
 mod engine;
+mod hue;
+mod lights;
 mod link;
 mod looks;
 mod config;
@@ -62,6 +64,9 @@ mod tags;
 mod text;
 mod timeline;
 mod ui_theme;
+mod showparams;
+mod packs;
+mod video;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -259,6 +264,8 @@ fn allowed_scenes(r: &Renderer, s: &Settings) -> Vec<usize> {
         // via an explicit cue, never by autopilot or next/prev.
         .filter(|&i| names[i] != "void")
         .filter(|&i| !names[i].starts_with("unity_") || EXT_LIVE.load(Ordering::Relaxed))
+        // video_* scenes (from effects packs): only with their clip on disk.
+        .filter(|&i| video::scene_ready(&names[i]))
         .filter(|&i| !s.disabled_scenes.contains(&names[i]))
         .filter(|&i| heavy_on || !heavy[i])
         .filter(|&i| s.flat_scenes || heavy[i])
@@ -663,8 +670,15 @@ fn render_loop(
     let mut flow = 0.0f64;
     // External engine link (Settings > unity_link).
     let mut link_out: Option<link::Link> = None;
+    // Lights (WLED): a worker thread; the loop hands it a frame each tick.
+    let lights = lights::Lights::start();
+    let mut light_lut: (String, std::sync::Arc<[u8; palettes::LUT_SIZE * 4]>) =
+        (String::new(), std::sync::Arc::new([0u8; palettes::LUT_SIZE * 4]));
     let mut engine: Option<engine::Engine> = None;
     let mut ext_seq = 0u64;
+    // Video clip scenes (video.rs): play head + decoder thread.
+    let mut video = video::Player::new();
+    video::rescan();
     let mut flow_bpm = 120.0f32;
     let groove_log = std::env::var_os("TRIPPIN_GROOVE_LOG").is_some();
     let mut last_groove_log = Instant::now();
@@ -880,6 +894,18 @@ fn render_loop(
                 Msg::Thumb(key) => {
                     // Editor keys thumbs "scene:<name>"; render by bare name.
                     let name = key.strip_prefix("scene:").unwrap_or(&key);
+                    // A video scene's tile is a frame of its clip; without
+                    // the clip it would cache black, so wait (the panel
+                    // asks again).
+                    if let Some(clip) = name.strip_prefix("video_") {
+                        match video::frames_at(clip, 2.0) {
+                            Some((a, _, _)) => {
+                                r.upload_video(0, &a);
+                                video.invalidate();
+                            }
+                            None => continue,
+                        }
+                    }
                     match r.scene_names().iter().position(|n| *n == name) {
                         Some(i) => match r.thumbnail(i, 128, 72) {
                             Some(px) => {
@@ -1583,6 +1609,22 @@ fn render_loop(
             1.0
         };
 
+        // Video clip scenes: advance the play head (speed follows the
+        // smoothed drive, or locked to the bar for `@video-lock` scenes,
+        // with a stutter on fills and a scratch on drops) and upload the
+        // frames around it.
+        let vbeat = video::Beat {
+            pos,
+            bpm: f.bpm,
+            beat_in_bar: f.beat_in_bar(pos),
+            calm: f.calm,
+            fill: dir.fill_strobe,
+            drop: ev.drop,
+        };
+        for (slot, px) in video.tick(r.scene_name(dir.scene), dt, dir.intensity, &vbeat) {
+            r.upload_video(slot, &px);
+        }
+
         let (w, h) = r.size();
         let mut spectrum = [0.0; audio::SPECTRUM_BINS];
         spectrum.copy_from_slice(&f.spectrum);
@@ -1629,8 +1671,36 @@ fn render_loop(
             hits4: f.hits4,
             pres4: f.pres4,
             clock4: clock4.map(|c| c as f32),
-            misc4: [0.0; 4],
+            // y: video frame blend (vid() in common.wgsl).
+            misc4: [0.0, video.blend, 0.0, 0.0],
         };
+        // Lights follow the show (lights.rs). The palette LUT is rebuilt
+        // only when the palette changes.
+        if s.lights_on || !s.wled.is_empty() {
+            if light_lut.0 != pal {
+                light_lut = (pal.to_string(), std::sync::Arc::new(palettes::lut(pal)));
+            }
+            lights.update(
+                lights::LightFrame {
+                    at: now,
+                    lut: light_lut.1.clone(),
+                    hue: dir.hue,
+                    pos,
+                    bpm: f.bpm,
+                    beat_in_bar,
+                    calm: f.calm,
+                    intensity: dir.intensity,
+                    energy: f.energy,
+                    hits4: f.hits4,
+                    pres4: f.pres4,
+                    master,
+                    strobe_live,
+                    strobe_open: strobe_gate > 0.5,
+                    smooth: crate::ai::scene_meta(r.scene_name(dir.scene)).flight,
+                },
+                &s,
+            );
+        }
         // External engine link: Trippin runs the Unity engine itself (see
         // engine.rs) — show state out over UDP, frames back through shared
         // memory. Cross-platform; nothing for the user to start.
@@ -1639,7 +1709,8 @@ fn render_loop(
                 link_out = link::Link::new(s.link_port).ok();
             }
             if let Some(l) = link_out.as_mut() {
-                l.send(&u, r.scene_name(dir.scene), pal, f.calm < 0.5);
+                let scene = r.scene_name(dir.scene);
+                l.send(&u, scene, pal, f.calm < 0.5, &showparams::tweak(&s.show_params, scene));
             }
             if engine.is_none() {
                 match engine::Engine::new(s.link_port) {
@@ -1649,6 +1720,7 @@ fn render_loop(
             }
             if let Some(e) = engine.as_mut() {
                 e.tick();
+                showparams::poll_manifest(&engine::params_path());
                 let latest = e.latest.lock().unwrap_or_else(|p| p.into_inner());
                 if let Some(fr) = latest.as_ref() {
                     if fr.seq != ext_seq {
@@ -2359,6 +2431,12 @@ impl App {
             // thread produces it ("scene:<name>" in shared.thumbs).
             R::Thumb(name) => self.send(Msg::Thumb(format!("scene:{name}"))),
             R::Set(k) => {
+                // The on-air scene, read before settings (lock order:
+                // status, then settings, never nested).
+                let on_air = {
+                    let st = lock(&sh.status);
+                    sh.scene_names.get(st.scene).cloned().unwrap_or_default()
+                };
                 {
                     let mut s = self.settings_mut();
                     match k {
@@ -2383,6 +2461,17 @@ impl App {
                         SetKey::BrandOpacity(v) => s.brand_opacity = v,
                         SetKey::TickerSpeed(v) => s.ticker_speed = v,
                         SetKey::TickerText(t) => s.ticker_text = t,
+                        SetKey::ShowParam(id, v) => {
+                            let defs = showparams::builtin().into_iter().chain(showparams::show_defs(&on_air));
+                            let Some(d) = defs.into_iter().find(|d| d.id == id) else { return };
+                            if !showparams::has_controls(&on_air) {
+                                return;
+                            }
+                            s.show_params.entry(on_air).or_default().insert(id, v.clamp(d.min, d.max));
+                        }
+                        SetKey::ShowParamsReset => {
+                            s.show_params.remove(&on_air);
+                        }
                     }
                 }
                 self.mark_dirty();
@@ -2449,7 +2538,22 @@ impl App {
                 // order the panel uses.
                 let st = lock(&state_sh.status).clone();
                 let s = lock(&state_sh.settings);
+                // The on-air Unity show's controls (showparams.rs).
+                let on_air = state_sh.scene_names.get(st.scene).map(String::as_str).unwrap_or("");
+                let show_controls: Vec<serde_json::Value> = if showparams::has_controls(on_air) {
+                    showparams::builtin()
+                        .into_iter()
+                        .chain(showparams::show_defs(on_air))
+                        .map(|d| {
+                            let v = showparams::value(&s.show_params, on_air, &d);
+                            serde_json::json!({ "id": d.id, "label": d.label, "min": d.min, "max": d.max, "value": v })
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
                 serde_json::json!({
+                    "show_controls": show_controls,
                     "type": "state",
                     "bpm": st.bpm,
                     "conf": st.confidence,
@@ -2739,6 +2843,20 @@ impl ApplicationHandler<AppEvent> for App {
         // The render thread (which owns the Engine) isn't unwound on quit —
         // macOS Cmd-Q never returns from run_app — so stop the player here.
         engine::shutdown();
+        // Hand a streaming Hue area back to the bridge (lights.rs's worker
+        // dies with the process and would leave it "in use" for ~10 s).
+        // Short timeouts: an unreachable bridge mustn't hold up quitting.
+        hue::QUITTING.store(true, Ordering::Relaxed);
+        if let Some(sh) = &self.shared {
+            let bridge = {
+                let s = lock(&sh.settings);
+                (s.lights_on && s.hue_on).then(|| s.hue.clone())
+            };
+            if let Some(b) = bridge {
+                hue::stop(&b);
+            }
+        }
+        lights::restore_on_quit();
     }
 
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
@@ -3284,11 +3402,7 @@ fn load_icon() -> Option<Icon> {
 fn check_shaders() -> Result<()> {
     let dir = render::find_shader_dir()?;
     let common = std::fs::read_to_string(dir.join("common.wgsl"))?;
-    let mut paths: Vec<std::path::PathBuf> = std::fs::read_dir(dir.join("scenes"))?
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .collect();
-    paths.retain(|p| p.extension().is_some_and(|e| e == "wgsl"));
-    paths.sort();
+    let mut paths = packs::scene_files_all(&dir);
     paths.push(dir.join("present.wgsl"));
     paths.push(dir.join("dancer.wgsl"));
     paths.push(dir.join("text.wgsl"));
@@ -3329,15 +3443,7 @@ fn check_shaders() -> Result<()> {
 fn ai_build(path: &std::path::Path) -> Result<()> {
     let song = song::load(path)?;
     let clip = timeline::Clip::from_song(&song, 0.0);
-    let mut scenes: Vec<String> = std::fs::read_dir(render::find_shader_dir()?.join("scenes"))?
-        .filter_map(|e| e.ok())
-        .filter_map(|e| {
-            let p = e.path();
-            (p.extension().is_some_and(|x| x == "wgsl"))
-                .then(|| p.file_stem().unwrap().to_string_lossy().into_owned())
-        })
-        .collect();
-    scenes.sort();
+    let scenes = packs::scene_names(&render::find_shader_dir()?);
     let routines: Vec<String> = dancer::find_dancer_dir()
         .map(|d| dancer::list_clips(&d).into_iter().map(|c| c.name).collect())
         .unwrap_or_default();
@@ -3483,6 +3589,55 @@ fn main() -> Result<()> {
     if args.iter().any(|a| a == "--check-shaders") {
         return check_shaders();
     }
+    // `--install-pack x.trippinpack`: install an effects pack (packs.rs),
+    // as Settings > Add pack from file does; a catalog id (`night-city`)
+    // downloads it, as the Install button does.
+    if let Some(p) = arg_value(&args, "--install-pack") {
+        let path = std::path::Path::new(&p);
+        let name = if path.is_file() {
+            packs::install_file(path)?
+        } else {
+            packs::install_catalog(&p, &|s| eprintln!("{s}"))?
+        };
+        println!("{name} installed in {}", packs::root().display());
+        return Ok(());
+    }
+    // `--list-packs`: every pack found and the scenes it adds.
+    if args.iter().any(|a| a == "--list-packs") {
+        let dir = render::find_shader_dir()?;
+        for p in packs::all() {
+            let n = packs::scene_names(&dir).iter().filter(|s| packs::owner(s).is_some_and(|o| o.id == p.id)).count();
+            println!(
+                "{:<14} {:<12} v{:<4} {:>2} scenes  {}{}",
+                p.id,
+                p.name,
+                p.version,
+                n,
+                p.dir.display(),
+                p.problem.as_deref().map(|w| format!("  (not loaded: {w})")).unwrap_or_default()
+            );
+        }
+        return Ok(());
+    }
+    // `--hue-test <ip> <user> <client key>`: stream 8 s to a Hue area.
+    if let Some(i) = args.iter().position(|a| a == "--hue-test") {
+        let get = |k: usize| args.get(i + k).cloned().unwrap_or_default();
+        return hue::cli_test(&get(1), &get(2), &get(3));
+    }
+    if let Some(i) = args.iter().position(|a| a == "--hue-slow-test") {
+        let get = |k: usize| args.get(i + k).cloned().unwrap_or_default();
+        return hue::cli_slow_test(&get(1), &get(2), &get(3), &get(4), get(5).parse().unwrap_or(20.0));
+    }
+    // `--lights-demo <host> [seconds]`: a synthetic groove on one WLED strip.
+    if let Some(h) = arg_value(&args, "--lights-demo") {
+        let secs = args
+            .iter()
+            .position(|a| a == "--lights-demo")
+            .and_then(|i| args.get(i + 2))
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(12.0);
+        return lights::demo(&h, secs);
+    }
     // `--analyze track.mp3` prints the per-bar feature summary the AI show
     // builder sends to the model — the prompt-tuning / sanity-check path.
     if let Some(p) = arg_value(&args, "--analyze") {
@@ -3512,6 +3667,10 @@ fn main() -> Result<()> {
     let env = audio::EnvLog::new();
 
     let mut settings = Settings::load();
+    // Effects packs: the scene list is fixed for the run, so which packs
+    // load is decided here, before anything lists scenes.
+    packs::init(&settings.disabled_packs);
+    packs::tidy();
     // Neural beat tracking: fetch the model in the background on first run.
     beats::set_enabled(settings.beat_model);
     if settings.beat_model {

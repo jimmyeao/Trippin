@@ -2088,7 +2088,7 @@ pub fn dump_feed(path: &std::path::Path, out: &std::path::Path, palette: &str) -
                 clock4: clock4.map(|c| c as f32),
                 ..Default::default()
             };
-            writeln!(w, "{}", crate::link::frame_json(&u, "", &pal, false, f.calm < 0.5))?;
+            writeln!(w, "{}", crate::link::frame_json(&u, "", &pal, false, f.calm < 0.5, &[]))?;
             frames += 1;
             next_t += dt;
         }

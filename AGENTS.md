@@ -105,6 +105,12 @@ overlays.
   unit spacing and strobed).
 - **No beat-synced flashes in tunnels or flight scenes.** They read as
   "jerky".
+- **Video footage** (owner's verdicts on Club Nights 2): no camera zoom
+  punch on the beat — it doesn't work on footage; react through the lights
+  (glints, streaks) instead. No crowds moving in unison or arms raised
+  together under white light (read as a gym class or a rally), no disco
+  balls (tacky), no cryo-jet shots. Close-ups (decks, a speaker cone) and
+  light-led shots (LED walls, lasers) work.
 - **Add scenes; don't replace them.** Removing or reworking a scene is the
   owner's call.
 - **Removed or disliked scenes; don't bring them back:** event_horizon,
@@ -270,9 +276,13 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
 | `src/midi.rs` | MIDI input (midir): one port, note-ons become `Action`s. |
 | `src/remote.rs` | LAN remote for the iOS companion app: a WebSocket JSON server (TCP 9138, Bonjour `_trippin._tcp`, PIN-gated) — protocol at the top of the file, details in §8. |
 | `ios/TrippinRemote/` | The iOS/iPadOS remote app (SwiftUI, iOS 17+): Bonjour discovery, PIN pairing in the Keychain, pads, scene grid with thumbnails, look/FX, dancer and transport pages, plus a built-in `DemoServer` for use without a rig (and for App Review). The `.xcodeproj` is generated: run `xcodegen` in that folder (it's git-ignored). Speaks the `remote.rs` protocol; UI tests in `UITests/`. See its README. |
+| `src/lights.rs`, `src/hue.rs` | Lights that follow the show: WLED over DDP (50 Hz), Hue Entertainment over DTLS (25 Hz), and non-streaming bridge bulbs a bar at a time. Settings > Lights. |
 | `src/osc.rs` | OSC UDP input (9139) for TouchOSC/Lemur — maps addresses onto the same `RemoteCmd`s as the app. |
 | `src/snap.rs` | Headless snapshot and benchmark rendering. |
-| `src/engine.rs`, `src/link.rs`, `unity/` | Unity engine (shows `unity_stage`, `unity_crystals`, `unity_flow`, `unity_leviathan`, `unity_sculpture`, `unity_colossus`, `unity_tidal_cathedral`, `unity_lightstorm`, `unity_prism`, `unity_aurora`, `unity_basscore`, `unity_pillars`, `unity_helix`, `unity_tesseract`, `unity_polyhedra`, `unity_knot`, `unity_gyroscope`, `unity_lattice`, `unity_pendulum`, `unity_spectrum`, `unity_eclipse`, `unity_lightrain`, `unity_warp`, `unity_ledwall`, `unity_fountain`, `unity_galaxy`, `unity_nebula`, `unity_ocean`, `unity_chladni`, `unity_tunnel`, `unity_orb`, `unity_radar`, `unity_djbot`, `unity_robot_rave`, `unity_assembly`, `unity_robot_club`, `unity_robot_band`, `unity_dj_battle`; any `unity_*` scene is gated on live frames and hidden from the AI builder). `engine.rs` launches the player headless and supervises it; frames come back through a memory-mapped file (seqlock, top row first) into `gfx::Statics::ext` (binding 8 `ext_tex`); `link.rs` sends the show state over UDP. Cross-platform, nothing to start by hand. See `unity/README.md`. |
+| `src/packs.rs`, `packs/`, `tools/pack_build.py` | Effects packs: scenes shipped apart from the app (`pack.json`, `scenes/`, `videos/`, `scene_tags.json`, `scene_energy.json`), installed to `<data dir>/packs/<id>` from the catalog or a `.trippinpack` file. Dev builds also read the repo's `packs/` (videos git-ignored; `TRIPPIN_NO_DEV_PACKS=1` hides them). Every scene lister goes through `packs::scene_files`/`scene_names`; tags and energy through `packs::merged_json`. |
+| `src/video.rs`, `tools/video_pack.py` | Video clip scenes (`video_<clip>.wgsl`, all in packs). Clips are packed offline into `.tvid` (JPEG frames + index; no codec at runtime) and read from each loaded pack's `videos/` or `TRIPPIN_VIDEOS`. A decoder thread feeds two stacked frames into `vid_tex` (binding 9); `vid()` / `vid_cam()` / `vid_streak()` / `vid_grade()` in common.wgsl blend and shape them. |
+| `src/showparams.rs` | Per-show controls for the `unity_*` shows (sidebar card): built-in Speed/Reactivity applied to the feed in `link.rs`, plus `[TrippinParam]` knobs from the engine's manifest (`-trippinParams`). |
+| `src/engine.rs`, `src/link.rs`, `unity/` | Unity engine (shows `unity_stage`, `unity_crystals`, `unity_flow`, `unity_leviathan`, `unity_sculpture`, `unity_colossus`, `unity_tidal_cathedral`, `unity_lightstorm`, `unity_prism`, `unity_aurora`, `unity_basscore`, `unity_pillars`, `unity_helix`, `unity_tesseract`, `unity_polyhedra`, `unity_knot`, `unity_gyroscope`, `unity_lattice`, `unity_pendulum`, `unity_spectrum`, `unity_eclipse`, `unity_lightrain`, `unity_warp`, `unity_ledwall`, `unity_fountain`, `unity_galaxy`, `unity_nebula`, `unity_ocean`, `unity_chladni`, `unity_tunnel`, `unity_orb`, `unity_radar`, `unity_djbot`, `unity_robot_rave`, `unity_assembly`, `unity_robot_club`, `unity_robot_band`, `unity_dj_battle`, `unity_highlands`, `unity_coaster`, `unity_fluid`; any `unity_*` scene is gated on live frames and hidden from the AI builder). `engine.rs` launches the player headless and supervises it; frames come back through a memory-mapped file (seqlock, top row first) into `gfx::Statics::ext` (binding 8 `ext_tex`); `link.rs` sends the show state over UDP. Cross-platform, nothing to start by hand. See `unity/README.md`. |
 | `tools/*.py` | Offline pipelines: mocap and stock video to dancer clips, and so on. |
 
 ## 6. Writing a scene
@@ -346,6 +356,28 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   `rd.xz` for level scenes.
 - Domain-repeated cities and facades: evaluate the current cell only, and
   clamp the march step.
+- **Effects packs** (`packs.rs`): the pack list is read once at startup,
+  because the scene list is fixed for the run (status, remote and timeline
+  hold scene indices), so install, remove and on/off apply on restart. Never
+  list `shaders/scenes` directly: use `packs::scene_files` (a pack scene is
+  missing from the AI builder, snaps and `--check-shaders` otherwise). A
+  pack scene whose name is taken is skipped. Bump `packs::API` when
+  common.wgsl changes a helper packs call. `--snap-energy` writes each pack's
+  scenes into that pack's `scene_energy.json`.
+- **Bar-locked video** (`// @video-lock` in a scene header, `video.rs`
+  `lock_step`): the loop spans a power-of-two number of bars nearest its
+  natural length (an 11.3 s clip at 128 BPM is 8 bars, 0.75x), doubled in
+  breakdowns, aligned to the downbeat. The head is pulled onto the grid
+  gently, and only cuts onto it on a bar line when far off; fills stutter a
+  half-beat slice, drops scratch back half a beat. Use it on club footage,
+  not flights or drives (no beat tricks there, AGENTS §2).
+- **Video scenes** (`video_*`): footage is display-referred, so pass it
+  through `untonemap()` (present's inverse) or it comes out washed and
+  dark. Never warp footage of buildings or roads (architecture rule):
+  reshape its *lights* (`vid_hl`, `vid_streak`) instead; only abstract
+  fluid footage may be displaced. Driving/flight clips must say "driving"
+  or "flying" in their blurb so `scene_meta` flags them (no strobe fills).
+  Playback speed is the CPU play rate (`video.rs`), eased from the drive.
 
 ### Adding a dancer/musician clip
 
@@ -470,6 +502,28 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   steps up `rate*dt` then eases back — a two-frame judder (this made the
   branding logo wobble horizontally whenever the DJ name was off). Guard
   the at-rest case (see `overlay.rs::ease_vis`).
+- **Unity show controls** (`showparams.rs`, `ShowParams.cs`): Speed must
+  re-integrate the clocks (`link.rs::apply`), never multiply them, or a
+  slider move jumps every show's camera. Knob values are keyed by the C#
+  field name, lower-cased. `TRIPPIN_ENGINE=<exe>` runs a dev player build in
+  the app, so a new show can be tested without publishing an engine.
+- **Lights** (`lights.rs`, `hue.rs`): the render loop only hands a
+  `LightFrame` to worker threads; never put network I/O on it. Patterns are
+  timed from the *predicted* beat grid plus a per-device lead, not from
+  detected hits. LED colours: don't square the palette as the HDR scenes do
+  — with the LED gamma it left strips at 2-10 of 255. White flashes are
+  capped at 3 Hz and never go to Hue. `--lights-demo <ip>` plus WLED's live
+  view (`ws://<ip>/ws`, `{"lv":true}`) shows what a strip really displays.
+- **Hue is the one HTTPS exception to the trust-store rule:** bridges use
+  Signify's private CA, so `hue::call` pins the bridge certificate's SHA-256
+  at pairing (rustls custom verifier) and refuses a change. Don't reuse that
+  verifier for anything else. The Entertainment stream is DTLS 1.2 PSK
+  (`webrtc-dtls`, a single-threaded tokio runtime inside the lights thread):
+  the PSK identity is the *application id* from `GET /auth/v1`'s
+  `hue-application-id` header, not the username. Start the area before the
+  handshake; stop it when done (also in `exiting`). Non-Hue bulbs can't
+  stream: they're plain light commands at <= 8/s total (`slow_worker`), a
+  bar at a time, with each light's state saved and restored.
 - **HTTP clients use the OS trust store** (`config::tls()`, ureq's
   `platform-verifier` feature). ureq's default bundled roots failed with
   `invalid certificate: UnknownIssuer` on the owner's M2, whose network
@@ -656,6 +710,10 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   - Scene energy comes from `shaders/scene_energy.json`, generated by
     `--snap all --snap-energy` (motion ×2 + brightness + colour, ranked).
     **Re-run it when you add scenes** (unknown scenes default to 0.5).
+    It leaves out `unity_*` shows (they can't be snapped, so they render
+    black; they must stay unrated). `video_*` scenes rate correctly only
+    with their clips in the pack's `videos/`; each pack's scenes go in its
+    own `scene_energy.json`.
     `scene_meta` lifts laser/festival rigs to ≥0.6 and flags tunnel/flight
     scenes, which never get strobe/flash fills (they stutter instead).
   - Plan dialect extras: `cuts` (in-block scene changes), `fill`
@@ -812,6 +870,11 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   `RemoteCmd`s. Buttons fire on press only — a falsy first arg is the
   release (the MIDI note-off lesson); `/set/*` and `/scene/goto|queue`
   read their arg verbatim.
+- **Unity show controls over the remote:** `set` with
+  `key:"show_param:<id>"` (clamped to the control's range) or
+  `"show_params_reset"`; the state push carries `show_controls`
+  (`{id,label,min,max,value}`) for the Unity show on air. The browser
+  harness renders them; the iOS app doesn't yet.
 - First enable pops the Windows firewall prompt once — expected.
 - **trippin-agent:** never `match` on a `MutexGuard`'s contents
   (`match link.lock()…rigs.first()` kept the guard alive through the

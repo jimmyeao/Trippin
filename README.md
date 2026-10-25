@@ -397,6 +397,53 @@ Settings tab shows its status. The auto-pilot only picks `unity_*` scenes
 while the engine is sending frames, and the AI show builder never uses them.
 Developer notes are in `unity/README.md`.
 
+**Show controls.** While a Unity show is on air, the sidebar's **Show
+controls** card adjusts it: **Speed** (how fast it travels, drifts and
+turns; moves locked to the beat stay on the beat, so a few mostly
+beat-locked shows such as the sculpture barely change) and **Reactivity**
+(how hard it answers the music) for every show. Values are remembered per
+show; **Reset** puts the show back to its defaults. Shows can also add
+their own knobs; the first ones (and `unity_fluid`, a real-time fluid
+simulation drawn as glossy liquid paint) arrive with the next Unity engine
+update.
+
+### Video scenes
+
+Video scenes come in **effects packs**, which install separately from the
+app (Settings → **Effects packs**). Three packs hold sixteen scenes built
+from short video loops: night drives through a neon city and a road tunnel, a flight over the
+city, a neon alley, highway light trails, club lasers and a club light rig,
+ink in water, coloured smoke and liquid chrome, plus six flights seen from
+the camera: down a neon avenue, low over the rooftops, diving between
+skyscrapers, over a club crowd to the DJ booth, through a warehouse rave's
+roof beams, and over a river under a lit bridge. The footage plays faster as the
+track builds and slows in breakdowns, and the music reshapes its lights
+(streaks, glints and light trails) or, on the fluid clips, the fluid
+itself. Buildings and roads never warp.
+
+| Pack | Scenes | Download |
+|---|---|---|
+| Night City | drives, flights, the alley and highway trails (9) | about 307 MB |
+| Club Nights | club lasers and rig, crowd and warehouse flights (4) | about 105 MB |
+| Liquid | ink, smoke and liquid chrome (3) | about 90 MB |
+| Club Nights 2 | the decks, a speaker cone, an LED wall, a laser tunnel (4), locked to the bar | about 100 MB |
+
+The Club Nights 2 scenes play locked to the bar: each loop spans whole bars
+from the downbeat, the lights flare on every kick, drum fills stutter the
+footage and drops scratch it back.
+
+On the Effects packs card, **Install** downloads a pack, **Add pack from
+file…** installs a `.trippinpack` you were given, the tick box switches a
+pack off without removing it, and **Remove** deletes it. Changes apply the
+next time Trippin starts. From the command line:
+`trippin --install-pack file.trippinpack` (or a pack id such as `night-city`, which downloads it) and `trippin --list-packs`.
+
+To make a pack, put `pack.json`, `scenes/*.wgsl`, `videos/*.tvid` (packed
+by `tools/video_pack.py`), `scene_tags.json` and `scene_energy.json` in a
+folder, then run `python tools/pack_build.py <folder>`. See `src/packs.rs`
+and the packs in `packs/`. The clips here were generated with an
+image-to-video model.
+
 ## Beats vs breakdowns
 
 The audio analyser counts kick hits over the last 2.5 s against the beats
@@ -477,6 +524,30 @@ sits over the plain frame). **Auto** picks a fresh effect on every scene cut
 (Mirror Y stays manual-only — an upside-down dancer reads as a glitch).
 It's applied in `present.wgsl` from `u.fx`, so it needs no scene support and
 combines with everything (a mirrored dancer in canon is five dancers).
+
+## Lights: WLED and Philips Hue
+
+Settings → **Lights** makes room lights follow the show.
+
+- **WLED strips** (found with **Find WLED**): the palette runs along the
+  strip, it pulses and ripples on every beat, a bright segment chases along
+  it once a bar and turns round each phrase, and it breathes slowly through
+  breakdowns. Nothing needs setting up on the WLED side.
+- **Philips Hue**: **Find bridge**, **Pair**, press the bridge's link
+  button, then pick an entertainment area (made in the Hue app). Its lights
+  get the same show by where they sit in the room, about 25 times a second.
+- **Other colour lights on the bridge** (non-Hue bulbs such as Gledopto or
+  Tuya can't join an entertainment area): tick them and they change colour
+  once a bar, one after another across the room. Their own colours come
+  back when the lights stop.
+- **lead** sends the beat early so lights land on the kick (network and bulb
+  delay); Hue needs more than WLED.
+- **Allow white flashes** lets strobe cues and fills flash WLED strips white,
+  at most 3 times a second and never on tunnel or flight scenes. Hue never
+  flashes.
+
+From the command line: `trippin --lights-demo <wled-ip> [seconds]` runs a
+test groove on one strip.
 
 ## Streaming: OBS, overlays, now playing, clips
 
