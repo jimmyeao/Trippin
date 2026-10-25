@@ -277,6 +277,9 @@ namespace TrippinStage.EditorTools
                 ("unity_highlands", typeof(HighlandsShow)),
                 ("unity_coaster", typeof(CoasterShow)),
                 ("unity_fluid", typeof(FluidShow)),
+                ("unity_murmuration", typeof(MurmurationShow)),
+                ("unity_ribbons", typeof(RibbonsShow)),
+                ("unity_bloom", typeof(BloomShow)),
             };
             // Extra materials for the ported scenes: instancing must be on the
             // material asset or the build strips the variant (AGENTS.md).
