@@ -270,6 +270,7 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
 | `src/midi.rs` | MIDI input (midir): one port, note-ons become `Action`s. |
 | `src/remote.rs` | LAN remote for the iOS companion app: a WebSocket JSON server (TCP 9138, Bonjour `_trippin._tcp`, PIN-gated) — protocol at the top of the file, details in §8. |
 | `ios/TrippinRemote/` | The iOS/iPadOS remote app (SwiftUI, iOS 17+): Bonjour discovery, PIN pairing in the Keychain, pads, scene grid with thumbnails, look/FX, dancer and transport pages, plus a built-in `DemoServer` for use without a rig (and for App Review). The `.xcodeproj` is generated: run `xcodegen` in that folder (it's git-ignored). Speaks the `remote.rs` protocol; UI tests in `UITests/`. See its README. |
+| `src/lights.rs`, `src/hue.rs` | Lights that follow the show: WLED over DDP (50 Hz), Hue Entertainment over DTLS (25 Hz), and non-streaming bridge bulbs a bar at a time. Settings > Lights. |
 | `src/osc.rs` | OSC UDP input (9139) for TouchOSC/Lemur — maps addresses onto the same `RemoteCmd`s as the app. |
 | `src/snap.rs` | Headless snapshot and benchmark rendering. |
 | `src/packs.rs`, `packs/`, `tools/pack_build.py` | Effects packs: scenes shipped apart from the app (`pack.json`, `scenes/`, `videos/`, `scene_tags.json`, `scene_energy.json`), installed to `<data dir>/packs/<id>` from the catalog or a `.trippinpack` file. Dev builds also read the repo's `packs/` (videos git-ignored; `TRIPPIN_NO_DEV_PACKS=1` hides them). Every scene lister goes through `packs::scene_files`/`scene_names`; tags and energy through `packs::merged_json`. |
@@ -493,6 +494,23 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   slider move jumps every show's camera. Knob values are keyed by the C#
   field name, lower-cased. `TRIPPIN_ENGINE=<exe>` runs a dev player build in
   the app, so a new show can be tested without publishing an engine.
+- **Lights** (`lights.rs`, `hue.rs`): the render loop only hands a
+  `LightFrame` to worker threads; never put network I/O on it. Patterns are
+  timed from the *predicted* beat grid plus a per-device lead, not from
+  detected hits. LED colours: don't square the palette as the HDR scenes do
+  — with the LED gamma it left strips at 2-10 of 255. White flashes are
+  capped at 3 Hz and never go to Hue. `--lights-demo <ip>` plus WLED's live
+  view (`ws://<ip>/ws`, `{"lv":true}`) shows what a strip really displays.
+- **Hue is the one HTTPS exception to the trust-store rule:** bridges use
+  Signify's private CA, so `hue::call` pins the bridge certificate's SHA-256
+  at pairing (rustls custom verifier) and refuses a change. Don't reuse that
+  verifier for anything else. The Entertainment stream is DTLS 1.2 PSK
+  (`webrtc-dtls`, a single-threaded tokio runtime inside the lights thread):
+  the PSK identity is the *application id* from `GET /auth/v1`'s
+  `hue-application-id` header, not the username. Start the area before the
+  handshake; stop it when done (also in `exiting`). Non-Hue bulbs can't
+  stream: they're plain light commands at <= 8/s total (`slow_worker`), a
+  bar at a time, with each light's state saved and restored.
 - **HTTP clients use the OS trust store** (`config::tls()`, ureq's
   `platform-verifier` feature). ureq's default bundled roots failed with
   `invalid certificate: UnknownIssuer` on the owner's M2, whose network

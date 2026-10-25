@@ -523,6 +523,30 @@ sits over the plain frame). **Auto** picks a fresh effect on every scene cut
 It's applied in `present.wgsl` from `u.fx`, so it needs no scene support and
 combines with everything (a mirrored dancer in canon is five dancers).
 
+## Lights: WLED and Philips Hue
+
+Settings → **Lights** makes room lights follow the show.
+
+- **WLED strips** (found with **Find WLED**): the palette runs along the
+  strip, it pulses and ripples on every beat, a bright segment chases along
+  it once a bar and turns round each phrase, and it breathes slowly through
+  breakdowns. Nothing needs setting up on the WLED side.
+- **Philips Hue**: **Find bridge**, **Pair**, press the bridge's link
+  button, then pick an entertainment area (made in the Hue app). Its lights
+  get the same show by where they sit in the room, about 25 times a second.
+- **Other colour lights on the bridge** (non-Hue bulbs such as Gledopto or
+  Tuya can't join an entertainment area): tick them and they change colour
+  once a bar, one after another across the room. Their own colours come
+  back when the lights stop.
+- **lead** sends the beat early so lights land on the kick (network and bulb
+  delay); Hue needs more than WLED.
+- **Allow white flashes** lets strobe cues and fills flash WLED strips white,
+  at most 3 times a second and never on tunnel or flight scenes. Hue never
+  flashes.
+
+From the command line: `trippin --lights-demo <wled-ip> [seconds]` runs a
+test groove on one strip.
+
 ## Streaming: OBS, overlays, now playing, clips
 
 Everything for streamers lives on the **Stream** tab.

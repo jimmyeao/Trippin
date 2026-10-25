@@ -345,6 +345,21 @@ pub enum Tristate {
     Off,
 }
 
+/// One WLED strip the lights drive (lights.rs).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WledLight {
+    pub name: String,
+    /// IP or host name.
+    pub host: String,
+    pub leds: u32,
+    pub on: bool,
+    /// Send this far ahead of the beat, for network + LED latency.
+    pub lead_ms: f32,
+    /// Run the patterns from the other end.
+    pub reverse: bool,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -417,6 +432,20 @@ pub struct Settings {
     /// Per-show controls for the Unity shows (scene → control id → value;
     /// missing = default). See showparams.rs.
     pub show_params: std::collections::BTreeMap<String, std::collections::BTreeMap<String, f32>>,
+    /// Lights follow the show (lights.rs): master switch, brightness
+    /// 0..1, white flashes allowed (strobe cues and fills), and the strips.
+    pub lights_on: bool,
+    pub light_level: f32,
+    pub light_flashes: bool,
+    pub wled: Vec<WledLight>,
+    /// Philips Hue: the paired bridge (key and client key included), stream
+    /// to its chosen entertainment area, and how far ahead of the beat.
+    pub hue: crate::hue::HueBridge,
+    pub hue_on: bool,
+    pub hue_lead_ms: f32,
+    /// Bridge lights that can't stream (non-Hue bulbs): ids, driven a bar
+    /// at a time with plain light commands (lights.rs::slow_worker).
+    pub hue_slow: Vec<String>,
     /// UDP port the show-state feed goes to (127.0.0.1).
     pub link_port: u16,
     pub latency_ms: f32,
@@ -543,6 +572,14 @@ impl Default for Settings {
             unity_link: false,
             disabled_packs: Vec::new(),
             show_params: Default::default(),
+            lights_on: false,
+            light_level: 0.8,
+            light_flashes: false,
+            wled: Vec::new(),
+            hue: Default::default(),
+            hue_on: false,
+            hue_lead_ms: 120.0,
+            hue_slow: Vec::new(),
             link_port: 9137,
             latency_ms: 30.0,
             audio_in: String::new(),

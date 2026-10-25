@@ -31,6 +31,8 @@ mod ai;
 mod audio;
 mod beats;
 mod engine;
+mod hue;
+mod lights;
 mod link;
 mod looks;
 mod config;
@@ -668,6 +670,10 @@ fn render_loop(
     let mut flow = 0.0f64;
     // External engine link (Settings > unity_link).
     let mut link_out: Option<link::Link> = None;
+    // Lights (WLED): a worker thread; the loop hands it a frame each tick.
+    let lights = lights::Lights::start();
+    let mut light_lut: (String, std::sync::Arc<[u8; palettes::LUT_SIZE * 4]>) =
+        (String::new(), std::sync::Arc::new([0u8; palettes::LUT_SIZE * 4]));
     let mut engine: Option<engine::Engine> = None;
     let mut ext_seq = 0u64;
     // Video clip scenes (video.rs): play head + decoder thread.
@@ -1658,6 +1664,33 @@ fn render_loop(
             // y: video frame blend (vid() in common.wgsl).
             misc4: [0.0, video.blend, 0.0, 0.0],
         };
+        // Lights follow the show (lights.rs). The palette LUT is rebuilt
+        // only when the palette changes.
+        if s.lights_on || !s.wled.is_empty() {
+            if light_lut.0 != pal {
+                light_lut = (pal.to_string(), std::sync::Arc::new(palettes::lut(pal)));
+            }
+            lights.update(
+                lights::LightFrame {
+                    at: now,
+                    lut: light_lut.1.clone(),
+                    hue: dir.hue,
+                    pos,
+                    bpm: f.bpm,
+                    beat_in_bar,
+                    calm: f.calm,
+                    intensity: dir.intensity,
+                    energy: f.energy,
+                    hits4: f.hits4,
+                    pres4: f.pres4,
+                    master,
+                    strobe_live,
+                    strobe_open: strobe_gate > 0.5,
+                    smooth: crate::ai::scene_meta(r.scene_name(dir.scene)).flight,
+                },
+                &s,
+            );
+        }
         // External engine link: Trippin runs the Unity engine itself (see
         // engine.rs) — show state out over UDP, frames back through shared
         // memory. Cross-platform; nothing for the user to start.
@@ -2800,6 +2833,18 @@ impl ApplicationHandler<AppEvent> for App {
         // The render thread (which owns the Engine) isn't unwound on quit —
         // macOS Cmd-Q never returns from run_app — so stop the player here.
         engine::shutdown();
+        // Hand a streaming Hue area back to the bridge (lights.rs's worker
+        // dies with the process and would leave it "in use" for ~10 s).
+        if let Some(sh) = &self.shared {
+            let bridge = {
+                let s = lock(&sh.settings);
+                (s.lights_on && s.hue_on).then(|| s.hue.clone())
+            };
+            if let Some(b) = bridge {
+                hue::stop(&b);
+            }
+        }
+        lights::restore_on_quit();
     }
 
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
@@ -3555,6 +3600,25 @@ fn main() -> Result<()> {
             );
         }
         return Ok(());
+    }
+    // `--hue-test <ip> <user> <client key>`: stream 8 s to a Hue area.
+    if let Some(i) = args.iter().position(|a| a == "--hue-test") {
+        let get = |k: usize| args.get(i + k).cloned().unwrap_or_default();
+        return hue::cli_test(&get(1), &get(2), &get(3));
+    }
+    if let Some(i) = args.iter().position(|a| a == "--hue-slow-test") {
+        let get = |k: usize| args.get(i + k).cloned().unwrap_or_default();
+        return hue::cli_slow_test(&get(1), &get(2), &get(3), &get(4), get(5).parse().unwrap_or(20.0));
+    }
+    // `--lights-demo <host> [seconds]`: a synthetic groove on one WLED strip.
+    if let Some(h) = arg_value(&args, "--lights-demo") {
+        let secs = args
+            .iter()
+            .position(|a| a == "--lights-demo")
+            .and_then(|i| args.get(i + 2))
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(12.0);
+        return lights::demo(&h, secs);
     }
     // `--analyze track.mp3` prints the per-bar feature summary the AI show
     // builder sends to the model — the prompt-tuning / sanity-check path.
