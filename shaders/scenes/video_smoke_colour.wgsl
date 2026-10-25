@@ -1,8 +1,8 @@
 // @bloom 0.6
 // @title Colour Smoke
-// Coloured smoke curling in slow vortices (video clip). The bass swells a slow swirling warp through the
-// fluid, the swirl turns one way then the other with the phrase, the
-// footage flows faster as the track builds, and the palette tints it.
+// Coloured smoke curling in slow vortices (video clip). The bass swells a slow swirl through the fluid,
+// which turns one way then the other with the phrase; the footage flows
+// faster as the track builds, and the palette tints it.
 
 // Smooth two-octave noise: the warp must be broad, or the footage wrinkles.
 fn soft(p: vec2<f32>) -> f32 {

@@ -34,7 +34,7 @@ namespace TrippinStage
         Material _view;
         readonly Vector4[] _splats = new Vector4[8], _vals = new Vector4[8];
         int _nSplat;
-        float _kickPrev, _impPrev, _orbit, _hue;
+        float _kickPrev, _impPrev, _orbit, _hue, _clkPrev = -1f;
         int _burst;
 
         static RenderTexture Rt(int w, int h, RenderTextureFormat f)
@@ -93,8 +93,14 @@ namespace TrippinStage
             float live = 1f - 0.75f * rx.calm;
 
             // --- the music's forces ------------------------------------------
-            // Orbit: the smooth energy clock, direction swinging each phrase.
-            _orbit += dt * (0.35f + 0.5f * rx.intensity) * Mathf.Sin(rx.phrase * 0.5f + 0.4f) * 1.2f;
+            // Orbit: advances with the smooth energy clock (so it surges on
+            // drops and follows Trippin's Speed control), its direction
+            // swinging through zero each phrase.
+            float dClk = _clkPrev < 0f ? 0f : rx.clk - _clkPrev;
+            if (dClk < -2048f) dClk += 4096f;                 // the clock wraps at 4096
+            if (dClk < 0f || dClk > 4f) dClk = 0f;            // a jump, not travel
+            _clkPrev = rx.clk;
+            _orbit += dClk * 0.3f * Mathf.Sin(rx.phrase * 0.5f + 0.4f);
             _hue = rx.beat / 128f;
             float rad = 0.03f * splatSize;
             float[] band = { rx.bassFast, rx.midFast, rx.highFast };

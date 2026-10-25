@@ -2553,6 +2553,18 @@ fn find_name(want: &str, pool: &[String]) -> Option<String> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn driving_and_flying_video_scenes_are_flight_scenes() {
+        // No strobe fills on them (AGENTS.md): the flag comes from the
+        // scene's blurb, so the wording of each video scene matters.
+        for s in ["video_city_drive", "video_tunnel_drive", "video_aerial_city"] {
+            assert!(scene_meta(s).flight, "{s} should be a flight scene");
+        }
+        for s in ["video_club_lasers", "video_club_lights", "video_ink_water", "video_smoke_colour", "video_liquid_chrome"] {
+            assert!(!scene_meta(s).flight, "{s} isn't a flight scene");
+        }
+    }
+
     fn clip() -> Clip {
         Clip {
             song: "x.mp3".into(),

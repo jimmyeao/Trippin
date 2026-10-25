@@ -398,8 +398,10 @@ while the engine is sending frames, and the AI show builder never uses them.
 Developer notes are in `unity/README.md`.
 
 **Show controls.** While a Unity show is on air, the sidebar's **Show
-controls** card adjusts it: **Speed** (how fast it travels and turns) and
-**Reactivity** (how hard it answers the music) for every show, plus the
+controls** card adjusts it: **Speed** (how fast it travels, drifts and
+turns; moves locked to the beat stay on the beat, so a few mostly
+beat-locked shows such as the sculpture barely change) and **Reactivity**
+(how hard it answers the music) for every show, plus the
 show's own knobs where it has them (for example `unity_fluid`: swirl, dye
 life, flow life, splat size, force and shine). Values are remembered per
 show; **Reset** puts the show back to its defaults.
