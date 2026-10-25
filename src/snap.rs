@@ -543,7 +543,11 @@ pub fn run(args: &[String]) -> Result<()> {
         if energy_mode {
             let (m, b, c) = frame_stats(&grabs);
             println!("{name:<18} motion {m:.4} bright {b:.3} colour {c:.3}");
-            energy_rows.push((name, m, b, c));
+            // unity_* shows only draw with the engine running: a snap is
+            // black, and a 0.0 rating would mark them as dead calm.
+            if !name.starts_with("unity_") {
+                energy_rows.push((name, m, b, c));
+            }
             continue;
         }
         if bench > 0 {

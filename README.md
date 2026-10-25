@@ -429,6 +429,11 @@ itself. Buildings and roads never warp.
 | Night City | drives, flights, the alley and highway trails (9) | about 290 MB |
 | Club Nights | club lasers and rig, crowd and warehouse flights (4) | about 105 MB |
 | Liquid | ink, smoke and liquid chrome (3) | about 90 MB |
+| Club Nights 2 | disco ball, decks, speaker cone, strobes, LED wall, cryo jets, laser tunnel, jumping crowd (8), locked to the bar | about 220 MB |
+
+The Club Nights 2 scenes play locked to the bar: each loop spans whole bars
+from the downbeat, every kick punches the camera in and splits the colour,
+drum fills stutter the footage and drops scratch it back.
 
 On the Effects packs card, **Install** downloads a pack, **Add pack from
 file…** installs a `.trippinpack` you were given, the tick box switches a

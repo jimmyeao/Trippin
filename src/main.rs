@@ -1610,8 +1610,18 @@ fn render_loop(
         };
 
         // Video clip scenes: advance the play head (speed follows the
-        // smoothed drive) and upload the frames around it.
-        for (slot, px) in video.tick(r.scene_name(dir.scene), dt, dir.intensity, f.calm) {
+        // smoothed drive, or locked to the bar for `@video-lock` scenes,
+        // with a stutter on fills and a scratch on drops) and upload the
+        // frames around it.
+        let vbeat = video::Beat {
+            pos,
+            bpm: f.bpm,
+            beat_in_bar: f.beat_in_bar(pos),
+            calm: f.calm,
+            fill: dir.fill_strobe,
+            drop: ev.drop,
+        };
+        for (slot, px) in video.tick(r.scene_name(dir.scene), dt, dir.intensity, &vbeat) {
             r.upload_video(slot, &px);
         }
 

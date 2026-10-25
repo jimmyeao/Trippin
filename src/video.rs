@@ -120,6 +120,15 @@ pub fn scene_ready(scene: &str) -> bool {
     }
 }
 
+/// Does the scene's header ask for bar-locked playback (`// @video-lock`)?
+fn scene_locked(scene: &str) -> bool {
+    crate::render::find_shader_dir()
+        .ok()
+        .and_then(|d| crate::packs::scene_file(&d, scene))
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .is_some_and(|b| b.lines().take(8).any(|l| l.contains("@video-lock")))
+}
+
 /// What the decoder has ready for the clip on air.
 #[derive(Default)]
 struct Ready {
@@ -139,13 +148,104 @@ struct Want {
 /// Plays the on-air `video_*` scene: advances the play head, asks the
 /// decoder thread for the frames around it, and hands the render loop the
 /// frames to upload plus the blend weight for `vid()`.
+/// Where the beat is, for bar-locked clips (`// @video-lock` in a scene's
+/// header): the latency-compensated beat position, tempo, the beat in the
+/// bar, breakdown amount, and the director's fill and drop.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Beat {
+    pub pos: f64,
+    pub bpm: f32,
+    pub beat_in_bar: u64,
+    pub calm: f32,
+    pub fill: bool,
+    pub drop: bool,
+}
+
+/// Bar-locked playback state.
+#[derive(Default)]
+struct Locked {
+    on: bool,
+    /// Fill: the clip time the stutter repeats from.
+    stutter: Option<f64>,
+    /// Drop: scratch back until this beat, then land on the grid.
+    rewind_until: Option<f64>,
+}
+
+/// Bars per loop for a clip of `len` seconds at `bpm`: the power of two
+/// nearest its natural length, so the footage runs near its own speed.
+fn loop_bars(len: f64, bpm: f32) -> f64 {
+    let raw = len / (4.0 * 60.0 / bpm.max(40.0) as f64);
+    2f64.powi(raw.max(0.5).log2().round() as i32).clamp(1.0, 8.0)
+}
+
+/// One step of bar-locked playback: the play head `t` (clip seconds) for a
+/// `len`-second loop. The loop spans whole bars from the downbeat (twice as
+/// many in a breakdown); the head runs at the loop's tempo rate and is
+/// pulled onto the grid gently (a phase-locked loop; far off, it cuts onto
+/// the grid on a bar line), except
+/// on a fill (stutter: the half beat it started on, repeated) and a drop
+/// (scratch back half a beat, then land on the grid).
+fn lock_step(l: &mut Locked, t: f64, len: f64, b: &Beat, dt: f32) -> f64 {
+    let spb = 60.0 / b.bpm.max(40.0) as f64;
+    let mut bars = loop_bars(len, b.bpm);
+    if b.calm > 0.5 {
+        bars *= 2.0;
+    }
+    let loop_beats = 4.0 * bars;
+    let start = b.pos.floor() - b.beat_in_bar as f64;
+    let bar = (start / 4.0).round() as i64;
+    let in_loop = ((bar.rem_euclid(bars as i64)) as f64 * 4.0 + (b.pos - start)) / loop_beats;
+    let target = in_loop.rem_euclid(1.0) * len;
+    // Clip seconds per second at the loop's tempo.
+    let nominal = len / (loop_beats * spb);
+    let dt = dt as f64;
+    if !l.on {
+        l.on = true;
+        return target;
+    }
+    if b.fill && b.calm < 0.5 {
+        let s = *l.stutter.get_or_insert(t);
+        return (s + (b.pos * 2.0).fract() * nominal * spb * 0.5).rem_euclid(len);
+    }
+    if l.stutter.take().is_some() {
+        // Fill over (it ends on a bar line): back on the grid.
+        return target;
+    }
+    if b.drop {
+        l.rewind_until = Some(b.pos + 0.5);
+    }
+    if let Some(until) = l.rewind_until {
+        if b.pos < until {
+            return (t - dt * nominal * 3.0).rem_euclid(len);
+        }
+        l.rewind_until = None;
+        return target;
+    }
+    // Phase error, wrapped to the nearest way round the loop.
+    let mut err = (target - t).rem_euclid(len);
+    if err > len / 2.0 {
+        err -= len;
+    }
+    // Far off (a tempo change, a breakdown halving the speed): cut onto
+    // the grid on the next bar line, where a cut reads as meant, rather
+    // than racing to catch up.
+    if err.abs() > 0.15 * len && b.pos - start < 0.1 {
+        return target;
+    }
+    let pull = (err * (dt * 3.0).min(1.0)).clamp(-0.6 * nominal * dt, 0.6 * nominal * dt);
+    (t + nominal * dt + pull).rem_euclid(len)
+}
+
 pub struct Player {
+    locked: Locked,
     want: Arc<(Mutex<Want>, Condvar)>,
     ready: Arc<Mutex<Ready>>,
     clip: String,
     /// Play head in seconds of clip time.
     pos: f64,
     rate: f32,
+    /// The scene on air asks for bar-locked playback.
+    lock_on: bool,
     /// Which frame each slot of `vid_tex` holds.
     slots: [Option<usize>; 2],
     /// Weight of slot 1 in `vid()` (u.misc4.y).
@@ -161,7 +261,17 @@ impl Player {
             .name("video".into())
             .spawn(move || decode_loop(&w, &r))
             .ok();
-        Player { want, ready, clip: String::new(), pos: 0.0, rate: 1.0, slots: [None; 2], blend: 0.0 }
+        Player {
+            locked: Locked::default(),
+            want,
+            ready,
+            clip: String::new(),
+            pos: 0.0,
+            rate: 1.0,
+            lock_on: false,
+            slots: [None; 2],
+            blend: 0.0,
+        }
     }
 
     /// Something else drew into `vid_tex` (a panel thumbnail): re-upload.
@@ -170,20 +280,21 @@ impl Player {
     }
 
     /// Advance playback for `scene` and return the frames to upload as
-    /// (slot, rgba). `drive` is the smoothed intensity (0..1), `calm` the
-    /// breakdown amount. Nothing happens unless a `video_*` scene is on air.
-    pub fn tick(&mut self, scene: &str, dt: f32, drive: f32, calm: f32) -> Vec<(u32, Arc<Vec<u8>>)> {
+    /// (slot, rgba). `drive` is the smoothed intensity (0..1), `beat` the
+    /// grid (breakdown amount included). Scenes with `// @video-lock` in
+    /// their header play locked to the bar (`lock_step`); the rest run at a
+    /// speed that follows the drive. Nothing happens unless a `video_*`
+    /// scene is on air.
+    pub fn tick(&mut self, scene: &str, dt: f32, drive: f32, beat: &Beat) -> Vec<(u32, Arc<Vec<u8>>)> {
         let Some(clip) = scene.strip_prefix("video_") else { return Vec::new() };
+        let calm = beat.calm;
         if clip != self.clip {
             self.clip = clip.to_string();
             self.pos = 0.0;
             self.slots = [None; 2];
+            self.locked = Locked::default();
+            self.lock_on = scene_locked(scene);
         }
-        // Speed follows the track's drive, eased over ~1.5 s: slow and
-        // floaty in breakdowns, up to 1.35x on a drop. Never raw audio.
-        let target = (0.55 + 0.8 * drive.clamp(0.0, 1.0)) * (1.0 - 0.35 * calm.clamp(0.0, 1.0));
-        self.rate += (target - self.rate) * (1.0 - (-dt / 1.5).exp());
-        self.pos += (dt * self.rate) as f64;
 
         let r = lock(&self.ready);
         if r.clip != self.clip || r.frames == 0 {
@@ -192,6 +303,15 @@ impl Player {
             return Vec::new();
         }
         let n = r.frames;
+        if self.lock_on {
+            self.pos = lock_step(&mut self.locked, self.pos, n as f64 / r.fps.max(1.0) as f64, beat, dt);
+        } else {
+            // Speed follows the track's drive, eased over ~1.5 s: slow and
+            // floaty in breakdowns, up to 1.35x on a drop. Never raw audio.
+            let target = (0.55 + 0.8 * drive.clamp(0.0, 1.0)) * (1.0 - 0.35 * calm.clamp(0.0, 1.0));
+            self.rate += (target - self.rate) * (1.0 - (-dt / 1.5).exp());
+            self.pos += (dt * self.rate) as f64;
+        }
         let fpos = self.pos * r.fps as f64;
         let f0 = fpos.floor() as usize % n;
         let f1 = (f0 + 1) % n;
@@ -323,6 +443,77 @@ pub fn frames_at(name: &str, t: f64) -> Option<(Vec<u8>, Vec<u8>, f32)> {
 
 #[cfg(test)]
 mod tests {
+
+    fn beat(pos: f64) -> Beat {
+        Beat { pos, bpm: 128.0, beat_in_bar: (pos.floor() as u64) % 4, ..Default::default() }
+    }
+
+    /// An 11.3 s loop at 128 BPM is ~6 bars: it spans 8 (0.75x, rather than
+    /// a frantic 1.5x over 4). Locked, it follows the grid from wherever
+    /// it joins, and never jumps.
+    #[test]
+    fn locked_clip_runs_on_the_bar() {
+        let len = 11.3;
+        assert_eq!(loop_bars(len, 128.0), 8.0);
+        assert_eq!(loop_bars(len, 64.0), 4.0);
+        let mut l = Locked::default();
+        // Joined mid-bar: lands where the grid is, not at 0.
+        let mut t = lock_step(&mut l, 0.0, len, &beat(17.0), 1.0 / 60.0);
+        let want = |p: f64| ((p / 32.0).rem_euclid(1.0)) * len;
+        assert!((t - want(17.0)).abs() < 1e-6, "{t}");
+        let mut p = 17.0;
+        for _ in 0..600 {
+            p += 128.0 / 60.0 / 60.0;
+            let nt = lock_step(&mut l, t, len, &beat(p), 1.0 / 60.0);
+            let step = (nt - t).rem_euclid(len);
+            assert!(step < 0.05, "jumped {step}");
+            t = nt;
+        }
+        assert!((t - want(p)).abs() < 0.02, "drifted: {t} vs {}", want(p));
+    }
+
+    /// Far off the grid, the head cuts onto it on the next bar line (and
+    /// runs forward until then).
+    #[test]
+    fn locked_clip_catches_up() {
+        let len = 11.3;
+        let mut l = Locked { on: true, ..Default::default() };
+        let mut t = 0.0;
+        let mut p = 9.0; // mid-bar, ~3.2 s off the grid
+        for _ in 0..180 {
+            p += 128.0 / 60.0 / 60.0;
+            let nt = lock_step(&mut l, t, len, &beat(p), 1.0 / 60.0);
+            if p < 12.0 {
+                assert!((nt - t).rem_euclid(len) < 0.05, "cut before the bar line at {p}");
+            }
+            t = nt;
+        }
+        let want = ((p / 32.0).rem_euclid(1.0)) * len;
+        assert!((t - want).abs() < 0.1, "{t} vs {want}");
+    }
+
+    /// A fill repeats the half beat it started on; after it, the head is
+    /// back on the grid.
+    #[test]
+    fn fill_stutters_then_lands() {
+        let len = 11.3;
+        let mut l = Locked::default();
+        let mut t = lock_step(&mut l, 0.0, len, &beat(12.0), 0.016);
+        let start = t;
+        let mut b = beat(12.0);
+        b.fill = true;
+        for k in 0..8 {
+            b.pos = 12.0 + k as f64 * 0.25;
+            t = lock_step(&mut l, t, len, &b, 0.016);
+            assert!(t >= start - 1e-9 && t < start + 11.3 / 32.0, "left the slice: {t}");
+        }
+        b.fill = false;
+        b.pos = 16.0;
+        b.beat_in_bar = 0;
+        t = lock_step(&mut l, t, len, &b, 0.016);
+        assert!((t - ((16.0f64 / 32.0).rem_euclid(1.0)) * len).abs() < 1e-6);
+    }
+
     use super::*;
 
     fn write_clip(path: &Path, frames: usize) {

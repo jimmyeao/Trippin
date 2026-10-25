@@ -68,6 +68,13 @@ pub const CATALOG: &[CatalogEntry] = &[
         size_mb: 90,
         asset: ("liquid-1.trippinpack", ""),
     },
+    CatalogEntry {
+        id: "club-nights-2",
+        name: "Club Nights 2",
+        about: "Eight club scenes locked to the bar: a disco ball, the decks, a speaker cone,                 warehouse strobes, an LED wall, cryo jets, a laser tunnel and a jumping crowd.                 Kicks punch the camera in, fills stutter, drops scratch.",
+        size_mb: 220,
+        asset: ("club-nights-2-1.trippinpack", ""),
+    },
 ];
 
 #[derive(Clone, Debug)]

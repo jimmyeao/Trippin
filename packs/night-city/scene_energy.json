@@ -1,11 +1,11 @@
 {
-  "video_aerial_city": 0.72,
-  "video_city_drive": 0.6,
-  "video_fpv_bridge": 0.6,
-  "video_fpv_city": 0.67,
-  "video_fpv_dive": 0.67,
-  "video_fpv_rooftops": 0.78,
-  "video_highway_trails": 0.59,
+  "video_aerial_city": 0.66,
+  "video_city_drive": 0.59,
+  "video_fpv_bridge": 0.59,
+  "video_fpv_city": 0.63,
+  "video_fpv_dive": 0.68,
+  "video_fpv_rooftops": 0.69,
+  "video_highway_trails": 0.6,
   "video_neon_alley": 0.62,
-  "video_tunnel_drive": 0.69
+  "video_tunnel_drive": 0.71
 }
