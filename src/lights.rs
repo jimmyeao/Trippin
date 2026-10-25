@@ -73,6 +73,10 @@ struct Conf {
     level: f32,
     flashes: bool,
     strips: Vec<WledLight>,
+    hue: crate::hue::HueBridge,
+    hue_on: bool,
+    hue_lead_ms: f32,
+    hue_slow: Vec<String>,
     /// A test pattern runs on this strip (host) until then (Settings > Test).
     test: Option<(String, Instant)>,
 }
@@ -92,6 +96,8 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 /// The latest status, for the panel.
 pub static STATUS: Mutex<Vec<StripStatus>> = Mutex::new(Vec::new());
+/// Hue stream status for the panel ("streaming to …", or the error).
+pub static HUE_STATUS: Mutex<String> = Mutex::new(String::new());
 /// Settings > Test: run the test pattern on this strip (host) for 3 s.
 pub static TEST: Mutex<Option<String>> = Mutex::new(None);
 
@@ -99,12 +105,29 @@ impl Lights {
     pub fn start() -> Lights {
         let shared = Arc::new(Mutex::new(Shared {
             frame: None,
-            conf: Conf { on: false, level: 0.8, flashes: false, strips: Vec::new(), test: None },
+            conf: Conf {
+                on: false,
+                level: 0.8,
+                flashes: false,
+                strips: Vec::new(),
+                hue: Default::default(),
+                hue_on: false,
+                hue_lead_ms: 120.0,
+                hue_slow: Vec::new(),
+                test: None,
+            },
         }));
         let sh = shared.clone();
         std::thread::Builder::new()
             .name("lights".into())
             .spawn(move || worker(sh))
+            .ok();
+        // Bridge lights outside the stream: their own thread, as each
+        // command is a blocking HTTPS call.
+        let sh = shared.clone();
+        std::thread::Builder::new()
+            .name("hue-slow".into())
+            .spawn(move || slow_worker(sh))
             .ok();
         Lights { shared }
     }
@@ -120,6 +143,14 @@ impl Lights {
         c.flashes = s.light_flashes;
         if c.strips != s.wled {
             c.strips = s.wled.clone();
+        }
+        if c.hue != s.hue {
+            c.hue = s.hue.clone();
+        }
+        c.hue_on = s.hue_on;
+        c.hue_lead_ms = s.hue_lead_ms;
+        if c.hue_slow != s.hue_slow {
+            c.hue_slow = s.hue_slow.clone();
         }
         if let Some(host) = test {
             c.test = Some((host, Instant::now() + Duration::from_secs(3)));
@@ -151,7 +182,13 @@ fn worker(sh: Arc<Mutex<Shared>>) {
     let period = Duration::from_secs_f32(1.0 / SEND_HZ);
     let mut next = Instant::now();
     let mut px: Vec<u8> = Vec::new();
+    // Hue: the open stream (and which bridge/area it's for), retry timer.
+    let mut hue: Option<(crate::hue::Stream, crate::hue::HueBridge)> = None;
+    let mut hue_retry = Instant::now();
+    let mut hue_rgb: Vec<[f32; 3]> = Vec::new();
+    let mut tick = 0u64;
     loop {
+        tick += 1;
         next += period;
         let now = Instant::now();
         if next > now {
@@ -168,6 +205,49 @@ fn worker(sh: Arc<Mutex<Shared>>) {
             lock(&sh).conf.test = None;
         }
         let testing = test_host.is_some();
+        // Hue: open the stream while wanted, close it (lights handed back)
+        // when not, or when the bridge or area changed.
+        let want_hue = conf.on && conf.hue_on && !conf.hue.area.is_empty();
+        if hue.as_ref().is_some_and(|(_, b)| !want_hue || *b != conf.hue) {
+            if let Some((s, b)) = hue.take() {
+                s.close(&b);
+            }
+            lock(&HUE_STATUS).clear();
+        }
+        if want_hue && hue.is_none() && Instant::now() >= hue_retry {
+            *lock(&HUE_STATUS) = "connecting…".into();
+            match crate::hue::Stream::open(&conf.hue) {
+                Ok(s) => {
+                    *lock(&HUE_STATUS) = format!("streaming to {} lights", s.channels.len());
+                    hue = Some((s, conf.hue.clone()));
+                }
+                Err(e) => {
+                    *lock(&HUE_STATUS) = format!("{e:#}");
+                    hue_retry = Instant::now() + Duration::from_secs(10);
+                }
+            }
+        }
+        // 25 Hz to the bridge: it can't take more, and keeps the stream up.
+        if tick % 2 == 0 {
+            if let Some((s, _)) = hue.as_mut() {
+                match &frame {
+                    Some(f) if f.at.elapsed() < Duration::from_millis(500) => {
+                        render_hue(&mut hue_rgb, f, &s.channels, conf.hue_lead_ms, conf.level, Instant::now());
+                    }
+                    _ => {
+                        hue_rgb.clear();
+                        hue_rgb.resize(s.channels.len(), [0.0; 3]);
+                    }
+                }
+                if let Err(e) = s.send(&hue_rgb) {
+                    *lock(&HUE_STATUS) = format!("{e:#}");
+                    if let Some((s, b)) = hue.take() {
+                        s.close(&b);
+                    }
+                    hue_retry = Instant::now() + Duration::from_secs(5);
+                }
+            }
+        }
         if !conf.on && !testing {
             // Off: send nothing, and WLED takes its strips back.
             strips.clear();
@@ -236,6 +316,79 @@ fn worker(sh: Arc<Mutex<Shared>>) {
     }
 }
 
+/// Commands a second to the bridge, all lights together (Philips asks for
+/// about 10; leave room for the app and other apps).
+const SLOW_HZ: f32 = 8.0;
+
+/// Non-streaming bridge lights: on each bar (each two in a breakdown), the
+/// next palette colour per light, sent one light at a time at `SLOW_HZ` so
+/// the change sweeps across the room; dim and slow through breakdowns, off
+/// on blackout. Each light's own state is saved first and put back when the
+/// lights stop.
+fn slow_worker(sh: Arc<Mutex<Shared>>) {
+    let mut saved: Vec<crate::hue::Saved> = Vec::new();
+    let mut bridge = crate::hue::HueBridge::default();
+    let mut queue: std::collections::VecDeque<(String, [f32; 3], u32)> = Default::default();
+    let mut last_bar: Option<i64> = None;
+    let gap = Duration::from_secs_f32(1.0 / SLOW_HZ);
+    loop {
+        std::thread::sleep(Duration::from_millis(20));
+        let (frame, conf) = {
+            let s = lock(&sh);
+            (s.frame.clone(), s.conf.clone())
+        };
+        let want = conf.on && !conf.hue.user.is_empty() && !conf.hue_slow.is_empty();
+        // Stop (or the light list or bridge changed): hand back what we took.
+        let keep = |id: &str| want && conf.hue == bridge && conf.hue_slow.iter().any(|x| x == id);
+        if saved.iter().any(|s| !keep(&s.id)) {
+            for s in saved.iter().filter(|s| !keep(&s.id)) {
+                crate::hue::restore_light(&bridge, s);
+            }
+            saved.retain(|s| keep(&s.id));
+            queue.retain(|(id, _, _)| keep(id));
+        }
+        if !want {
+            last_bar = None;
+            continue;
+        }
+        bridge = conf.hue.clone();
+        for id in &conf.hue_slow {
+            if !saved.iter().any(|s| &s.id == id) {
+                if let Some(s) = crate::hue::save_light(&bridge, id) {
+                    saved.push(s);
+                }
+            }
+        }
+        let Some(f) = frame.filter(|f| f.at.elapsed() < Duration::from_millis(500)) else { continue };
+        // Zigbee bulbs lag: aim the change ahead of the bar line.
+        let pos = f.pos + (f.at.elapsed().as_secs_f64() + 0.3) * f.bpm as f64 / 60.0;
+        // Bars counted from the downbeat: the bar line the frame's beat is in,
+        // then on from there.
+        let start = f.pos.floor() - f.beat_in_bar as f64;
+        let bar = (start / 4.0).round() as i64 + ((pos - start) / 4.0).floor() as i64;
+        let every = if f.calm > 0.5 { 2 } else { 1 };
+        if last_bar != Some(bar) && bar.rem_euclid(every) == 0 {
+            last_bar = Some(bar);
+            let n = conf.hue_slow.len().max(1) as f32;
+            let lvl = (0.35 + 0.65 * f.intensity) * (1.0 - 0.6 * f.calm) * f.master.clamp(0.0, 1.0) * conf.level;
+            let fade = if f.calm > 0.5 { 2000 } else { 400 };
+            queue.clear();
+            for (i, id) in conf.hue_slow.iter().enumerate() {
+                let c = pal(&f.lut[..], f.hue + bar as f32 * 0.13 + i as f32 / n * 0.35);
+                queue.push_back((id.clone(), c.map(|v| v * lvl), fade));
+            }
+        } else if last_bar.is_none() {
+            last_bar = Some(bar);
+        }
+        if let Some((id, rgb, fade)) = queue.pop_front() {
+            if let Err(e) = crate::hue::set_light(&bridge, &id, rgb, fade) {
+                *lock(&HUE_STATUS) = format!("{e:#}");
+            }
+            std::thread::sleep(gap);
+        }
+    }
+}
+
 /// White flash for this strip now? The strobe gate opens on each drum hit
 /// while a strobe is live; flashes follow it, capped at `MAX_FLASH_HZ`.
 fn flash_now(st: &mut Strip, f: &LightFrame, conf: &Conf) -> f32 {
@@ -257,50 +410,91 @@ fn pal(lut: &[u8], x: f32) -> [f32; 3] {
 }
 
 /// One strip of "follow the show" pixels into `px` (RGB bytes).
-pub fn render_strip(px: &mut [u8], f: &LightFrame, c: &WledLight, level: f32, flash: f32, now: Instant) {
-    let n = px.len() / 3;
-    if n == 0 {
-        return;
-    }
-    // Where the beat will be when these pixels light: the frame's position
-    // moved on to now, plus the strip's lead.
-    let ahead = now.saturating_duration_since(f.at).as_secs_f64() + c.lead_ms as f64 / 1000.0;
+/// The beat-grid state every pixel of a frame shares (`look`), so strips
+/// and Hue lights shade the same show from a position across the room.
+struct Look {
+    beat: f32,
+    front: f32,
+    chase: f32,
+    base: f32,
+    pulse: f32,
+    drums: f32,
+    soft: f32,
+    drift: f32,
+}
+
+fn look(f: &LightFrame, lead_ms: f32, now: Instant) -> Look {
+    // Where the beat will be when these lights change: the frame's
+    // position moved on to now, plus the device's lead.
+    let ahead = now.saturating_duration_since(f.at).as_secs_f64() + lead_ms as f64 / 1000.0;
     let pos = f.pos + ahead * f.bpm as f64 / 60.0;
     let beat = pos.fract() as f32;
     // `beat_in_bar` is the beat `f.pos` is in; count on from there.
     let bar_t = ((f.beat_in_bar as f64 + pos - f.pos.floor()).rem_euclid(4.0) / 4.0) as f32;
     let drums = (1.0 - f.calm).clamp(0.0, 1.0);
     let soft = if f.smooth { 0.4 } else { 1.0 };
-    // Beat pulse: sharp attack on the beat, decays through it.
-    let pulse = (-beat * 7.0).exp() * drums * soft * (0.35 + 0.65 * f.hits4[0].max(f.pres4[0]).min(1.0));
-    // Kick ripple from the middle, one per beat, travelling out over half
-    // a beat.
-    let front = beat * 2.0;
-    // Bar chase: once along the strip per bar, turning round each phrase.
+    // Bar chase: once across per bar, turning round each phrase.
     let phrase = ((pos / 16.0).floor() as i64).rem_euclid(2) == 1;
-    let chase = if phrase { 1.0 - bar_t } else { bar_t };
     // Breakdown: a slow breath over two bars.
     let breath = 0.5 + 0.5 * (pos as f32 / 8.0 * std::f32::consts::TAU).sin();
-    let base = (0.45 + 0.3 * f.intensity) * (0.65 + 0.35 * drums) + 0.35 * f.calm * breath;
-    let drift = (pos as f32 / 64.0).fract();
+    Look {
+        beat,
+        // Kick ripple from the middle, out over half a beat.
+        front: beat * 2.0,
+        chase: if phrase { 1.0 - bar_t } else { bar_t },
+        base: (0.45 + 0.3 * f.intensity) * (0.65 + 0.35 * drums) + 0.35 * f.calm * breath,
+        // Beat pulse: sharp attack on the beat, decays through it.
+        pulse: (-beat * 7.0).exp() * drums * soft * (0.35 + 0.65 * f.hits4[0].max(f.pres4[0]).min(1.0)),
+        drums,
+        soft,
+        drift: (pos as f32 / 64.0).fract(),
+    }
+}
+
+/// Colour at `x` (0..1 across the strip or the room), linear, before the
+/// master level, flashes and gamma.
+fn shade(l: &Look, f: &LightFrame, x: f32) -> [f32; 3] {
+    // The palette as is: squaring it (as the HDR scenes do) on top of the
+    // LED gamma left mid colours nearly black.
+    let col = pal(&f.lut[..], f.hue + l.drift + x * 0.45);
+    let d = (x - 0.5).abs() * 2.0;
+    let ripple = (-((d - l.front) * 9.0).powi(2)).exp() * (1.0 - l.beat) * l.drums * l.soft * 0.8;
+    let cd = (x - l.chase).abs().min(1.0 - (x - l.chase).abs());
+    let chase = (-(cd * 14.0).powi(2)).exp() * (0.25 + 0.5 * l.drums) * f.energy.clamp(0.3, 1.0);
+    let v = (l.base + l.pulse * 0.9 + ripple + chase).min(1.4);
+    [col[0] * v, col[1] * v, col[2] * v]
+}
+
+/// One strip of "follow the show" pixels into `px` (RGB bytes).
+pub fn render_strip(px: &mut [u8], f: &LightFrame, c: &WledLight, level: f32, flash: f32, now: Instant) {
+    let n = px.len() / 3;
+    if n == 0 {
+        return;
+    }
+    let l = look(f, c.lead_ms, now);
     let master = f.master.clamp(0.0, 1.0) * level;
     for i in 0..n {
-        let x = (i as f32 + 0.5) / n as f32;
-        // The palette as is: squaring it (as the HDR scenes do) on top of
-        // the LED gamma left mid colours nearly black.
-        let col = pal(&f.lut[..], f.hue + drift + x * 0.45);
-        let d = (x - 0.5).abs() * 2.0;
-        let ripple = (-((d - front) * 9.0).powi(2)).exp() * (1.0 - beat) * drums * soft * 0.8;
-        let cd = (x - chase).abs().min(1.0 - (x - chase).abs());
-        let chase_v = (-(cd * 14.0).powi(2)).exp() * (0.25 + 0.5 * drums) * f.energy.clamp(0.3, 1.0);
-        let v = (base + pulse * 0.9 + ripple + chase_v).min(1.4);
+        let col = shade(&l, f, (i as f32 + 0.5) / n as f32);
         for k in 0..3 {
-            let lit = col[k] * v + flash;
             // Gamma: perceptual brightness to LED duty (WLED sends realtime
             // data uncorrected).
-            let o = (lit * master).clamp(0.0, 1.0).powf(1.6);
+            let o = ((col[k] + flash) * master).clamp(0.0, 1.0).powf(1.6);
             px[i * 3 + k] = (o * 255.0 + 0.5) as u8;
         }
+    }
+}
+
+/// Hue lights: the same show at each light's place across the room (its
+/// x, -1..1). No flashes ever, and a gentler pulse: bulbs are slow and the
+/// bridge isn't for strobing.
+pub fn render_hue(out: &mut Vec<[f32; 3]>, f: &LightFrame, chans: &[crate::hue::Channel], lead_ms: f32, level: f32, now: Instant) {
+    let mut l = look(f, lead_ms, now);
+    l.pulse *= 0.7;
+    let master = f.master.clamp(0.0, 1.0) * level;
+    out.clear();
+    for c in chans {
+        let col = shade(&l, f, ((c.x + 1.0) * 0.5).clamp(0.0, 1.0));
+        out.push(col.map(|v| (v * master).clamp(0.0, 1.0)));
     }
 }
 
@@ -514,7 +708,17 @@ mod tests {
             flash_at: Instant::now() - Duration::from_secs(1),
             gate_was: false,
         };
-        let conf = Conf { on: true, level: 1.0, flashes: true, strips: vec![], test: None };
+        let conf = Conf {
+            on: true,
+            level: 1.0,
+            flashes: true,
+            strips: vec![],
+            hue: Default::default(),
+            hue_on: false,
+            hue_lead_ms: 0.0,
+            hue_slow: vec![],
+            test: None,
+        };
         let mut f = frame(8.0, 0.0);
         f.strobe_live = true;
         let mut starts = 0;

@@ -270,6 +270,7 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
 | `src/midi.rs` | MIDI input (midir): one port, note-ons become `Action`s. |
 | `src/remote.rs` | LAN remote for the iOS companion app: a WebSocket JSON server (TCP 9138, Bonjour `_trippin._tcp`, PIN-gated) — protocol at the top of the file, details in §8. |
 | `ios/TrippinRemote/` | The iOS/iPadOS remote app (SwiftUI, iOS 17+): Bonjour discovery, PIN pairing in the Keychain, pads, scene grid with thumbnails, look/FX, dancer and transport pages, plus a built-in `DemoServer` for use without a rig (and for App Review). The `.xcodeproj` is generated: run `xcodegen` in that folder (it's git-ignored). Speaks the `remote.rs` protocol; UI tests in `UITests/`. See its README. |
+| `src/lights.rs`, `src/hue.rs` | Lights that follow the show: WLED over DDP (50 Hz), Hue Entertainment over DTLS (25 Hz), and non-streaming bridge bulbs a bar at a time. Settings > Lights. |
 | `src/osc.rs` | OSC UDP input (9139) for TouchOSC/Lemur — maps addresses onto the same `RemoteCmd`s as the app. |
 | `src/snap.rs` | Headless snapshot and benchmark rendering. |
 | `src/engine.rs`, `src/link.rs`, `unity/` | Unity engine (shows `unity_stage`, `unity_crystals`, `unity_flow`, `unity_leviathan`, `unity_sculpture`, `unity_colossus`, `unity_tidal_cathedral`, `unity_lightstorm`, `unity_prism`, `unity_aurora`, `unity_basscore`, `unity_pillars`, `unity_helix`, `unity_tesseract`, `unity_polyhedra`, `unity_knot`, `unity_gyroscope`, `unity_lattice`, `unity_pendulum`, `unity_spectrum`, `unity_eclipse`, `unity_lightrain`, `unity_warp`, `unity_ledwall`, `unity_fountain`, `unity_galaxy`, `unity_nebula`, `unity_ocean`, `unity_chladni`, `unity_tunnel`, `unity_orb`, `unity_radar`, `unity_djbot`, `unity_robot_rave`, `unity_assembly`, `unity_robot_club`, `unity_robot_band`, `unity_dj_battle`; any `unity_*` scene is gated on live frames and hidden from the AI builder). `engine.rs` launches the player headless and supervises it; frames come back through a memory-mapped file (seqlock, top row first) into `gfx::Statics::ext` (binding 8 `ext_tex`); `link.rs` sends the show state over UDP. Cross-platform, nothing to start by hand. See `unity/README.md`. |
@@ -470,6 +471,23 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   steps up `rate*dt` then eases back — a two-frame judder (this made the
   branding logo wobble horizontally whenever the DJ name was off). Guard
   the at-rest case (see `overlay.rs::ease_vis`).
+- **Lights** (`lights.rs`, `hue.rs`): the render loop only hands a
+  `LightFrame` to worker threads; never put network I/O on it. Patterns are
+  timed from the *predicted* beat grid plus a per-device lead, not from
+  detected hits. LED colours: don't square the palette as the HDR scenes do
+  — with the LED gamma it left strips at 2-10 of 255. White flashes are
+  capped at 3 Hz and never go to Hue. `--lights-demo <ip>` plus WLED's live
+  view (`ws://<ip>/ws`, `{"lv":true}`) shows what a strip really displays.
+- **Hue is the one HTTPS exception to the trust-store rule:** bridges use
+  Signify's private CA, so `hue::call` pins the bridge certificate's SHA-256
+  at pairing (rustls custom verifier) and refuses a change. Don't reuse that
+  verifier for anything else. The Entertainment stream is DTLS 1.2 PSK
+  (`webrtc-dtls`, a single-threaded tokio runtime inside the lights thread):
+  the PSK identity is the *application id* from `GET /auth/v1`'s
+  `hue-application-id` header, not the username. Start the area before the
+  handshake; stop it when done (also in `exiting`). Non-Hue bulbs can't
+  stream: they're plain light commands at <= 8/s total (`slow_worker`), a
+  bar at a time, with each light's state saved and restored.
 - **HTTP clients use the OS trust store** (`config::tls()`, ureq's
   `platform-verifier` feature). ureq's default bundled roots failed with
   `invalid certificate: UnknownIssuer` on the owner's M2, whose network

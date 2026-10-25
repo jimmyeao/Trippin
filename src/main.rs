@@ -31,6 +31,7 @@ mod ai;
 mod audio;
 mod beats;
 mod engine;
+mod hue;
 mod lights;
 mod link;
 mod looks;
@@ -2771,6 +2772,17 @@ impl ApplicationHandler<AppEvent> for App {
         // The render thread (which owns the Engine) isn't unwound on quit —
         // macOS Cmd-Q never returns from run_app — so stop the player here.
         engine::shutdown();
+        // Hand a streaming Hue area back to the bridge (lights.rs's worker
+        // dies with the process and would leave it "in use" for ~10 s).
+        if let Some(sh) = &self.shared {
+            let bridge = {
+                let s = lock(&sh.settings);
+                (s.lights_on && s.hue_on).then(|| s.hue.clone())
+            };
+            if let Some(b) = bridge {
+                hue::stop(&b);
+            }
+        }
     }
 
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
@@ -3514,6 +3526,15 @@ fn main() -> Result<()> {
     }
     if args.iter().any(|a| a == "--check-shaders") {
         return check_shaders();
+    }
+    // `--hue-test <ip> <user> <client key>`: stream 8 s to a Hue area.
+    if let Some(i) = args.iter().position(|a| a == "--hue-test") {
+        let get = |k: usize| args.get(i + k).cloned().unwrap_or_default();
+        return hue::cli_test(&get(1), &get(2), &get(3));
+    }
+    if let Some(i) = args.iter().position(|a| a == "--hue-slow-test") {
+        let get = |k: usize| args.get(i + k).cloned().unwrap_or_default();
+        return hue::cli_slow_test(&get(1), &get(2), &get(3), &get(4), get(5).parse().unwrap_or(20.0));
     }
     // `--lights-demo <host> [seconds]`: a synthetic groove on one WLED strip.
     if let Some(h) = arg_value(&args, "--lights-demo") {

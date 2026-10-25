@@ -3884,12 +3884,15 @@ fn lights_card(ui: &mut egui::Ui, s: &mut Settings) {
     ui.add_space(4.0);
     let status = lights::STATUS.lock().unwrap_or_else(|e| e.into_inner()).clone();
     let mut remove = None;
+    // Widths from the card, not inside the rows: `available_width` in a
+    // `horizontal` sees the parent's max_rect and can overflow (AGENTS.md).
+    let label_w = (ui.available_width() - 150.0).max(60.0);
     for (i, w) in s.wled.iter_mut().enumerate() {
         ui.horizontal(|ui| {
             ui.checkbox(&mut w.on, "");
             let font = egui::FontId::proportional(12.5);
             let label = format!("{} · {} LEDs", w.name, w.leds);
-            let width = (ui.available_width() - 150.0).max(60.0);
+            let width = label_w;
             ui.label(egui::RichText::new(ellipsize(ui.painter(), &label, &font, width)).font(font))
                 .on_hover_text(&w.host);
             if ui.small_button("Test").clicked() {
@@ -3944,6 +3947,111 @@ fn lights_card(ui: &mut egui::Ui, s: &mut Settings) {
                 reverse: false,
             }),
         }
+    }
+    hue_section(ui, s, label_w);
+}
+
+/// Philips Hue: find and pair a bridge, pick an entertainment area, stream.
+fn hue_section(ui: &mut egui::Ui, s: &mut Settings, label_w: f32) {
+    use crate::hue;
+    use crate::ui_theme::*;
+    ui.add_space(8.0);
+    ui.label(egui::RichText::new("Philips Hue").strong());
+    let (busy, msg, found, areas) = {
+        let mut u = hue::UI.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(b) = u.paired.take() {
+            s.hue = b;
+        }
+        (u.busy, u.msg.clone(), u.found.clone(), u.areas.clone())
+    };
+    let font = egui::FontId::proportional(12.5);
+    if s.hue.user.is_empty() {
+        ui.small("Pair a Hue bridge, then pick an entertainment area (made in the Hue app).");
+        ui.horizontal(|ui| {
+            if ui.add_enabled(!busy, egui::Button::new("Find bridge")).clicked() {
+                hue::find_bg();
+            }
+            if busy {
+                ui.spinner();
+            }
+        });
+        for (ip, name) in &found {
+            ui.horizontal(|ui| {
+                let label = format!("{name} · {ip}");
+                ui.label(egui::RichText::new(ellipsize(ui.painter(), &label, &font, label_w)).font(font.clone()));
+                if ui.add_enabled(!busy, egui::Button::new("Pair").small()).on_hover_text("Then press the link button on the bridge").clicked() {
+                    hue::pair_bg(ip.clone(), name.clone());
+                }
+            });
+        }
+    } else {
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut s.hue_on, "");
+            let label = format!("{} · {}", s.hue.name, if s.hue.area_name.is_empty() { "no area" } else { &s.hue.area_name });
+            ui.label(egui::RichText::new(ellipsize(ui.painter(), &label, &font, label_w)).font(font.clone()));
+            if ui.small_button("Forget").on_hover_text("Unpair this bridge").clicked() {
+                s.hue = Default::default();
+                s.hue_on = false;
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.add_space(24.0);
+            let mut pick = None;
+            egui::ComboBox::from_id_salt("hue_area")
+                .selected_text(if s.hue.area_name.is_empty() { "choose area" } else { &s.hue.area_name })
+                .show_ui(ui, |ui| {
+                    for (id, name, n) in &areas {
+                        if ui.selectable_label(*id == s.hue.area, format!("{name} ({n})")).clicked() {
+                            pick = Some((id.clone(), name.clone()));
+                        }
+                    }
+                });
+            if let Some((id, name)) = pick {
+                s.hue.area = id;
+                s.hue.area_name = name;
+            }
+            if ui.add_enabled(!busy, egui::Button::new("reload").small()).on_hover_text("Reload the areas").clicked()
+                || (areas.is_empty() && !busy && msg.is_empty())
+            {
+                hue::areas_bg(s.hue.clone());
+            }
+            ui.label(egui::RichText::new("lead").size(11.0).color(MUTED));
+            ui.add(egui::DragValue::new(&mut s.hue_lead_ms).range(0.0..=400.0).speed(1.0).suffix(" ms"))
+                .on_hover_text("Send the beat this far early: Hue bulbs lag more than LED strips");
+        });
+        let st = crate::lights::HUE_STATUS.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if s.hue_on && !st.is_empty() {
+            ui.small(st);
+        }
+        // Bulbs that can't join an entertainment area (non-Hue makes): a
+        // colour change each bar, one light at a time (hue.rs).
+        let all = hue::LIGHTS.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let slow: Vec<&hue::BridgeLight> = all.iter().filter(|l| l.colour && !l.streams).collect();
+        egui::CollapsingHeader::new(format!("Other colour lights on the bridge ({})", slow.len()))
+            .id_salt("hue_slow")
+            .show(ui, |ui| {
+                ui.small("These can't stream, so they change colour once a bar instead of on every beat.");
+                if all.is_empty() && !busy {
+                    hue::lights_bg(s.hue.clone());
+                }
+                for l in slow {
+                    let mut on = s.hue_slow.contains(&l.id);
+                    let label = format!("{} · {}", l.name, l.maker);
+                    if ui
+                        .checkbox(&mut on, egui::RichText::new(ellipsize(ui.painter(), &label, &font, label_w)).font(font.clone()))
+                        .changed()
+                    {
+                        if on {
+                            s.hue_slow.push(l.id.clone());
+                        } else {
+                            s.hue_slow.retain(|x| x != &l.id);
+                        }
+                    }
+                }
+            });
+    }
+    if !msg.is_empty() {
+        ui.small(egui::RichText::new(msg).color(MUTED));
     }
 }
 

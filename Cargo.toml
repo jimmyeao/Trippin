@@ -37,6 +37,9 @@ if-addrs = "0.15"
 mdns-sd = "0.21.4"
 rosc = "0.11.4"
 base64 = "0.23.1"
+webrtc-dtls = "0.12"
+tokio = { version = "1", default-features = false, features = ["rt", "net", "time"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 
 [build-dependencies]
 # Embeds logo.ico as the exe's icon resource on Windows.

@@ -433,6 +433,14 @@ pub struct Settings {
     pub light_level: f32,
     pub light_flashes: bool,
     pub wled: Vec<WledLight>,
+    /// Philips Hue: the paired bridge (key and client key included), stream
+    /// to its chosen entertainment area, and how far ahead of the beat.
+    pub hue: crate::hue::HueBridge,
+    pub hue_on: bool,
+    pub hue_lead_ms: f32,
+    /// Bridge lights that can't stream (non-Hue bulbs): ids, driven a bar
+    /// at a time with plain light commands (lights.rs::slow_worker).
+    pub hue_slow: Vec<String>,
     /// UDP port the show-state feed goes to (127.0.0.1).
     pub link_port: u16,
     pub latency_ms: f32,
@@ -561,6 +569,10 @@ impl Default for Settings {
             light_level: 0.8,
             light_flashes: false,
             wled: Vec::new(),
+            hue: Default::default(),
+            hue_on: false,
+            hue_lead_ms: 120.0,
+            hue_slow: Vec::new(),
             link_port: 9137,
             latency_ms: 30.0,
             audio_in: String::new(),
