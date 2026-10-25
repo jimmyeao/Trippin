@@ -261,8 +261,8 @@ fn allowed_scenes(r: &Renderer, s: &Settings) -> Vec<usize> {
         // via an explicit cue, never by autopilot or next/prev.
         .filter(|&i| names[i] != "void")
         .filter(|&i| !names[i].starts_with("unity_") || EXT_LIVE.load(Ordering::Relaxed))
-        // video_* scenes need their clip on disk (Settings > Video clips).
-        .filter(|&i| video::scene_ready(&names[i]))
+        // video_* scenes: Settings > Video clips on, and their clip on disk.
+        .filter(|&i| !names[i].starts_with("video_") || (s.video_clips && video::scene_ready(&names[i])))
         .filter(|&i| !s.disabled_scenes.contains(&names[i]))
         .filter(|&i| heavy_on || !heavy[i])
         .filter(|&i| s.flat_scenes || heavy[i])

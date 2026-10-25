@@ -1813,6 +1813,12 @@ fn inspector_body(
         });
     });
 
+    // Unity show controls (showparams.rs) while a unity_* show is on air.
+    if let Some(name) = scenes.get(st.scene).filter(|n| crate::showparams::has_controls(n)) {
+        let title = st.scene_titles.get(st.scene).map(String::as_str).unwrap_or(name);
+        ui.add_space(8.0);
+        show_controls(ui, s, name, title);
+    }
 }
 
 /// A summary row — label left, monospaced value right, chevron — that
@@ -2020,13 +2026,6 @@ fn pads_view(
         );
     });
     ui.add_space(8.0);
-
-    // Unity show controls (showparams.rs) while a unity_* show is on air.
-    if let Some(name) = scenes.get(st.scene).filter(|n| crate::showparams::has_controls(n)) {
-        let title = st.scene_titles.get(st.scene).map(String::as_str).unwrap_or(name);
-        show_controls(ui, s, name, title);
-        ui.add_space(8.0);
-    }
 
     // Action pads — the same Actions the hotkeys fire, with the current
     // binding badged top-right and a live sub-state under the label (1c).
