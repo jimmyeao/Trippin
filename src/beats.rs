@@ -286,7 +286,8 @@ pub struct Grid {
 /// confident beats only, double-time hits dropped, integer beat numbering
 /// across gaps, confidence-weighted least squares, then the bar phase by a
 /// vote of every detected downbeat. `max_bpm` folds faster tempos to half
-/// time (Trippin's grids run 87 for drum & bass, like the live tracker).
+/// time (Trippin's grids run 87 for drum & bass, like the live tracker),
+/// and tempos under half of it to double time (a 65 read runs at 130).
 pub fn fit_grid(beats: &[Beat], max_bpm: f64) -> Option<Grid> {
     let conf: Vec<&Beat> = beats.iter().filter(|b| b.conf >= CONF_MIN).collect();
     if conf.len() < 16 {
@@ -400,17 +401,24 @@ pub fn fit_grid(beats: &[Beat], max_bpm: f64) -> Option<Grid> {
     }
     let mut period = slope;
     let mut bar = 4.0 * slope;
+    let mut phase_agreement = best / total;
     if 60.0 / slope > max_bpm {
         // Half time: a "beat" spans two real beats and a bar two real bars.
         period *= 2.0;
         bar *= 2.0;
+    } else if 60.0 / slope < max_bpm / 2.0 {
+        // Every other beat (a 130 track read at 65): a real bar is two of
+        // these "beats", so slots two apart are the same downbeat.
+        period *= 0.5;
+        bar *= 0.5;
+        phase_agreement = (best + votes[(phase + 2) % 4]) / total;
     }
     let mut t0 = icpt + slope * phase as f64;
     t0 -= (t0 / bar).floor() * bar;
     Some(Grid {
         bpm: 60.0 / period,
         first_downbeat: t0,
-        phase_agreement: best / total,
+        phase_agreement,
     })
 }
 
@@ -427,6 +435,9 @@ pub fn song_grid(path: &Path, mono: &[f32], sr: u32, max_bpm: f64) -> Result<Gri
                     v["first_downbeat"].as_f64(),
                     v["phase_agreement"].as_f64(),
                 ) {
+                    // Grids cached before the double-tempo line read slow
+                    // tracks at half tempo; a downbeat is still a downbeat.
+                    let bpm = if bpm < max_bpm / 2.0 { bpm * 2.0 } else { bpm };
                     return Ok(Grid {
                         bpm,
                         first_downbeat: t0,
@@ -511,6 +522,21 @@ mod tests {
             .collect();
         let g = fit_grid(&beats, 144.0).unwrap();
         assert!((g.bpm - 86.0).abs() < 0.05, "bpm {}", g.bpm);
+    }
+
+    #[test]
+    fn doubles_every_other_beat_reads() {
+        // Beats at 65 BPM: a 130 track with every other beat found.
+        let p = 60.0 / 65.0;
+        let beats: Vec<Beat> = (0..150)
+            .map(|n| Beat { t: 1.0 + n as f32 * p, conf: 0.9, down: n % 2 == 0 })
+            .collect();
+        let g = fit_grid(&beats, 150.0).unwrap();
+        assert!((g.bpm - 130.0).abs() < 0.05, "bpm {}", g.bpm);
+        assert!(g.phase_agreement > 0.9, "agreement {}", g.phase_agreement);
+        let bar = 4.0 * 60.0 / 130.0;
+        let k = ((1.0 - g.first_downbeat) / bar).round();
+        assert!((g.first_downbeat + k * bar - 1.0).abs() < 0.01, "t0 {}", g.first_downbeat);
     }
 
     #[test]

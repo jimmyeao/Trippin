@@ -249,6 +249,10 @@ fn estimate_bpm(env: &[f32], fps: f32) -> Option<(f64, f64)> {
     if 60.0 * fps / period > crate::audio::HALF_TEMPO_ABOVE {
         period *= 2.0;
     }
+    // And below the double-tempo line, a read of every other beat.
+    if 60.0 * fps / period < crate::audio::DOUBLE_TEMPO_BELOW {
+        period *= 0.5;
+    }
     let bpm = 60.0 * fps as f64 / period as f64;
 
     // Comb-filter the whole envelope at that period: the offset with the most

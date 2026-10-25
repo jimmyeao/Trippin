@@ -514,6 +514,15 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   drops a connection whose port vanished, so replugging recovers. midir's
   macOS backend is CoreMIDI — the code isn't cfg-gated, but it hasn't been
   compiled for macOS yet.
+- **Tempo octave: one reading per tempo, 75-150 BPM.** `HALF_TEMPO_ABOVE`
+  (150) halves fast reads and `DOUBLE_TEMPO_BELOW` (exactly half of it)
+  doubles slow ones, in every path that sets a tempo: `nn_apply`,
+  `estimate_tempo`, the end of `frame`, `song.rs` and `beats::fit_grid`
+  (plus cached grids on read). The neural fit accepts 55-290 BPM, and Beat
+  This! sometimes finds every other beat on a sparse stretch: unfolded, a
+  130 set locked at 65, and the keep-the-live-level rule then turned every
+  correct 130 fit back into 65. Any other floor lets the two folds undo
+  each other.
 - **Beat This! grid fit** (`beats.rs::fit_grid`): the model sometimes emits
   *confident* beats at ~1.5x tempo plus dozens of junk downbeats through a
   breakdown. Counting those as beats skewed tempos by 2-3%, and a slightly
