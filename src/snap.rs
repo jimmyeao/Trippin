@@ -370,7 +370,7 @@ pub fn run(args: &[String]) -> Result<()> {
     };
 
     // Built in plus the effects packs' scenes (packs.rs).
-    let mut scenes: Vec<PathBuf> = crate::packs::scene_files(&dir);
+    let mut scenes: Vec<PathBuf> = crate::packs::scene_files_all(&dir);
     if which != "all" {
         let want: Vec<&str> = which.split(',').collect();
         scenes.retain(|p| {

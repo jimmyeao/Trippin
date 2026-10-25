@@ -101,6 +101,9 @@ fn unhex(s: &str) -> Option<Vec<u8>> {
         .flatten()
 }
 
+/// Quitting: short timeouts, so an unreachable bridge can't hold up exit.
+pub static QUITTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 struct Reply {
     status: u16,
     headers: String,
@@ -127,9 +130,11 @@ fn call(ip: &str, pin: &str, method: &str, path: &str, key: &str, body: Option<&
     let addr: std::net::IpAddr = ip.parse().context("bridge address")?;
     let name = rustls::pki_types::ServerName::IpAddress(addr.into());
     let conn = rustls::ClientConnection::new(Arc::new(cfg), name)?;
-    let sock = TcpStream::connect_timeout(&(addr, 443).into(), Duration::from_secs(4))?;
-    sock.set_read_timeout(Some(Duration::from_secs(6)))?;
-    sock.set_write_timeout(Some(Duration::from_secs(6)))?;
+    let quick = QUITTING.load(std::sync::atomic::Ordering::Relaxed);
+    let (connect, io) = if quick { (Duration::from_millis(600), Duration::from_millis(800)) } else { (Duration::from_secs(4), Duration::from_secs(6)) };
+    let sock = TcpStream::connect_timeout(&(addr, 443).into(), connect)?;
+    sock.set_read_timeout(Some(io))?;
+    sock.set_write_timeout(Some(io))?;
     let mut tls = rustls::StreamOwned::new(conn, sock);
     let body = body.unwrap_or("");
     let mut req = format!("{method} {path} HTTP/1.1\r\nHost: {ip}\r\nConnection: close\r\nContent-Length: {}\r\n", body.len());

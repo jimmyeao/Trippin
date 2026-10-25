@@ -173,6 +173,21 @@ const ASSET: (&str, &str) = (
 /// Written into the unpacked folder; a download whose stamp isn't the
 /// current `ASSET` is stale and gets replaced.
 const STAMP: &str = "ENGINE_VERSION";
+
+/// The engine release the app downloads (`RELEASE_BASE`).
+pub const ENGINE_VERSION: u32 = 15;
+
+/// Can the engine the app runs draw this `unity_*` show? A show added in a
+/// newer engine than the pinned one stays out of the scene list until that
+/// engine is published (bump `ENGINE_VERSION`). `TRIPPIN_ENGINE` (a dev
+/// player build) runs everything.
+pub fn scene_supported(name: &str) -> bool {
+    let needs = match name {
+        "unity_fluid" => 16,
+        _ => 0,
+    };
+    needs <= ENGINE_VERSION || std::env::var_os("TRIPPIN_ENGINE").is_some()
+}
 const HEADER: usize = 64;
 
 /// The latest frame from the engine, RGBA8 at `EXT_W` x `EXT_H`.

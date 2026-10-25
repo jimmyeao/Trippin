@@ -87,7 +87,7 @@ mod tests {
 
     /// Built-in and pack scenes (`load` merges the packs' tags too).
     fn scene_ids(dir: &Path) -> Vec<String> {
-        crate::packs::scene_names(dir)
+        crate::packs::scene_names_all(dir)
     }
 
     #[test]

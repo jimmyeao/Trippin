@@ -401,14 +401,11 @@ Developer notes are in `unity/README.md`.
 controls** card adjusts it: **Speed** (how fast it travels, drifts and
 turns; moves locked to the beat stay on the beat, so a few mostly
 beat-locked shows such as the sculpture barely change) and **Reactivity**
-(how hard it answers the music) for every show, plus the
-show's own knobs where it has them (for example `unity_fluid`: swirl, dye
-life, flow life, splat size, force and shine). Values are remembered per
-show; **Reset** puts the show back to its defaults.
-
-`unity_fluid` is a real-time fluid simulation drawn as glossy liquid paint:
-three emitters pour and push with the bass, mids and highs, and every kick
-fires a burst that blooms into swirls.
+(how hard it answers the music) for every show. Values are remembered per
+show; **Reset** puts the show back to its defaults. Shows can also add
+their own knobs; the first ones (and `unity_fluid`, a real-time fluid
+simulation drawn as glossy liquid paint) arrive with the next Unity engine
+update.
 
 ### Video scenes
 

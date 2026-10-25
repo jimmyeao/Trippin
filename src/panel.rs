@@ -3925,6 +3925,9 @@ fn effects_packs(ui: &mut egui::Ui, s: &mut Settings) {
     ui.small("Extra scenes that install apart from the app, such as the video clip scenes.");
     ui.add_space(4.0);
     let mut restart = packs::CHANGED.load(std::sync::atomic::Ordering::Acquire);
+    // Label widths from the card: `available_width` inside a `horizontal`
+    // sees the parent's max_rect and can overflow (AGENTS.md).
+    let card_w = ui.available_width();
     for p in packs::all() {
         let font = egui::FontId::proportional(12.5);
         ui.horizontal(|ui| {
@@ -3937,7 +3940,7 @@ fn effects_packs(ui: &mut egui::Ui, s: &mut Settings) {
                 }
             }
             restart |= on == p.disabled;
-            let w = (ui.available_width() - 70.0).max(60.0);
+            let w = (card_w - 100.0).max(60.0);
             let label = format!("{} · v{}{}", p.name, p.version, if p.installed { "" } else { " · dev" });
             ui.label(egui::RichText::new(ellipsize(ui.painter(), &label, &font, w)).font(font.clone()))
                 .on_hover_text(&p.about);
@@ -3959,7 +3962,7 @@ fn effects_packs(ui: &mut egui::Ui, s: &mut Settings) {
         for c in missing {
             ui.horizontal(|ui| {
                 let font = egui::FontId::proportional(12.5);
-                let w = (ui.available_width() - 90.0).max(60.0);
+                let w = (card_w - 90.0).max(60.0);
                 let label = format!("{} · {} MB", c.name, c.size_mb);
                 ui.label(egui::RichText::new(ellipsize(ui.painter(), &label, &font, w)).font(font))
                     .on_hover_text(c.about);

@@ -2845,6 +2845,8 @@ impl ApplicationHandler<AppEvent> for App {
         engine::shutdown();
         // Hand a streaming Hue area back to the bridge (lights.rs's worker
         // dies with the process and would leave it "in use" for ~10 s).
+        // Short timeouts: an unreachable bridge mustn't hold up quitting.
+        hue::QUITTING.store(true, Ordering::Relaxed);
         if let Some(sh) = &self.shared {
             let bridge = {
                 let s = lock(&sh.settings);
@@ -3400,7 +3402,7 @@ fn load_icon() -> Option<Icon> {
 fn check_shaders() -> Result<()> {
     let dir = render::find_shader_dir()?;
     let common = std::fs::read_to_string(dir.join("common.wgsl"))?;
-    let mut paths = packs::scene_files(&dir);
+    let mut paths = packs::scene_files_all(&dir);
     paths.push(dir.join("present.wgsl"));
     paths.push(dir.join("dancer.wgsl"));
     paths.push(dir.join("text.wgsl"));

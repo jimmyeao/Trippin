@@ -224,9 +224,18 @@ fn stem(p: &Path) -> String {
     p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
-/// Scene files: the built-in `<shader_dir>/scenes` plus each loaded pack's,
-/// sorted by name. A pack scene with a taken name is skipped (logged once).
+/// The scenes the app shows: `scene_files_all` less `unity_*` shows the
+/// pinned engine can't draw yet (engine::scene_supported).
 pub fn scene_files(shader_dir: &Path) -> Vec<PathBuf> {
+    let mut v = scene_files_all(shader_dir);
+    v.retain(|p| crate::engine::scene_supported(&stem(p)));
+    v
+}
+
+/// Every scene file: the built-in `<shader_dir>/scenes` plus each loaded
+/// pack's, sorted by name. A pack scene with a taken name is skipped (logged
+/// once). `--check-shaders`, snaps and the tag tests use this.
+pub fn scene_files_all(shader_dir: &Path) -> Vec<PathBuf> {
     let mut files = wgsl_in(&shader_dir.join("scenes"));
     let mut names: Vec<String> = files.iter().map(|p| stem(p)).collect();
     static WARNED: AtomicBool = AtomicBool::new(false);
@@ -251,6 +260,12 @@ pub fn scene_files(shader_dir: &Path) -> Vec<PathBuf> {
 /// Scene names, as `scene_files`.
 pub fn scene_names(shader_dir: &Path) -> Vec<String> {
     scene_files(shader_dir).iter().map(|p| stem(p)).collect()
+}
+
+/// Every scene name, as `scene_files_all`.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn scene_names_all(shader_dir: &Path) -> Vec<String> {
+    scene_files_all(shader_dir).iter().map(|p| stem(p)).collect()
 }
 
 /// The file for scene `name`, built in or from a pack.
@@ -470,6 +485,19 @@ mod tests {
         for bad in ["trippin.exe", "scenes/x.exe", "scenes/a/b.wgsl", "videos/x.wgsl", "common.wgsl", "x/pack.json"] {
             assert!(!allowed(Path::new(bad)), "{bad}");
         }
+    }
+
+    /// A show the pinned engine can't draw stays out of the scene list
+    /// (auto-pilot, Library, remote), but its shader is still checked.
+    #[test]
+    fn shows_for_a_newer_engine_are_hidden() {
+        if std::env::var_os("TRIPPIN_ENGINE").is_some() {
+            return;
+        }
+        let d = crate::render::find_shader_dir().unwrap();
+        assert!(!scene_names(&d).iter().any(|s| s == "unity_fluid"));
+        assert!(scene_names_all(&d).iter().any(|s| s == "unity_fluid"));
+        assert!(scene_names(&d).iter().any(|s| s == "unity_colossus"));
     }
 
     #[test]
