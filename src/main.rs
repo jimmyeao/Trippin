@@ -62,6 +62,7 @@ mod tags;
 mod text;
 mod timeline;
 mod ui_theme;
+mod showparams;
 mod video;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -1667,7 +1668,8 @@ fn render_loop(
                 link_out = link::Link::new(s.link_port).ok();
             }
             if let Some(l) = link_out.as_mut() {
-                l.send(&u, r.scene_name(dir.scene), pal, f.calm < 0.5);
+                let scene = r.scene_name(dir.scene);
+                l.send(&u, scene, pal, f.calm < 0.5, &showparams::tweak(&s.show_params, scene));
             }
             if engine.is_none() {
                 match engine::Engine::new(s.link_port) {
@@ -1677,6 +1679,7 @@ fn render_loop(
             }
             if let Some(e) = engine.as_mut() {
                 e.tick();
+                showparams::poll_manifest(&engine::params_path());
                 let latest = e.latest.lock().unwrap_or_else(|p| p.into_inner());
                 if let Some(fr) = latest.as_ref() {
                     if fr.seq != ext_seq {

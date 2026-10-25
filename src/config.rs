@@ -415,6 +415,9 @@ pub struct Settings {
     /// Video clip scenes (`video_*`): download the clip pack and put them
     /// in rotation. Off by default — it's a large download.
     pub video_clips: bool,
+    /// Per-show controls for the Unity shows (scene → control id → value;
+    /// missing = default). See showparams.rs.
+    pub show_params: std::collections::BTreeMap<String, std::collections::BTreeMap<String, f32>>,
     /// UDP port the show-state feed goes to (127.0.0.1).
     pub link_port: u16,
     pub latency_ms: f32,
@@ -540,6 +543,7 @@ impl Default for Settings {
             beat_model: true,
             unity_link: false,
             video_clips: false,
+            show_params: Default::default(),
             link_port: 9137,
             latency_ms: 30.0,
             audio_in: String::new(),

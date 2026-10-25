@@ -218,6 +218,13 @@ pub fn player_path() -> Option<PathBuf> {
     c.into_iter().find(|p| p.is_file())
 }
 
+/// The engine's show-param manifest (absolute, like the log: the macOS
+/// player resolves relative paths beside its .app).
+pub fn params_path() -> PathBuf {
+    let p = crate::config::data_dir().join("unity-params.json");
+    std::path::absolute(&p).unwrap_or(p)
+}
+
 /// Supervises the engine process and owns the frame file + reader thread.
 pub struct Engine {
     started: Instant,
@@ -373,6 +380,10 @@ impl Engine {
         cmd.arg("-batchmode")
             .arg("-trippinFrame")
             .arg(&self.path)
+            // Where the player lists its shows' [TrippinParam] controls
+            // (showparams.rs). Older players ignore the flag.
+            .arg("-trippinParams")
+            .arg(params_path())
             .arg("-trippinPort")
             .arg(self.port.to_string())
             .arg("-logFile")

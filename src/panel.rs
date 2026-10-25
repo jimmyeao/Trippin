@@ -2021,6 +2021,13 @@ fn pads_view(
     });
     ui.add_space(8.0);
 
+    // Unity show controls (showparams.rs) while a unity_* show is on air.
+    if let Some(name) = scenes.get(st.scene).filter(|n| crate::showparams::has_controls(n)) {
+        let title = st.scene_titles.get(st.scene).map(String::as_str).unwrap_or(name);
+        show_controls(ui, s, name, title);
+        ui.add_space(8.0);
+    }
+
     // Action pads — the same Actions the hotkeys fire, with the current
     // binding badged top-right and a live sub-state under the label (1c).
     section_label(ui, "pads");
@@ -2470,6 +2477,36 @@ fn palette_column(ui: &mut egui::Ui, s: &mut Settings) {
 }
 
 /// A labelled control row for the inspector — tighter than `row`.
+/// Speed / Reactivity for the Unity show on air, plus the controls the
+/// show declares itself (`[TrippinParam]`, read from the engine's
+/// manifest). Values persist per show; Reset puts its defaults back.
+fn show_controls(ui: &mut egui::Ui, s: &mut Settings, scene: &str, title: &str) {
+    use crate::showparams as sp;
+    use crate::ui_theme::*;
+    section_label(ui, "show controls");
+    card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        // Width captured here, not inside the rows (layout rule, AGENTS.md).
+        let slider_w = (ui.available_width() - 60.0 - 70.0).max(60.0);
+        let shown = ellipsize(ui.painter(), title, &egui::FontId::proportional(12.0), ui.available_width());
+        ui.label(egui::RichText::new(shown).size(12.0).color(MUTED));
+        let defs: Vec<sp::ParamDef> = sp::builtin().into_iter().chain(sp::show_defs(scene)).collect();
+        for d in &defs {
+            let mut v = sp::value(&s.show_params, scene, d);
+            ctl_row(ui, &d.label, |ui| {
+                ui.spacing_mut().slider_width = slider_w;
+                if ui.add(egui::Slider::new(&mut v, d.min..=d.max).max_decimals(2)).changed() {
+                    s.show_params.entry(scene.to_string()).or_default().insert(d.id.clone(), v);
+                }
+            });
+        }
+        let custom = s.show_params.get(scene).is_some_and(|m| !m.is_empty());
+        if ui.add_enabled(custom, egui::Button::new("Reset")).clicked() {
+            s.show_params.remove(scene);
+        }
+    });
+}
+
 fn ctl_row(ui: &mut egui::Ui, label: &str, body: impl FnOnce(&mut egui::Ui)) {
     ui.horizontal(|ui| {
         ui.add_sized(

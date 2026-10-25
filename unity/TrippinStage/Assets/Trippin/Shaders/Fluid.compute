@@ -1,0 +1,134 @@
+// Stable fluids (Stam 1999, in the style of the well-known WebGL fluid
+// demos) for unity_fluid: semi-Lagrangian advection, vorticity confinement,
+// a Jacobi pressure solve and gradient subtraction on a coarse velocity grid,
+// with a finer dye field advected through it. FluidShow.cs drives the steps
+// and the splats (the music's forces).
+#pragma kernel Splat
+#pragma kernel Advect
+#pragma kernel Curl
+#pragma kernel Vorticity
+#pragma kernel Divergence
+#pragma kernel Jacobi
+#pragma kernel Gradient
+
+SamplerState linearClampSampler;
+
+// Splat: add a gaussian of _SplatVal at _SplatPos (uv) into _Dst (read from _Src).
+Texture2D<float4> _Src;
+RWTexture2D<float4> _Dst;
+uint2 _Size;            // size of the texture being written
+float2 _Texel;          // 1 / size of the velocity grid
+float _Aspect;          // width / height
+float4 _Splats[8];      // xy uv, z radius (uv), w unused
+float4 _SplatVals[8];   // value added at the centre
+int _SplatCount;
+
+[numthreads(8, 8, 1)]
+void Splat(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= _Size)) return;
+    float2 uv = (id.xy + 0.5) / _Size;
+    float4 v = _Src[id.xy];
+    for (int i = 0; i < _SplatCount; i++)
+    {
+        float2 d = uv - _Splats[i].xy;
+        d.x *= _Aspect;
+        v += _SplatVals[i] * exp(-dot(d, d) / max(_Splats[i].z * _Splats[i].z, 1e-6));
+    }
+    _Dst[id.xy] = v;
+}
+
+// Advect _Src through _Vel (velocity in uv per second) over _Dt, then decay.
+Texture2D<float4> _Vel;
+float _Dt, _Decay;
+
+[numthreads(8, 8, 1)]
+void Advect(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= _Size)) return;
+    float2 uv = (id.xy + 0.5) / _Size;
+    float2 v = _Vel.SampleLevel(linearClampSampler, uv, 0).xy;
+    float2 back = uv - v * _Dt;
+    float4 q = _Src.SampleLevel(linearClampSampler, back, 0);
+    _Dst[id.xy] = q * _Decay;
+}
+
+// Velocity-grid neighbours, clamped at the walls.
+float4 At(Texture2D<float4> t, int2 p)
+{
+    return t[clamp(p, int2(0, 0), int2(_Size) - 1)];
+}
+
+RWTexture2D<float4> _CurlOut;
+
+[numthreads(8, 8, 1)]
+void Curl(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= _Size)) return;
+    int2 p = int2(id.xy);
+    float l = At(_Vel, p - int2(1, 0)).y, r = At(_Vel, p + int2(1, 0)).y;
+    float b = At(_Vel, p - int2(0, 1)).x, t = At(_Vel, p + int2(0, 1)).x;
+    _CurlOut[id.xy] = float4(0.5 * ((r - l) - (t - b)), 0, 0, 0);
+}
+
+// Vorticity confinement: push along N x w, N toward stronger curl, so the
+// small swirls the solver smears out are kept alive.
+Texture2D<float4> _CurlIn;
+float _Swirl;
+
+[numthreads(8, 8, 1)]
+void Vorticity(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= _Size)) return;
+    int2 p = int2(id.xy);
+    float l = abs(At(_CurlIn, p - int2(1, 0)).x), r = abs(At(_CurlIn, p + int2(1, 0)).x);
+    float b = abs(At(_CurlIn, p - int2(0, 1)).x), t = abs(At(_CurlIn, p + int2(0, 1)).x);
+    float c = At(_CurlIn, p).x;
+    float2 n = 0.5 * float2(r - l, t - b);
+    n /= length(n) + 1e-5;
+    float2 f = _Swirl * c * float2(n.y, -n.x) * _Texel;
+    float2 v = _Src[id.xy].xy + f * _Dt;
+    _Dst[id.xy] = float4(clamp(v, -2.0, 2.0), 0, 0);
+}
+
+[numthreads(8, 8, 1)]
+void Divergence(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= _Size)) return;
+    int2 p = int2(id.xy);
+    // Walls: the velocity across the border is reflected (free-slip box).
+    float2 c = At(_Vel, p).xy;
+    float l = p.x == 0 ? -c.x : At(_Vel, p - int2(1, 0)).x;
+    float r = p.x == int(_Size.x) - 1 ? -c.x : At(_Vel, p + int2(1, 0)).x;
+    float b = p.y == 0 ? -c.y : At(_Vel, p - int2(0, 1)).y;
+    float t = p.y == int(_Size.y) - 1 ? -c.y : At(_Vel, p + int2(0, 1)).y;
+    // In grid units: uv velocity x size.
+    _Dst[id.xy] = float4(0.5 * ((r - l) * _Size.x + (t - b) * _Size.y), 0, 0, 0);
+}
+
+// One Jacobi step of the pressure Poisson equation (_Src = pressure, _Div).
+Texture2D<float4> _Div;
+
+[numthreads(8, 8, 1)]
+void Jacobi(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= _Size)) return;
+    int2 p = int2(id.xy);
+    float l = At(_Src, p - int2(1, 0)).x, r = At(_Src, p + int2(1, 0)).x;
+    float b = At(_Src, p - int2(0, 1)).x, t = At(_Src, p + int2(0, 1)).x;
+    _Dst[id.xy] = float4(0.25 * (l + r + b + t - At(_Div, p).x), 0, 0, 0);
+}
+
+// Subtract the pressure gradient: the velocity becomes divergence-free.
+Texture2D<float4> _Pressure;
+
+[numthreads(8, 8, 1)]
+void Gradient(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= _Size)) return;
+    int2 p = int2(id.xy);
+    float l = At(_Pressure, p - int2(1, 0)).x, r = At(_Pressure, p + int2(1, 0)).x;
+    float b = At(_Pressure, p - int2(0, 1)).x, t = At(_Pressure, p + int2(0, 1)).x;
+    float2 v = _Vel[id.xy].xy - 0.5 * float2((r - l) / _Size.x, (t - b) / _Size.y);
+    _Dst[id.xy] = float4(v, 0, 0);
+}

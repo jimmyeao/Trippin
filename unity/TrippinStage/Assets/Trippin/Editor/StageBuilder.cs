@@ -276,6 +276,7 @@ namespace TrippinStage.EditorTools
                 ("unity_dj_battle", typeof(DjBattleShow)),
                 ("unity_highlands", typeof(HighlandsShow)),
                 ("unity_coaster", typeof(CoasterShow)),
+                ("unity_fluid", typeof(FluidShow)),
             };
             // Extra materials for the ported scenes: instancing must be on the
             // material asset or the build strips the variant (AGENTS.md).
@@ -311,6 +312,12 @@ namespace TrippinStage.EditorTools
                 ks.screenMat = kitScreen;
                 ks.crowdMeshMat = dir.crowdMeshMat;
                 if (ks is HighlandsShow hs) hs.highlandsMat = highlandsMat;
+                if (ks is FluidShow fl)
+                {
+                    fl.sim = AssetDatabase.LoadAssetAtPath<ComputeShader>($"{Root}/Shaders/Fluid.compute");
+                    if (fl.sim == null) throw new System.Exception("Fluid.compute not found");
+                    fl.viewMat = Mat("Trippin/FluidView", "FluidView");
+                }
                 if (ks is CoasterShow cosh)
                 {
                     cosh.coasterCityMat = coasterCityMat;
