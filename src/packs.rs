@@ -71,9 +71,26 @@ pub const CATALOG: &[CatalogEntry] = &[
     CatalogEntry {
         id: "club-nights-2",
         name: "Club Nights 2",
-        about: "Four club scenes locked to the bar: the decks, a speaker cone, an LED wall and a                 laser tunnel. The lights flare on the kicks, fills stutter, drops scratch.",
+        about: "Four club scenes locked to the bar: the decks, a speaker cone, an LED wall and a \
+                laser tunnel. The lights flare on the kicks, fills stutter, drops scratch.",
         size_mb: 100,
         asset: ("club-nights-2-1.trippinpack", "c373ed66cfa01e4f7b6b30718f9a5c58ef79a7a6a599576c9664510557129ee0"),
+    },
+    CatalogEntry {
+        id: "liquid-2",
+        name: "Liquid 2",
+        about: "Seven video scenes: marbled paint, oil on water, ferrofluid, a jellyfish, a powder \
+                burst, molten gold and ink drops, swirled by the music.",
+        size_mb: 186,
+        asset: ("liquid-2-1.trippinpack", ""),
+    },
+    CatalogEntry {
+        id: "dance-floor",
+        name: "Dance Floor",
+        about: "Seven scenes locked to the bar: dancers each in their own groove, feet on a light-up \
+                floor, a rooftop party, a solo dancer, and the mixer, the vinyl and the moving heads.",
+        size_mb: 182,
+        asset: ("dance-floor-1.trippinpack", ""),
     },
 ];
 
