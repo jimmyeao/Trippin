@@ -429,6 +429,10 @@ pub struct Settings {
     pub unity_link: bool,
     /// Effects packs switched off (ids; packs.rs). Read at startup.
     pub disabled_packs: Vec<String>,
+    /// Where effects packs install ("" = `<data dir>/packs`): they're big,
+    /// so users may keep them on another drive. Changed through
+    /// `packs::move_packs_bg`, which moves the installed ones.
+    pub packs_dir: String,
     /// Per-show controls for the Unity shows (scene → control id → value;
     /// missing = default). See showparams.rs.
     pub show_params: std::collections::BTreeMap<String, std::collections::BTreeMap<String, f32>>,
@@ -571,6 +575,7 @@ impl Default for Settings {
             beat_model: true,
             unity_link: false,
             disabled_packs: Vec::new(),
+            packs_dir: String::new(),
             show_params: Default::default(),
             lights_on: false,
             light_level: 0.8,
