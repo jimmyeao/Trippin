@@ -29,6 +29,7 @@ Material:
         m_Offset: {x: 0, y: 0}
     m_Ints: []
     m_Floats:
+    - _EdgeFade: 0
     - _Gain: 1
     - _Glint: 1
     - _Haze: 0.2

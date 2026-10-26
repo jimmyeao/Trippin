@@ -17,6 +17,7 @@ Shader "Trippin/HqBackdrop"
         _HazeCol ("Haze colour", Color) = (0.12, 0.05, 0.1, 1)
         _Mirror ("Mirror", Float) = 0
         _URange ("U range", Float) = 1
+        _EdgeFade ("Side fade", Float) = 0
     }
     SubShader
     {
@@ -34,7 +35,7 @@ Shader "Trippin/HqBackdrop"
             TEXTURE2D(_MainTex);
             SAMPLER(sampler_MainTex);
             CBUFFER_START(UnityPerMaterial)
-            float _Gain, _Lit, _Haze, _Mirror, _URange;
+            float _Gain, _Lit, _Haze, _Mirror, _URange, _EdgeFade;
             float4 _HazeCol;
             CBUFFER_END
 
@@ -69,7 +70,9 @@ Shader "Trippin/HqBackdrop"
                 }
                 float4 t = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, uv);
                 float3 c = lerp(Lift(t.rgb), _HazeCol.rgb, _Haze);
-                return float4(c * _Gain, t.a);
+                // Optionally fade out at the sides into whatever sky is behind.
+                float side = _EdgeFade > 0.0 ? smoothstep(0.0, _EdgeFade, i.uv.x) * smoothstep(1.0, 1.0 - _EdgeFade, i.uv.x) : 1.0;
+                return float4(c * _Gain, t.a * side);
             }
             ENDHLSL
         }
