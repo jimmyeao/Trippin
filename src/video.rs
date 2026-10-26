@@ -38,6 +38,10 @@ pub struct Clip {
 }
 
 impl Clip {
+    pub fn frames(&self) -> usize {
+        self.index.len()
+    }
+
     pub fn open(path: &Path) -> Result<Clip> {
         let data = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
         let u = |o: usize| -> Result<u32> {
@@ -120,6 +124,18 @@ pub fn scene_ready(scene: &str) -> bool {
     }
 }
 
+/// The footage's own hits in clip seconds, from `<clip>.beats.json` next to
+/// the clip (tools/video_beats.py); None for a clip with no clear rhythm.
+fn clip_hits(clip: &str) -> Option<Vec<f64>> {
+    let p = clip_path(clip)?.with_extension("beats.json");
+    let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(p).ok()?).ok()?;
+    let fps = v["fps"].as_f64().filter(|f| *f > 0.0)?;
+    let mut h: Vec<f64> = v["hits"].as_array()?.iter().filter_map(|x| x.as_f64()).map(|f| f / fps).collect();
+    h.sort_by(f64::total_cmp);
+    h.dedup();
+    (h.len() >= 4).then_some(h)
+}
+
 /// Does the scene's header ask for bar-locked playback (`// @video-lock`)?
 fn scene_locked(scene: &str) -> bool {
     crate::render::find_shader_dir()
@@ -178,14 +194,44 @@ fn loop_bars(len: f64, bpm: f32) -> f64 {
     2f64.powi(raw.max(0.5).log2().round() as i32).clamp(1.0, 8.0)
 }
 
-/// One step of bar-locked playback: the play head `t` (clip seconds) for a
-/// `len`-second loop. The loop spans whole bars from the downbeat (twice as
-/// many in a breakdown); the head runs at the loop's tempo rate and is
-/// pulled onto the grid gently (a phase-locked loop; far off, it cuts onto
-/// the grid on a bar line), except
-/// on a fill (stutter: the half beat it started on, repeated) and a drop
-/// (scratch back half a beat, then land on the grid).
-fn lock_step(l: &mut Locked, t: f64, len: f64, b: &Beat, dt: f32) -> f64 {
+/// The most the play head's speed is nudged to drift back onto the grid:
+/// small enough that the footage's motion never visibly speeds or slows.
+const MAX_NUDGE: f64 = 0.03;
+
+/// Hit matching: the footage's own hits (clip seconds, ascending, from
+/// `tools/video_beats.py`) land one per beat — or two, or one every other
+/// beat, whichever keeps the footage nearest its own speed (half as many
+/// through a breakdown). Returns the target and the clip seconds per second
+/// it implies: the hits' mean spacing per beat, so the speed is steady.
+fn hit_target(hits: &[f64], len: f64, b: &Beat, wpos: f64) -> (f64, f64) {
+    let spb = 60.0 / b.bpm.max(40.0) as f64;
+    let n = hits.len();
+    let gap = len / n as f64;
+    let mut step = if gap / spb < 0.7 {
+        2.0
+    } else if gap / spb > 1.5 {
+        0.5
+    } else {
+        1.0
+    };
+    if b.calm > 0.5 {
+        step *= 0.5;
+    }
+    let x = wpos * step;
+    let k = x.floor() as i64;
+    let a = hits[k.rem_euclid(n as i64) as usize];
+    let mut next = hits[(k + 1).rem_euclid(n as i64) as usize];
+    if next <= a {
+        next += len;
+    }
+    ((a + (x - k as f64) * (next - a)).rem_euclid(len), gap * step / spb)
+}
+
+/// Where the grid puts the head (clip seconds) for a locked clip, and the
+/// clip seconds per second that implies: the footage's own hits on the
+/// beats when it has a rhythm, else the loop over whole bars from the
+/// downbeat.
+fn grid_target(len: f64, b: &Beat, hits: Option<&[f64]>) -> (f64, f64) {
     let spb = 60.0 / b.bpm.max(40.0) as f64;
     let mut bars = loop_bars(len, b.bpm);
     if b.calm > 0.5 {
@@ -194,10 +240,36 @@ fn lock_step(l: &mut Locked, t: f64, len: f64, b: &Beat, dt: f32) -> f64 {
     let loop_beats = 4.0 * bars;
     let start = b.pos.floor() - b.beat_in_bar as f64;
     let bar = (start / 4.0).round() as i64;
-    let in_loop = ((bar.rem_euclid(bars as i64)) as f64 * 4.0 + (b.pos - start)) / loop_beats;
-    let target = in_loop.rem_euclid(1.0) * len;
-    // Clip seconds per second at the loop's tempo.
-    let nominal = len / (loop_beats * spb);
+    match hits.filter(|h| h.len() >= 4) {
+        Some(h) => hit_target(h, len, b, b.pos),
+        None => {
+            let in_loop = ((bar.rem_euclid(bars as i64)) as f64 * 4.0 + (b.pos - start)) / loop_beats;
+            // Clip seconds per second at the loop's tempo.
+            (in_loop.rem_euclid(1.0) * len, len / (loop_beats * spb))
+        }
+    }
+}
+
+/// Snapshots (`--snap`): the head for a locked scene at a beat position, on
+/// the grid (no stutter or catch-up); None for a scene that isn't locked.
+pub fn snap_time(scene: &str, len: f64, b: &Beat) -> Option<f64> {
+    let clip = scene.strip_prefix("video_")?;
+    scene_locked(scene).then(|| grid_target(len, b, clip_hits(clip).as_deref()).0)
+}
+
+/// One step of bar-locked playback: the play head `t` (clip seconds) for a
+/// `len`-second loop. The loop spans whole bars from the downbeat (twice as
+/// many in a breakdown). The head runs at a steady speed set by the tempo
+/// and drifts back onto the grid by nudging that speed a few percent (more
+/// than a beat off, it cuts onto the grid on a bar line instead), except on
+/// a fill (stutter: the half beat it started on, repeated) and a drop
+/// (scratch back half a beat, then land on the grid). The beat never moves
+/// the footage within the beat: that read as unnatural; scenes show the
+/// kick in their light instead.
+fn lock_step(l: &mut Locked, t: f64, len: f64, b: &Beat, dt: f32, hits: Option<&[f64]>) -> f64 {
+    let spb = 60.0 / b.bpm.max(40.0) as f64;
+    let start = b.pos.floor() - b.beat_in_bar as f64;
+    let (target, nominal) = grid_target(len, b, hits);
     let dt = dt as f64;
     if !l.on {
         l.on = true;
@@ -226,14 +298,16 @@ fn lock_step(l: &mut Locked, t: f64, len: f64, b: &Beat, dt: f32) -> f64 {
     if err > len / 2.0 {
         err -= len;
     }
+    let beat_len = nominal * spb;
     // Far off (a tempo change, a breakdown halving the speed): cut onto
     // the grid on the next bar line, where a cut reads as meant, rather
     // than racing to catch up.
-    if err.abs() > 0.15 * len && b.pos - start < 0.1 {
+    if err.abs() > beat_len && b.pos - start < 0.1 {
         return target;
     }
-    let pull = (err * (dt * 3.0).min(1.0)).clamp(-0.6 * nominal * dt, 0.6 * nominal * dt);
-    (t + nominal * dt + pull).rem_euclid(len)
+    // Steady speed, nudged so the error closes over a couple of bars.
+    let nudge = (err / beat_len / 8.0).clamp(-MAX_NUDGE, MAX_NUDGE);
+    (t + nominal * dt * (1.0 + nudge)).rem_euclid(len)
 }
 
 pub struct Player {
@@ -246,6 +320,8 @@ pub struct Player {
     rate: f32,
     /// The scene on air asks for bar-locked playback.
     lock_on: bool,
+    /// The clip's own hits (seconds), when it has a rhythm (`clip_hits`).
+    hits: Option<Vec<f64>>,
     /// Which frame each slot of `vid_tex` holds.
     slots: [Option<usize>; 2],
     /// Weight of slot 1 in `vid()` (u.misc4.y).
@@ -269,6 +345,7 @@ impl Player {
             pos: 0.0,
             rate: 1.0,
             lock_on: false,
+            hits: None,
             slots: [None; 2],
             blend: 0.0,
         }
@@ -294,6 +371,7 @@ impl Player {
             self.slots = [None; 2];
             self.locked = Locked::default();
             self.lock_on = scene_locked(scene);
+            self.hits = clip_hits(clip);
         }
 
         let r = lock(&self.ready);
@@ -304,7 +382,7 @@ impl Player {
         }
         let n = r.frames;
         if self.lock_on {
-            self.pos = lock_step(&mut self.locked, self.pos, n as f64 / r.fps.max(1.0) as f64, beat, dt);
+            self.pos = lock_step(&mut self.locked, self.pos, n as f64 / r.fps.max(1.0) as f64, beat, dt, self.hits.as_deref());
         } else {
             // Speed follows the track's drive, eased over ~1.5 s: slow and
             // floaty in breakdowns, up to 1.35x on a drop. Never raw audio.
@@ -458,18 +536,66 @@ mod tests {
         assert_eq!(loop_bars(len, 64.0), 4.0);
         let mut l = Locked::default();
         // Joined mid-bar: lands where the grid is, not at 0.
-        let mut t = lock_step(&mut l, 0.0, len, &beat(17.0), 1.0 / 60.0);
+        let mut t = lock_step(&mut l, 0.0, len, &beat(17.0), 1.0 / 60.0, None);
         let want = |p: f64| ((p / 32.0).rem_euclid(1.0)) * len;
         assert!((t - want(17.0)).abs() < 1e-6, "{t}");
         let mut p = 17.0;
         for _ in 0..600 {
             p += 128.0 / 60.0 / 60.0;
-            let nt = lock_step(&mut l, t, len, &beat(p), 1.0 / 60.0);
+            let nt = lock_step(&mut l, t, len, &beat(p), 1.0 / 60.0, None);
             let step = (nt - t).rem_euclid(len);
             assert!(step < 0.05, "jumped {step}");
             t = nt;
         }
         assert!((t - want(p)).abs() < 0.02, "drifted: {t} vs {}", want(p));
+    }
+
+    /// The footage never surges on the beat: frame to frame the head moves
+    /// at a steady speed, a little off the grid or on it.
+    #[test]
+    fn footage_runs_at_a_steady_speed() {
+        let len = 11.3;
+        let mut l = Locked::default();
+        let mut p = 20.0;
+        let mut t = lock_step(&mut l, 0.0, len, &beat(p), 1.0 / 60.0, None);
+        t = (t + 0.1).rem_euclid(len); // knocked a little off the grid
+        let (mut lo, mut hi) = (f64::MAX, 0.0f64);
+        for _ in 0..240 {
+            p += 128.0 / 60.0 / 60.0;
+            let nt = lock_step(&mut l, t, len, &beat(p), 1.0 / 60.0, None);
+            let step = (nt - t).rem_euclid(len);
+            lo = lo.min(step);
+            hi = hi.max(step);
+            t = nt;
+        }
+        assert!(hi / lo < 1.0 + 2.0 * MAX_NUDGE + 1e-9, "speed varied {lo}..{hi}");
+    }
+
+    /// Hit matching: on every beat the head is on (or within a hair of) one
+    /// of the footage's own hits, taking them in order, one per beat when
+    /// the footage's rhythm is near the tempo.
+    #[test]
+    fn footage_hits_land_on_the_beats() {
+        let len = 11.25;
+        let hits: Vec<f64> = (0..24).map(|k| 0.1 + k as f64 * len / 24.0).collect(); // ~0.47 s apart
+        let mut l = Locked::default();
+        let mut t = 0.0;
+        let mut seen = Vec::new();
+        let mut p = 40.0;
+        while p < 48.0 {
+            let b = beat(p);
+            // A sixtieth of a beat per step, in seconds at 128 BPM.
+            t = lock_step(&mut l, t, len, &b, (60.0 / 128.0 / 60.0) as f32, Some(&hits));
+            if (p - p.round()).abs() < 1e-6 {
+                let k = hits.iter().position(|h| (h - t).abs() < 0.02);
+                assert!(k.is_some(), "beat {p}: head {t} on no hit");
+                seen.push(k.unwrap());
+            }
+            p = ((p * 60.0).round() + 1.0) / 60.0;
+        }
+        for w in seen.windows(2) {
+            assert_eq!((w[1] + 24 - w[0]) % 24, 1, "hits taken in order: {seen:?}");
+        }
     }
 
     /// Far off the grid, the head cuts onto it on the next bar line (and
@@ -482,7 +608,7 @@ mod tests {
         let mut p = 9.0; // mid-bar, ~3.2 s off the grid
         for _ in 0..180 {
             p += 128.0 / 60.0 / 60.0;
-            let nt = lock_step(&mut l, t, len, &beat(p), 1.0 / 60.0);
+            let nt = lock_step(&mut l, t, len, &beat(p), 1.0 / 60.0, None);
             if p < 12.0 {
                 assert!((nt - t).rem_euclid(len) < 0.05, "cut before the bar line at {p}");
             }
@@ -498,19 +624,19 @@ mod tests {
     fn fill_stutters_then_lands() {
         let len = 11.3;
         let mut l = Locked::default();
-        let mut t = lock_step(&mut l, 0.0, len, &beat(12.0), 0.016);
+        let mut t = lock_step(&mut l, 0.0, len, &beat(12.0), 0.016, None);
         let start = t;
         let mut b = beat(12.0);
         b.fill = true;
         for k in 0..8 {
             b.pos = 12.0 + k as f64 * 0.25;
-            t = lock_step(&mut l, t, len, &b, 0.016);
+            t = lock_step(&mut l, t, len, &b, 0.016, None);
             assert!(t >= start - 1e-9 && t < start + 11.3 / 32.0, "left the slice: {t}");
         }
         b.fill = false;
         b.pos = 16.0;
         b.beat_in_bar = 0;
-        t = lock_step(&mut l, t, len, &b, 0.016);
+        t = lock_step(&mut l, t, len, &b, 0.016, None);
         assert!((t - ((16.0f64 / 32.0).rem_euclid(1.0)) * len).abs() < 1e-6);
     }
 

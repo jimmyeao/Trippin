@@ -282,7 +282,7 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
 | `src/packs.rs`, `packs/`, `tools/pack_build.py` | Effects packs: scenes shipped apart from the app (`pack.json`, `scenes/`, `videos/`, `scene_tags.json`, `scene_energy.json`), installed to `<data dir>/packs/<id>` from the catalog or a `.trippinpack` file. Dev builds also read the repo's `packs/` (videos git-ignored; `TRIPPIN_NO_DEV_PACKS=1` hides them). Every scene lister goes through `packs::scene_files`/`scene_names`; tags and energy through `packs::merged_json`. |
 | `src/video.rs`, `tools/video_pack.py` | Video clip scenes (`video_<clip>.wgsl`, all in packs). Clips are packed offline into `.tvid` (JPEG frames + index; no codec at runtime) and read from each loaded pack's `videos/` or `TRIPPIN_VIDEOS`. A decoder thread feeds two stacked frames into `vid_tex` (binding 9); `vid()` / `vid_cam()` / `vid_streak()` / `vid_grade()` in common.wgsl blend and shape them. |
 | `src/showparams.rs` | Per-show controls for the `unity_*` shows (sidebar card): built-in Speed/Reactivity applied to the feed in `link.rs`, plus `[TrippinParam]` knobs from the engine's manifest (`-trippinParams`). |
-| `src/engine.rs`, `src/link.rs`, `unity/` | Unity engine (shows `unity_stage`, `unity_crystals`, `unity_flow`, `unity_leviathan`, `unity_sculpture`, `unity_colossus`, `unity_tidal_cathedral`, `unity_lightstorm`, `unity_prism`, `unity_aurora`, `unity_basscore`, `unity_pillars`, `unity_helix`, `unity_tesseract`, `unity_polyhedra`, `unity_knot`, `unity_gyroscope`, `unity_lattice`, `unity_pendulum`, `unity_spectrum`, `unity_eclipse`, `unity_lightrain`, `unity_warp`, `unity_ledwall`, `unity_fountain`, `unity_galaxy`, `unity_nebula`, `unity_ocean`, `unity_chladni`, `unity_tunnel`, `unity_orb`, `unity_radar`, `unity_djbot`, `unity_robot_rave`, `unity_assembly`, `unity_robot_club`, `unity_robot_band`, `unity_dj_battle`, `unity_highlands`, `unity_coaster`, `unity_fluid`; any `unity_*` scene is gated on live frames and hidden from the AI builder). `engine.rs` launches the player headless and supervises it; frames come back through a memory-mapped file (seqlock, top row first) into `gfx::Statics::ext` (binding 8 `ext_tex`); `link.rs` sends the show state over UDP. Cross-platform, nothing to start by hand. See `unity/README.md`. |
+| `src/engine.rs`, `src/link.rs`, `unity/` | Unity engine (shows `unity_stage`, `unity_crystals`, `unity_flow`, `unity_leviathan`, `unity_sculpture`, `unity_colossus`, `unity_tidal_cathedral`, `unity_lightstorm`, `unity_prism`, `unity_aurora`, `unity_basscore`, `unity_pillars`, `unity_helix`, `unity_tesseract`, `unity_polyhedra`, `unity_knot`, `unity_gyroscope`, `unity_lattice`, `unity_pendulum`, `unity_spectrum`, `unity_eclipse`, `unity_lightrain`, `unity_warp`, `unity_ledwall`, `unity_fountain`, `unity_galaxy`, `unity_nebula`, `unity_ocean`, `unity_chladni`, `unity_tunnel`, `unity_orb`, `unity_radar`, `unity_djbot`, `unity_robot_rave`, `unity_assembly`, `unity_robot_club`, `unity_robot_band`, `unity_dj_battle`, `unity_highlands`, `unity_coaster`, `unity_fluid`, `unity_murmuration`, `unity_ribbons`, `unity_bloom` (the last three need engine v17: `engine::scene_supported`); any `unity_*` scene is gated on live frames and hidden from the AI builder). `engine.rs` launches the player headless and supervises it; frames come back through a memory-mapped file (seqlock, top row first) into `gfx::Statics::ext` (binding 8 `ext_tex`); `link.rs` sends the show state over UDP. Cross-platform, nothing to start by hand. See `unity/README.md`. |
 | `tools/*.py` | Offline pipelines: mocap and stock video to dancer clips, and so on. |
 
 ## 6. Writing a scene
@@ -364,11 +364,25 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   pack scene whose name is taken is skipped. Bump `packs::API` when
   common.wgsl changes a helper packs call. `--snap-energy` writes each pack's
   scenes into that pack's `scene_energy.json`.
+- **Tempo-matched video** (owner: the best video scenes are the ones whose
+  footage moves *to the beat*). **Never vary the footage's speed within a
+  beat**: a per-beat surge (tried as `video::pump`) read as unnatural. The
+  head runs at a steady tempo-set speed and is nudged at most
+  `MAX_NUDGE` (3%) to drift onto the grid; the kick shows in the scene's
+  light (soft-attack grid kick: longer glints, an exposure breathe up to
+  12%). Clips with a real
+  rhythm get `<clip>.beats.json` from `tools/video_beats.py` (run it on new
+  clips before `pack_build.py`): their speed is set so their own hits fall
+  on the beats. The video
+  model leaves a 2/4-frame highlight flicker and 8-frame chunk rhythm in
+  every clip — the analyser box-filters and skips those, or every clip
+  "has" a beat.
 - **Bar-locked video** (`// @video-lock` in a scene header, `video.rs`
   `lock_step`): the loop spans a power-of-two number of bars nearest its
   natural length (an 11.3 s clip at 128 BPM is 8 bars, 0.75x), doubled in
-  breakdowns, aligned to the downbeat. The head is pulled onto the grid
-  gently, and only cuts onto it on a bar line when far off; fills stutter a
+  breakdowns, aligned to the downbeat. The head drifts onto the grid by a
+  small speed nudge, and only cuts onto it on a bar line when more than a
+  beat off; fills stutter a
   half-beat slice, drops scratch back half a beat. Use it on club footage,
   not flights or drives (no beat tricks there, AGENTS §2).
 - **Video scenes** (`video_*`): footage is display-referred, so pass it

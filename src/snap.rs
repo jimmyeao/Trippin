@@ -416,7 +416,8 @@ pub fn run(args: &[String]) -> Result<()> {
         }
         let mut cur = 0usize;
         let mut frame = 0u32;
-        // video_* scenes: the clip plays at 1x on the snapshot clock.
+        // video_* scenes: the clip plays at 1x on the snapshot clock, or on
+        // the groove's beat grid for bar-locked scenes (video::snap_time).
         let vclip = name
             .strip_prefix("video_")
             .and_then(crate::video::clip_path)
@@ -428,7 +429,17 @@ pub fn run(args: &[String]) -> Result<()> {
         let step = |t: f32, frame: u32, cur: &mut usize| {
             let mut u = groove(t, w, h, frame, bloom_amt, tonemap, calm);
             if let Some(c) = &vclip {
-                let fpos = t as f64 * c.fps as f64;
+                let len = c.frames() as f64 / c.fps as f64;
+                let beat = t as f64 * 126.0 / 60.0;
+                let vb = crate::video::Beat {
+                    pos: beat,
+                    bpm: 126.0,
+                    beat_in_bar: (beat.floor() as u64) % 4,
+                    calm,
+                    ..Default::default()
+                };
+                let ct = crate::video::snap_time(&name, len, &vb).unwrap_or(t as f64);
+                let fpos = ct * c.fps as f64;
                 let f0 = fpos.floor() as usize;
                 for (slot, f) in [(0, f0), (1, f0 + 1)] {
                     if let Ok(px) = c.decode(f) {
