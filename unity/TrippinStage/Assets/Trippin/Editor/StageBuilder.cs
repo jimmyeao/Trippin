@@ -18,6 +18,24 @@ namespace TrippinStage.EditorTools
         const string Root = "Assets/Trippin";
         const string ScenePath = "Assets/Scenes/Stage.unity";
 
+        /// An HQ texture from Assets/Trippin/Textures (Alice-generated art).
+        static Texture2D Tex(string file, TextureWrapMode wrap = TextureWrapMode.Clamp)
+        {
+            var path = $"{Root}/Textures/{file}";
+            if (AssetImporter.GetAtPath(path) is TextureImporter ti)
+            {
+                ti.wrapMode = wrap;
+                ti.alphaIsTransparency = true;
+                ti.mipmapEnabled = true;
+                ti.textureCompression = TextureImporterCompression.CompressedHQ;
+                ti.maxTextureSize = 4096;
+                ti.SaveAndReimport();
+            }
+            var t = AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+            if (t == null) throw new System.Exception($"texture {path} not found");
+            return t;
+        }
+
         static Material Mat(string shader, string name)
         {
             Directory.CreateDirectory($"{Root}/Materials");
@@ -84,11 +102,16 @@ namespace TrippinStage.EditorTools
             tm.mode.Override(TonemappingMode.ACES);
             var vig = prof.Add<Vignette>(true);
             vig.intensity.Override(0.25f);
+            // Depth of field, off: an HQ show turns it on for itself (HqPost).
+            var dof = prof.Add<DepthOfField>(true);
+            dof.mode.Override(DepthOfFieldMode.Off);
+            dof.highQualitySampling.Override(true);
             foreach (var c in prof.components) AssetDatabase.AddObjectToAsset(c, prof);
             EditorUtility.SetDirty(prof);
             var vol = new GameObject("Post").AddComponent<Volume>();
             vol.isGlobal = true;
             vol.sharedProfile = prof;
+            vol.gameObject.AddComponent<HqPostDriver>();
 
             // Engine: the link, the show switcher and the frame exporter. Each
             // show is a child named after its Trippin scene.
@@ -281,6 +304,9 @@ namespace TrippinStage.EditorTools
                 ("unity_ribbons", typeof(RibbonsShow)),
                 ("unity_bloom", typeof(BloomShow)),
                 ("unity_marble", typeof(MarbleShow)),
+                ("unity_fireworks", typeof(FireworksShow)),
+                ("unity_chrome", typeof(ChromeShow)),
+                ("unity_kaleido", typeof(KaleidoShow)),
             };
             // Extra materials for the ported scenes: instancing must be on the
             // material asset or the build strips the variant (AGENTS.md).
@@ -321,6 +347,31 @@ namespace TrippinStage.EditorTools
                     fl.sim = AssetDatabase.LoadAssetAtPath<ComputeShader>($"{Root}/Shaders/Fluid.compute");
                     if (fl.sim == null) throw new System.Exception("Fluid.compute not found");
                     fl.viewMat = Mat("Trippin/FluidView", "FluidView");
+                }
+                if (ks is FireworksShow fw)
+                {
+                    fw.particles = AssetDatabase.LoadAssetAtPath<ComputeShader>($"{Root}/Shaders/HqParticles.compute");
+                    if (fw.particles == null) throw new System.Exception("HqParticles.compute not found");
+                    fw.sparkMat = Mat("Trippin/HqSpark", "HqSpark");
+                    fw.smokeMat = Mat("Trippin/HqSmoke", "HqSmoke");
+                    fw.backdropMat = Mat("Trippin/HqBackdrop", "HqSkyline");
+                    fw.backdropMat.SetTexture("_MainTex", Tex("HqSkyline.png", TextureWrapMode.Mirror));
+                    fw.skyMat = co.skyMat;
+                }
+                if (ks is ChromeShow chs)
+                {
+                    chs.chromeMat = Mat("Trippin/HqChrome", "HqChrome");
+                    chs.chromeMat.SetTexture("_Env", Tex("HqStudio.png", TextureWrapMode.Repeat));
+                    chs.chromeMat.SetTexture("_Env2", Tex("HqNeonRoom.png", TextureWrapMode.Repeat));
+                }
+                if (ks is KaleidoShow kal)
+                {
+                    kal.kaleidoMat = Mat("Trippin/HqKaleido", "HqKaleido");
+                    kal.shardMat = Mat("Trippin/HqShard", "HqShard");
+                    kal.glassMat = Mat("Trippin/HqShardGlass", "HqShardGlass");
+                    kal.backMat = Mat("Trippin/HqBackdrop", "HqLightBox");
+                    kal.glassA = Tex("HqGlassDichroic.png", TextureWrapMode.Mirror);
+                    kal.glassB = Tex("HqGlassStained.png", TextureWrapMode.Mirror);
                 }
                 if (ks is MarbleShow mb)
                 {

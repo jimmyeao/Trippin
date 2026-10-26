@@ -1,0 +1,117 @@
+// GPU particles for the HQ shows (HqKit.cs ParticleField): a ring buffer of
+// up to a few hundred thousand sparks. Emit writes a frame's bursts into the
+// ring (one thread per new particle, each finding its burst by the bursts'
+// running start offsets); Step integrates them (gravity, drag, life).
+#pragma kernel Emit
+#pragma kernel Step
+
+struct P
+{
+    float3 pos; float life;      // seconds left (<= 0: dead)
+    float3 vel; float maxLife;
+    float4 col;                  // rgb (HDR), a = size
+    float drag, grav, seed, delay;   // delay: seconds before it starts (a trail ghost)
+};
+
+RWStructuredBuffer<P> _P;
+uint _Count;                     // ring size
+
+// Up to 64 bursts this frame: _B0 xyz centre, w first index (offset into this
+// frame's emission); _B1 x speed, y shape, z size, w life; _B2 rgb colour,
+// w drag; _B3 xyz inherited velocity, w gravity scale; _B4 xyz ring/plane
+// axis, w spread (speed jitter); _B5 x ghosts per star (a trail: copies of
+// the star launched a little later, which retrace its exact path), y the
+// trail's length in seconds.
+float4 _B0[64], _B1[64], _B2[64], _B3[64], _B4[64], _B5[64];
+int _BCount;
+uint _Total, _Head;
+float _Seed;
+
+uint Hash(uint x)
+{
+    x ^= x >> 16; x *= 0x7feb352du; x ^= x >> 15; x *= 0x846ca68bu; x ^= x >> 16;
+    return x;
+}
+float R(uint i, uint salt) { return (Hash(i * 9781u + salt * 6271u + (uint)(_Seed * 1000.0)) & 0xffffff) / 16777216.0; }
+
+float3 Sphere(float u, float v)
+{
+    float z = u * 2.0 - 1.0, a = v * 6.2831853;
+    float s = sqrt(saturate(1.0 - z * z));
+    return float3(s * cos(a), z, s * sin(a));
+}
+
+[numthreads(64, 1, 1)]
+void Emit(uint3 id : SV_DispatchThreadID)
+{
+    uint k = id.x;
+    if (k >= _Total) return;
+    int b = 0;
+    for (int j = 1; j < _BCount; j++) if (k >= (uint)_B0[j].w) b = j;
+    uint local = k - (uint)_B0[b].w;
+    // Trail ghosts share their star's randoms: same path, started later.
+    uint per = (uint)_B5[b].x + 1;
+    uint star = local / per, ghost = local % per;
+    uint key = (uint)_B0[b].w + star;
+    float u = R(key, 1), v = R(key, 2), w = R(key, 3);
+    float shape = _B1[b].y;
+    float3 dir;
+    if (shape < 0.5)        // sphere (peony)
+        dir = Sphere(u, v);
+    else if (shape < 1.5)   // ring round _B4.xyz, a little thickness
+    {
+        float3 ax = normalize(_B4[b].xyz);
+        float3 t1 = normalize(cross(ax, abs(ax.y) < 0.9 ? float3(0, 1, 0) : float3(1, 0, 0)));
+        float3 t2 = cross(ax, t1);
+        float a = v * 6.2831853;
+        dir = normalize(t1 * cos(a) + t2 * sin(a) + ax * (u - 0.5) * 0.12);
+    }
+    else if (shape < 2.5)   // cone (a rocket's trail sparks): down the -axis
+    {
+        float3 ax = normalize(_B4[b].xyz);
+        dir = normalize(-ax + Sphere(u, v) * 0.35);
+    }
+    else                    // shell of evenly spread stars (golden-angle sphere)
+    {
+        float i = star + 0.5;
+        float next = b + 1 < _BCount ? _B0[min(b + 1, 63)].w : (float)_Total;
+        float cnt = (next - _B0[b].w) / per;
+        float z = 1.0 - 2.0 * i / max(cnt, 1.0);
+        float s = sqrt(saturate(1.0 - z * z));
+        float a = i * 2.39996323;
+        dir = float3(s * cos(a), z, s * sin(a));
+    }
+    float sp = _B1[b].x * (1.0 - _B4[b].w * w);
+    P p;
+    p.pos = _B0[b].xyz;
+    p.vel = dir * sp + _B3[b].xyz;
+    float g = per > 1 ? ghost / (float)(per - 1) : 0.0;
+    p.maxLife = _B1[b].w * (0.75 + 0.5 * R(key, 4));
+    p.life = p.maxLife;
+    // Ghosts trail off: dimmer and thinner the further back they are.
+    // (a long-exposure trail: thin and even, fading only toward its tail).
+    float fall = ghost == 0 ? 1.0 : 0.7 * (1.0 - g * g);
+    p.col = float4(_B2[b].rgb * fall, _B1[b].z * (0.7 + 0.6 * R(key, 5)) * (ghost == 0 ? 1.0 : 0.5 - 0.25 * g));
+    p.drag = _B2[b].w;
+    p.grav = _B3[b].w;
+    p.seed = R(key, 6);
+    p.delay = ghost * _B5[b].y / max((float)(per - 1), 1.0);
+    _P[(_Head + k) % _Count] = p;
+}
+
+float _Dt;
+float3 _Gravity;
+
+[numthreads(256, 1, 1)]
+void Step(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Count) return;
+    P p = _P[id.x];
+    if (p.life <= 0.0) return;
+    if (p.delay > 0.0) { p.delay -= _Dt; _P[id.x] = p; return; }
+    p.vel += _Gravity * p.grav * _Dt;
+    p.vel *= exp(-p.drag * _Dt);
+    p.pos += p.vel * _Dt;
+    p.life -= _Dt;
+    _P[id.x] = p;
+}

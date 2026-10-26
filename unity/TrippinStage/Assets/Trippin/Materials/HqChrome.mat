@@ -1,0 +1,45 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!21 &2100000
+Material:
+  serializedVersion: 8
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: HqChrome
+  m_Shader: {fileID: 4800000, guid: 5c930ed4e5eccae4aa3ced8af0a803e8, type: 3}
+  m_Parent: {fileID: 0}
+  m_ModifiedSerializedProperties: 0
+  m_ValidKeywords: []
+  m_InvalidKeywords: []
+  m_LightmapFlags: 4
+  m_EnableInstancingVariants: 0
+  m_DoubleSidedGI: 0
+  m_CustomRenderQueue: -1
+  stringTagMap: {}
+  disabledShaderPasses: []
+  m_LockedProperties: 
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs:
+    - _Env:
+        m_Texture: {fileID: 2800000, guid: 7903273a8c35453478ca0e749c1dcdaa, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _Env2:
+        m_Texture: {fileID: 2800000, guid: f63e649ef1feb37469d8a8aecf12e4b3, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    m_Ints: []
+    m_Floats:
+    - _EnvGain: 1.4
+    - _EnvMix: 1
+    - _EnvYaw: 0
+    - _Film: 0.5
+    - _Gain: 1
+    - _Smooth: 2.4
+    - _Tint: 0.6
+    m_Colors: []
+  m_BuildTextureStacks: []
+  m_AllowLocking: 1
