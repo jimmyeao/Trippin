@@ -381,8 +381,10 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   every clip — the analyser box-filters and skips those, or every clip
   "has" a beat.
 - **Bar-locked video** (`// @video-lock` in a scene header, `video.rs`
-  `lock_step`): the loop spans a power-of-two number of bars nearest its
-  natural length (an 11.3 s clip at 128 BPM is 8 bars, 0.75x), doubled in
+  `lock_step`): the loop spans the fewest power-of-two bars that keep it
+  at or under `MAX_SPEED` (1.15x; an 11.3 s clip at 128 BPM is 8 bars,
+  0.75x — rounding to the nearest gave 4 bars, 1.4x, at 119 BPM, "very
+  fast"), and hit clips take hits per beat by the same cap; doubled in
   breakdowns, aligned to the downbeat. The head drifts onto the grid by a
   small speed nudge, and only cuts onto it on a bar line when more than a
   beat off; fills stutter a

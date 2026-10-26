@@ -187,11 +187,22 @@ struct Locked {
     rewind_until: Option<f64>,
 }
 
-/// Bars per loop for a clip of `len` seconds at `bpm`: the power of two
-/// nearest its natural length, so the footage runs near its own speed.
+/// The fastest locked footage may run. Rounding to the *nearest* power of
+/// two let it reach 1.4x (an 11.3 s dancer at 119 BPM got 4 bars, not 8),
+/// which read as "very fast"; slow motion down to half this reads fine.
+const MAX_SPEED: f64 = 1.15;
+
+/// The power of two to scale a natural speed `r` by so the footage runs at
+/// most `MAX_SPEED` (and above half of it).
+fn fit_speed(r: f64) -> f64 {
+    2f64.powi((MAX_SPEED / r.max(1e-6)).log2().floor() as i32)
+}
+
+/// Bars per loop for a clip of `len` seconds at `bpm`: the fewest (a power
+/// of two) that keep the footage at or under `MAX_SPEED`.
 fn loop_bars(len: f64, bpm: f32) -> f64 {
     let raw = len / (4.0 * 60.0 / bpm.max(40.0) as f64);
-    2f64.powi(raw.max(0.5).log2().round() as i32).clamp(1.0, 8.0)
+    (1.0 / fit_speed(raw)).clamp(1.0, 8.0)
 }
 
 /// The most the play head's speed is nudged to drift back onto the grid:
@@ -199,21 +210,16 @@ fn loop_bars(len: f64, bpm: f32) -> f64 {
 const MAX_NUDGE: f64 = 0.03;
 
 /// Hit matching: the footage's own hits (clip seconds, ascending, from
-/// `tools/video_beats.py`) land one per beat — or two, or one every other
-/// beat, whichever keeps the footage nearest its own speed (half as many
-/// through a breakdown). Returns the target and the clip seconds per second
-/// it implies: the hits' mean spacing per beat, so the speed is steady.
+/// `tools/video_beats.py`) land one per beat — or two, or one every two or
+/// four beats, the most per beat that keeps the footage at or under
+/// `MAX_SPEED` (half as many through a breakdown). Returns the target and
+/// the clip seconds per second it implies: the hits' mean spacing per beat,
+/// so the speed is steady.
 fn hit_target(hits: &[f64], len: f64, b: &Beat, wpos: f64) -> (f64, f64) {
     let spb = 60.0 / b.bpm.max(40.0) as f64;
     let n = hits.len();
     let gap = len / n as f64;
-    let mut step = if gap / spb < 0.7 {
-        2.0
-    } else if gap / spb > 1.5 {
-        0.5
-    } else {
-        1.0
-    };
+    let mut step = fit_speed(gap / spb).clamp(0.25, 2.0);
     if b.calm > 0.5 {
         step *= 0.5;
     }
@@ -595,6 +601,22 @@ mod tests {
         }
         for w in seen.windows(2) {
             assert_eq!((w[1] + 24 - w[0]) % 24, 1, "hits taken in order: {seen:?}");
+        }
+    }
+
+    /// No tempo in the 75-150 range plays footage fast: the shipped dance
+    /// clips (11.3 s; b-boy 9 hits, popper 8, drummer 11) and a plain loop
+    /// stay at or under MAX_SPEED (and above half of it).
+    #[test]
+    fn footage_never_runs_fast() {
+        let len = 271.0 / 24.0;
+        for bpm in 75..=150 {
+            let b = Beat { pos: 8.0, bpm: bpm as f32, ..Default::default() };
+            for n in [0usize, 8, 9, 11] {
+                let hits: Vec<f64> = (0..n).map(|k| k as f64 * len / n as f64).collect();
+                let (_, v) = grid_target(len, &b, (n > 0).then_some(&hits[..]));
+                assert!(v <= MAX_SPEED + 1e-9 && v > MAX_SPEED / 2.0 - 1e-9, "{bpm} BPM, {n} hits: {v}x");
+            }
         }
     }
 
