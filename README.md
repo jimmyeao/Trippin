@@ -415,7 +415,10 @@ swirl, drop size, comb, shine and relief). Values are remembered per show;
 
 `unity_fluid` is a real-time fluid simulation drawn as glossy liquid paint:
 three emitters pour and push with the bass, mids and highs, and every kick
-fires a burst that blooms into swirls.
+fires a burst that blooms into swirls. `unity_marble` is paper marbling,
+live: every kick drops a ring of thick glossy paint (black and gold between
+the palette's colours), and a vortex and a comb stir the rings into marbled
+swirls.
 
 ### Video scenes
 

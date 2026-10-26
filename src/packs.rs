@@ -696,8 +696,8 @@ mod tests {
         for s in scene_names_all(&d).iter().filter(|s| s.starts_with("unity_")) {
             assert_eq!(shown.contains(s), crate::engine::scene_supported(s), "{s}");
         }
-        for s in ["unity_fluid", "unity_murmuration", "unity_ribbons", "unity_bloom"] {
-            assert!(crate::engine::scene_supported(s), "engine v17 draws {s}");
+        for s in ["unity_fluid", "unity_murmuration", "unity_ribbons", "unity_bloom", "unity_marble"] {
+            assert!(crate::engine::scene_supported(s), "engine v18 draws {s}");
         }
     }
 
