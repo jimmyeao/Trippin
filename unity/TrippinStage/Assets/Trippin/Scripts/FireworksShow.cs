@@ -218,7 +218,7 @@ namespace TrippinStage
             // Focus on the bursts; a breakdown softens it into bokeh.
             _soft = Eased.Follow(_soft, calm ? 1f : 0f, 0.6f, 1.2f, dt);
             float dist = (new Vector3(0f, 120f, BurstZ) - cam.transform.position).magnitude;
-            HqPost.Focus(Mathf.Lerp(dist, dist * 0.18f, _soft * blur), Mathf.Lerp(5.6f, 1.4f, _soft * Mathf.Clamp01(blur)), 85f);
+            HqPost.Focus(Mathf.Lerp(dist, dist * 0.18f, _soft * blur), Mathf.Lerp(5.6f, 1.2f, _soft * Mathf.Clamp01(blur)), 200f);
         }
     }
 }

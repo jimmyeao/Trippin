@@ -129,7 +129,7 @@ namespace TrippinStage
 
             rig.Orbit(cam, rx, 11f, 3.5f, 5.5f, dt, 0.7f, 0.12f);
             float dist = (new Vector3(0f, 5.5f, 0f) - cam.transform.position).magnitude;
-            HqPost.Focus(dist * 0.75f, Mathf.Lerp(11f, 1.6f, Mathf.Clamp01(blur * 0.5f)), 50f);
+            HqPost.Focus(dist * 0.75f, Mathf.Lerp(8f, 1.4f, Mathf.Clamp01(blur * 0.5f)), 135f);
         }
     }
 }

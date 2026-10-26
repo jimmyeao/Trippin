@@ -149,7 +149,9 @@ namespace TrippinStage
         }
 
         /// Bokeh depth of field this frame: sharp at `distance` metres, the
-        /// blur growing as the f-number drops (`aperture`, 1-32).
+        /// blur growing as the f-number drops (`aperture`, 1-32). URP's
+        /// bokeh discs are small at normal focal lengths: use a long lens
+        /// (135-220 mm) wide open for a visible effect.
         public static void Focus(float distance, float aperture, float focalLength = 50f)
         {
             var d = Dof();

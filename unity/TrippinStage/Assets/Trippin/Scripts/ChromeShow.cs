@@ -91,8 +91,7 @@ namespace TrippinStage
             _m.SetFloat("_Gain", rx.Gain(0.85f, 1.15f));
 
             rig.Orbit(cam, rx, 17f, 8f, Centre.y, dt, 0.8f, 0.15f);
-            float dist = (Centre - cam.transform.position).magnitude;
-            HqPost.Focus(dist, 3.2f, 70f);
+            // (No depth of field: URP's bokeh softened the blobs themselves.)
         }
     }
 }

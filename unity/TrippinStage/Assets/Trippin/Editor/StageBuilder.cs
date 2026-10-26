@@ -311,6 +311,7 @@ namespace TrippinStage.EditorTools
                 ("unity_rain", typeof(RainShow)),
                 ("unity_pool", typeof(PoolShow)),
                 ("unity_synthwave", typeof(SynthwaveShow)),
+                ("unity_bokeh", typeof(FairyLightsShow)),
             };
             // Extra materials for the ported scenes: instancing must be on the
             // material asset or the build strips the variant (AGENTS.md).
@@ -362,6 +363,7 @@ namespace TrippinStage.EditorTools
                     fw.backdropMat.SetTexture("_MainTex", Tex("HqSkyline.png", TextureWrapMode.Mirror));
                     fw.skyMat = co.skyMat;
                 }
+                if (ks is FairyLightsShow fl2) fl2.bulbMat = Mat("Trippin/HqBulb", "HqBulb");
                 if (ks is SynthwaveShow sw)
                 {
                     sw.synthMat = Mat("Trippin/HqSynth", "HqSynth");
