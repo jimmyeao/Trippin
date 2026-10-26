@@ -26,6 +26,12 @@ namespace TrippinStage
         public bool cut, drums = true;
         /// The on-air show's [TrippinParam] values, in manifest order (ShowParams).
         public float[] knobs = new float[0];
+        /// Trippin's Speed and Reactivity controls for the show on air (1 = as
+        /// played; older Trippins send neither). Speed already runs the energy
+        /// clocks faster in Trippin; here it also drives the camera's travel
+        /// (Rx.camBeat). Reactivity is applied to the levels as they arrive
+        /// (TrippinLink.ApplyReact), so every show gets it.
+        public float speed = 1f, react = 1f;
     }
 
     [DefaultExecutionOrder(-100)]
@@ -127,13 +133,35 @@ namespace TrippinStage
             }
         }
 
+        /// Reactivity on a level (0..1): below 1 it scales the level down (0 =
+        /// the music moves nothing); above 1 it lifts the quiet and middle of
+        /// the range toward full (v^(1/r)), so shapes swing harder and kicks
+        /// cross the shows' thresholds sooner. Loud levels already sit near 1,
+        /// so a plain gain above 1 did nothing.
+        public static float React(float v, float r)
+        {
+            v = Mathf.Clamp01(v);
+            return r <= 1f ? v * Mathf.Max(r, 0f) : Mathf.Pow(v, 1f / r);
+        }
+
+        static void ApplyReact(ShowState s)
+        {
+            float r = s.react;
+            if (Mathf.Abs(r - 1f) < 1e-3f) return;
+            s.bass = React(s.bass, r); s.mid = React(s.mid, r); s.high = React(s.high, r);
+            s.energy = React(s.energy, r); s.onset = React(s.onset, r); s.kick = React(s.kick, r);
+            foreach (var a in new[] { s.lvl4, s.hits4, s.spectrum })
+                if (a != null)
+                    for (int i = 0; i < a.Length; i++) a[i] = React(a[i], r);
+        }
+
         void Update()
         {
             if (_replay != null && _replay.Length > 0)
             {
                 _replayT += Time.deltaTime;
                 int idx = ((int)(_replayT * 60f)) % _replay.Length;
-                try { State = JsonUtility.FromJson<ShowState>(_replay[idx]); } catch (Exception) { }
+                try { var rs = JsonUtility.FromJson<ShowState>(_replay[idx]); ApplyReact(rs); State = rs; } catch (Exception) { }
                 Live = false;   // the show manager cycles on the beat, as it does with no feed
                 PushGlobals(State);
                 return;
@@ -147,6 +175,7 @@ namespace TrippinStage
                     var s = JsonUtility.FromJson<ShowState>(json);
                     if (s != null)
                     {
+                        ApplyReact(s);
                         State = s;
                         _lastPacket = Time.unscaledTime;
                     }

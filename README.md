@@ -398,13 +398,20 @@ while the engine is sending frames, and the AI show builder never uses them.
 Developer notes are in `unity/README.md`.
 
 **Show controls.** While a Unity show is on air, the sidebar's **Show
-controls** card adjusts it: **Speed** (how fast it travels, drifts and
-turns; moves locked to the beat stay on the beat, so a few mostly
-beat-locked shows such as the sculpture barely change) and **Reactivity**
-(how hard it answers the music) for every show, plus the show's own knobs
-where it has them (for example `unity_fluid`: swirl, dye life, flow life,
-splat size, force and shine). Values are remembered per show; **Reset** puts
-the show back to its defaults.
+controls** card adjusts it. Every show has:
+
+- **Speed:** how fast it travels, drifts and turns, camera included. Moves
+  locked to the beat stay on the beat, so mostly beat-locked shows such as
+  the sculpture change less.
+- **Reactivity:** how hard it answers the music. 0 leaves it nearly still;
+  above 1 shapes swing harder and kicks land more easily.
+- **Brightness**, **Saturation** and **Hue shift.**
+
+Shows framed by the shared camera also get **Camera distance** (closer or
+further back), and some have their own knobs (`unity_fluid`: swirl, dye life,
+flow life, splat size, force and shine; `unity_marble`: swirl, drop size,
+comb, shine and relief). Values are remembered per show; **Reset** puts the
+show back to its defaults.
 
 `unity_fluid` is a real-time fluid simulation drawn as glossy liquid paint:
 three emitters pour and push with the bass, mids and highs, and every kick

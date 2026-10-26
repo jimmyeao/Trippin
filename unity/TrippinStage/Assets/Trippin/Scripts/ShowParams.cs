@@ -57,6 +57,7 @@ namespace TrippinStage
                     {
                         var a = f.GetCustomAttribute<TrippinParamAttribute>();
                         if (a == null || f.FieldType != typeof(float) || list.Count >= 8) continue;
+                        if (f.Name == "zoom" && c is KitShow ks && !ks.UsesCamera) continue;
                         list.Add(new Knob { owner = c, field = f, attr = a, def = (float)f.GetValue(c) });
                     }
                 _knobs[i] = list;

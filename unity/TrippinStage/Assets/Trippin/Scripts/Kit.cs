@@ -19,6 +19,11 @@ namespace TrippinStage
     public sealed class Rx
     {
         public float beat, clk, clkBass, clkHigh, phrase;
+        /// The beat run at Trippin's Speed control (ShowState.speed): the
+        /// camera's travel (CamRig.Orbit), so Speed visibly speeds the shot.
+        public float camBeat;
+        float _camPrev = -1f;
+        bool _camInit;
         /// Trippin's tracked beat count, continuous: where the tempo tracker jumps (a re-lock or a
         /// downbeat-phase correction), the output carries on smoothly and eases onto the new grid
         /// over ~0.4 s instead of stepping. Use this (never `clk`) for anything that has to land on
@@ -43,6 +48,7 @@ namespace TrippinStage
         public void Reset()
         {
             impact = 0f;
+            _camPrev = -1f;
             _bPrev = -1f; _bOff = 0f; _bShift = 0f;
             for (int i = 0; i < spec.Length; i++) spec[i] = 0f;
         }
@@ -80,6 +86,12 @@ namespace TrippinStage
             }
             _bPrev = bb;
             beatS = bb + _bOff;
+            if (!_camInit) { camBeat = s.beat; _camInit = true; }   // the shot starts where it always did
+            float dCam = _camPrev < 0f ? 0f : s.beat - _camPrev;
+            if (dCam < -2048f) dCam += 4096f;
+            if (dCam < 0f || dCam > 4f) dCam = 0f;          // a jump, not travel
+            _camPrev = s.beat;
+            camBeat += dCam * Mathf.Clamp(s.speed, 0f, 4f);
             clk = s.clock4 != null && s.clock4.Length > 1 ? s.clock4[1] : beat;
             clkBass = s.clock4 != null && s.clock4.Length > 1 ? s.clock4[1] : beat;
             clkHigh = s.clock4 != null && s.clock4.Length > 3 ? s.clock4[3] : beat;
@@ -120,7 +132,10 @@ namespace TrippinStage
                 for (int i = 0; i < spec.Length && i < s.spectrum.Length; i++)
                 {
                     float den = Mathf.Max(_specPk[i], 0.35f * all, 0.12f);
-                    spec[i] = Eased.Follow(spec[i], Mathf.Clamp01(s.spectrum[i] / den), 16f, 5f, dt);
+                    // The auto-gain would undo a Reactivity below 1 (the
+                    // levels arrive scaled down): apply it after.
+                    float lo = Mathf.Clamp01(s.react);
+                    spec[i] = Eased.Follow(spec[i], Mathf.Clamp01(s.spectrum[i] / den) * lo, 16f, 5f, dt);
                 }
             }
 
@@ -577,11 +592,15 @@ namespace TrippinStage
     {
         Vector3 _pos, _look;
         bool _set;
+        /// Trippin's camera-distance control (KitShow.zoom): the shot pulls
+        /// back (> 1) or closes in (< 1) along its own line to the target.
+        public float zoom = 1f;
 
         public void Snap() { _set = false; }
 
         public void Move(Camera cam, Vector3 want, Vector3 look, float dt, float rate = 0.8f)
         {
+            want = look + (want - look) * zoom;
             if (!_set) { _pos = want; _look = look; _set = true; }
             float k = 1f - Mathf.Exp(-dt * rate);
             _pos = Vector3.Lerp(_pos, want, k);
@@ -594,9 +613,9 @@ namespace TrippinStage
         /// and creeps in during a build.
         public void Orbit(Camera cam, Rx rx, float radius, float height, float lookY, float dt, float swing = 1f, float push = 0.2f)
         {
-            float sw = Mathf.Sin(rx.beat / 128f * Mathf.PI * 2f) * swing;
+            float sw = Mathf.Sin(rx.camBeat / 128f * Mathf.PI * 2f) * swing;
             float r = Mathf.Lerp(radius, radius * (1f - push), rx.tension) + Mathf.Sin(rx.phrase) * radius * 0.06f;
-            var want = new Vector3(Mathf.Sin(sw) * r, height + Mathf.Sin(rx.beat / 48f * Mathf.PI * 2f) * height * 0.12f, -Mathf.Cos(sw) * r);
+            var want = new Vector3(Mathf.Sin(sw) * r, height + Mathf.Sin(rx.camBeat / 48f * Mathf.PI * 2f) * height * 0.12f, -Mathf.Cos(sw) * r);
             Move(cam, want, new Vector3(0f, lookY + 2f * rx.tension, 0f), dt);
         }
     }
@@ -613,6 +632,14 @@ namespace TrippinStage
         protected readonly CamRig rig = new CamRig();
         protected HazeSet haze;
         float _farWas;
+
+        /// Trippin's camera-distance control, on every show that frames its
+        /// shot through the shared rig (UsesCamera).
+        [TrippinParam("Camera distance", 0.5f, 2f)] public float zoom = 1f;
+
+        /// False for shows that don't use the rig (full-screen passes, a
+        /// camera on its own path): ShowParams then leaves `zoom` out.
+        public virtual bool UsesCamera => true;
 
         protected abstract void Build();
         protected abstract void Frame(ShowState s, float dt);
@@ -635,6 +662,7 @@ namespace TrippinStage
         {
             float dt = Time.deltaTime;
             rx.Tick(TrippinLink.State, dt);
+            rig.zoom = zoom;
             Frame(TrippinLink.State, dt);
             if (haze != null) haze.Apply(1f + 0.8f * rx.tension + 0.8f * rx.impact);
         }

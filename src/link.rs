@@ -49,14 +49,13 @@ impl Link {
             self.last_scene = scene.to_string();
         }
         let u = self.apply(u, tweak);
-        let msg = frame_json(&u, scene, &self.palette, cut, drums, &tweak.knobs);
+        let msg = frame_json(&u, scene, &self.palette, cut, drums, tweak);
         let _ = self.sock.send_to(msg.to_string().as_bytes(), self.addr);
     }
 
-    /// The per-show Speed and Reactivity controls (`showparams.rs`), applied
-    /// to a copy of the frame: flow and the energy clocks advance at
-    /// `speed` x (beat and bar stay on the music), and the audio levels are
-    /// scaled by `react` (clamped to 0..1, the range shows expect).
+    /// The per-show Speed control (`showparams.rs`), applied to a copy of
+    /// the frame: flow and the energy clocks advance at `speed` x (beat and
+    /// bar stay on the music). Reactivity goes to the engine in the feed.
     fn apply(&mut self, u: &Uniforms, t: &Tweak) -> Uniforms {
         let mut o = *u;
         let now = [u.flow, u.clock4[0], u.clock4[1], u.clock4[2], u.clock4[3]];
@@ -76,14 +75,6 @@ impl Link {
         }
         o.flow = self.clocks_out[0];
         o.clock4.copy_from_slice(&self.clocks_out[1..]);
-        if t.react != 1.0 {
-            let r = |v: &mut f32| *v = (*v * t.react).clamp(0.0, 1.0);
-            for v in [&mut o.bass, &mut o.mid, &mut o.high, &mut o.energy, &mut o.onset, &mut o.kick] {
-                r(v);
-            }
-            o.lvl4.iter_mut().chain(o.hits4.iter_mut()).chain(o.pres4.iter_mut()).for_each(r);
-            o.spectrum.iter_mut().for_each(r);
-        }
         o
     }
 }
@@ -108,7 +99,7 @@ pub fn frame_json(
     palette: &[[f32; 3]],
     cut: bool,
     drums: bool,
-    knobs: &[f32],
+    tweak: &Tweak,
 ) -> serde_json::Value {
     json!({
         "time": u.time, "dt": u.dt,
@@ -124,6 +115,9 @@ pub fn frame_json(
         "scene": scene, "cut": cut, "drums": drums,
         // The on-air show's own controls ([TrippinParam] fields), in the
         // order of the engine's manifest. Older engines ignore it.
-        "knobs": knobs,
+        "knobs": tweak.knobs,
+        // Speed and Reactivity for the show on air (showparams.rs); the
+        // engine runs its camera at `speed` and shapes its levels by `react`.
+        "speed": tweak.speed, "react": tweak.react,
     })
 }

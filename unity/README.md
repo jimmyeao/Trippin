@@ -104,9 +104,23 @@ Run `Build/TrippinStage.exe`. With no Trippin feed it cycles every 16 bars; `-cy
 ## Show controls (`ShowParams.cs`)
 
 Trippin's sidebar has a **Show controls** card for the `unity_*` show on air
-(`src/showparams.rs`). Speed and Reactivity work on every show and need
-nothing here: Trippin re-integrates the travel clocks (`flow`, `clock4`) at
-the chosen speed and scales the audio levels in the feed it sends.
+(`src/showparams.rs`). The built-in ones need nothing in a show:
+
+- **Speed:** Trippin re-integrates the travel clocks (`flow`, `clock4`) at the
+  chosen speed, and sends it as `speed`; `Rx.camBeat` runs at it, so
+  `CamRig.Orbit` swings the shot faster too.
+- **Reactivity:** sent as `react`; `TrippinLink.ApplyReact` reshapes the
+  levels as each packet arrives (below 1 a gain toward 0; above 1
+  `v^(1/r)`), so every show, kit or not, gets it, and `Rx` re-applies a
+  gain below 1 after its spectrum auto-gain. (Scaling the levels in Trippin
+  did nothing: the auto-gain undid it, and loud levels sat at 1 already.)
+- **Camera distance:** `KitShow.zoom`, a `[TrippinParam]` on the base class
+  that `CamRig.Move` applies along the camera's line to its target. Shows
+  that don't frame through the rig override `UsesCamera => false`, and
+  `ShowParams` leaves the knob out of their manifest.
+- **Brightness, Saturation, Hue shift:** Trippin applies them to the frame
+  it gets back (`ext_look` in `shaders/common.wgsl`), so they work with any
+  engine.
 
 A show adds its own knobs by tagging public float fields:
 

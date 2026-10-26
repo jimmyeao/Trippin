@@ -19,6 +19,8 @@ namespace TrippinStage
 {
     public sealed class MarbleShow : KitShow
     {
+        public override bool UsesCamera => false;
+
         public ComputeShader sim;       // Fluid.compute: the velocity solver
         public ComputeShader marble;    // Marble.compute: the paint
         public Material viewMat;

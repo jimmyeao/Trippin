@@ -19,6 +19,8 @@ namespace TrippinStage
 {
     public sealed class CoasterShow : KitShow
     {
+        public override bool UsesCamera => false;
+
         public Material coasterCityMat, deckMat, noseMat, skyMat;
 
         const float LAP_BEATS = 96f;

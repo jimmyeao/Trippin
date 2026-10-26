@@ -12,5 +12,5 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let b = 0.03 - 0.59 * y;
     let x = (-b + sqrt(b * b + 4.0 * a * 0.14 * y)) / (2.0 * a);
     let expo = 0.75 + 0.35 * u.intensity;
-    return vec4<f32>(x / expo, 1.0);
+    return vec4<f32>(ext_look(x / expo), 1.0);
 }
