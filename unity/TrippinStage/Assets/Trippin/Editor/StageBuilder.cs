@@ -307,6 +307,8 @@ namespace TrippinStage.EditorTools
                 ("unity_fireworks", typeof(FireworksShow)),
                 ("unity_chrome", typeof(ChromeShow)),
                 ("unity_kaleido", typeof(KaleidoShow)),
+                ("unity_confetti", typeof(ConfettiShow)),
+                ("unity_rain", typeof(RainShow)),
             };
             // Extra materials for the ported scenes: instancing must be on the
             // material asset or the build strips the variant (AGENTS.md).
@@ -357,6 +359,16 @@ namespace TrippinStage.EditorTools
                     fw.backdropMat = Mat("Trippin/HqBackdrop", "HqSkyline");
                     fw.backdropMat.SetTexture("_MainTex", Tex("HqSkyline.png", TextureWrapMode.Mirror));
                     fw.skyMat = co.skyMat;
+                }
+                if (ks is RainShow rn)
+                {
+                    rn.rainMat = Mat("Trippin/HqRain", "HqRain");
+                    rn.rainMat.SetTexture("_Street", Tex("HqRainStreet.png"));
+                }
+                if (ks is ConfettiShow cf)
+                {
+                    cf.particles = AssetDatabase.LoadAssetAtPath<ComputeShader>($"{Root}/Shaders/HqParticles.compute");
+                    cf.confettiMat = Mat("Trippin/HqConfetti", "HqConfetti");
                 }
                 if (ks is ChromeShow chs)
                 {

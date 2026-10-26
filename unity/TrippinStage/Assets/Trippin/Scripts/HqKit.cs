@@ -25,7 +25,8 @@ namespace TrippinStage
         public Material Mat => _mat;
         public Material MirrorMat => _mirMat;
 
-        public enum Shape { Sphere = 0, Ring = 1, Cone = 2, Shell = 3 }
+        /// Box: scattered through a volume whose half-extents are `axis`.
+        public enum Shape { Sphere = 0, Ring = 1, Cone = 2, Shell = 3, Box = 4 }
 
         public ParticleField(ComputeShader cs, Material spark, int count, bool mirror, float waterY = 0f)
         {
@@ -53,7 +54,7 @@ namespace TrippinStage
         /// Queue a burst for this frame (at most 64 a frame; extras drop).
         public void Burst(Vector3 centre, int count, Shape shape, float speed, float size, float life, Color col,
                           float drag = 1f, float grav = 1f, Vector3 inherit = default, Vector3 axis = default, float spread = 0.15f,
-                          int ghosts = 0, float trail = 0.25f)
+                          int ghosts = 0, float trail = 0.25f, float cone = 0f)
         {
             if (_n >= 64 || count <= 0) return;
             ghosts = Mathf.Clamp(ghosts, 0, 31);
@@ -64,7 +65,7 @@ namespace TrippinStage
             _b3[_n] = new Vector4(inherit.x, inherit.y, inherit.z, grav);
             var ax = axis == default ? Vector3.up : axis;
             _b4[_n] = new Vector4(ax.x, ax.y, ax.z, spread);
-            _b5[_n] = new Vector4(ghosts, trail, 0f, 0f);
+            _b5[_n] = new Vector4(ghosts, trail, cone, 0f);
             _total += count;
             _n++;
         }

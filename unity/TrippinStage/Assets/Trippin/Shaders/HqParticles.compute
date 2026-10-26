@@ -21,7 +21,7 @@ uint _Count;                     // ring size
 // w drag; _B3 xyz inherited velocity, w gravity scale; _B4 xyz ring/plane
 // axis, w spread (speed jitter); _B5 x ghosts per star (a trail: copies of
 // the star launched a little later, which retrace its exact path), y the
-// trail's length in seconds.
+// trail's length in seconds, z a cone's width (0 = the default 0.35).
 float4 _B0[64], _B1[64], _B2[64], _B3[64], _B4[64], _B5[64];
 int _BCount;
 uint _Total, _Head;
@@ -69,8 +69,10 @@ void Emit(uint3 id : SV_DispatchThreadID)
     else if (shape < 2.5)   // cone (a rocket's trail sparks): down the -axis
     {
         float3 ax = normalize(_B4[b].xyz);
-        dir = normalize(-ax + Sphere(u, v) * 0.35);
+        dir = normalize(-ax + Sphere(u, v) * (_B5[b].z > 0.0 ? _B5[b].z : 0.35));
     }
+    else if (shape > 3.5)   // box: scattered through a volume (_B4.xyz half-extents), drifting
+        dir = Sphere(u, v);
     else                    // shell of evenly spread stars (golden-angle sphere)
     {
         float i = star + 0.5;
@@ -84,6 +86,7 @@ void Emit(uint3 id : SV_DispatchThreadID)
     float sp = _B1[b].x * (1.0 - _B4[b].w * w);
     P p;
     p.pos = _B0[b].xyz;
+    if (shape > 3.5) p.pos += (float3(R(key, 7), R(key, 8), R(key, 9)) * 2.0 - 1.0) * _B4[b].xyz;
     p.vel = dir * sp + _B3[b].xyz;
     float g = per > 1 ? ghost / (float)(per - 1) : 0.0;
     p.maxLife = _B1[b].w * (0.75 + 0.5 * R(key, 4));
