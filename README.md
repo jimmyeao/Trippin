@@ -430,14 +430,15 @@ itself. Buildings and roads never warp.
 | Club Nights | club lasers and rig, crowd and warehouse flights (4) | about 105 MB |
 | Liquid | ink, smoke and liquid chrome (3) | about 90 MB |
 | Club Nights 2 | the decks, a speaker cone, an LED wall, a laser tunnel (4), locked to the bar | about 100 MB |
-| Liquid 2 | marbled paint, oil on water, ferrofluid, a jellyfish, a powder burst, molten gold, ink drops (7) | coming soon |
-| Dance Floor | freestyle dancers, feet on a light-up floor, a rooftop party, a solo dancer, the mixer, the vinyl, moving heads (7), locked to the bar | coming soon |
+| Liquid 2 | marbled paint, oil on water, ferrofluid, a jellyfish, a powder burst, molten gold, ink drops (7) | about 185 MB |
+| Dance Floor | freestyle dancers, feet on a light-up floor, a rooftop party, a solo dancer, the mixer, the vinyl, moving heads (7), locked to the bar | about 181 MB |
 
 The Club Nights 2 and Dance Floor scenes play locked to the bar: each loop
 spans whole bars from the downbeat, the lights flare on every kick, drum
-fills stutter the footage and drops scratch it back. The footage surges
-forward on each beat, and where a clip has a rhythm of its own (dancers'
-steps, a jellyfish's pulse) its moves are timed to land on the beats.
+fills stutter the footage and drops scratch it back. The footage plays at
+a steady speed matched to the tempo, and where a clip has a rhythm of its
+own (dancers' steps, a jellyfish's pulse) its speed is set so its moves
+land on the beats.
 
 On the Effects packs card, **Install** downloads a pack, **Add pack from
 file…** installs a `.trippinpack` you were given, the tick box switches a

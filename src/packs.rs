@@ -40,7 +40,7 @@ pub struct CatalogEntry {
     pub asset: (&'static str, &'static str),
 }
 
-const RELEASE_BASE: &str = "https://github.com/jimmyeao/Trippin/releases/download/packs-v1";
+const RELEASE_BASE: &str = "https://github.com/jimmyeao/Trippin/releases/download/packs-v2";
 
 pub const CATALOG: &[CatalogEntry] = &[
     CatalogEntry {
@@ -50,7 +50,7 @@ pub const CATALOG: &[CatalogEntry] = &[
                 down an avenue, over the rooftops, between towers and under a bridge, a neon \
                 alley and highway light trails.",
         size_mb: 307,
-        asset: ("night-city-1.trippinpack", "a7291e13c690aa42cebfba1f31de5ea73a2059cb0df1ba343fcb02debdd4ca5a"),
+        asset: ("night-city-1.1.trippinpack", "dcdbf18a73e9692c2693a3e4be5f5286eab65f7d92d6537927cf5c8df6d2c96e"),
     },
     CatalogEntry {
         id: "club-nights",
@@ -58,7 +58,7 @@ pub const CATALOG: &[CatalogEntry] = &[
         about: "Four video scenes: club lasers, a club light rig, and flights over a club crowd \
                 and through a warehouse rave.",
         size_mb: 105,
-        asset: ("club-nights-1.trippinpack", "405851def9b325dc8d98d00512163cc36980eab7d8b7578f429ea4f453136483"),
+        asset: ("club-nights-1.1.trippinpack", "7b18b7b1078c1304e2f5466ec66b2a9c2e819e87482003d3290a3b7a560f8d03"),
     },
     CatalogEntry {
         id: "liquid",
@@ -66,7 +66,7 @@ pub const CATALOG: &[CatalogEntry] = &[
         about: "Three video scenes: ink blooming in water, coloured smoke and liquid chrome, \
                 swirled by the music.",
         size_mb: 87,
-        asset: ("liquid-1.trippinpack", "3f74bdad986c67862eccb8a7883c1d14d2528489989653252e5c3b22350ee1b7"),
+        asset: ("liquid-1.trippinpack", "47db566017242e0bc459b54fcb0a5fd2771e1e824ceedfdd29d1247766d06e30"),
     },
     CatalogEntry {
         id: "club-nights-2",
@@ -74,7 +74,7 @@ pub const CATALOG: &[CatalogEntry] = &[
         about: "Four club scenes locked to the bar: the decks, a speaker cone, an LED wall and a \
                 laser tunnel. The lights flare on the kicks, fills stutter, drops scratch.",
         size_mb: 100,
-        asset: ("club-nights-2-1.trippinpack", "c373ed66cfa01e4f7b6b30718f9a5c58ef79a7a6a599576c9664510557129ee0"),
+        asset: ("club-nights-2-1.1.trippinpack", "0281ed87236ca54fc369ef8c82fd0f174d4a71d29375e391745c7c2ea7709146"),
     },
     CatalogEntry {
         id: "liquid-2",
@@ -82,7 +82,7 @@ pub const CATALOG: &[CatalogEntry] = &[
         about: "Seven video scenes: marbled paint, oil on water, ferrofluid, a jellyfish, a powder \
                 burst, molten gold and ink drops, swirled by the music.",
         size_mb: 186,
-        asset: ("liquid-2-1.trippinpack", ""),
+        asset: ("liquid-2-1.trippinpack", "f4499fce6272d3532c56234df7dcd1af26e0a1a2703581024fa057a2c4e76506"),
     },
     CatalogEntry {
         id: "dance-floor",
@@ -90,7 +90,7 @@ pub const CATALOG: &[CatalogEntry] = &[
         about: "Seven scenes locked to the bar: dancers each in their own groove, feet on a light-up \
                 floor, a rooftop party, a solo dancer, and the mixer, the vinyl and the moving heads.",
         size_mb: 182,
-        asset: ("dance-floor-1.trippinpack", ""),
+        asset: ("dance-floor-1.trippinpack", "588d24d64fd82a0d7342e5f8eaece87f28ea9d9d1081cd271fe1515b7fa4b2c1"),
     },
 ];
 
@@ -517,7 +517,9 @@ mod tests {
         for s in scene_names_all(&d).iter().filter(|s| s.starts_with("unity_")) {
             assert_eq!(shown.contains(s), crate::engine::scene_supported(s), "{s}");
         }
-        assert!(crate::engine::scene_supported("unity_fluid"), "engine v16 draws unity_fluid");
+        for s in ["unity_fluid", "unity_murmuration", "unity_ribbons", "unity_bloom"] {
+            assert!(crate::engine::scene_supported(s), "engine v17 draws {s}");
+        }
     }
 
     #[test]

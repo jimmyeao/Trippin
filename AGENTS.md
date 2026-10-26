@@ -365,20 +365,24 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   common.wgsl changes a helper packs call. `--snap-energy` writes each pack's
   scenes into that pack's `scene_energy.json`.
 - **Tempo-matched video** (owner: the best video scenes are the ones whose
-  footage moves *to the beat*). Generated footage has almost no rhythm of
-  its own, so a locked scene's head is *pumped* within each beat
-  (`video::pump`: it surges on the beat, eases before the next; motion
-  measured ~2x higher in the first quarter of a beat). Clips with a real
+  footage moves *to the beat*). **Never vary the footage's speed within a
+  beat**: a per-beat surge (tried as `video::pump`) read as unnatural. The
+  head runs at a steady tempo-set speed and is nudged at most
+  `MAX_NUDGE` (3%) to drift onto the grid; the kick shows in the scene's
+  light (soft-attack grid kick: longer glints, an exposure breathe up to
+  12%). Clips with a real
   rhythm get `<clip>.beats.json` from `tools/video_beats.py` (run it on new
-  clips before `pack_build.py`): their own hits land on the beats. The video
+  clips before `pack_build.py`): their speed is set so their own hits fall
+  on the beats. The video
   model leaves a 2/4-frame highlight flicker and 8-frame chunk rhythm in
   every clip — the analyser box-filters and skips those, or every clip
   "has" a beat.
 - **Bar-locked video** (`// @video-lock` in a scene header, `video.rs`
   `lock_step`): the loop spans a power-of-two number of bars nearest its
   natural length (an 11.3 s clip at 128 BPM is 8 bars, 0.75x), doubled in
-  breakdowns, aligned to the downbeat. The head is pulled onto the grid
-  gently, and only cuts onto it on a bar line when far off; fills stutter a
+  breakdowns, aligned to the downbeat. The head drifts onto the grid by a
+  small speed nudge, and only cuts onto it on a bar line when more than a
+  beat off; fills stutter a
   half-beat slice, drops scratch back half a beat. Use it on club footage,
   not flights or drives (no beat tricks there, AGENTS §2).
 - **Video scenes** (`video_*`): footage is display-referred, so pass it
