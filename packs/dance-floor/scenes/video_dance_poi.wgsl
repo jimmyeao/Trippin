@@ -1,7 +1,7 @@
 // @bloom 0.6
-// @title Freestyle
+// @title LED Poi
 // @video-lock
-// A few dancers each freestyling to the same groove (video clip, locked to the tempo: the footage runs at a steady
+// A performer spinning glowing LED poi, light trails looping in the dark (video clip, locked to the tempo: the footage runs at a steady
 // speed in time, its own light hits land on the beats). The beams and lights flare
 // into star glints on the drums, and the camera sways with the phrase.
 

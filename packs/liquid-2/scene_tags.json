@@ -1,9 +1,49 @@
 {
-  "video_fluid_ferro": ["organic", "abstract", "dark"],
-  "video_fluid_gold": ["organic", "abstract", "bright", "slow"],
-  "video_fluid_inkdrop": ["organic", "abstract", "slow"],
-  "video_fluid_jelly": ["organic", "dark", "slow"],
-  "video_fluid_marble": ["organic", "abstract", "bright"],
-  "video_fluid_oilwater": ["organic", "abstract", "dark", "slow"],
-  "video_fluid_powder": ["organic", "abstract", "bright"]
+  "video_fluid_ferro": [
+    "organic",
+    "abstract",
+    "dark"
+  ],
+  "video_fluid_ferropulse": [
+    "organic",
+    "abstract",
+    "dark"
+  ],
+  "video_fluid_gold": [
+    "organic",
+    "abstract",
+    "bright",
+    "slow"
+  ],
+  "video_fluid_inkdrop": [
+    "organic",
+    "abstract",
+    "slow"
+  ],
+  "video_fluid_jelly": [
+    "organic",
+    "dark",
+    "slow"
+  ],
+  "video_fluid_marble": [
+    "organic",
+    "abstract",
+    "bright"
+  ],
+  "video_fluid_oilwater": [
+    "organic",
+    "abstract",
+    "dark",
+    "slow"
+  ],
+  "video_fluid_powder": [
+    "organic",
+    "abstract",
+    "bright"
+  ],
+  "video_fluid_speakerpaint": [
+    "organic",
+    "abstract",
+    "bright"
+  ]
 }

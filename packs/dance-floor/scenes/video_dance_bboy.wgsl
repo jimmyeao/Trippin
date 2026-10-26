@@ -1,7 +1,7 @@
 // @bloom 0.6
-// @title Rooftop Party
+// @title B-Boy
 // @video-lock
-// Friends dancing on a rooftop under string lights (video clip, locked to the tempo: the footage runs at a steady
+// A b-boy breaking in violet and amber haze: footwork, a handstand freeze and spins (video clip, locked to the tempo: the footage runs at a steady
 // speed in time, its own light hits land on the beats). The beams and lights flare
 // into star glints on the drums, and the camera sways with the phrase.
 
