@@ -176,6 +176,54 @@ namespace TrippinStage
     /// manager renders in LateUpdate): depth of field goes off in any frame
     /// no show asked for it.
     [DefaultExecutionOrder(-1000)]
+    /// A baked 64^3 tileable noise volume shared by the volumetric shows
+    /// (ink, smoke): four independent smooth value noises in RGBA with a
+    /// lattice of 16 cells across the tile, so world p/16 samples one lattice
+    /// cell per unit. One trilinear fetch replaces eight hashes per tap.
+    public static class HqNoise
+    {
+        static Texture3D _vol;
+        public static Texture3D Volume
+        {
+            get
+            {
+                if (_vol != null) return _vol;
+                const int N = 64, P = 16, C = N / P;
+                var lat = new float[4, P, P, P];
+                var rnd = new System.Random(1234);
+                for (int c = 0; c < 4; c++)
+                    for (int z = 0; z < P; z++) for (int y = 0; y < P; y++) for (int x = 0; x < P; x++)
+                        lat[c, z, y, x] = (float)rnd.NextDouble();
+                var px = new Color32[N * N * N];
+                for (int z = 0; z < N; z++)
+                {
+                    int z0 = z / C, z1 = (z0 + 1) % P; float fz = S((z % C) / (float)C);
+                    for (int y = 0; y < N; y++)
+                    {
+                        int y0 = y / C, y1 = (y0 + 1) % P; float fy = S((y % C) / (float)C);
+                        for (int x = 0; x < N; x++)
+                        {
+                            int x0 = x / C, x1 = (x0 + 1) % P; float fx = S((x % C) / (float)C);
+                            var v = new byte[4];
+                            for (int c = 0; c < 4; c++)
+                            {
+                                float a = Mathf.Lerp(Mathf.Lerp(lat[c, z0, y0, x0], lat[c, z0, y0, x1], fx), Mathf.Lerp(lat[c, z0, y1, x0], lat[c, z0, y1, x1], fx), fy);
+                                float b = Mathf.Lerp(Mathf.Lerp(lat[c, z1, y0, x0], lat[c, z1, y0, x1], fx), Mathf.Lerp(lat[c, z1, y1, x0], lat[c, z1, y1, x1], fx), fy);
+                                v[c] = (byte)Mathf.RoundToInt(Mathf.Lerp(a, b, fz) * 255f);
+                            }
+                            px[(z * N + y) * N + x] = new Color32(v[0], v[1], v[2], v[3]);
+                        }
+                    }
+                }
+                _vol = new Texture3D(N, N, N, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Repeat, filterMode = FilterMode.Bilinear, name = "HqNoise" };
+                _vol.SetPixels32(px);
+                _vol.Apply(false, true);
+                return _vol;
+            }
+        }
+        static float S(float t) => t * t * (3f - 2f * t);
+    }
+
     public sealed class HqPostDriver : MonoBehaviour
     {
         void LateUpdate() => HqPost.EndFrame();

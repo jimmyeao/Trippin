@@ -136,6 +136,7 @@
   "unity_ribbons": ["abstract", "geometric", "neon"],
   "unity_bloom": ["organic", "geometric", "neon"],
   "unity_marble": ["organic", "abstract", "bright"],
+  "unity_ink": ["organic", "abstract", "slow"],
   "unity_fire": ["stage", "warm", "bright"],
   "unity_neon_portals": ["neon", "flight", "geometric"],
   "unity_bokeh": ["slow", "warm", "dark"],
