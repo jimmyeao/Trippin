@@ -309,6 +309,7 @@ namespace TrippinStage.EditorTools
                 ("unity_kaleido", typeof(KaleidoShow)),
                 ("unity_confetti", typeof(ConfettiShow)),
                 ("unity_rain", typeof(RainShow)),
+                ("unity_pool", typeof(PoolShow)),
             };
             // Extra materials for the ported scenes: instancing must be on the
             // material asset or the build strips the variant (AGENTS.md).
@@ -359,6 +360,11 @@ namespace TrippinStage.EditorTools
                     fw.backdropMat = Mat("Trippin/HqBackdrop", "HqSkyline");
                     fw.backdropMat.SetTexture("_MainTex", Tex("HqSkyline.png", TextureWrapMode.Mirror));
                     fw.skyMat = co.skyMat;
+                }
+                if (ks is PoolShow poolShow)
+                {
+                    poolShow.poolMat = Mat("Trippin/HqPool", "HqPool");
+                    poolShow.poolMat.SetTexture("_Tiles", Tex("HqPoolTiles.png", TextureWrapMode.Repeat));
                 }
                 if (ks is RainShow rn)
                 {

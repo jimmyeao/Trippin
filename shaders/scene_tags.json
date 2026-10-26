@@ -136,6 +136,7 @@
   "unity_ribbons": ["abstract", "geometric", "neon"],
   "unity_bloom": ["organic", "geometric", "neon"],
   "unity_marble": ["organic", "abstract", "bright"],
+  "unity_pool": ["organic", "cold", "slow"],
   "unity_rain": ["urban", "neon", "slow"],
   "unity_confetti": ["stage", "bright", "warm"],
   "unity_fireworks": ["urban", "bright", "warm"],
