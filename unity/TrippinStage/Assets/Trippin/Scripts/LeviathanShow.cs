@@ -22,10 +22,10 @@ namespace TrippinStage
     {
         public Camera cam;
         [TrippinParam("Wing beat", 0f, 2f)] public float wingAmt = 1f;
-        [TrippinParam("Swim sway", 0f, 2f)] public float swaySway = 1f;
+        [TrippinParam("Swim sway", 0f, 3f)] public float swaySway = 1f;
         [TrippinParam("Kick pulse", 0f, 2f)] public float pulseAmt = 1f;
-        [TrippinParam("Strands", 0f, 2f)] public float strands = 1f;
-        [TrippinParam("Turbulence", 0f, 3f)] public float turbAmt = 1f;
+        [TrippinParam("Strands", 0f, 4f)] public float strands = 1f;
+        [TrippinParam("Turbulence", 0f, 6f)] public float turbAmt = 1f;
         [TrippinParam("Strand colour", 0f, 1f)] public float strandHue = 0.15f;
         [TrippinParam("Camera distance", 0.5f, 2f)] public float zoom = 1f;
         public ComputeShader sim;

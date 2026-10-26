@@ -21,6 +21,9 @@ namespace TrippinStage
 {
     public sealed class TunnelShow : KitShow
     {
+        // The corridor is a full-screen pass from a fixed eye: distance means nothing.
+        public override bool UsesCamera => false;
+
         [TrippinParam("Width", 0.5f, 2f)] public float width = 1f;
         [TrippinParam("Flight speed", 0.3f, 3f)] public float flight = 1f;
         [TrippinParam("Bend", 0f, 3f)] public float bend = 1f;
@@ -43,7 +46,7 @@ namespace TrippinStage
             // Steady, fast and tempo-locked (the energy clock surged and stalled with the music).
             float bps = Mathf.Clamp(s.bpm, 60f, 200f) / 60f;
             _boost = Eased.Follow(_boost, rx.impact, 2f, 0.5f, dt);
-            _dist += dt * bps * 12f * flight * (1f + 0.35f * _boost);
+            _dist += dt * bps * 12f * flight * Mathf.Clamp(s.speed, 0f, 4f) * (1f + 0.35f * _boost);
             _m.SetFloat("_Scroll", _dist);
             _m.SetFloat("_Shape", 1f - 0.5f * rx.tension);
             _m.SetFloat("_Phase", rx.clk * 0.4f);

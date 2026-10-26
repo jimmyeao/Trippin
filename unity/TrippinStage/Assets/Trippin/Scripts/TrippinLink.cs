@@ -148,6 +148,25 @@ namespace TrippinStage
             return r <= 1f ? v * Mathf.Max(r, 0f) : Mathf.Pow(v, 1f / r);
         }
 
+        // Replay only: Trippin's Speed re-integration (link.rs::apply) of flow
+        // and the energy clocks, so -speed records what the app would show.
+        float[] _clkIn, _clkOut;
+        void ScaleClocks(ShowState s, float speed)
+        {
+            if (s.clock4 == null || s.clock4.Length < 4) return;
+            var now = new[] { s.flow, s.clock4[0], s.clock4[1], s.clock4[2], s.clock4[3] };
+            if (_clkIn == null) { _clkIn = now; _clkOut = (float[])now.Clone(); return; }
+            for (int i = 0; i < 5; i++)
+            {
+                float d = now[i] - _clkIn[i];
+                if (d < -2048f) d += 4096f;
+                _clkOut[i] = (_clkOut[i] + (d >= 0f && d < 64f ? d * speed : 0f)) % 4096f;
+            }
+            _clkIn = now;
+            s.flow = _clkOut[0];
+            for (int i = 0; i < 4; i++) s.clock4[i] = _clkOut[i + 1];
+        }
+
         static void ApplyReact(ShowState s)
         {
             float r = s.react;
@@ -168,7 +187,7 @@ namespace TrippinStage
                 try
                 {
                     var rs = JsonUtility.FromJson<ShowState>(_replay[idx]);
-                    if (_argSpeed > 0f) rs.speed = _argSpeed;
+                    if (_argSpeed > 0f) { rs.speed = _argSpeed; ScaleClocks(rs, _argSpeed); }
                     if (_argReact >= 0f) rs.react = _argReact;
                     ApplyReact(rs);
                     State = rs;

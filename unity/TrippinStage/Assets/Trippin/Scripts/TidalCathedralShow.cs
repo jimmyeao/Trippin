@@ -7,8 +7,8 @@ namespace TrippinStage
     {
         public Camera cam;
         [TrippinParam("Formation bars", 1f, 16f)] public float formBars = 4f;
-        [TrippinParam("Beam scan", 0f, 2f)] public float scanAmt = 1f;
-        [TrippinParam("Beams", 0f, 2f)] public float beams = 1f;
+        [TrippinParam("Beam scan", 0f, 4f)] public float scanAmt = 1f;
+        [TrippinParam("Beams", 0f, 4f)] public float beams = 1f;
         [TrippinParam("Beam colour", 0f, 1f)] public float beamHue = 0.12f;
         [TrippinParam("Sail swing", 0f, 2f)] public float sailSwing = 1f;
         [TrippinParam("Kick pull", 0f, 2f)] public float kickPull = 1f;

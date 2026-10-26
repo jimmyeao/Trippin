@@ -26,7 +26,7 @@ namespace TrippinStage
         [TrippinParam("Swell", 0f, 3f)] public float swell = 1f;
         [TrippinParam("Twist", 0f, 3f)] public float twistAmt = 1f;
         [TrippinParam("Kick ripple", 0f, 2f)] public float ripple = 1f;
-        [TrippinParam("Searchlights", 0f, 3f)] public float searchlights = 1f;
+        [TrippinParam("Searchlights", 0f, 5f)] public float searchlights = 1f;
         [TrippinParam("Glow colour", 0f, 1f)] public float glowHue = 0.45f;
         [TrippinParam("Camera distance", 0.5f, 2f)] public float zoom = 1f;
         public Material sculptMat, skyMat, groundMat, beamMat, glowMat, hazeMat;

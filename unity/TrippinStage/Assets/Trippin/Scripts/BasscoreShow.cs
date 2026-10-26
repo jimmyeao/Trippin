@@ -22,7 +22,7 @@ namespace TrippinStage
         public Camera cam;
         [TrippinParam("Colour", 0f, 1f)] public float hueBase = 0.02f;
         [TrippinParam("Ripple depth", 0.2f, 2.5f)] public float ripple = 1f;
-        [TrippinParam("Kick rings", 0f, 2f)] public float kickRings = 1f;
+        [TrippinParam("Kick rings", 0f, 3f)] public float kickRings = 1f;
         [TrippinParam("Ring speed", 0.3f, 2.5f)] public float ringSpeed = 1f;
         [TrippinParam("Shaft height", 0.3f, 2f)] public float shaftH = 1f;
         [TrippinParam("Shafts", 0f, 2f)] public float shafts = 1f;

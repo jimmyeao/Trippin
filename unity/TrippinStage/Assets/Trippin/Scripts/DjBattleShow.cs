@@ -22,7 +22,7 @@ namespace TrippinStage
         const int Tower = 10;
         [TrippinParam("Colour", 0f, 1f)] public float hueBase = 0.5f;
         [TrippinParam("Swap bars", 1f, 16f)] public float swapBars = 4f;
-        [TrippinParam("Lasers", 0f, 2f)] public float lasers = 1f;
+        [TrippinParam("Lasers", 0f, 3f)] public float lasers = 1f;
         [TrippinParam("Laser spread", 0.3f, 2f)] public float laserSpread = 1f;
         [TrippinParam("Spotlights", 0f, 3f)] public float spots = 1f;
         [TrippinParam("LED wall", 0f, 2f)] public float wall = 1f;

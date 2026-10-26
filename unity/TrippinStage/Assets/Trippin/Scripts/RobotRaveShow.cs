@@ -32,7 +32,7 @@ namespace TrippinStage
         [TrippinParam("Dance energy", 0.3f, 1.6f)] public float energy = 1f;
         [TrippinParam("Spread", 0.6f, 1.4f)] public float spread = 1f;
         [TrippinParam("Spotlights", 0f, 2f)] public float spots = 1f;
-        [TrippinParam("Lasers", 0f, 2f)] public float lasers = 1f;
+        [TrippinParam("Lasers", 0f, 3f)] public float lasers = 1f;
         [TrippinParam("LED wall", 0f, 2f)] public float wall = 1f;
         [TrippinParam("Camera sway", 0f, 2f)] public float sway = 1f;
 

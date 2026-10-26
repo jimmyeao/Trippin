@@ -24,7 +24,7 @@ namespace TrippinStage
         [TrippinParam("Colour", 0f, 1f)] public float hueBase = 0.08f;
         [TrippinParam("Reach", 0.5f, 1.5f)] public float reachAmt = 1f;
         [TrippinParam("Arm sway", 0f, 2f)] public float armSway = 1f;
-        [TrippinParam("Sparks", 0f, 2f)] public float sparks = 1f;
+        float sparks = 1f;   // (a "Sparks" control did nothing visible: specks at the tool tips)
         [TrippinParam("Overhead lights", 0f, 2f)] public float overhead = 1f;
         [TrippinParam("Core ripple", 0.2f, 2.5f)] public float coreRipple = 1f;
 
@@ -119,8 +119,8 @@ namespace TrippinStage
                     float u = Kit.H(j * 7 + k, 3);
                     Vector3 d = new Vector3(Kit.H(j * 13 + k, 4) - 0.5f, Kit.H(j * 13 + k, 5) * 0.8f - 0.1f, Kit.H(j * 13 + k, 6) - 0.5f).normalized;
                     float life = Mathf.Repeat(rx.clk * 0.6f + u, 1f);
-                    float spread = kick * (0.4f + 3.2f * life);
-                    _sparks.Set(j * Sparks + k, tipP + d * spread + new Vector3(0f, -2f * life * life * kick, 0f), 0.35f + 0.3f * u, hue + 0.05f, gain * 1.2f * sparks * kick * (1f - life), face);
+                    float spread = kick * (0.4f + 3.2f * life) * sparks;
+                    _sparks.Set(j * Sparks + k, tipP + d * spread + new Vector3(0f, -2f * life * life * kick, 0f), (0.35f + 0.3f * u) * (0.4f + 0.6f * sparks), hue + 0.05f, gain * 1.2f * Mathf.Min(sparks, 1f) * kick * (1f - life), face);
                 }
             }
             for (int i = 0; i < 12; i++)

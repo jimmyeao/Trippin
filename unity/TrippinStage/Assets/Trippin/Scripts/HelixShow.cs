@@ -25,7 +25,7 @@ namespace TrippinStage
         [TrippinParam("Spin", 0f, 3f)] public float spinAmt = 1f;
         [TrippinParam("Width", 0.5f, 2f)] public float width = 1f;
         [TrippinParam("Thickness", 0.3f, 2.5f)] public float thick = 1f;
-        [TrippinParam("Motes", 0f, 2f)] public float motes = 1f;
+        float motes = 1f;   // (a "Motes" control was invisible)
         [TrippinParam("Colour", 0f, 1f)] public float hue = 0.45f;
 
         TubeRibbon[] _strand = new TubeRibbon[2];
