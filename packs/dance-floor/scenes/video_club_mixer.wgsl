@@ -1,8 +1,8 @@
 // @bloom 0.6
 // @title Mixer
 // @video-lock
-// VU meters and glowing knobs on a DJ mixer (video clip, locked to the tempo: the footage surges on each
-// beat, its own light hits land on the beats). The beams and lights flare
+// VU meters and glowing knobs on a DJ mixer (video clip, locked to the tempo: the footage runs at a steady
+// speed in time, its own light hits land on the beats). The beams and lights flare
 // into star glints on the drums, and the camera sways with the phrase.
 
 fn glints(uv: vec2<f32>, zoom: f32, pan: vec2<f32>, len: f32) -> vec3<f32> {
@@ -22,9 +22,15 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let zoom = 1.08 + 0.03 * u.pres4.x;
     let pan = vec2<f32>(0.016 * phrase, 0.008 * sin(u.flow / 16.0 * TAU));
     let base = vid_cam(in.uv, zoom, pan);
-    let len = (0.01 + 0.05 * u.hits4.x + 0.02 * u.pres4.z) * (1.0 - 0.6 * u.calm);
+    // The kick, on the beat grid (not the detector's lag): a quick soft rise
+    // and a slower fade, so the light breathes with the beat without a step;
+    // none in breakdowns. The footage itself runs at a steady speed.
+    let bp = u.beat_phase;
+    let kick = smoothstep(0.0, 0.06, bp) * exp(-bp * 4.0) * (1.0 - u.calm) * (0.4 + 0.6 * min(u.hits4.x, 1.0));
+    let len = (0.01 + 0.045 * kick + 0.02 * u.hits4.x + 0.02 * u.pres4.z) * (1.0 - 0.6 * u.calm);
     let g = glints(in.uv, zoom, pan, len);
     var c = untonemap(vid_grade(base, u.hue + u.flow * 0.02, 0.25));
     c += untonemap(vid_grade(g, u.hue + 0.5, 0.6) * 0.7);
+    c = c * (1.0 + 0.12 * kick) + untonemap(vid_grade(vid_hl(base), u.hue + 0.5, 0.6)) * 0.35 * kick;
     return vec4<f32>(c, 1.0);
 }

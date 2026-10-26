@@ -194,34 +194,15 @@ fn loop_bars(len: f64, bpm: f32) -> f64 {
     2f64.powi(raw.max(0.5).log2().round() as i32).clamp(1.0, 8.0)
 }
 
-/// One step of bar-locked playback: the play head `t` (clip seconds) for a
-/// `len`-second loop. The loop spans whole bars from the downbeat (twice as
-/// many in a breakdown); the head runs at the loop's tempo rate and is
-/// pulled onto the grid gently (a phase-locked loop; far off, it cuts onto
-/// the grid on a bar line), except
-/// on a fill (stutter: the half beat it started on, repeated) and a drop
-/// (scratch back half a beat, then land on the grid).
-/// The beat pump: where in a beat the play head is, for a beat fraction
-/// `f` (0..1). It surges on the beat and eases off before the next one, so
-/// footage with no rhythm of its own (most generated clips) still moves on
-/// the kick; the average speed is unchanged. `amt` 0 = linear.
-pub fn pump(f: f64, amt: f64) -> f64 {
-    const K: f64 = 6.0;
-    let curve = (1.0 - (-K * f).exp()) / (1.0 - (-K).exp());
-    (1.0 - amt) * f + amt * curve
-}
-
-/// How hard the pump surges: strong while the drums play, none through a
-/// breakdown (slow footage floats there).
-fn pump_amount(calm: f32) -> f64 {
-    0.45 * (1.0 - calm.clamp(0.0, 1.0)) as f64
-}
+/// The most the play head's speed is nudged to drift back onto the grid:
+/// small enough that the footage's motion never visibly speeds or slows.
+const MAX_NUDGE: f64 = 0.03;
 
 /// Hit matching: the footage's own hits (clip seconds, ascending, from
 /// `tools/video_beats.py`) land one per beat — or two, or one every other
 /// beat, whichever keeps the footage nearest its own speed (half as many
-/// through a breakdown). Between hits the head moves through the pumped
-/// beat. Returns the target and the clip seconds per second it implies.
+/// through a breakdown). Returns the target and the clip seconds per second
+/// it implies: the hits' mean spacing per beat, so the speed is steady.
 fn hit_target(hits: &[f64], len: f64, b: &Beat, wpos: f64) -> (f64, f64) {
     let spb = 60.0 / b.bpm.max(40.0) as f64;
     let n = hits.len();
@@ -249,7 +230,7 @@ fn hit_target(hits: &[f64], len: f64, b: &Beat, wpos: f64) -> (f64, f64) {
 /// Where the grid puts the head (clip seconds) for a locked clip, and the
 /// clip seconds per second that implies: the footage's own hits on the
 /// beats when it has a rhythm, else the loop over whole bars from the
-/// downbeat; pumped within each beat either way.
+/// downbeat.
 fn grid_target(len: f64, b: &Beat, hits: Option<&[f64]>) -> (f64, f64) {
     let spb = 60.0 / b.bpm.max(40.0) as f64;
     let mut bars = loop_bars(len, b.bpm);
@@ -259,12 +240,10 @@ fn grid_target(len: f64, b: &Beat, hits: Option<&[f64]>) -> (f64, f64) {
     let loop_beats = 4.0 * bars;
     let start = b.pos.floor() - b.beat_in_bar as f64;
     let bar = (start / 4.0).round() as i64;
-    // The grid position pumped within each beat (the surge on the kick).
-    let wpos = b.pos.floor() + pump(b.pos.fract(), pump_amount(b.calm));
     match hits.filter(|h| h.len() >= 4) {
-        Some(h) => hit_target(h, len, b, wpos),
+        Some(h) => hit_target(h, len, b, b.pos),
         None => {
-            let in_loop = ((bar.rem_euclid(bars as i64)) as f64 * 4.0 + (wpos - start)) / loop_beats;
+            let in_loop = ((bar.rem_euclid(bars as i64)) as f64 * 4.0 + (b.pos - start)) / loop_beats;
             // Clip seconds per second at the loop's tempo.
             (in_loop.rem_euclid(1.0) * len, len / (loop_beats * spb))
         }
@@ -278,6 +257,15 @@ pub fn snap_time(scene: &str, len: f64, b: &Beat) -> Option<f64> {
     scene_locked(scene).then(|| grid_target(len, b, clip_hits(clip).as_deref()).0)
 }
 
+/// One step of bar-locked playback: the play head `t` (clip seconds) for a
+/// `len`-second loop. The loop spans whole bars from the downbeat (twice as
+/// many in a breakdown). The head runs at a steady speed set by the tempo
+/// and drifts back onto the grid by nudging that speed a few percent (more
+/// than a beat off, it cuts onto the grid on a bar line instead), except on
+/// a fill (stutter: the half beat it started on, repeated) and a drop
+/// (scratch back half a beat, then land on the grid). The beat never moves
+/// the footage within the beat: that read as unnatural; scenes show the
+/// kick in their light instead.
 fn lock_step(l: &mut Locked, t: f64, len: f64, b: &Beat, dt: f32, hits: Option<&[f64]>) -> f64 {
     let spb = 60.0 / b.bpm.max(40.0) as f64;
     let start = b.pos.floor() - b.beat_in_bar as f64;
@@ -310,18 +298,16 @@ fn lock_step(l: &mut Locked, t: f64, len: f64, b: &Beat, dt: f32, hits: Option<&
     if err > len / 2.0 {
         err -= len;
     }
-    // On the grid (the usual case): follow it exactly, pump and all.
-    if err.abs() < 0.35 * nominal * spb {
-        return target;
-    }
+    let beat_len = nominal * spb;
     // Far off (a tempo change, a breakdown halving the speed): cut onto
     // the grid on the next bar line, where a cut reads as meant, rather
     // than racing to catch up.
-    if err.abs() > 0.15 * len && b.pos - start < 0.1 {
+    if err.abs() > beat_len && b.pos - start < 0.1 {
         return target;
     }
-    let pull = (err * (dt * 3.0).min(1.0)).clamp(-0.6 * nominal * dt, 0.6 * nominal * dt);
-    (t + nominal * dt + pull).rem_euclid(len)
+    // Steady speed, nudged so the error closes over a couple of bars.
+    let nudge = (err / beat_len / 8.0).clamp(-MAX_NUDGE, MAX_NUDGE);
+    (t + nominal * dt * (1.0 + nudge)).rem_euclid(len)
 }
 
 pub struct Player {
@@ -551,7 +537,7 @@ mod tests {
         let mut l = Locked::default();
         // Joined mid-bar: lands where the grid is, not at 0.
         let mut t = lock_step(&mut l, 0.0, len, &beat(17.0), 1.0 / 60.0, None);
-        let want = |p: f64| (((p.floor() + pump(p.fract(), pump_amount(0.0))) / 32.0).rem_euclid(1.0)) * len;
+        let want = |p: f64| ((p / 32.0).rem_euclid(1.0)) * len;
         assert!((t - want(17.0)).abs() < 1e-6, "{t}");
         let mut p = 17.0;
         for _ in 0..600 {
@@ -564,22 +550,30 @@ mod tests {
         assert!((t - want(p)).abs() < 0.02, "drifted: {t} vs {}", want(p));
     }
 
-    /// The pump: the footage covers far more ground in the first quarter of
-    /// each beat than in the last, the average speed stays the tempo's, and
-    /// a breakdown plays it straight.
+    /// The footage never surges on the beat: frame to frame the head moves
+    /// at a steady speed, a little off the grid or on it.
     #[test]
-    fn pump_moves_the_footage_on_the_beat() {
-        let a = pump_amount(0.0);
-        let first = pump(0.25, a) - pump(0.0, a);
-        let last = pump(1.0, a) - pump(0.75, a);
-        assert!(first > 3.0 * last, "first quarter {first}, last {last}");
-        assert!((pump(1.0, a) - 1.0).abs() < 1e-9 && pump(0.0, a).abs() < 1e-9);
-        assert!((pump(0.3, pump_amount(1.0)) - 0.3).abs() < 1e-9);
+    fn footage_runs_at_a_steady_speed() {
+        let len = 11.3;
+        let mut l = Locked::default();
+        let mut p = 20.0;
+        let mut t = lock_step(&mut l, 0.0, len, &beat(p), 1.0 / 60.0, None);
+        t = (t + 0.1).rem_euclid(len); // knocked a little off the grid
+        let (mut lo, mut hi) = (f64::MAX, 0.0f64);
+        for _ in 0..240 {
+            p += 128.0 / 60.0 / 60.0;
+            let nt = lock_step(&mut l, t, len, &beat(p), 1.0 / 60.0, None);
+            let step = (nt - t).rem_euclid(len);
+            lo = lo.min(step);
+            hi = hi.max(step);
+            t = nt;
+        }
+        assert!(hi / lo < 1.0 + 2.0 * MAX_NUDGE + 1e-9, "speed varied {lo}..{hi}");
     }
 
-    /// Hit matching: on every beat the head is exactly on one of the
-    /// footage's own hits, taking them in order, one per beat when the
-    /// footage's rhythm is near the tempo.
+    /// Hit matching: on every beat the head is on (or within a hair of) one
+    /// of the footage's own hits, taking them in order, one per beat when
+    /// the footage's rhythm is near the tempo.
     #[test]
     fn footage_hits_land_on_the_beats() {
         let len = 11.25;
@@ -590,9 +584,10 @@ mod tests {
         let mut p = 40.0;
         while p < 48.0 {
             let b = beat(p);
-            t = lock_step(&mut l, t, len, &b, 1.0 / 60.0, Some(&hits));
+            // A sixtieth of a beat per step, in seconds at 128 BPM.
+            t = lock_step(&mut l, t, len, &b, (60.0 / 128.0 / 60.0) as f32, Some(&hits));
             if (p - p.round()).abs() < 1e-6 {
-                let k = hits.iter().position(|h| (h - t).abs() < 1e-6);
+                let k = hits.iter().position(|h| (h - t).abs() < 0.02);
                 assert!(k.is_some(), "beat {p}: head {t} on no hit");
                 seen.push(k.unwrap());
             }

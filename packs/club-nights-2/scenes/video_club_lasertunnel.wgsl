@@ -19,9 +19,11 @@ fn glints(uv: vec2<f32>, zoom: f32, pan: vec2<f32>, len: f32) -> vec3<f32> {
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let phrase = sin(u.flow / 32.0 * TAU);
-    // The kick: on the beat grid (not the detector's lag), sharp attack,
-    // gone by the half beat; none in breakdowns.
-    let kick = exp(-u.beat_phase * 7.0) * (1.0 - u.calm) * (0.4 + 0.6 * min(u.hits4.x, 1.0));
+    // The kick, on the beat grid (not the detector's lag): a quick soft rise
+    // and a slower fade, so the light breathes with the beat without a step;
+    // none in breakdowns. The footage itself runs at a steady speed.
+    let bp = u.beat_phase;
+    let kick = smoothstep(0.0, 0.06, bp) * exp(-bp * 4.0) * (1.0 - u.calm) * (0.4 + 0.6 * min(u.hits4.x, 1.0));
     let zoom = 1.08 + 0.03 * u.pres4.x;
     let pan = vec2<f32>(0.016 * phrase, 0.008 * sin(u.flow / 16.0 * TAU));
     let base = vid_cam(in.uv, zoom, pan);
@@ -29,5 +31,6 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let g = glints(in.uv, zoom, pan, len);
     var c = untonemap(vid_grade(base, u.hue + u.flow * 0.02, 0.25));
     c += untonemap(vid_grade(g, u.hue + 0.5, 0.6) * 0.7);
+    c = c * (1.0 + 0.12 * kick) + untonemap(vid_grade(vid_hl(base), u.hue + 0.5, 0.6)) * 0.35 * kick;
     return vec4<f32>(c, 1.0);
 }
