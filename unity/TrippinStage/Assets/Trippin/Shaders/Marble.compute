@@ -1,0 +1,165 @@
+// Paper marbling for unity_marble (MarbleShow.cs): a full canvas of paint
+// floating on size, moved the way a marbler moves it. Every step is a
+// backward map, composed into one resample a frame so the bands stay crisp:
+//  - drops (Jaffer's area-preserving ink drop: a disc of new paint opens at
+//    c and pushes everything else out, so repeated drops make rings);
+//  - a comb pulled through the paint (tine lines drag it along, falling off
+//    away from each tine);
+//  - the flow of the fluid sim (Fluid.compute's velocity, stirred by vortices).
+// _Paint is rgb colour; _Props is x height (paint thickness), y metal.
+#pragma kernel Init
+#pragma kernel Advect
+#pragma kernel Vortex
+
+SamplerState linearClampSampler;
+
+uint2 _Size;            // the texture being written
+float _Aspect;          // width / height
+float _Dt;
+
+// --- Init: a first canvas of wavy bands ------------------------------------
+float4 _Bands[8];       // rgb colour, a height
+float4 _BandMetal[2];   // metal per band (8 floats)
+float _Seed;
+RWTexture2D<float4> _PaintOut, _PropsOut;
+
+float Hash(float n) { return frac(sin(n * 12.9898) * 43758.5453); }
+
+[numthreads(8, 8, 1)]
+void Init(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= _Size)) return;
+    float2 uv = (id.xy + 0.5) / _Size;
+    float y = uv.y + 0.05 * sin(uv.x * 7.0 + _Seed) + 0.03 * sin(uv.x * 17.0 - _Seed * 2.0);
+    float b = y * 14.0;
+    int i = (int)floor(b) & 7;
+    float m = (i < 4 ? _BandMetal[0][i] : _BandMetal[1][i - 4]);
+    _PaintOut[id.xy] = float4(_Bands[i].rgb, 1);
+    _PropsOut[id.xy] = float4(_Bands[i].a, m, 0, 0);
+}
+
+// --- Advect: drops, comb and flow in one resample ---------------------------
+Texture2D<float4> _Vel;     // uv per second
+Texture2D<float4> _Paint, _Props;
+float4 _Drops[4];           // xy centre (uv), z rho^2 this frame (in height units), w unused
+float4 _DropCols[4];        // rgb colour, a height
+float4 _DropMetal;          // metal per drop
+int _DropCount;
+float4 _Comb;               // xy unit pull direction (height units), z pull this frame, w tine spacing
+float _CombLambda;          // tine falloff (height units)
+float _CombPhase;
+
+// Catmull-Rom in 9 bilinear taps, clamped to the 2x2 neighbourhood so the
+// overshoot can't ring and build up frame after frame.
+float4 Cubic(Texture2D<float4> t, float2 uv)
+{
+    float2 size = _Size;
+    float2 sp = uv * size;
+    float2 p1 = floor(sp - 0.5) + 0.5;
+    float2 f = sp - p1;
+    float2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+    float2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+    float2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+    float2 w3 = f * f * (-0.5 + 0.5 * f);
+    float2 w12 = w1 + w2;
+    float2 p0 = (p1 - 1.0) / size, p3 = (p1 + 2.0) / size, p12 = (p1 + w2 / w12) / size;
+    float4 r = 0;
+    r += t.SampleLevel(linearClampSampler, float2(p0.x, p0.y), 0) * w0.x * w0.y;
+    r += t.SampleLevel(linearClampSampler, float2(p12.x, p0.y), 0) * w12.x * w0.y;
+    r += t.SampleLevel(linearClampSampler, float2(p3.x, p0.y), 0) * w3.x * w0.y;
+    r += t.SampleLevel(linearClampSampler, float2(p0.x, p12.y), 0) * w0.x * w12.y;
+    r += t.SampleLevel(linearClampSampler, float2(p12.x, p12.y), 0) * w12.x * w12.y;
+    r += t.SampleLevel(linearClampSampler, float2(p3.x, p12.y), 0) * w3.x * w12.y;
+    r += t.SampleLevel(linearClampSampler, float2(p0.x, p3.y), 0) * w0.x * w3.y;
+    r += t.SampleLevel(linearClampSampler, float2(p12.x, p3.y), 0) * w12.x * w3.y;
+    r += t.SampleLevel(linearClampSampler, float2(p3.x, p3.y), 0) * w3.x * w3.y;
+    int2 q = clamp(int2(p1 - 0.5), int2(0, 0), int2(_Size) - 2);
+    float4 a = t[q], b = t[q + int2(1, 0)], c = t[q + int2(0, 1)], d = t[q + int2(1, 1)];
+    return clamp(r, min(min(a, b), min(c, d)), max(max(a, b), max(c, d)));
+}
+
+[numthreads(8, 8, 1)]
+void Advect(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= _Size)) return;
+    float2 uv = (id.xy + 0.5) / _Size;
+    float px = 1.0 / _Size.y;               // a pixel, in height units
+    // Height units: x scaled by the aspect, so drops are round.
+    float2 p = float2(uv.x * _Aspect, uv.y);
+
+    // Drops, newest first (the inverse of applying them oldest first). Inside
+    // a drop's disc is its own paint.
+    float4 newCol = 0, newProp = 0;
+    float inside = 0;
+    for (int i = _DropCount - 1; i >= 0; i--)
+    {
+        float2 c = float2(_Drops[i].x * _Aspect, _Drops[i].y);
+        float rho2 = _Drops[i].z;
+        float2 d = p - c;
+        float r2 = dot(d, d);
+        float rho = sqrt(rho2);
+        float r = sqrt(r2);
+        float a = 1.0 - smoothstep(rho - 0.75 * px, rho + 0.75 * px, r);
+        if (a > 0.0 && inside < 1.0)
+        {
+            float k = a * (1.0 - inside);
+            newCol += k * float4(_DropCols[i].rgb, 1);
+            newProp += k * float4(_DropCols[i].a, _DropMetal[i], 0, 0);
+            inside += k;
+        }
+        p = c + d * sqrt(max(0.0, 1.0 - rho2 / max(r2, 1e-10)));
+    }
+
+    // The comb: tines across the pull, each dragging the paint along.
+    float2 n = float2(-_Comb.y, _Comb.x);
+    float s = dot(p, n) / _Comb.w + _CombPhase;
+    float dd = abs(s - round(s)) * _Comb.w;
+    // It fades out toward the edge it pulls from, or the clamped border
+    // would be dragged in as streaks.
+    float2 up = float2(_Comb.x > 0 ? p.x : _Aspect - p.x, _Comb.y > 0 ? p.y : 1.0 - p.y);
+    float edge = smoothstep(0.0, 0.3, abs(_Comb.x) > 0.5 ? up.x : up.y);
+    p -= _Comb.xy * _Comb.z * edge * _CombLambda / (dd + _CombLambda);
+
+    // The flow, back along the velocity.
+    float2 q = float2(p.x / _Aspect, p.y);
+    float2 v = _Vel.SampleLevel(linearClampSampler, q, 0).xy;
+    q -= v * _Dt;
+
+    float4 col = Cubic(_Paint, q);
+    float4 prop = Cubic(_Props, q);
+    if (inside > 0.0)
+    {
+        col = lerp(col, newCol / inside, inside);
+        prop = lerp(prop, newProp / inside, inside);
+    }
+    _PaintOut[id.xy] = col;
+    _PropsOut[id.xy] = prop;
+}
+
+// --- Vortex: stir the velocity field ----------------------------------------
+Texture2D<float4> _Src;
+RWTexture2D<float4> _Dst;
+float4 _Vortices[2];    // xy centre (uv), z angular speed (rad/s), w radius (height units)
+float _Pull;            // how fast the velocity takes the vortex's (per second)
+
+[numthreads(8, 8, 1)]
+void Vortex(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= _Size)) return;
+    float2 uv = (id.xy + 0.5) / _Size;
+    float2 v = _Src[id.xy].xy;
+    float2 p = float2(uv.x * _Aspect, uv.y);
+    for (int i = 0; i < 2; i++)
+    {
+        float2 d = p - float2(_Vortices[i].x * _Aspect, _Vortices[i].y);
+        float fall = exp(-dot(d, d) / (_Vortices[i].w * _Vortices[i].w));
+        float2 want = _Vortices[i].z * float2(-d.y, d.x);       // rigid rotation, height units/s
+        want.x /= _Aspect;                                    // back to uv/s
+        v += (want - v) * saturate(_Pull * _Dt) * fall;
+    }
+    // The tray's rim holds the paint: flow dies toward the edges, or the
+    // free-slip walls shear it into thin stripes along the border.
+    float2 rim = min(uv, 1.0 - uv) * float2(_Aspect, 1.0);
+    v *= lerp(1.0, smoothstep(0.0, 0.12, min(rim.x, rim.y)), saturate(4.0 * _Dt));
+    _Dst[id.xy] = float4(v, 0, 0);
+}

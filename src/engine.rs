@@ -185,6 +185,7 @@ pub fn scene_supported(name: &str) -> bool {
     let needs = match name {
         "unity_fluid" => 16,
         "unity_murmuration" | "unity_ribbons" | "unity_bloom" => 17,
+        "unity_marble" => 18,
         _ => 0,
     };
     needs <= ENGINE_VERSION || std::env::var_os("TRIPPIN_ENGINE").is_some()

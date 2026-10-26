@@ -113,7 +113,8 @@ overlays.
   light-led shots (LED walls, lasers) work. Casual groups dancing (a
   freestyle group, a rooftop party) aren't great; a single dancer in neon
   haze is. Macro fluids (marbled paint, oil on water, ferrofluid, ink
-  drops, molten gold, a jellyfish) are liked.
+  drops, molten gold, a jellyfish) are liked; the ferrofluid clip
+  isn't (too like another, visually does nothing).
 - **Add scenes; don't replace them.** Removing or reworking a scene is the
   owner's call.
 - **Removed or disliked scenes; don't bring them back:** event_horizon,

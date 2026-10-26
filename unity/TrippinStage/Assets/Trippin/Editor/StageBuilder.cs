@@ -280,6 +280,7 @@ namespace TrippinStage.EditorTools
                 ("unity_murmuration", typeof(MurmurationShow)),
                 ("unity_ribbons", typeof(RibbonsShow)),
                 ("unity_bloom", typeof(BloomShow)),
+                ("unity_marble", typeof(MarbleShow)),
             };
             // Extra materials for the ported scenes: instancing must be on the
             // material asset or the build strips the variant (AGENTS.md).
@@ -320,6 +321,13 @@ namespace TrippinStage.EditorTools
                     fl.sim = AssetDatabase.LoadAssetAtPath<ComputeShader>($"{Root}/Shaders/Fluid.compute");
                     if (fl.sim == null) throw new System.Exception("Fluid.compute not found");
                     fl.viewMat = Mat("Trippin/FluidView", "FluidView");
+                }
+                if (ks is MarbleShow mb)
+                {
+                    mb.sim = AssetDatabase.LoadAssetAtPath<ComputeShader>($"{Root}/Shaders/Fluid.compute");
+                    mb.marble = AssetDatabase.LoadAssetAtPath<ComputeShader>($"{Root}/Shaders/Marble.compute");
+                    if (mb.sim == null || mb.marble == null) throw new System.Exception("Fluid.compute / Marble.compute not found");
+                    mb.viewMat = Mat("Trippin/MarbleView", "MarbleView");
                 }
                 if (ks is CoasterShow cosh)
                 {
