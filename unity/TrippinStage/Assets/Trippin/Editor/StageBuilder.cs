@@ -317,6 +317,7 @@ namespace TrippinStage.EditorTools
                 ("unity_ink", typeof(InkShow)),
                 ("unity_vortex", typeof(VortexShow)),
                 ("unity_sparks", typeof(SparksShow)),
+                ("unity_fireflies", typeof(FirefliesShow)),
             };
             // Extra materials for the ported scenes: instancing must be on the
             // material asset or the build strips the variant (AGENTS.md).
@@ -375,6 +376,12 @@ namespace TrippinStage.EditorTools
                     vx.skyMat.SetTexture("_MainTex", Tex("HqStormSky.png"));
                 }
                 if (ks is InkShow ink) ink.inkMat = Mat("Trippin/HqInk", "HqInk");
+                if (ks is FirefliesShow ff)
+                {
+                    ff.flyMat = Mat("Trippin/HqFirefly", "HqFirefly");
+                    ff.backMat = Mat("Trippin/HqBackdrop", "HqForest");
+                    ff.backMat.SetTexture("_MainTex", Tex("HqForest.png"));
+                }
                 if (ks is SparksShow sk)
                 {
                     sk.sparkMat = Mat("Trippin/HqSpark", "HqSpark");
