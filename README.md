@@ -442,8 +442,11 @@ land on the beats.
 
 On the Effects packs card, **Install** downloads a pack, **Add pack from
 file…** installs a `.trippinpack` you were given, the tick box switches a
-pack off without removing it, and **Remove** deletes it. Changes apply the
-next time Trippin starts. From the command line:
+pack off without removing it, and **Remove** deletes it. Packs are big, so
+**Folder → Change…** lets you keep them somewhere else, such as a second
+drive: Trippin makes a `Trippin Packs` folder there, moves the packs you've
+installed into it, and downloads new ones there (**Default** moves them
+back). Changes apply the next time Trippin starts. From the command line:
 `trippin --install-pack file.trippinpack` (or a pack id such as `night-city`, which downloads it) and `trippin --list-packs`.
 
 To make a pack, put `pack.json`, `scenes/*.wgsl`, `videos/*.tvid` (packed

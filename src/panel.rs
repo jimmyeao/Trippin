@@ -3954,7 +3954,37 @@ fn effects_packs(ui: &mut egui::Ui, s: &mut Settings) {
             ui.small(format!("  not loaded: {why}"));
         }
     }
-    let have = |id: &str| packs::all().iter().any(|p| p.id == id) || packs::root().join(id).is_dir();
+    // Where packs install: they're big, so it can be another drive. A move
+    // finishes in the background, then the setting follows.
+    let custom = packs::custom_root();
+    if !packs::busy() && s.packs_dir != custom {
+        s.packs_dir = custom;
+    }
+    ui.add_space(4.0);
+    let font = egui::FontId::proportional(12.0);
+    let shown = format!("Folder: {}", packs::root().display());
+    ui.label(egui::RichText::new(elide_mid(ui.painter(), &shown, &font, card_w - 8.0)).font(font))
+        .on_hover_text(format!("{shown}\nWhere packs download and install. Changing it moves the installed packs."));
+    ui.horizontal(|ui| {
+        if ui
+            .add_enabled(!packs::busy(), egui::Button::new("Change…").small())
+            .on_hover_text("Pick a folder (another drive, say); the packs go in a \"Trippin Packs\" folder inside it")
+            .clicked()
+        {
+            if let Some(p) = rfd::FileDialog::new().set_title("Folder for effects packs").pick_folder() {
+                packs::move_packs_bg(Some(packs::folder_for(&p)));
+            }
+        }
+        if !s.packs_dir.is_empty()
+            && ui
+                .add_enabled(!packs::busy(), egui::Button::new("Default").small())
+                .on_hover_text(format!("Move the packs back to {}", packs::default_root().display()))
+                .clicked()
+        {
+            packs::move_packs_bg(None);
+        }
+    });
+    let have = |id: &str| packs::all().iter().any(|p| p.id == id) || packs::on_disk(id);
     let missing: Vec<&packs::CatalogEntry> = packs::CATALOG.iter().filter(|c| !have(c.id)).collect();
     if !missing.is_empty() {
         ui.add_space(4.0);

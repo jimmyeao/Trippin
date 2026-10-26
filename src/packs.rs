@@ -136,13 +136,68 @@ fn one() -> u32 {
 static DISABLED: OnceLock<Vec<String>> = OnceLock::new();
 static PACKS: OnceLock<Vec<Pack>> = OnceLock::new();
 
-pub fn init(disabled: &[String]) {
+/// The folder chosen in Settings for installed packs (`Settings::packs_dir`;
+/// packs are big, so users may keep them on another drive). None = the
+/// default under the data dir.
+static CUSTOM_ROOT: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+pub fn init(disabled: &[String], packs_dir: &str) {
     let _ = DISABLED.set(disabled.to_vec());
+    set_root(packs_dir);
+}
+
+/// Use `packs_dir` ("" = the default) for installs from now on.
+pub fn set_root(packs_dir: &str) {
+    *CUSTOM_ROOT.lock().unwrap_or_else(|e| e.into_inner()) =
+        (!packs_dir.trim().is_empty()).then(|| PathBuf::from(packs_dir.trim()));
+}
+
+/// The chosen folder as `Settings::packs_dir` stores it ("" = default).
+pub fn custom_root() -> String {
+    CUSTOM_ROOT.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map_or_else(String::new, |p| p.display().to_string())
+}
+
+pub fn default_root() -> PathBuf {
+    crate::config::data_dir().join("packs")
 }
 
 /// Where installed packs go.
 pub fn root() -> PathBuf {
-    crate::config::data_dir().join("packs")
+    CUSTOM_ROOT.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_else(default_root)
+}
+
+/// Every folder installed packs may be in: the chosen one, then the
+/// default (packs installed before a folder was chosen keep working).
+fn roots() -> Vec<PathBuf> {
+    let mut v = vec![root()];
+    let d = default_root();
+    if !v.iter().any(|r| same_dir(r, &d)) {
+        v.push(d);
+    }
+    v
+}
+
+fn same_dir(a: &Path, b: &Path) -> bool {
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
+}
+
+/// The packs folder for a folder picked in Settings: a "Trippin Packs"
+/// folder inside it, so picking a drive's root never mixes packs (and
+/// `tidy`'s clean-up) with the user's own folders.
+pub fn folder_for(picked: &Path) -> PathBuf {
+    if picked.file_name().is_some_and(|n| n == "Trippin Packs") {
+        picked.to_path_buf()
+    } else {
+        picked.join("Trippin Packs")
+    }
+}
+
+/// Is a pack with this id installed (in any packs folder)?
+pub fn on_disk(id: &str) -> bool {
+    valid_id(id) && roots().iter().any(|r| r.join(id).is_dir())
 }
 
 /// Pack folders in search order: dev folders in the repo first (so edits
@@ -157,7 +212,7 @@ fn search_dirs() -> Vec<(PathBuf, bool)> {
     if let Some(p) = std::env::var_os("TRIPPIN_PACKS") {
         d.insert(0, (PathBuf::from(p), false));
     }
-    d.push((root(), true));
+    d.extend(roots().into_iter().map(|r| (r, true)));
     d
 }
 
@@ -473,23 +528,146 @@ pub fn remove(id: &str) -> Result<()> {
     if !valid_id(id) {
         bail!("bad pack id");
     }
-    let dir = root().join(id);
-    // Rename first: on Windows a clip the decoder holds can't be deleted,
-    // but the folder can still move out of the way.
-    let gone = root().join(format!("{id}.removed"));
-    let _ = std::fs::remove_dir_all(&gone);
-    std::fs::rename(&dir, &gone).with_context(|| format!("removing {id}"))?;
-    let _ = std::fs::remove_dir_all(&gone);
+    let base = roots().into_iter().find(|r| r.join(id).is_dir()).ok_or_else(|| anyhow!("{id} isn't installed"))?;
+    discard(&base, id).with_context(|| format!("removing {id}"))?;
     CHANGED.store(true, Ordering::Release);
     Ok(())
 }
 
-/// Leftovers from an interrupted install or a remove that couldn't finish.
+/// Delete `<base>/<id>`. Rename first: on Windows a clip the decoder holds
+/// can't be deleted, but the folder can still move out of the way (`tidy`
+/// finishes it on the next start).
+fn discard(base: &Path, id: &str) -> Result<()> {
+    let gone = base.join(format!("{id}.removed"));
+    let _ = std::fs::remove_dir_all(&gone);
+    std::fs::rename(base.join(id), &gone)?;
+    let _ = std::fs::remove_dir_all(&gone);
+    Ok(())
+}
+
+/// The ids of the packs installed in `base`, sorted.
+fn ids_in(base: &Path) -> Vec<String> {
+    let Ok(rd) = std::fs::read_dir(base) else { return Vec::new() };
+    let mut ids: Vec<String> = rd
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().join("pack.json").is_file())
+        .filter_map(|e| e.file_name().to_str().filter(|n| valid_id(n)).map(str::to_owned))
+        .collect();
+    ids.sort();
+    ids
+}
+
+fn copy_dir(from: &Path, to: &Path) -> Result<()> {
+    std::fs::create_dir_all(to)?;
+    for e in std::fs::read_dir(from)? {
+        let e = e?;
+        let dest = to.join(e.file_name());
+        if e.file_type()?.is_dir() {
+            copy_dir(&e.path(), &dest)?;
+        } else {
+            std::fs::copy(e.path(), &dest)?;
+        }
+    }
+    Ok(())
+}
+
+/// Move every installed pack into `to` (None = the default folder) and
+/// install there from now on (Settings > packs folder). Packs are copied
+/// (the folders may be on different drives) and the old copies deleted only
+/// once every copy is in place, so a failure part way loses nothing.
+/// Returns how many moved; the pack list is fixed for the run, so they
+/// load from the new folder on restart.
+pub fn move_packs(to: Option<PathBuf>, set: &dyn Fn(String)) -> Result<usize> {
+    let dest = to.clone().unwrap_or_else(default_root);
+    move_between(&roots(), &dest, set, || set_root(&to.map(|p| p.display().to_string()).unwrap_or_default()))
+}
+
+/// `move_packs` from the folders `froms`; `switch` runs once every pack is
+/// in `dest`, before the old copies go.
+fn move_between(froms: &[PathBuf], dest: &Path, set: &dyn Fn(String), switch: impl FnOnce()) -> Result<usize> {
+    std::fs::create_dir_all(&dest).with_context(|| format!("can't create {}", dest.display()))?;
+    let probe = dest.join(".trippin-write-test");
+    std::fs::write(&probe, b"").with_context(|| format!("can't write to {}", dest.display()))?;
+    let _ = std::fs::remove_file(&probe);
+    let mut found: Vec<(PathBuf, String)> = Vec::new();
+    for from in froms {
+        if same_dir(from, dest) {
+            continue;
+        }
+        for id in ids_in(from) {
+            if !found.iter().any(|(_, i)| *i == id) {
+                found.push((from.clone(), id));
+            }
+        }
+    }
+    let part = |id: &str| dest.join(format!("{id}.part"));
+    for (from, id) in &found {
+        set(format!("copying {id}…"));
+        let _ = std::fs::remove_dir_all(part(id));
+        if let Err(e) = copy_dir(&from.join(id), &part(id)) {
+            for (_, id) in &found {
+                let _ = std::fs::remove_dir_all(part(id));
+            }
+            return Err(e).with_context(|| format!("copying {id} to {}", dest.display()));
+        }
+    }
+    for (_, id) in &found {
+        let _ = std::fs::remove_dir_all(dest.join(id));
+        std::fs::rename(part(id), dest.join(id)).with_context(|| format!("moving {id}"))?;
+    }
+    switch();
+    // A copy whose clip is open (a video scene on air) can't be deleted
+    // yet: `tidy` deletes it on the next start.
+    for (from, id) in &found {
+        let _ = discard(from, id);
+    }
+    Ok(found.len())
+}
+
+/// `move_packs` in the background.
+pub fn move_packs_bg(to: Option<PathBuf>) {
+    if BUSY.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    std::thread::Builder::new()
+        .name("pack-move".into())
+        .spawn(move || {
+            let shown = to.clone().unwrap_or_else(default_root);
+            match move_packs(to, &set_status) {
+                Ok(n) => {
+                    if n > 0 {
+                        CHANGED.store(true, Ordering::Release);
+                    }
+                    set_status(format!(
+                        "Packs folder: {}{}",
+                        shown.display(),
+                        if n > 0 { format!(" ({n} moved: restart Trippin to load them from there)") } else { String::new() }
+                    ));
+                }
+                Err(e) => set_status(format!("couldn't move the packs: {e:#}")),
+            }
+            BUSY.store(false, Ordering::Release);
+        })
+        .ok();
+}
+
+/// Leftovers from an interrupted install or a remove that couldn't finish,
+/// and old copies of packs moved to the chosen folder (`move_packs`).
 pub fn tidy() {
-    let Ok(rd) = std::fs::read_dir(root()) else { return };
-    for p in rd.filter_map(|e| e.ok().map(|e| e.path())) {
-        if p.extension().is_some_and(|e| e == "part" || e == "removed") {
-            let _ = std::fs::remove_dir_all(&p);
+    let main = root();
+    for r in roots().iter().skip(1) {
+        for id in ids_in(r) {
+            if main.join(&id).join("pack.json").is_file() {
+                let _ = discard(r, &id);
+            }
+        }
+    }
+    for r in roots() {
+        let Ok(rd) = std::fs::read_dir(r) else { continue };
+        for p in rd.filter_map(|e| e.ok().map(|e| e.path())) {
+            if p.is_dir() && p.extension().is_some_and(|e| e == "part" || e == "removed") {
+                let _ = std::fs::remove_dir_all(&p);
+            }
         }
     }
 }
@@ -521,6 +699,38 @@ mod tests {
         for s in ["unity_fluid", "unity_murmuration", "unity_ribbons", "unity_bloom"] {
             assert!(crate::engine::scene_supported(s), "engine v17 draws {s}");
         }
+    }
+
+    /// Moving packs to another folder copies them all, then deletes the old
+    /// copies; non-pack folders and leftovers are left alone.
+    #[test]
+    fn packs_move_to_another_folder() {
+        let base = std::env::temp_dir().join(format!("packs-move-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (a, b, to) = (base.join("a"), base.join("b"), base.join("Trippin Packs"));
+        for (dir, id) in [(&a, "one"), (&a, "two"), (&b, "two"), (&b, "three")] {
+            std::fs::create_dir_all(dir.join(id).join("videos")).unwrap();
+            std::fs::write(dir.join(id).join("pack.json"), format!("{{\"id\":\"{id}\"}}")).unwrap();
+            std::fs::write(dir.join(id).join("videos").join("x.tvid"), dir.to_string_lossy().as_bytes()).unwrap();
+        }
+        std::fs::create_dir_all(a.join("Not A Pack")).unwrap();
+        let mut switched = false;
+        let n = move_between(&[a.clone(), b.clone()], &to, &|_| {}, || switched = true).unwrap();
+        assert_eq!(n, 3);
+        assert!(switched);
+        for id in ["one", "two", "three"] {
+            assert!(to.join(id).join("videos").join("x.tvid").is_file(), "{id} moved");
+            assert!(!a.join(id).exists(), "{id} left in a");
+        }
+        // The first folder's copy wins (it's the one that was loaded); the
+        // shadowed one stays.
+        assert_eq!(std::fs::read_to_string(to.join("two").join("videos").join("x.tvid")).unwrap(), a.to_string_lossy());
+        assert!(b.join("two").exists() && !b.join("three").exists());
+        assert!(a.join("Not A Pack").is_dir());
+        assert!(std::fs::read_dir(&to).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().ends_with(".part")));
+        assert_eq!(folder_for(&base), to);
+        assert_eq!(folder_for(&to), to);
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

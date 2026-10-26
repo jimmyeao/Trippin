@@ -3481,6 +3481,9 @@ fn main() -> Result<()> {
         unsafe { std::env::set_var("RTEN_NUM_THREADS", "2") };
     }
     let args: Vec<String> = std::env::args().collect();
+    // The packs folder first: snaps, --check-shaders and --list-packs list
+    // pack scenes too.
+    packs::set_root(&Settings::load().packs_dir);
     if args.iter().any(|a| a == "--list-devices") {
         return audio::list_devices();
     }
@@ -3669,7 +3672,7 @@ fn main() -> Result<()> {
     let mut settings = Settings::load();
     // Effects packs: the scene list is fixed for the run, so which packs
     // load is decided here, before anything lists scenes.
-    packs::init(&settings.disabled_packs);
+    packs::init(&settings.disabled_packs, &settings.packs_dir);
     packs::tidy();
     // Neural beat tracking: fetch the model in the background on first run.
     beats::set_enabled(settings.beat_model);
