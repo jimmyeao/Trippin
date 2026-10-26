@@ -312,6 +312,7 @@ namespace TrippinStage.EditorTools
                 ("unity_pool", typeof(PoolShow)),
                 ("unity_synthwave", typeof(SynthwaveShow)),
                 ("unity_bokeh", typeof(FairyLightsShow)),
+                ("unity_neon_portals", typeof(NeonPortalsShow)),
             };
             // Extra materials for the ported scenes: instancing must be on the
             // material asset or the build strips the variant (AGENTS.md).

@@ -186,7 +186,7 @@ pub fn scene_supported(name: &str) -> bool {
         "unity_fluid" => 16,
         "unity_murmuration" | "unity_ribbons" | "unity_bloom" => 17,
         "unity_marble" => 18,
-        "unity_fireworks" | "unity_chrome" | "unity_kaleido" | "unity_confetti" | "unity_rain" | "unity_pool" | "unity_synthwave" | "unity_bokeh" => 19,
+        "unity_fireworks" | "unity_chrome" | "unity_kaleido" | "unity_confetti" | "unity_rain" | "unity_pool" | "unity_synthwave" | "unity_bokeh" | "unity_neon_portals" => 19,
         _ => 0,
     };
     needs <= ENGINE_VERSION || std::env::var_os("TRIPPIN_ENGINE").is_some()
