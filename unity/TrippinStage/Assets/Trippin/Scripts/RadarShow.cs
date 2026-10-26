@@ -20,6 +20,10 @@ namespace TrippinStage
     {
         const int Bars = 72;
         const float Radius = 24f;
+        [TrippinParam("Bar height", 0.3f, 2.5f)] public float height = 1f;
+        [TrippinParam("Ring speed", 0.3f, 2.5f)] public float ringSpeed = 1f;
+        [TrippinParam("Colour", 0f, 1f)] public float hue = 0.4f;
+
         Material _m;
         BeamPool _bars;
         readonly float[] _ringR = { -1f, -1f, -1f, -1f };
@@ -59,14 +63,14 @@ namespace TrippinStage
             for (int i = 0; i < 4; i++)
             {
                 if (_ringR[i] < 0f) { _ringK[i] = 0f; continue; }
-                _ringR[i] += dt * 0.5f;
+                _ringR[i] += dt * 0.5f * ringSpeed;
                 if (_ringR[i] > 1f) { _ringR[i] = -1f; _ringK[i] = 0f; continue; }
                 _ringK[i] = Mathf.Pow(1f - _ringR[i], 1.5f);
             }
             _m.SetVector("_RingR", new Vector4(_ringR[0], _ringR[1], _ringR[2], _ringR[3]));
             _m.SetVector("_RingK", new Vector4(_ringK[0], _ringK[1], _ringK[2], _ringK[3]));
             _m.SetFloat("_Gain", gain * 1.2f);
-            _m.SetFloat("_Hue", 0.4f + 0.08f * Mathf.Sin(rx.phrase));
+            _m.SetFloat("_Hue", hue + 0.08f * Mathf.Sin(rx.phrase));
             // One revolution per four bars, at north on the downbeat (Scope.shader measures the angle from east, atan2(y, x)).
             _m.SetFloat("_Sweep", rx.beatS * (Mathf.PI * 2f / 16f) + Mathf.PI * 0.5f);
             _m.SetFloat("_Drift", rx.clk);
@@ -78,9 +82,9 @@ namespace TrippinStage
                 float a = i / (float)Bars * Mathf.PI * 2f;
                 float sym = Mathf.Abs(i / (float)Bars * 2f - 1f);
                 float lvl = rx.Spec(sym);
-                float h = (0.8f + 11f * lvl) * lift;
+                float h = (0.8f + 11f * lvl) * lift * height;
                 Vector3 foot = new Vector3(Mathf.Cos(a) * Radius * 1.06f, 0.1f, Mathf.Sin(a) * Radius * 1.06f);
-                _bars.Set(i, foot, foot + new Vector3(0f, h, 0f), Kit.Hue(0.4f + 0.3f * sym), gain * (0.3f + 1.1f * lvl));
+                _bars.Set(i, foot, foot + new Vector3(0f, h, 0f), Kit.Hue(hue + 0.3f * sym), gain * (0.3f + 1.1f * lvl));
             }
             rig.Orbit(cam, rx, 34f, 26f, 0f, dt);
         }

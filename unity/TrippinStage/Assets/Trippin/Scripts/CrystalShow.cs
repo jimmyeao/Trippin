@@ -17,6 +17,12 @@ namespace TrippinStage
     public class CrystalShow : MonoBehaviour
     {
         public Camera cam;
+        [TrippinParam("Tunnel width", 0.5f, 2f)] public float width = 1f;
+        [TrippinParam("Crystal size", 0.5f, 2f)] public float crystal = 1f;
+        [TrippinParam("Kick punch", 0f, 2f)] public float punchAmt = 1f;
+        [TrippinParam("Crystal spin", 0f, 3f)] public float spinAmt = 1f;
+        [TrippinParam("Twist", 0f, 3f)] public float twistAmt = 1f;
+        [TrippinParam("Roll", 0f, 2f)] public float roll = 1f;
         public Material chromeMat, sunMat, nebulaMat, pointsMat;
 
         const int Count = 600;
@@ -131,9 +137,10 @@ namespace TrippinStage
             _energy += (s.energy - _energy) * (1f - Mathf.Exp(-dt / 0.6f));
             // Speed and spin integrate smoothed values (no raw audio in the
             // integrator — motion stays smooth).
-            float dTravel = dt * s.bpm / 60f * (1.2f + 7f * _energy * (1f - 0.6f * s.calm));
+            // Trippin's Speed control runs the flight (ShowState.speed).
+            float dTravel = dt * s.bpm / 60f * (1.2f + 7f * _energy * (1f - 0.6f * s.calm)) * Mathf.Clamp(s.speed, 0f, 4f);
             _travel += dTravel;
-            _spinPhase += dt * (0.3f + 3.5f * _high);
+            _spinPhase += dt * (0.3f + 3.5f * _high) * spinAmt;
             if (!s.drums) _calmLong += dt;
             if (s.drums && !_drumsWas && _calmLong > 4f) _bloom = 1f;
             if (s.drums) _calmLong = 0f;
@@ -143,7 +150,7 @@ namespace TrippinStage
 
             float travel = _travel;
             float phrase = s.beat / 64f * Mathf.PI * 2f;
-            float twist = 0.012f + 0.01f * Mathf.Sin(phrase * 0.5f);
+            float twist = (0.012f + 0.01f * Mathf.Sin(phrase * 0.5f)) * twistAmt;
             float swing = Mathf.Sin(phrase) * 1.4f + s.flow * 0.04f;
             float swell = 1f + 0.3f * _bass * (1f - s.calm);
             float breathe = 1f + 0.35f * (_mid - 0.35f);
@@ -152,7 +159,7 @@ namespace TrippinStage
                 float z0 = _h[i] * Length;
                 float z = Mathf.Repeat(z0 - travel, Length) - 6f;
                 float a = i * 2.39996f + z * twist + swing;
-                float r = _rad[i] * burst * breathe;
+                float r = _rad[i] * burst * breathe * width;
                 // The kick wave: nearer crystals get it first.
                 int delay = (int)(Mathf.Clamp01(z / 140f) * 70f);
                 float punch = _kickHist[(_kh - delay + _kickHist.Length) % _kickHist.Length];
@@ -163,7 +170,7 @@ namespace TrippinStage
                 // through the camera as a giant flat kite.
                 float fade = Mathf.SmoothStep(0, 1, Mathf.InverseLerp(Length - 6f, Length - 40f, z))
                            * Mathf.SmoothStep(0, 1, Mathf.InverseLerp(-6f, 6f, z));
-                _m[i] = Matrix4x4.TRS(p, rot, Vector3.one * (_sz[i] * swell * (1f + 0.6f * punch) * fade));
+                _m[i] = Matrix4x4.TRS(p, rot, Vector3.one * (_sz[i] * crystal * swell * (1f + 0.6f * punchAmt * punch) * fade));
             }
             Graphics.RenderMeshInstanced(_rp, _mesh, 0, _m);
 
@@ -182,7 +189,7 @@ namespace TrippinStage
             Graphics.RenderPrimitives(_moteRp, MeshTopology.Triangles, Motes * 6);
             // Camera: centred, banking gently with the phrase.
             cam.transform.position = new Vector3(Mathf.Sin(phrase * 0.5f) * 1.5f, Mathf.Cos(phrase * 0.7f) * 1.0f, -8f);
-            cam.transform.rotation = Quaternion.Euler(0, Mathf.Sin(phrase * 0.5f) * 4f, Mathf.Sin(phrase) * 7f);
+            cam.transform.rotation = Quaternion.Euler(0, Mathf.Sin(phrase * 0.5f) * 4f, Mathf.Sin(phrase) * 7f * roll);
         }
     }
 }

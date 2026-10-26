@@ -14,9 +14,15 @@ namespace TrippinStage
 {
     public sealed class PolyhedraShow : KitShow
     {
+        readonly ClkAcc _spinClk = new ClkAcc();
         const int Solids = 3;
         readonly Vector3[][] _v = new Vector3[Solids][];
         readonly int[][] _e = new int[Solids][];   // pairs of vertex indices
+        [TrippinParam("Size", 0.5f, 2f)] public float sizeAmt = 1f;
+        [TrippinParam("Spin", 0f, 3f)] public float spinAmt = 1f;
+        [TrippinParam("Spikes", 0f, 3f)] public float spikes = 1f;
+        [TrippinParam("Colour", 0f, 1f)] public float hue = 0.1f;
+
         BeamPool _beams;
         int _count;
         static readonly float[] Size = { 8f, 5.2f, 3.2f };
@@ -66,20 +72,21 @@ namespace TrippinStage
             float tight = (1f - 0.45f * rx.tension) * (1f + 0.6f * rx.impact);
             var centre = new Vector3(0f, 10f, 0f);
             int n = 0;
+            float sc = _spinClk.Step(rx.clk, spinAmt);
             for (int k = 0; k < Solids; k++)
             {
-                float ang = (rx.clk * 0.05f + 0.9f * Mathf.Sin(rx.phrase + k * 1.7f)) * (1f + k * 0.4f) * (k % 2 == 0 ? 1f : -1f);
+                float ang = (sc * 0.05f + 0.9f * spinAmt * Mathf.Sin(rx.phrase + k * 1.7f)) * (1f + k * 0.4f) * (k % 2 == 0 ? 1f : -1f);
                 Quaternion q = Quaternion.AngleAxis(ang * Mathf.Rad2Deg, Axis[k].normalized);
-                float size = Size[k] * (1f + 0.2f * rx.bassFast + 0.08f * rx.kick) * tight;
+                float size = Size[k] * sizeAmt * (1f + 0.2f * rx.bassFast + 0.08f * rx.kick) * tight;
                 var verts = _v[k];
                 int[] e = _e[k];
                 for (int i = 0; i < e.Length; i += 2)
                 {
                     int a = e[i], b = e[i + 1];
                     float la = rx.Spec(((a * 7 + k * 3) % 32) / 31f), lb = rx.Spec(((b * 7 + k * 3) % 32) / 31f);
-                    Vector3 pa = q * (verts[a] * (size * (1f + 0.45f * la)));
-                    Vector3 pb = q * (verts[b] * (size * (1f + 0.45f * lb)));
-                    _beams.Set(n++, centre + pa, centre + pb, Kit.Hue(0.1f + 0.3f * k + 0.2f * (la + lb)), gain * (0.45f + 1.0f * 0.5f * (la + lb)));
+                    Vector3 pa = q * (verts[a] * (size * (1f + 0.45f * spikes * la)));
+                    Vector3 pb = q * (verts[b] * (size * (1f + 0.45f * spikes * lb)));
+                    _beams.Set(n++, centre + pa, centre + pb, Kit.Hue(hue + 0.3f * k + 0.2f * (la + lb)), gain * (0.45f + 1.0f * 0.5f * (la + lb)));
                 }
             }
             rig.Orbit(cam, rx, 30f, 10f, 10f, dt);

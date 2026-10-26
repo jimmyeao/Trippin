@@ -19,6 +19,12 @@ namespace TrippinStage
 {
     public sealed class OceanShow : KitShow
     {
+        [TrippinParam("Wave height", 0.2f, 2.5f)] public float waves = 1f;
+        [TrippinParam("Swell", 0.3f, 2f)] public float swell = 1f;
+        [TrippinParam("Searchlights", 0f, 2f)] public float searchlights = 1f;
+        [TrippinParam("Sky colour", 0f, 1f)] public float skyHue = 0.55f;
+        [TrippinParam("Camera sway", 0f, 2f)] public float sway = 1f;
+
         Material _land, _sky;
         BeamPool _lights;
         readonly float[] _ringR = { -1f, -1f, -1f, -1f };
@@ -57,7 +63,7 @@ namespace TrippinStage
 
         void Sky(Material m, float gain)
         {
-            m.SetFloat("_SkyHue", 0.55f + 0.08f * Mathf.Sin(rx.phrase * 0.5f));
+            m.SetFloat("_SkyHue", skyHue + 0.08f * Mathf.Sin(rx.phrase * 0.5f));
             m.SetFloat("_SkyGain", gain);
             m.SetFloat("_SkyClk", rx.clk);
         }
@@ -81,19 +87,19 @@ namespace TrippinStage
             _land.SetVector("_RingR", new Vector4(_ringR[0], _ringR[1], _ringR[2], _ringR[3]));
             _land.SetVector("_RingK", new Vector4(_ringK[0], _ringK[1], _ringK[2], _ringK[3]));
             _land.SetFloat("_Gain", gain);
-            _land.SetFloat("_Amp", (1.2f + 1.0f * rx.bassSlow + 0.9f * rx.bassFast + 1.0f * rx.impact) * (1f - 0.4f * rx.tension));
+            _land.SetFloat("_Amp", (1.2f + 1.0f * rx.bassSlow + 0.9f * rx.bassFast + 1.0f * rx.impact) * (1f - 0.4f * rx.tension) * waves);
             _land.SetFloat("_Phase", rx.clk * 0.3f);
-            _land.SetVector("_P0", new Vector4(0.9f + 0.6f * Mathf.Sin(rx.phrase), 0f, 0f, 0f));
+            _land.SetVector("_P0", new Vector4((0.9f + 0.6f * Mathf.Sin(rx.phrase)) * swell, 0f, 0f, 0f));
             for (int i = 0; i < 4; i++)
             {
                 float side = i < 2 ? -1f : 1f;
                 var from = new Vector3(side * (50f + 20f * (i % 2)), 0.5f, 240f);
                 float sweep = Mathf.Sin(rx.phrase * 0.5f + i * 1.4f) * 30f * (1f + 0.4f * rx.highFast);
                 var to = from + new Vector3(sweep - side * 30f, 130f, -10f);
-                _lights.Set(i, from, to, Kit.Hue(0.5f + i * 0.08f), gain * (0.4f + 0.8f * rx.midFast));
+                _lights.Set(i, from, to, Kit.Hue(skyHue - 0.05f + i * 0.08f), gain * (0.4f + 0.8f * rx.midFast) * searchlights);
             }
-            float sway = Mathf.Sin(rx.phrase * 0.5f);
-            rig.Move(cam, new Vector3(5f * sway, 7f, 0f), new Vector3(2f * sway, 9f, 100f), dt, 1f);
+            float sw = Mathf.Sin(rx.phrase * 0.5f) * sway;
+            rig.Move(cam, new Vector3(5f * sw, 7f, 0f), new Vector3(2f * sw, 9f, 100f), dt, 1f);
         }
     }
 }

@@ -21,6 +21,13 @@ namespace TrippinStage
     public class LeviathanShow : MonoBehaviour
     {
         public Camera cam;
+        [TrippinParam("Wing beat", 0f, 2f)] public float wingAmt = 1f;
+        [TrippinParam("Swim sway", 0f, 2f)] public float swaySway = 1f;
+        [TrippinParam("Kick pulse", 0f, 2f)] public float pulseAmt = 1f;
+        [TrippinParam("Strands", 0f, 2f)] public float strands = 1f;
+        [TrippinParam("Turbulence", 0f, 3f)] public float turbAmt = 1f;
+        [TrippinParam("Strand colour", 0f, 1f)] public float strandHue = 0.15f;
+        [TrippinParam("Camera distance", 0.5f, 2f)] public float zoom = 1f;
         public ComputeShader sim;
         public Material filamentMat, pointsMat, skinMat;
 
@@ -138,7 +145,9 @@ namespace TrippinStage
             // --- steering: phrase-length swings plus a pull back to the
             // middle of the void, so it wanders but stays on screen.
             float phrase = s.beat / 64f * Mathf.PI * 2f;
-            float speed = (2.2f + 7f * _energy) * (1f - 0.45f * s.calm) + 6f * _flare;
+            // Trippin's Speed control runs the swim (ShowState.speed).
+            float spd = Mathf.Clamp(s.speed, 0f, 4f);
+            float speed = ((2.2f + 7f * _energy) * (1f - 0.45f * s.calm) + 6f * _flare) * spd;
             _travel += speed * dt;
             float yawRate = 0.32f * Mathf.Sin(phrase * 0.5f + 0.3f) + 0.18f * (Mathf.PerlinNoise(_travel * 0.02f, 3.1f) - 0.5f) * 2f;
             var toCentre = -_head;
@@ -170,8 +179,8 @@ namespace TrippinStage
                 float l = d.magnitude;
                 _pts[i] = _pts[i - 1] + (l > 1e-5f ? d / l : -_fwd) * SegLen;
             }
-            _swim += dt * bps * (0.35f + 0.6f * _energy);
-            _wing += dt * bps * Mathf.PI * (0.25f + 0.35f * _energy) * (1f - 0.4f * s.calm);
+            _swim += dt * bps * (0.35f + 0.6f * _energy) * spd;
+            _wing += dt * bps * Mathf.PI * (0.25f + 0.35f * _energy) * (1f - 0.4f * s.calm) * spd;
             var upRef = Vector3.up;
             for (int i = 0; i < Spine; i++)
             {
@@ -182,10 +191,10 @@ namespace TrippinStage
                 var up = Vector3.Cross(t, right);
                 float s01 = i / (Spine - 1f);
                 // Tail whips wider than the head.
-                float sway = Mathf.Sin(_swim * Mathf.PI * 2f - s01 * 7f) * (0.15f + 2.4f * s01 * s01);
+                float sway = Mathf.Sin(_swim * Mathf.PI * 2f - s01 * 7f) * (0.15f + 2.4f * s01 * s01) * swaySway;
                 // The kick wave travels head -> tail (about a beat end to end).
                 int delay = (int)(s01 * 45f);
-                float pulse = _kickHist[(_kh - delay + _kickHist.Length) % _kickHist.Length];
+                float pulse = _kickHist[(_kh - delay + _kickHist.Length) % _kickHist.Length] * pulseAmt;
                 var p = _pts[i] + right * sway;
                 _spineD[i] = new Vector4(p.x, p.y, p.z, pulse);
                 _rightD[i] = right;
@@ -209,9 +218,9 @@ namespace TrippinStage
             sim.SetFloat("_Dt", dt);
             sim.SetFloat("_T", s.flow * 0.12f);
             sim.SetFloat("_WingPhase", _wing);
-            sim.SetFloat("_WingAmp", (0.5f + 0.7f * _energy) * (1f - 0.35f * s.calm));
+            sim.SetFloat("_WingAmp", (0.5f + 0.7f * _energy) * (1f - 0.35f * s.calm) * wingAmt);
             sim.SetFloat("_Breath", 1f + 0.12f * _bass * (1f - 0.5f * s.calm));
-            sim.SetFloat("_Turb", 0.3f + 1.2f * _mid);
+            sim.SetFloat("_Turb", (0.3f + 1.2f * _mid) * turbAmt);
             sim.SetVector("_Fwd", _fwd);
             sim.SetFloat("_Stream", 10f + 3f * speed);
             sim.SetFloat("_Flare", _flare);
@@ -222,16 +231,17 @@ namespace TrippinStage
             float gain = 0.5f + 0.3f * s.intensity;
             _skinM.SetFloat("_Gain", gain);
             _skinM.SetFloat("_Time2", s.flow * 0.15f + Time.time * 0.25f);
-            _strandM.SetFloat("_Gain", gain * (0.28f + 0.8f * _flare));
+            _strandM.SetFloat("_Gain", gain * (0.28f + 0.8f * _flare) * strands);
+            _strandM.SetFloat("_Hue", strandHue);
             Graphics.RenderPrimitivesIndexed(_skinRp, MeshTopology.Triangles, _skinIdx, _skinCount);
             Graphics.RenderPrimitives(_strandRp, MeshTopology.Triangles, Strands * (StrandPts - 1) * 6);
 
             // --- camera: glide alongside, orbit swinging with the phrase.
             var focus = _pts[Spine / 4];
-            _orbit += dt * (0.05f + 0.1f * _energy) * Mathf.Sin(phrase * 0.5f);
-            float dist = 38f + 8f * s.calm;
+            _orbit += dt * (0.05f + 0.1f * _energy) * Mathf.Sin(phrase * 0.5f) * spd;
+            float dist = (38f + 8f * s.calm) * zoom;
             var side = Quaternion.Euler(0, _yaw + 70f + Mathf.Rad2Deg * _orbit, 0) * Vector3.forward;
-            var want = focus + side * dist + Vector3.up * (16f + 7f * Mathf.Sin(phrase * 0.5f + 0.8f));
+            var want = focus + side * dist + Vector3.up * (16f + 7f * Mathf.Sin(phrase * 0.5f + 0.8f)) * zoom;
             // First frame: start in place rather than gliding in from afar.
             cam.transform.position = _camSet ? Vector3.Lerp(cam.transform.position, want, 1f - Mathf.Exp(-dt * 0.8f)) : want;
             _camSet = true;

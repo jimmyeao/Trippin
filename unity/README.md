@@ -99,7 +99,7 @@ Build from the CLI (Unity 6000.3.25f1):
 
     unity run . -- -executeMethod TrippinStage.EditorTools.StageBuilder.BuildPlayer [-stageOut Build2] [-stageMac]
 
-Run `Build/TrippinStage.exe`. With no Trippin feed it cycles every 16 bars; `-cycleBars N` changes that and `-tourShows a,b,c` cycles only the named shows, for a quick recorded tour (e.g. `-tourShows unity_helix,unity_warp -cycleBars 4 -record tour -recordSeconds 30`). `-replayFeed feed.jsonl [-replayFrom 95]` plays a feed recorded from a real track (made with `trippin --dump-feed track.flac feed.jsonl [palette]`, which runs the file through the live analyser: tempo tracker, neural downbeat check, breakdown detector) instead of the synthetic groove, looping at 60 fps, so shows can be tested on real music without audio capture. `-uncapped` removes the 60 fps cap so the `[Stage] ms/frame` log shows the real cost. `-record <dir> -recordSeconds 64` writes a fixed-30-fps JPEG sequence and quits (encode with ffmpeg).
+Run `Build/TrippinStage.exe`. With no Trippin feed it cycles every 16 bars; `-cycleBars N` changes that and `-tourShows a,b,c` cycles only the named shows, for a quick recorded tour (e.g. `-tourShows unity_helix,unity_warp -cycleBars 4 -record tour -recordSeconds 30`). `-replayFeed feed.jsonl [-replayFrom 95]` plays a feed recorded from a real track (made with `trippin --dump-feed track.flac feed.jsonl [palette]`, which runs the file through the live analyser: tempo tracker, neural downbeat check, breakdown detector) instead of the synthetic groove, looping at 60 fps, so shows can be tested on real music without audio capture. `-uncapped` removes the 60 fps cap so the `[Stage] ms/frame` log shows the real cost. `-record <dir> -recordSeconds 64` writes a fixed-30-fps JPEG sequence and quits (encode with ffmpeg). With a replay, `-knobs 1,2.5,0.6` sets the show's own controls (manifest order) and `-speed 2 -react 0.5` Trippin's Speed and Reactivity, so a control can be checked deterministically (a replay at fixed 30 fps records the same frames every run).
 
 ## Show controls (`ShowParams.cs`)
 
@@ -132,6 +132,24 @@ to the path Trippin passes with `-trippinParams`. Each frame the feed's
 `knobs` array (values for the show on air, in manifest order) is written
 back into the fields. The field's id in Trippin's settings is its name in
 lower case, so renaming a field resets what users saved for it.
+
+Every show has its own controls (3-7 each). The default is the value the
+show had before, so nothing changes until a slider moves. Rules:
+
+- **Scale amplitudes, never a running clock.** `rx.clk * spin` jumps the
+  angle by the change in `spin` times the whole clock (thousands of beats),
+  so dragging the slider whipped the object round. Rates go through a
+  `ClkAcc` (Kit.cs), stepped by the clock: `_spinClk.Step(rx.clk, spinAmt)`.
+  The same for Speed on shows with their own cameras (`ClkAcc` on the beat at
+  `ShowState.speed`).
+- **Counts stay fixed** (AGENTS §2): a control scales size, spacing,
+  brightness, travel or depth, never how many beams or nodes there are.
+- "N bars" controls (formations, patterns, shots) round to whole bars, and
+  a change takes effect with the show's usual morph.
+- At most 8 per show, Camera distance included (ShowParams drops the rest).
+
+Check them with `-knobs`: every control at an extreme must change the
+recording (scratchpad tool `each.py` did this for all 44 shows).
 
 ## Fluid (`FluidShow.cs`, `Fluid.compute`, `FluidView.shader`)
 

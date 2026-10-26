@@ -15,6 +15,12 @@ namespace TrippinStage
     public sealed class MurmurationShow : KitShow
     {
         const int N = 1500;
+        [TrippinParam("Flock size", 0.5f, 2f)] public float flock = 1f;
+        [TrippinParam("Fold", 0f, 3f)] public float fold = 1f;
+        [TrippinParam("Kick pull", 0f, 2f)] public float pullAmt = 1f;
+        [TrippinParam("Wheel", 0f, 3f)] public float wheelAmt = 1f;
+        [TrippinParam("Colour", 0f, 1f)] public float hueOff = 0.1f;
+
         GlowPool _birds;
         Vector3[] _dir;
         float[] _rad;
@@ -45,24 +51,24 @@ namespace TrippinStage
             _waveX += 40f * dt;
             float t = rx.clk * 0.04f;
             // The flight path: a slow figure eight, wheeling round with the phrase.
-            float wheel = 0.6f * Mathf.Sin(rx.phrase * 0.5f);
+            float wheel = 0.6f * wheelAmt * Mathf.Sin(rx.phrase * 0.5f);
             Vector3 c = new Vector3(Mathf.Sin(t) * 4f, 4f + Mathf.Sin(t * 1.7f) * 1.5f, Mathf.Sin(t * 2f) * 2.5f);
             Quaternion turn = Quaternion.Euler(0f, wheel * 40f + t * 18f, Mathf.Sin(t * 0.8f) * 12f);
-            float vol = (9f + 4f * rx.bassSlow) * (1f + 0.35f * rx.calm) * (1f - 0.25f * rx.tension + 0.3f * rx.impact);
+            float vol = (9f + 4f * rx.bassSlow) * (1f + 0.35f * rx.calm) * (1f - 0.25f * rx.tension + 0.3f * rx.impact) * flock;
             for (int i = 0; i < N; i++)
             {
                 Vector3 d = _dir[i] * _rad[i];
                 // The fold: noise bends the flock, slowly.
                 float nx = Mathf.PerlinNoise(d.x * 0.6f + t * 0.7f, d.z * 0.6f) - 0.5f;
                 float ny = Mathf.PerlinNoise(d.z * 0.6f + 13f, d.y * 0.6f + t * 0.5f) - 0.5f;
-                d += new Vector3(nx * 0.9f, ny * 0.8f, (nx - ny) * 0.6f);
+                d += new Vector3(nx * 0.9f, ny * 0.8f, (nx - ny) * 0.6f) * fold;
                 // The kick: pulled in tight, the fold rolling across the flock.
                 float wv = (d.x * vol - _waveX) / 5f;
                 float wave = Mathf.Exp(-wv * wv);
-                float r = vol * (1f - 0.35f * _pull - 0.18f * wave);
+                float r = vol * (1f - 0.35f * _pull * pullAmt - 0.18f * wave);
                 Vector3 p = c + turn * (d * r);
                 float size = (0.32f + 0.22f * Kit.H(i, 4)) * (1f + 0.8f * rx.highFast * Kit.H(i, 5));
-                float hue = 0.1f + 0.35f * _rad[i] + 0.1f * Mathf.Sin(t + d.x);
+                float hue = hueOff + 0.35f * _rad[i] + 0.1f * Mathf.Sin(t + d.x);
                 _birds.Set(i, p, size, hue, gain * 1.8f * (0.7f + 0.6f * wave) * (0.5f + 0.5f * Kit.H(i, 6)), face);
             }
             rig.Orbit(cam, rx, 22f, 3f + 3f * Mathf.Sin(rx.phrase * 0.5f), 5.6f, dt, 1f, 0.12f);

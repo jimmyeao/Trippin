@@ -21,6 +21,13 @@ namespace TrippinStage
 {
     public sealed class TunnelShow : KitShow
     {
+        [TrippinParam("Width", 0.5f, 2f)] public float width = 1f;
+        [TrippinParam("Flight speed", 0.3f, 3f)] public float flight = 1f;
+        [TrippinParam("Bend", 0f, 3f)] public float bend = 1f;
+        [TrippinParam("Rib depth", 0f, 3f)] public float ribs = 1f;
+        [TrippinParam("Roll", 0f, 3f)] public float roll = 1f;
+        [TrippinParam("Colour", 0f, 1f)] public float hue = 0.5f;
+
         Material _m;
         float _dist, _boost;
 
@@ -32,20 +39,20 @@ namespace TrippinStage
         protected override void Frame(ShowState s, float dt)
         {
             _m.SetFloat("_Gain", rx.Gain(0.6f, 2.2f));
-            _m.SetFloat("_Radius", 9f * (1f - 0.3f * rx.tension) * (1f + 0.35f * rx.impact));
+            _m.SetFloat("_Radius", 9f * width * (1f - 0.3f * rx.tension) * (1f + 0.35f * rx.impact));
             // Steady, fast and tempo-locked (the energy clock surged and stalled with the music).
             float bps = Mathf.Clamp(s.bpm, 60f, 200f) / 60f;
             _boost = Eased.Follow(_boost, rx.impact, 2f, 0.5f, dt);
-            _dist += dt * bps * 12f * (1f + 0.35f * _boost);
+            _dist += dt * bps * 12f * flight * (1f + 0.35f * _boost);
             _m.SetFloat("_Scroll", _dist);
             _m.SetFloat("_Shape", 1f - 0.5f * rx.tension);
             _m.SetFloat("_Phase", rx.clk * 0.4f);
-            _m.SetFloat("_Rib", 0.08f + 0.3f * rx.bassFast + 0.1f * rx.impact);
-            _m.SetFloat("_BendAmp", 3.5f * (0.6f + 0.4f * Mathf.Sin(rx.phrase)));
+            _m.SetFloat("_Rib", (0.08f + 0.3f * rx.bassFast + 0.1f * rx.impact) * ribs);
+            _m.SetFloat("_BendAmp", 3.5f * bend * (0.6f + 0.4f * Mathf.Sin(rx.phrase)));
             _m.SetFloat("_BendPhase", rx.clk * 0.01f + Mathf.Sin(rx.phrase));
-            _m.SetFloat("_Hue", 0.5f + 0.1f * Mathf.Sin(rx.phrase * 0.5f));
+            _m.SetFloat("_Hue", hue + 0.1f * Mathf.Sin(rx.phrase * 0.5f));
             rig.Move(cam, Vector3.zero, new Vector3(0f, 0f, 40f), dt, 8f);
-            cam.transform.rotation = cam.transform.rotation * Quaternion.AngleAxis(6f * Mathf.Sin(rx.phrase), Vector3.forward);
+            cam.transform.rotation = cam.transform.rotation * Quaternion.AngleAxis(6f * roll * Mathf.Sin(rx.phrase), Vector3.forward);
         }
     }
 }

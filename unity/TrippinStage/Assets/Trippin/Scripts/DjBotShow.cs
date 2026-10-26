@@ -21,6 +21,13 @@ namespace TrippinStage
 {
     public class DjBotShow : KitShow
     {
+        [TrippinParam("Colour", 0f, 1f)] public float hueBase = 0.5f;
+        [TrippinParam("Lasers", 0f, 2f)] public float lasers = 1f;
+        [TrippinParam("Laser spread", 0.3f, 2f)] public float laserSpread = 1f;
+        [TrippinParam("Light shafts", 0f, 3f)] public float shafts = 1f;
+        [TrippinParam("LED wall", 0f, 2f)] public float wall = 1f;
+        [TrippinParam("Camera sway", 0f, 2f)] public float sway = 1f;
+
         protected Transform root;   // the booth, DJ and rig live under this (the club show moves it back and scales it)
         RobotMats _mats;
         DjStation _station;
@@ -51,13 +58,13 @@ namespace TrippinStage
         protected override void Frame(ShowState s, float dt)
         {
             float gain = rx.Gain(0.6f, 1.45f);
-            float hue = 0.5f + 0.08f * Mathf.Sin(rx.phrase * 0.5f);
+            float hue = hueBase + 0.08f * Mathf.Sin(rx.phrase * 0.5f);
             _mats.Tune(hue, gain);
             _station.Update(rx, hue, gain, dt);
 
             // LED wall.
             _wallM.SetFloat("_Hue", hue + 0.05f);
-            _wallM.SetFloat("_Gain", gain * 0.9f);
+            _wallM.SetFloat("_Gain", gain * 0.9f * wall);
             _wallM.SetFloat("_Clk", rx.clk);
 
             // Lasers fanning up from the floor behind the DJ: a formation every 4 bars, swinging with the phrase.
@@ -70,13 +77,13 @@ namespace TrippinStage
                 float u = (i - 6.5f) / 6.5f;
                 var from = new Vector3(u * 15f, 0.4f, 10f);
                 float ang = Mathf.Lerp(FormAng(prevForm, u, i, rx.phrase), FormAng(form, u, i, rx.phrase), morph);
-                var to = from + new Vector3(Mathf.Sin(ang) * 22f, 26f, 8f * Mathf.Cos(ang));
-                _lasers.Set(i, from, to, Kit.Hue(0.5f + 0.06f * (i % 5)), gain * (0.3f + 0.7f * rx.midFast + 0.4f * rx.impact));
+                var to = from + new Vector3(Mathf.Sin(ang * laserSpread) * 22f, 26f, 8f * Mathf.Cos(ang * laserSpread));
+                _lasers.Set(i, from, to, Kit.Hue(hueBase + 0.06f * (i % 5)), gain * lasers * (0.3f + 0.7f * rx.midFast + 0.4f * rx.impact));
             }
             for (int i = 0; i < 6; i++)
             {
                 float x = (i - 2.5f) * 6f;
-                _shafts.Set(i, new Vector3(x, 0f, 12f), new Vector3(x + 5f * Mathf.Sin(rx.phrase + i), 30f, 8f), Kit.Hue(0.5f + 0.08f * i), gain * (0.05f + 0.14f * rx.Spec(i / 5f)));
+                _shafts.Set(i, new Vector3(x, 0f, 12f), new Vector3(x + 5f * Mathf.Sin(rx.phrase + i), 30f, 8f), Kit.Hue(hueBase + 0.08f * i), gain * shafts * (0.05f + 0.14f * rx.Spec(i / 5f)));
             }
 
             // Camera: low in front, drifting, pushing in on a build.
@@ -88,8 +95,8 @@ namespace TrippinStage
         /// The camera's target pose (the club show shoots from behind the crowd).
         protected virtual void CameraPose(out Vector3 pos, out Vector3 look)
         {
-            float sway = Mathf.Sin(rx.phrase * 0.5f);
-            pos = new Vector3(sway * 5f, 6.2f + 0.5f * Mathf.Sin(rx.phrase), -5.5f + 2f * rx.tension);
+            float sw = Mathf.Sin(rx.phrase * 0.5f) * sway;
+            pos = new Vector3(sw * 5f, 6.2f + 0.5f * sway * Mathf.Sin(rx.phrase), -5.5f + 2f * rx.tension);
             look = new Vector3(0f, 7.0f, 4f);
         }
     }

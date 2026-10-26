@@ -28,6 +28,14 @@ namespace TrippinStage
             new Vector3(0f, 0f, 9f), new Vector3(-5.5f, 0f, 6.5f), new Vector3(5.5f, 0f, 6.5f),
             new Vector3(-11f, 0f, 3.5f), new Vector3(11f, 0f, 3.5f), new Vector3(-16.5f, 0f, 0.5f), new Vector3(16.5f, 0f, 0.5f),
         };
+        [TrippinParam("Colour", 0f, 1f)] public float hueBase = 0.5f;
+        [TrippinParam("Dance energy", 0.3f, 1.6f)] public float energy = 1f;
+        [TrippinParam("Spread", 0.6f, 1.4f)] public float spread = 1f;
+        [TrippinParam("Spotlights", 0f, 2f)] public float spots = 1f;
+        [TrippinParam("Lasers", 0f, 2f)] public float lasers = 1f;
+        [TrippinParam("LED wall", 0f, 2f)] public float wall = 1f;
+        [TrippinParam("Camera sway", 0f, 2f)] public float sway = 1f;
+
         RobotMats _mats;
         readonly Android[] _bot = new Android[N];
         Material _floorM, _wallM;
@@ -68,18 +76,18 @@ namespace TrippinStage
         protected override void Frame(ShowState s, float dt)
         {
             float gain = rx.Gain(0.6f, 1.45f);
-            float hue = 0.5f + 0.1f * Mathf.Sin(rx.phrase * 0.5f);
+            float hue = hueBase + 0.1f * Mathf.Sin(rx.phrase * 0.5f);
             _mats.Tune(hue, gain);
             float kick = rx.kick;
             float dir = Mathf.Clamp(Mathf.Sin(rx.phrase) * 4f, -1f, 1f);       // reverses with the phrase, smoothly
             _up = Mathf.Clamp01(rx.impact * 2.2f);
-            float tight = 1f - 0.18f * rx.tension;
+            float tight = (1f - 0.18f * rx.tension) * spread;
             Quaternion face = cam.transform.rotation;
 
             for (int i = 0; i < N; i++)
             {
                 int band = i & 3;
-                float amp = 0.45f + 0.7f * rx.Band(band);
+                float amp = (0.45f + 0.7f * rx.Band(band)) * energy;
                 // Offsets in whole beats only (pi/2 in the half-speed terms, a half beat
                 // in the full-speed ones), so the routines differ but stay on the grid.
                 float ph = (i % 4) * Mathf.PI * 0.5f;
@@ -150,7 +158,7 @@ namespace TrippinStage
 
                 // Spotlight from the truss down onto this android, a glow on the floor under it.
                 var from = new Vector3(baseP.x + 3f * Mathf.Sin(rx.phrase + i), 26f, baseP.z + 3f);
-                _spots.Set(i, from, new Vector3(baseP.x, 0f, baseP.z), Kit.Hue(hue + 0.09f * i), gain * (0.07f + 0.22f * rx.Band(band) + 0.2f * rx.impact));
+                _spots.Set(i, from, new Vector3(baseP.x, 0f, baseP.z), Kit.Hue(hue + 0.09f * i), gain * spots * (0.07f + 0.22f * rx.Band(band) + 0.2f * rx.impact));
                 _sparks.Set(i, baseP + new Vector3(0f, 0.1f, 0f), 6f + 4f * rx.Band(band), hue + 0.09f * i, gain * (0.2f + 0.6f * rx.Band(band)), Quaternion.Euler(90f, 0f, 0f));
             }
 
@@ -158,18 +166,18 @@ namespace TrippinStage
             _floorM.SetFloat("_Gain", gain);
             _floorM.SetFloat("_Clk", rx.clk);
             _wallM.SetFloat("_Hue", hue + 0.1f);
-            _wallM.SetFloat("_Gain", gain * 0.9f);
+            _wallM.SetFloat("_Gain", gain * 0.9f * wall);
             _wallM.SetFloat("_Clk", rx.clk);
             for (int i = 0; i < 10; i++)
             {
                 float u = (i - 4.5f) / 4.5f;
                 var from = new Vector3(u * 28f, 0.4f, 19f);
                 float ang = u * 0.8f + 0.5f * Mathf.Sin(rx.phrase + i * 0.5f);
-                _wash.Set(i, from, from + new Vector3(Mathf.Sin(ang) * 20f, 24f, -6f * Mathf.Cos(ang)), Kit.Hue(hue + 0.06f * i), gain * (0.25f + 0.6f * rx.midFast));
+                _wash.Set(i, from, from + new Vector3(Mathf.Sin(ang) * 20f, 24f, -6f * Mathf.Cos(ang)), Kit.Hue(hue + 0.06f * i), gain * lasers * (0.25f + 0.6f * rx.midFast));
             }
 
-            float sway = Mathf.Sin(rx.phrase * 0.5f);
-            rig.Move(cam, new Vector3(sway * 9f, 6.5f + 1.2f * Mathf.Sin(rx.phrase), -27f + 5f * rx.tension),
+            float sw = Mathf.Sin(rx.phrase * 0.5f) * sway;
+            rig.Move(cam, new Vector3(sw * 9f, 6.5f + 1.2f * sway * Mathf.Sin(rx.phrase), -27f + 5f * rx.tension),
                 new Vector3(0f, 4.6f, 5f), dt, 0.6f);
         }
     }

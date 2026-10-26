@@ -43,6 +43,7 @@ namespace TrippinStage
         public static ShowState State { get; private set; } = new ShowState();
         /// True while datagrams are arriving.
         public static bool Live { get; private set; }
+        float _argSpeed = -1f, _argReact = -1f;
 
         UdpClient _udp;
         Thread _thread;
@@ -94,6 +95,9 @@ namespace TrippinStage
                     catch (Exception e) { Debug.LogError($"[TrippinLink] can't read replay feed {a[i + 1]}: {e.Message}"); }
                     if (_replay != null) Debug.Log($"[TrippinLink] replaying {_replay.Length} frames ({_replay.Length / 60f:F0} s) from {a[i + 1]}");
                 }
+                // `-speed 2 -react 0.5`: Trippin's Speed and Reactivity for a replay.
+                if (a[i] == "-speed") float.TryParse(a[i + 1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _argSpeed);
+                if (a[i] == "-react") float.TryParse(a[i + 1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _argReact);
                 if (a[i] == "-replayFrom" && float.TryParse(a[i + 1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var from)) _replayT = from;
             }
             _heard = Time.realtimeSinceStartup;
@@ -161,7 +165,15 @@ namespace TrippinStage
             {
                 _replayT += Time.deltaTime;
                 int idx = ((int)(_replayT * 60f)) % _replay.Length;
-                try { var rs = JsonUtility.FromJson<ShowState>(_replay[idx]); ApplyReact(rs); State = rs; } catch (Exception) { }
+                try
+                {
+                    var rs = JsonUtility.FromJson<ShowState>(_replay[idx]);
+                    if (_argSpeed > 0f) rs.speed = _argSpeed;
+                    if (_argReact >= 0f) rs.react = _argReact;
+                    ApplyReact(rs);
+                    State = rs;
+                }
+                catch (Exception) { }
                 Live = false;   // the show manager cycles on the beat, as it does with no feed
                 PushGlobals(State);
                 return;

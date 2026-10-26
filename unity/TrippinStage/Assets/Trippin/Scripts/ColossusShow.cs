@@ -22,6 +22,12 @@ namespace TrippinStage
     public class ColossusShow : MonoBehaviour
     {
         public Camera cam;
+        [TrippinParam("Dance energy", 0f, 2f)] public float dance = 1f;
+        [TrippinParam("Panel glow", 0f, 2f)] public float panel = 1f;
+        [TrippinParam("City kick wave", 0f, 2f)] public float cityWave = 1f;
+        [TrippinParam("Searchlights", 0f, 3f)] public float searchlights = 1f;
+        [TrippinParam("Glow colour", 0f, 1f)] public float glowHue = 0.4f;
+        [TrippinParam("Camera distance", 0.5f, 2f)] public float zoom = 1f;
         public Material androidMat, headMat, glowMat, cityMat, skyMat, groundMat, beamMat;
 
         const float Height = 24f;
@@ -315,7 +321,7 @@ namespace TrippinStage
             float phrase = s.beat / 64f * Mathf.PI * 2f;
             // A smooth two-beat pump on the flow clock (never the bar phase).
             float pumpWave = 0.5f - 0.5f * Mathf.Cos(s.flow * Mathf.PI);
-            float pumpAmp = (0.25f + 0.75f * _energy) * (1f - _armsDown);
+            float pumpAmp = (0.25f + 0.75f * _energy) * (1f - _armsDown) * dance;
             float twist = 0.22f * Mathf.Sin(phrase * 0.5f) * (1f - 0.5f * _armsDown);
             float yaw = 0.45f * (Mathf.PerlinNoise(_lookT, 1.3f) - 0.5f) * 2f + 0.2f * Mathf.Sin(phrase);
             float pitch = 0.12f + 0.08f * pumpWave * pumpAmp + 0.12f * (Mathf.PerlinNoise(_lookT * 0.7f, 5.1f) - 0.5f);
@@ -324,7 +330,7 @@ namespace TrippinStage
             foreach (var m in new[] { _mat, _mirMat })
             {
                 m.SetMatrixArray("_Bones", _w);
-                m.SetFloat("_Panel", _panel * 0.8f + 3f * Mathf.SmoothStep(0, 1, _burst));
+                m.SetFloat("_Panel", (_panel * 0.8f + 3f * Mathf.SmoothStep(0, 1, _burst)) * panel);
                 m.SetFloat("_PanelWave", _wave);
                 m.SetFloat("_Flow", _flow);
                 m.SetFloat("_Calm", s.calm);
@@ -349,10 +355,10 @@ namespace TrippinStage
             Graphics.RenderMesh(_headMirRp, _headMesh, 0, _mirror.localToWorldMatrix * local);
 
             // Camera: low, looking up; drifting round the front.
-            _orbit += dt * (0.04f + 0.08f * _energy) * Mathf.Sin(phrase * 0.5f + 0.7f);
+            _orbit += dt * (0.04f + 0.08f * _energy) * Mathf.Sin(phrase * 0.5f + 0.7f) * Mathf.Clamp(s.speed, 0f, 4f);
             float a = Mathf.Clamp(_orbit, -0.8f, 0.8f);
             if (Mathf.Abs(_orbit) > 0.8f) _orbit = Mathf.Sign(_orbit) * 0.8f;
-            float dist = 21f + 6f * s.calm;
+            float dist = (21f + 6f * s.calm) * zoom;
             var want = new Vector3(Mathf.Sin(a) * dist, 4f + 2f * Mathf.Sin(phrase * 0.25f), Mathf.Cos(a) * dist);
             cam.transform.position = _placeCam ? want : Vector3.Lerp(cam.transform.position, want, 1f - Mathf.Exp(-dt * 0.8f));
             _placeCam = false;
@@ -366,7 +372,7 @@ namespace TrippinStage
 
             // City: the kick wave rings out over the rooftops; more windows
             // light as the track builds (smoothed, never per-hit).
-            if (_wave < 0f) { _cityWave = 0f; _cityWaveAmp = Mathf.Clamp01(_kick + 0.3f); }
+            if (_wave < 0f) { _cityWave = 0f; _cityWaveAmp = Mathf.Clamp01(_kick + 0.3f) * cityWave; }
             _cityWave += dt * 140f;
             _cityWaveAmp *= Mathf.Exp(-dt / 1.2f);
             _lit += (Mathf.Clamp01(0.2f + 0.8f * _energy) * (1f - 0.4f * s.calm) - _lit) * (1f - Mathf.Exp(-dt / 2f));
@@ -399,11 +405,11 @@ namespace TrippinStage
                 _beams[i].localRotation = Quaternion.Euler(0, baseYaw + sweep, 0) * Quaternion.Euler(tilt, 0, 0);
                 _mpb.Clear();
                 _mpb.SetColor("_Color", TrippinLink.Palette(0.3f + u * 0.4f));
-                _mpb.SetFloat("_Intensity", (0.04f + 0.08f * _energy) * (1f - 0.6f * s.calm));
+                _mpb.SetFloat("_Intensity", (0.04f + 0.08f * _energy) * (1f - 0.6f * s.calm) * searchlights);
                 _beamR[i].SetPropertyBlock(_mpb);
             }
             _glowM.SetFloat("_Glow", 0.12f + 0.12f * s.intensity + 0.3f * Mathf.SmoothStep(0, 1, _burst));
-            _glowM.SetFloat("_Hue", 0.4f + 0.1f * Mathf.Sin(phrase * 0.25f));
+            _glowM.SetFloat("_Hue", glowHue + 0.1f * Mathf.Sin(phrase * 0.25f));
         }
     }
 }

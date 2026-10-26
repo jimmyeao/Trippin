@@ -620,6 +620,28 @@ namespace TrippinStage
         }
     }
 
+    /// A show's own clock, run at a control's rate (Spin, Fall speed...): it
+    /// steps with the clock it follows, so moving the slider changes the
+    /// speed and never jumps the angle (clk * rate jumped by the change in
+    /// rate times the whole clock: dragging the slider whipped the object
+    /// round). Starts on the clock, so at rate 1 it is the clock. Wrap-safe
+    /// (Trippin's clocks wrap at 4096); a jump is no travel.
+    public sealed class ClkAcc
+    {
+        float _v, _prev = -1f;
+
+        public float Step(float clock, float rate)
+        {
+            if (_prev < 0f) { _v = _prev = clock; return _v; }
+            float d = clock - _prev;
+            _prev = clock;
+            if (d < -2048f) d += 4096f;
+            if (d < 0f || d > 4f) d = 0f;
+            _v += d * rate;
+            return _v;
+        }
+    }
+
     /// Base for the kit shows: registers uniformly in StageBuilder, owns the
     /// shared signals, camera rig and (optionally) floor + haze.
     public abstract class KitShow : MonoBehaviour

@@ -22,6 +22,9 @@ namespace TrippinStage
         // `-tourShows a,b,c` to cycle only those shows — for quick recorded tours.
         int _cycleBars = 16;
         string[] _tour;
+        // `-knobs 1,2.5,0.6`: the show's controls (manifest order) without a
+        // feed, so a -replayFeed recording can test them deterministically.
+        float[] _argKnobs;
 
         /// `-uncapped`: no 60 fps cap, so the frame-time log shows the real
         /// cost (profiling only — Trippin never passes it).
@@ -44,6 +47,9 @@ namespace TrippinStage
                 if (a[i] == "-show") _forced = a[i + 1];
                 if (a[i] == "-cycleBars" && int.TryParse(a[i + 1], out var cb) && cb > 0) _cycleBars = cb;
                 if (a[i] == "-tourShows") _tour = a[i + 1].Split(',');
+                if (a[i] == "-knobs")
+                    _argKnobs = System.Array.ConvertAll(a[i + 1].Split(','), v =>
+                        float.Parse(v, System.Globalization.CultureInfo.InvariantCulture));
             }
             for (int i = 0; i < shows.Length; i++) shows[i].SetActive(false);
             ShowParams.Init(shows, names);
@@ -74,6 +80,7 @@ namespace TrippinStage
             }
             // Trippin's per-show controls for the show on air.
             if (TrippinLink.Live && want == names[_cur]) ShowParams.Apply(_cur, s.knobs);
+            else if (!TrippinLink.Live && _argKnobs != null) ShowParams.Apply(_cur, _argKnobs);
 
             // Frame time for whichever show is up (was StageDirector-only).
             _ftSum += Time.unscaledDeltaTime;

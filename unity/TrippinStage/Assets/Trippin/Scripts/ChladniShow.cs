@@ -17,7 +17,13 @@ namespace TrippinStage
 {
     public sealed class ChladniShow : KitShow
     {
+        readonly ClkAcc _spinClk = new ClkAcc();
         static readonly float[,] Modes = { { 1f, 2f }, { 2f, 3f }, { 3f, 4f }, { 2f, 5f }, { 4f, 5f }, { 3f, 6f } };
+        [TrippinParam("Plate depth", 0.2f, 2.5f)] public float depth = 1f;
+        [TrippinParam("Kick ripple", 0f, 3f)] public float ripple = 1f;
+        [TrippinParam("Spin", 0f, 3f)] public float spinAmt = 1f;
+        [TrippinParam("Colour", 0f, 1f)] public float hue = 0.45f;
+
         Material _m;
         Transform _plate;
         int _cur = -1, _prev;
@@ -47,21 +53,21 @@ namespace TrippinStage
             float mm = Mathf.Lerp(Modes[_prev, 1], Modes[_cur, 1], m) + 0.12f * rx.highFast;
             float gain = rx.Gain(0.35f, 1.6f);
             n += 0.35f * rx.midFast; mm += 0.3f * rx.highFast;     // the figure warps with the mids and highs
-            _m.SetFloat("_Amp", (2.5f + 5f * rx.bassFast + 4f * rx.impact) * (1f - 0.6f * rx.tension));
+            _m.SetFloat("_Amp", (2.5f + 5f * rx.bassFast + 4f * rx.impact) * (1f - 0.6f * rx.tension) * depth);
             // One flex a beat, deeper with the bass; the plate never quite rests flat while the drums play.
             float drive = Mathf.Clamp01(0.35f + 0.9f * rx.bassFast) * (1f - 0.7f * rx.calm);
             _m.SetFloat("_Vib", Mathf.Lerp(1f, Mathf.Cos(rx.beatS * Mathf.PI * 2f), drive));
             // A kick strikes the plate: a ring runs out at 30 m/s and dies away.
-            if (rx.kick > 0.55f && _kickPrev <= 0.55f) { _ripR = 0f; _ripA = 2.2f + 2.5f * rx.bassFast; }
+            if (rx.kick > 0.55f && _kickPrev <= 0.55f) { _ripR = 0f; _ripA = (2.2f + 2.5f * rx.bassFast) * ripple; }
             _kickPrev = rx.kick;
             _ripR += 30f * dt;
             _ripA *= Mathf.Exp(-2.2f * dt);
             _m.SetFloat("_RipR", _ripR);
             _m.SetFloat("_RipA", _ripA * (1f - 0.6f * rx.tension));
             _m.SetFloat("_Intensity", 0.8f * gain);
-            _m.SetFloat("_Hue", 0.45f + 0.1f * Mathf.Sin(rx.phrase * 0.5f));
+            _m.SetFloat("_Hue", hue + 0.1f * Mathf.Sin(rx.phrase * 0.5f));
             _m.SetVector("_P0", new Vector4(n, mm, 0f, 0f));
-            _plate.localRotation = Quaternion.Euler(0f, (rx.clk * 0.4f + 25f * Mathf.Sin(rx.phrase)), 0f);
+            _plate.localRotation = Quaternion.Euler(0f, _spinClk.Step(rx.clk, spinAmt) * 0.4f + 25f * spinAmt * Mathf.Sin(rx.phrase), 0f);
             rig.Orbit(cam, rx, 34f, 26f, 2f, dt);
         }
     }

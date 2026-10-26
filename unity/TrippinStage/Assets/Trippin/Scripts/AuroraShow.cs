@@ -25,6 +25,15 @@ namespace TrippinStage
     public class AuroraShow : MonoBehaviour
     {
         public Camera cam;
+        [TrippinParam("Colour", 0f, 1f)] public float hue = 0.45f;
+        [TrippinParam("Fold depth", 0.2f, 2.5f)] public float foldAmt = 1f;
+        [TrippinParam("Curtain height", 0.5f, 1.6f)] public float curtain = 1f;
+        [TrippinParam("Searchlights", 0f, 2f)] public float searchlights = 1f;
+        [TrippinParam("Sweep width", 0f, 2f)] public float sweepAmt = 1f;
+        [TrippinParam("Haze", 0f, 3f)] public float hazeAmt = 1f;
+        [TrippinParam("Camera distance", 0.5f, 2f)] public float zoom = 1f;
+        // Trippin's Speed control runs the camera's travel (ShowState.speed).
+        readonly ClkAcc _camClk = new ClkAcc();
         public Material auroraMat, beamMat, groundMat, hazeMat;
 
         const int Curtains = 5, Lights = 6, GridU = 160, GridV = 24;
@@ -198,14 +207,14 @@ namespace TrippinStage
             // when Tension builds, so a 0.35 tension dim cancelled the calm boost (only
             // ~15% brighter than the drums on the M2): weaker dim, wider calm range.
             float level = Mathf.Lerp(0.45f, 1f, _calmSlow) * (1f - 0.15f * tn) * (1f + 0.7f * imp);
-            float hueBase = 0.45f + 0.06f * Mathf.Sin(phrase * 0.5f);
-            float fold = (0.45f + 0.9f * Mathf.Clamp01(_bassSlow) + 0.7f * _bassFast) * (1f - 0.5f * tn) * (1f + 0.8f * imp);
+            float hueBase = hue + 0.06f * Mathf.Sin(phrase * 0.5f);
+            float fold = (0.45f + 0.9f * Mathf.Clamp01(_bassSlow) + 0.7f * _bassFast) * (1f - 0.5f * tn) * (1f + 0.8f * imp) * foldAmt;
             for (int i = 0; i < Curtains; i++)
             {
                 float u = i / (Curtains - 1f);
                 float swing = Mathf.Sin(phrase + i * 1.3f) * 2.2f; // travel direction reverses with the phrase
                 float phase = clk * 0.05f + swing;
-                float height = (15f + 8f * Mathf.Clamp01(_midSlow) + 7f * _midEase + 4f * u + 5f * tn);
+                float height = (15f + 8f * Mathf.Clamp01(_midSlow) + 7f * _midEase + 4f * u + 5f * tn) * curtain;
                 _mpb.Clear();
                 _mpb.SetFloat("_Hue", hueBase + u * 0.18f);
                 _mpb.SetFloat("_Intensity", 0.55f * level);
@@ -229,7 +238,7 @@ namespace TrippinStage
             for (int i = 0; i < Lights; i++)
             {
                 var toCentre = new Vector3(-_lightPos[i].x, 0f, -_lightPos[i].z + 10f).normalized;
-                float sweep = Mathf.Sin(phrase * 0.5f + i * 1.05f) * 38f * (0.85f + 0.4f * _highEase); // highs widen the sweep
+                float sweep = Mathf.Sin(phrase * 0.5f + i * 1.05f) * 38f * sweepAmt * (0.85f + 0.4f * _highEase); // highs widen the sweep
                 float elev = (58f + 14f * Mathf.Sin(clk * 0.045f + i * 0.9f) + 14f * imp) * Mathf.Deg2Rad;
                 var horiz = Quaternion.Euler(0f, sweep * (1f + 0.6f * imp), 0f) * toCentre;
                 var d = (horiz * Mathf.Cos(elev) + Vector3.up * Mathf.Sin(elev)).normalized;
@@ -246,7 +255,7 @@ namespace TrippinStage
                 Color c = TrippinLink.Palette(hueBase + 0.2f + i * 0.07f);
                 float mx = Mathf.Max(c.r, Mathf.Max(c.g, c.b), 1e-3f);
                 c = new Color(c.r / mx, c.g / mx, c.b / mx);
-                float inten = 0.8f * level * (0.6f + 0.6f * s.intensity);
+                float inten = 0.8f * level * (0.6f + 0.6f * s.intensity) * searchlights;
                 _mpb.Clear();
                 _mpb.SetColor("_Color", c);
                 _mpb.SetFloat("_Intensity", inten);
@@ -256,9 +265,9 @@ namespace TrippinStage
             }
 
             for (int i = 0; i < _hazeM.Length; i++)
-                _hazeM[i].SetFloat("_Density", _hazeBase[i] * (1f + 0.8f * tn + 0.8f * imp));
+                _hazeM[i].SetFloat("_Density", _hazeBase[i] * hazeAmt * (1f + 0.8f * tn + 0.8f * imp));
 
-            UpdateCamera(beat, dt, tn);
+            UpdateCamera(_camClk.Step(beat, s.speed), dt, tn);
         }
 
         // Low over the water, drifting sideways with the phrase and creeping
@@ -272,7 +281,7 @@ namespace TrippinStage
             float k = 1f - Mathf.Exp(-dt * 0.7f);
             _camPos = Vector3.Lerp(_camPos, want, k);
             _camLook = Vector3.Lerp(_camLook, look, k);
-            cam.transform.position = _camPos;
+            cam.transform.position = _camLook + (_camPos - _camLook) * zoom;
             cam.transform.LookAt(_camLook);
         }
     }

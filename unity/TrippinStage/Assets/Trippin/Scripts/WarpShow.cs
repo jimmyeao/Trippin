@@ -16,6 +16,11 @@ namespace TrippinStage
     {
         const int N = 320;
         const float Far = 140f;
+        [TrippinParam("Streak length", 0.3f, 3f)] public float length = 1f;
+        [TrippinParam("Width", 0.5f, 2f)] public float width = 1f;
+        [TrippinParam("Roll", 0f, 4f)] public float roll = 1f;
+        [TrippinParam("Colour", 0f, 1f)] public float hue = 0.4f;
+
         BeamPool _beams;
 
         protected override void Build()
@@ -26,13 +31,13 @@ namespace TrippinStage
         protected override void Frame(ShowState s, float dt)
         {
             float gain = rx.Gain(0.5f, 1.3f);
-            float stretch = 3f + 22f * rx.lum + 10f * rx.bassFast + 14f * rx.impact;
+            float stretch = (3f + 22f * rx.lum + 10f * rx.bassFast + 14f * rx.impact) * length;
             float cx = 3f * Mathf.Sin(rx.phrase), cy = 1.5f * Mathf.Sin(rx.phrase * 0.7f + 1f);
             float squeeze = 1f - 0.3f * rx.tension;
             for (int i = 0; i < N; i++)
             {
                 float a = Kit.H(i, 1) * Mathf.PI * 2f;
-                float r = (4f + Kit.H(i, 2) * Kit.H(i, 2) * 28f) * squeeze;
+                float r = (4f + Kit.H(i, 2) * Kit.H(i, 2) * 28f) * squeeze * width;
                 float z = rx.clk * 0.05f * (0.6f + 0.8f * Kit.H(i, 4)) + Kit.H(i, 3);
                 z -= Mathf.Floor(z);
                 z = Far * (1f - z);
@@ -41,10 +46,10 @@ namespace TrippinStage
                 float len = stretch * (0.3f + near) * (0.4f + Kit.H(i, 5));
                 var p0 = new Vector3(Mathf.Cos(a) * r + cx, Mathf.Sin(a) * r + cy, z);
                 var p1 = p0 + new Vector3(0f, 0f, len);
-                _beams.Set(i, p0, p1, Kit.Hue(0.4f + 0.3f * Kit.H(i, 7)), gain * (0.3f + 0.9f * near) * (0.5f + Kit.H(i, 6)) * life);
+                _beams.Set(i, p0, p1, Kit.Hue(hue + 0.3f * Kit.H(i, 7)), gain * (0.3f + 0.9f * near) * (0.5f + Kit.H(i, 6)) * life);
             }
             rig.Move(cam, new Vector3(0f, 0f, 0f), new Vector3(cx * 0.5f, cy * 0.5f, 50f), dt, 6f);
-            cam.transform.rotation = cam.transform.rotation * Quaternion.AngleAxis(4f * Mathf.Sin(rx.phrase), Vector3.forward);
+            cam.transform.rotation = cam.transform.rotation * Quaternion.AngleAxis(4f * roll * Mathf.Sin(rx.phrase), Vector3.forward);
         }
     }
 }

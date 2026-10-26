@@ -20,7 +20,15 @@ namespace TrippinStage
 {
     public sealed class GyroscopeShow : KitShow
     {
+        readonly ClkAcc[] _ringClk = { new ClkAcc(), new ClkAcc(), new ClkAcc(), new ClkAcc(), new ClkAcc() };
         const int Rings = 5, Segs = 96, BeadsPer = 3;
+        [TrippinParam("Size", 0.5f, 2f)] public float sizeAmt = 1f;
+        [TrippinParam("Spin", 0f, 3f)] public float spinAmt = 1f;
+        [TrippinParam("Tilt", 0f, 2f)] public float tilt = 1f;
+        [TrippinParam("Core ripple", 0.2f, 2.5f)] public float coreRipple = 1f;
+        [TrippinParam("Thickness", 0.3f, 2.5f)] public float thick = 1f;
+        [TrippinParam("Colour", 0f, 1f)] public float hue = 0.3f;
+
         TubeRibbon[] _ring = new TubeRibbon[Rings];
         GlowPool _beads;
         BeamPool _spokes;
@@ -51,11 +59,11 @@ namespace TrippinStage
         {
             float gain = rx.Gain();
             var centre = new Vector3(0f, 11f, 0f);
-            float spread = (1f - 0.4f * rx.tension) * (1f + 0.5f * rx.impact);
-            _core.SetFloat("_Amp", 0.7f + 1.3f * rx.bassFast + 0.6f * rx.impact);
+            float spread = (1f - 0.4f * rx.tension) * (1f + 0.5f * rx.impact) * sizeAmt;
+            _core.SetFloat("_Amp", (0.7f + 1.3f * rx.bassFast + 0.6f * rx.impact) * coreRipple);
             _core.SetFloat("_Freq", 1.4f + 1.1f * rx.highFast);
             _core.SetFloat("_Phase", rx.clk * 0.3f);
-            _core.SetFloat("_Hue", 0.55f + 0.1f * Mathf.Sin(rx.phrase));
+            _core.SetFloat("_Hue", hue + 0.25f + 0.1f * Mathf.Sin(rx.phrase));
             _core.SetFloat("_Intensity", 0.8f * gain);
             _coreM.CopyPropertiesFromMaterial(_core);
             _coreM.SetFloat("_Intensity", 0.8f * gain * 0.3f);
@@ -64,8 +72,8 @@ namespace TrippinStage
                 float band = rx.Band(k);
                 float rad = (4.5f + 2.3f * k) * (1f + 0.25f * band + 0.12f * rx.kick) * spread;
                 float c = Rx.Clock(s, 1 + k % 3);
-                Quaternion q = Quaternion.AngleAxis((c * 0.06f * (k % 2 == 0 ? 1f : -1f) + 0.8f * Mathf.Sin(rx.phrase + k)) * Mathf.Rad2Deg, new Vector3(0.2f + 0.2f * k, 1f, 0.4f - 0.1f * k).normalized)
-                              * Quaternion.AngleAxis((25f + 18f * k) * Mathf.Sin(rx.phrase * 0.5f + k * 1.3f), Vector3.right);
+                Quaternion q = Quaternion.AngleAxis((_ringClk[k].Step(c, spinAmt) * 0.06f * (k % 2 == 0 ? 1f : -1f) + 0.8f * spinAmt * Mathf.Sin(rx.phrase + k)) * Mathf.Rad2Deg, new Vector3(0.2f + 0.2f * k, 1f, 0.4f - 0.1f * k).normalized)
+                              * Quaternion.AngleAxis((25f + 18f * k) * tilt * Mathf.Sin(rx.phrase * 0.5f + k * 1.3f), Vector3.right);
                 var t = _ring[k];
                 for (int i = 0; i <= Segs; i++)
                 {
@@ -77,12 +85,12 @@ namespace TrippinStage
                     float lob = (rx.Spec(sx - 0.08f) + rx.Spec(sx - 0.04f) + lvl + rx.Spec(sx + 0.04f) + rx.Spec(sx + 0.08f)) * 0.2f;
                     float rip = 1f + 0.2f * (lob - 0.25f);
                     t.P[i] = centre + q * new Vector3(Mathf.Cos(a) * rad * rip, Mathf.Sin(a) * rad * rip, 0f);
-                    t.R[i] = 0.13f * (1f + 0.35f * k * 0.15f) * (1f + 0.9f * lob + 0.4f * band);
+                    t.R[i] = 0.13f * thick * (1f + 0.35f * k * 0.15f) * (1f + 0.9f * lob + 0.4f * band);
                     t.K[i] = 0.3f + 0.5f * band + 0.7f * lvl;
                     t.Hu[i] = 0.12f * k + a * 0.04f;
                 }
                 t.Mat.SetFloat("_Phase", c * 0.25f * (k % 2 == 0 ? 1f : -1f));
-                t.Mat.SetFloat("_Hue", 0.3f);
+                t.Mat.SetFloat("_Hue", hue);
                 t.Apply(gain);
                 for (int b = 0; b < BeadsPer; b++)
                 {

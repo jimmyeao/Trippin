@@ -18,8 +18,16 @@ namespace TrippinStage
 {
     public sealed class KnotShow : KitShow
     {
+        readonly ClkAcc _spinClk = new ClkAcc();
         const int Segs = 200, Beads = 60;
         static readonly int[,] Pq = { { 2, 3 }, { 3, 2 }, { 3, 4 }, { 2, 5 }, { 4, 3 }, { 5, 2 } };
+        [TrippinParam("Size", 0.5f, 2f)] public float sizeAmt = 1f;
+        [TrippinParam("Loop width", 0.3f, 2f)] public float loop = 1f;
+        [TrippinParam("Spin", 0f, 3f)] public float spinAmt = 1f;
+        [TrippinParam("Thickness", 0.3f, 2.5f)] public float thick = 1f;
+        [TrippinParam("Ghost knot", 0f, 2f)] public float ghost = 1f;
+        [TrippinParam("Colour", 0f, 1f)] public float hue = 0f;
+
         TubeRibbon _main, _ghost;
         GlowPool _beads;
         readonly Vector3[] _a = new Vector3[Segs + 1], _b = new Vector3[Segs + 1];
@@ -59,12 +67,12 @@ namespace TrippinStage
             if (_cur < 0) { _cur = _prev = f; _start = rx.beat - 4f; }
             else if (f != _cur) { _prev = _cur; _cur = f; _start = rx.beat; }
             float m = Mathf.SmoothStep(0f, 1f, (rx.beat - _start) / 2f);
-            float spin = rx.clk * 0.03f + 0.8f * Mathf.Sin(rx.phrase);
-            Curve(_a, Pq[_prev, 0], Pq[_prev, 1], spin, 1f, 2.8f);
-            Curve(_b, Pq[_cur, 0], Pq[_cur, 1], spin, 1f, 2.8f);
+            float spin = _spinClk.Step(rx.clk, spinAmt) * 0.03f + 0.8f * spinAmt * Mathf.Sin(rx.phrase);
+            Curve(_a, Pq[_prev, 0], Pq[_prev, 1], spin, sizeAmt, 2.8f * loop);
+            Curve(_b, Pq[_cur, 0], Pq[_cur, 1], spin, sizeAmt, 2.8f * loop);
             int gp = Pq.GetLength(0);
-            Curve(_ga, Pq[(_prev + 1) % gp, 0], Pq[(_prev + 1) % gp, 1], -spin * 0.7f, 1.35f, 3.4f);
-            Curve(_gb, Pq[(_cur + 1) % gp, 0], Pq[(_cur + 1) % gp, 1], -spin * 0.7f, 1.35f, 3.4f);
+            Curve(_ga, Pq[(_prev + 1) % gp, 0], Pq[(_prev + 1) % gp, 1], -spin * 0.7f, 1.35f * sizeAmt, 3.4f * loop);
+            Curve(_gb, Pq[(_cur + 1) % gp, 0], Pq[(_cur + 1) % gp, 1], -spin * 0.7f, 1.35f * sizeAmt, 3.4f * loop);
             float gain = rx.Gain();
             float head = rx.beatS / 16f - Mathf.Floor(rx.beatS / 16f);          // one lap per four bars
             for (int i = 0; i <= Segs; i++)
@@ -73,7 +81,7 @@ namespace TrippinStage
                 float sym = Mathf.Abs(Mathf.Sin(t * Mathf.PI * 3f));
                 float lvl = rx.Spec(sym);
                 _main.P[i] = Vector3.Lerp(_a[i], _b[i], m);
-                _main.R[i] = 0.26f * (1f + 1.1f * lvl + 0.5f * rx.kick);
+                _main.R[i] = 0.26f * thick * (1f + 1.1f * lvl + 0.5f * rx.kick);
                 float d = head - t; d -= Mathf.Floor(d);
                 float comet = Mathf.Pow(1f - d, 3f);
                 _main.K[i] = 0.3f + 0.8f * lvl + 1.1f * comet;
@@ -84,11 +92,11 @@ namespace TrippinStage
                 _ghost.Hu[i] = 0.55f + t * 0.4f;
             }
             _main.Mat.SetFloat("_Phase", -rx.clk * 0.12f);
-            _main.Mat.SetFloat("_Hue", 0.0f);
+            _main.Mat.SetFloat("_Hue", hue);
             _ghost.Mat.SetFloat("_Phase", rx.clk * 0.1f);
-            _ghost.Mat.SetFloat("_Hue", 0.15f);
+            _ghost.Mat.SetFloat("_Hue", hue + 0.15f);
             _main.Apply(gain);
-            _ghost.Apply(gain * 0.7f);
+            _ghost.Apply(gain * 0.7f * ghost);
 
             Quaternion face = cam.transform.rotation;
             for (int i = 0; i < Beads; i++)

@@ -407,11 +407,11 @@ controls** card adjusts it. Every show has:
   above 1 shapes swing harder and kicks land more easily.
 - **Brightness**, **Saturation** and **Hue shift.**
 
-Shows framed by the shared camera also get **Camera distance** (closer or
-further back), and some have their own knobs (`unity_fluid`: swirl, dye life,
-flow life, splat size, force and shine; `unity_marble`: swirl, drop size,
-comb, shine and relief). Values are remembered per show; **Reset** puts the
-show back to its defaults.
+Most shows also get **Camera distance** (closer or further back), and every
+show has its own controls: three to seven of size, spin, twist, beam width,
+haze, lasers, how many bars a formation holds, and so on (`unity_marble`:
+swirl, drop size, comb, shine and relief). Values are remembered per show;
+**Reset** puts the show back to its defaults.
 
 `unity_fluid` is a real-time fluid simulation drawn as glossy liquid paint:
 three emitters pour and push with the bass, mids and highs, and every kick

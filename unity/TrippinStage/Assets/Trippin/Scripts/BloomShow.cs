@@ -12,7 +12,14 @@ namespace TrippinStage
 {
     public sealed class BloomShow : KitShow
     {
+        readonly ClkAcc _spinClk = new ClkAcc();
         const int Layers = 3, Petals = 10, K = 48;
+        [TrippinParam("Petal length", 0.5f, 2f)] public float petal = 1f;
+        [TrippinParam("Openness", -0.5f, 0.5f)] public float openBias = 0f;
+        [TrippinParam("Spin", 0f, 3f)] public float spinAmt = 1f;
+        [TrippinParam("Kick pulse", 0f, 3f)] public float pulseAmt = 1f;
+        [TrippinParam("Colour", 0f, 1f)] public float hueOff = 0f;
+
         GlowPool _pts;
         float _pulse = 99f, _kickPrev;
 
@@ -28,13 +35,14 @@ namespace TrippinStage
             if (rx.kick > 0.55f && _kickPrev <= 0.55f) _pulse = 0f;
             _kickPrev = rx.kick;
             _pulse += dt * 1.8f;
-            float open = Mathf.Clamp01(0.35f + 0.45f * rx.bassSlow + 0.2f * rx.impact - 0.3f * rx.calm);
+            float open = Mathf.Clamp01(0.35f + openBias + 0.45f * rx.bassSlow + 0.2f * rx.impact - 0.3f * rx.calm);
             float dir = Mathf.Sin(rx.phrase * 0.5f);
             int n = 0;
+            float sc = _spinClk.Step(rx.clk, spinAmt);
             for (int ly = 0; ly < Layers; ly++)
             {
-                float spin = (ly % 2 == 0 ? 1f : -1f) * (rx.clk * 0.02f * (1f + ly * 0.3f)) + 0.4f * dir * (ly + 1);
-                float len = (5f + ly * 3.2f) * (0.7f + 0.5f * open);
+                float spin = (ly % 2 == 0 ? 1f : -1f) * (sc * 0.02f * (1f + ly * 0.3f)) + 0.4f * dir * (ly + 1) * spinAmt;
+                float len = (5f + ly * 3.2f) * (0.7f + 0.5f * open) * petal;
                 float lift = ly * 0.8f;
                 for (int p = 0; p < Petals; p++)
                 {
@@ -51,10 +59,10 @@ namespace TrippinStage
                         float y = lift + (1f - open) * r * 0.55f;
                         var pos = new Vector3(Mathf.Cos(a) * r, y, Mathf.Sin(a) * r);
                         float pd = (v - _pulse) / 0.09f;
-                        float pulse = Mathf.Exp(-pd * pd);
+                        float pulse = Mathf.Exp(-pd * pd) * pulseAmt;
                         float tip = Mathf.Pow(v, 6f) * rx.highFast;
                         float size = (0.45f + 0.2f * (1f - v)) * (1f + 1.2f * pulse + 1.5f * tip);
-                        float hue = ly * 0.18f + v * 0.25f;
+                        float hue = hueOff + ly * 0.18f + v * 0.25f;
                         _pts.Set(n++, pos, size, hue, gain * 1.7f * (0.5f + 0.5f * v) * (1f + 1.4f * pulse + tip), face);
                     }
                 }

@@ -20,6 +20,14 @@ namespace TrippinStage
     public sealed class DjBattleShow : KitShow
     {
         const int Tower = 10;
+        [TrippinParam("Colour", 0f, 1f)] public float hueBase = 0.5f;
+        [TrippinParam("Swap bars", 1f, 16f)] public float swapBars = 4f;
+        [TrippinParam("Lasers", 0f, 2f)] public float lasers = 1f;
+        [TrippinParam("Laser spread", 0.3f, 2f)] public float laserSpread = 1f;
+        [TrippinParam("Spotlights", 0f, 3f)] public float spots = 1f;
+        [TrippinParam("LED wall", 0f, 2f)] public float wall = 1f;
+        [TrippinParam("Camera sway", 0f, 2f)] public float sway = 1f;
+
         RobotMats _mats;
         readonly DjStation[] _st = new DjStation[2];
         readonly Transform[] _root = new Transform[2];
@@ -58,10 +66,10 @@ namespace TrippinStage
         protected override void Frame(ShowState s, float dt)
         {
             float gain = rx.Gain(0.6f, 1.45f);
-            float hue = 0.5f + 0.08f * Mathf.Sin(rx.phrase * 0.5f);
+            float hue = hueBase + 0.08f * Mathf.Sin(rx.phrase * 0.5f);
             _mats.Tune(hue, gain);
             // Who has the floor: A for 16 beats, then B; both on a drop.
-            float target = ((int)(rx.beatS / 16f) & 1) == 0 ? 0f : 1f;
+            float target = ((int)(rx.beatS / (4f * Mathf.Max(1, Mathf.RoundToInt(swapBars)))) & 1) == 0 ? 0f : 1f;
             _act = Eased.Follow(_act, target, 2f, 2f, dt);
             float both = Mathf.Clamp01(rx.impact * 2.2f);
             float actA = Mathf.Max(1f - _act, both), actB = Mathf.Max(_act, both);
@@ -82,11 +90,11 @@ namespace TrippinStage
                     _tower.Glow(k, hue + 0.18f * d + 0.03f * i, 0.05f + 2.4f * on);
                 }
                 // A spotlight on the DJ who has the floor.
-                _spots.Set(d, Pos[d] + new Vector3(0f, 30f, 6f), Pos[d] + new Vector3(0f, 8f, 4.9f), Kit.Hue(hue + 0.18f * d), gain * (0.03f + 0.3f * act));
+                _spots.Set(d, Pos[d] + new Vector3(0f, 30f, 6f), Pos[d] + new Vector3(0f, 8f, 4.9f), Kit.Hue(hue + 0.18f * d), gain * spots * (0.03f + 0.3f * act));
             }
 
             _wallM.SetFloat("_Hue", hue + 0.1f);
-            _wallM.SetFloat("_Gain", gain * 0.9f);
+            _wallM.SetFloat("_Gain", gain * 0.9f * wall);
             _wallM.SetFloat("_Clk", rx.clk);
             // A new laser formation every 16 beats, morphing in over the first beat (a hard switch
             // read as a pop at every hand-over).
@@ -98,12 +106,12 @@ namespace TrippinStage
                 float u = (i - 6.5f) / 6.5f;
                 var from = new Vector3(u * 24f, 0.4f, 12f);
                 float ang = Mathf.Lerp(FormAng(prevForm, u, i, rx.phrase), FormAng(form, u, i, rx.phrase), morph);
-                _lasers.Set(i, from, from + new Vector3(Mathf.Sin(ang) * 22f, 28f, 8f * Mathf.Cos(ang)), Kit.Hue(hue + 0.06f * (i % 5) + (u > 0f ? 0.18f : 0f)), gain * (0.3f + 0.7f * rx.midFast + 0.4f * rx.impact));
+                _lasers.Set(i, from, from + new Vector3(Mathf.Sin(ang * laserSpread) * 22f, 28f, 8f * Mathf.Cos(ang * laserSpread)), Kit.Hue(hue + 0.06f * (i % 5) + (u > 0f ? 0.18f : 0f)), gain * lasers * (0.3f + 0.7f * rx.midFast + 0.4f * rx.impact));
             }
 
             // Camera: leans toward whoever has the floor, swings with the phrase, pushes in on a build.
-            float sway = Mathf.Sin(rx.phrase * 0.5f);
-            rig.Move(cam, new Vector3(sway * 5f + (_act - 0.5f) * 7f, 7.0f + 0.6f * Mathf.Sin(rx.phrase), -23f + 4f * rx.tension),
+            float sw = Mathf.Sin(rx.phrase * 0.5f) * sway;
+            rig.Move(cam, new Vector3(sw * 5f + (_act - 0.5f) * 7f, 7.0f + 0.6f * Mathf.Sin(rx.phrase), -23f + 4f * rx.tension),
                 new Vector3((_act - 0.5f) * 5f, 8.0f, 5f), dt, 0.7f);
         }
     }

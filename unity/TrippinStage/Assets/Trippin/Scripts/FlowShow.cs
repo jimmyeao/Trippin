@@ -13,6 +13,13 @@ namespace TrippinStage
     public class FlowShow : MonoBehaviour
     {
         public Camera cam;
+        [TrippinParam("Shape bars", 1f, 16f)] public float shapeBars = 4f;
+        [TrippinParam("Turbulence", 0f, 3f)] public float turbAmt = 1f;
+        [TrippinParam("Kick wave", 0f, 2f)] public float waveAmt = 1f;
+        [TrippinParam("Size", 0.5f, 2f)] public float sizeAmt = 1f;
+        [TrippinParam("Spin", 0f, 3f)] public float spinAmt = 1f;
+        [TrippinParam("Glow colour", 0f, 1f)] public float glowHue = 0.55f;
+        [TrippinParam("Camera distance", 0.5f, 2f)] public float zoom = 1f;
         public ComputeShader flow;
         public Material pointsMat, nebulaMat, glowMat;
 
@@ -76,7 +83,7 @@ namespace TrippinStage
         {
             var s = TrippinLink.State;
             float dt = Mathf.Min(Time.deltaTime, 1f / 30f);
-            int bar4 = Mathf.FloorToInt(s.beat / 16f);
+            int bar4 = Mathf.FloorToInt(s.beat / (4f * Mathf.Max(1, Mathf.RoundToInt(shapeBars))));
             if (bar4 != _lastBar4)
             {
                 // New shape every 4 bars: the current blend becomes A.
@@ -92,14 +99,14 @@ namespace TrippinStage
             float lb = s.lvl4 != null && s.lvl4.Length > 3 ? s.lvl4[0] : 0f;
             float lm = s.lvl4 != null && s.lvl4.Length > 3 ? 0.5f * (s.lvl4[1] + s.lvl4[2]) : 0f;
             _bass += (lb - _bass) * k;
-            _turb += ((0.8f + 7f * lm) * (1f - 0.6f * s.calm) - _turb) * k;
+            _turb += ((0.8f + 7f * lm) * (1f - 0.6f * s.calm) * turbAmt - _turb) * k;
             _energy += (s.energy - _energy) * (1f - Mathf.Exp(-dt / 0.6f));
             // Kick onsets launch a shockwave from the centre.
             float kt = Mathf.Max(s.kick, s.hits4 != null && s.hits4.Length > 0 ? s.hits4[0] : 0f) * (1f - s.calm);
             if (kt > 0.45f && kt > _kick + 0.25f && Time.time - _lastKick > 0.15f)
             {
                 _waveR = 0f;
-                _waveAmp = Mathf.Clamp01(kt);
+                _waveAmp = Mathf.Clamp01(kt) * waveAmt;
                 _lastKick = Time.time;
             }
             _kick = kt;
@@ -108,7 +115,7 @@ namespace TrippinStage
             // Rotation speed integrates the smoothed energy, direction swings
             // with the phrase (passes through zero smoothly).
             float ph = s.beat / 64f * Mathf.PI * 2f;
-            _rot += dt * (0.08f + 0.9f * _energy) * Mathf.Sin(ph * 0.5f + 0.4f);
+            _rot += dt * (0.08f + 0.9f * _energy) * Mathf.Sin(ph * 0.5f + 0.4f) * spinAmt;
             if (!s.drums) _calmLong += dt;
             if (s.drums && !_drumsWas && _calmLong > 4f) _scatter = 1f;
             if (s.drums) _calmLong = 0f;
@@ -126,7 +133,7 @@ namespace TrippinStage
             flow.SetFloat("_Turb", _turb * (1f + 6f * _scatter));
             flow.SetFloat("_Stiff", 5f * (1f - 0.85f * _scatter));
             flow.SetFloat("_Push", 6f * _bass * (1f - s.calm) + 25f * _scatter);
-            flow.SetFloat("_Scale", 1f + 0.35f * _bass * (1f - 0.5f * s.calm));
+            flow.SetFloat("_Scale", (1f + 0.35f * _bass * (1f - 0.5f * s.calm)) * sizeAmt);
             flow.SetFloat("_Rot", _rot);
             flow.SetFloat("_Wave", 160f * _waveAmp);
             flow.SetFloat("_WaveR", _waveR);
@@ -138,8 +145,8 @@ namespace TrippinStage
             // Orbit: speed on the flow clock, direction swinging per phrase.
             float phrase = s.beat / 64f * Mathf.PI * 2f;
             // Direction eases through zero as the phrase sine turns — no snap.
-            _orbit += dt * (0.08f + 0.12f * s.intensity) * Mathf.Sin(phrase * 0.5f);
-            var p = new Vector3(Mathf.Sin(_orbit) * 34f, 6f + Mathf.Sin(phrase) * 9f, Mathf.Cos(_orbit) * 34f);
+            _orbit += dt * (0.08f + 0.12f * s.intensity) * Mathf.Sin(phrase * 0.5f) * Mathf.Clamp(s.speed, 0f, 4f);
+            var p = new Vector3(Mathf.Sin(_orbit) * 34f, 6f + Mathf.Sin(phrase) * 9f, Mathf.Cos(_orbit) * 34f) * zoom;
             // First frame after a cut-in: on the orbit, not eased in from the previous show's camera.
             cam.transform.position = _placeCam ? p : Vector3.Lerp(cam.transform.position, p, 1f - Mathf.Exp(-dt * 1.5f));
             _placeCam = false;
@@ -151,7 +158,7 @@ namespace TrippinStage
             _glowT.rotation = Quaternion.LookRotation(cam.transform.position - _glowT.position);
             _glowT.localScale = Vector3.one * (26f + 14f * _energy);
             _glowM.SetFloat("_Glow", 0.12f + 0.3f * s.intensity + 0.5f * Mathf.SmoothStep(0, 1, _scatter));
-            _glowM.SetFloat("_Hue", 0.55f + 0.1f * Mathf.Sin(phrase * 0.25f));
+            _glowM.SetFloat("_Hue", glowHue + 0.1f * Mathf.Sin(phrase * 0.25f));
             _nebM.SetFloat("_Wisp", 0.4f + 0.35f * _energy);
         }
     }

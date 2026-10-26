@@ -19,6 +19,15 @@ namespace TrippinStage
     {
         [Header("Assigned by StageBuilder")]
         public Camera cam;
+        [TrippinParam("Laser formation bars", 1f, 16f)] public float formBars = 4f;
+        [TrippinParam("Lasers", 0f, 2f)] public float lasers = 1f;
+        [TrippinParam("Light shafts", 0f, 3f)] public float shafts = 1f;
+        [TrippinParam("LED walls", 0f, 2f)] public float walls = 1f;
+        [TrippinParam("Pyro", 0f, 1f)] public float pyro = 1f;
+        [TrippinParam("Haze", 0f, 3f)] public float hazeAmt = 1f;
+        [TrippinParam("Shot bars", 2f, 16f)] public float shotBars = 8f;
+        [TrippinParam("Camera distance", 0.5f, 2f)] public float zoom = 1f;
+        readonly ClkAcc _camClk = new ClkAcc();
         public RenderTexture output;
         public Material beamMat, ledMat, structMat, crowdMat, hazeMat, addMat;
         public Material confettiMat, phoneMat, sunMat, crowdMeshMat;
@@ -707,7 +716,7 @@ namespace TrippinStage
             if (bar != _lastBar)
             {
                 _lastBar = bar;
-                if (s.drums && s.intensity > 0.75f && bar % 8 == 0)
+                if (pyro > 0.5f && s.drums && s.intensity > 0.75f && bar % 8 == 0)
                 {
                     int k = (bar / 8) % 5;
                     Fire(_pyro[k], 40);
@@ -717,13 +726,13 @@ namespace TrippinStage
 
             // Fog thickens through a build and puffs out on the drop.
             for (int i = 0; i < _hazeM.Count; i++)
-                _hazeM[i].SetFloat("_Density", _hazeBase[i] * (1f + 0.8f * DropDirector.Tension + 0.8f * DropDirector.Impact));
+                _hazeM[i].SetFloat("_Density", _hazeBase[i] * hazeAmt * (1f + 0.8f * DropDirector.Tension + 0.8f * DropDirector.Impact));
 
             UpdateLasers(s, beat, bar);
             UpdateSetPieces(s, beat, dt);
             UpdateShafts(s, beat);
             UpdateWalls(s, beat, bar);
-            UpdateCamera(s, beat, dt);
+            UpdateCamera(s, _camClk.Step(beat, s.speed), dt);
             // Fixture glows flicker with the high hits.
             float hh = s.hits4 != null && s.hits4.Length > 3 ? s.hits4[3] : 0f;
             _mpb.Clear();
@@ -805,7 +814,7 @@ namespace TrippinStage
 
         void UpdateLasers(ShowState s, float beat, int bar)
         {
-            int f = (bar / 4) % Formations;
+            int f = (bar / Mathf.Max(1, Mathf.RoundToInt(formBars))) % Formations;
             if (f != _formation)
             {
                 for (int i = 0; i < _lasers.Count; i++) _laserFrom[i] = _lasers[i].localRotation;
@@ -829,7 +838,7 @@ namespace TrippinStage
                 _mpb.SetColor("_Color", c);
                 // Held breath before the drop (dimmer, tighter), full burst after.
                 float drama = (1f - 0.35f * DropDirector.Tension) * (1f + 1.2f * DropDirector.Impact);
-                _mpb.SetFloat("_Intensity", vis * drama * (2.2f + 1.6f * hit) * (0.6f + 0.6f * s.intensity));
+                _mpb.SetFloat("_Intensity", vis * drama * (2.2f + 1.6f * hit) * (0.6f + 0.6f * s.intensity) * lasers);
                 _laserR[i].SetPropertyBlock(_mpb);
             }
         }
@@ -849,7 +858,7 @@ namespace TrippinStage
                 Color c = TrippinLink.Palette(0.55f + u * 0.25f);
                 _mpb.SetColor("_Color", c);
                 float lvl = s.lvl4 != null && s.lvl4.Length > 1 ? s.lvl4[1] : 0.5f;
-                _mpb.SetFloat("_Intensity", 0.05f + 0.08f * lvl + 0.05f * s.calm);
+                _mpb.SetFloat("_Intensity", (0.05f + 0.08f * lvl + 0.05f * s.calm) * shafts);
                 _shaftR[i].SetPropertyBlock(_mpb);
             }
         }
@@ -871,7 +880,7 @@ namespace TrippinStage
                     _wallBlendStart[i] = beat;
                 }
                 m.SetFloat("_Blend", Mathf.Clamp01(beat - _wallBlendStart[i]));
-                m.SetFloat("_Bright", Mathf.Lerp(2.8f, 1.1f, s.calm));
+                m.SetFloat("_Bright", Mathf.Lerp(2.8f, 1.1f, s.calm) * walls);
             }
             _lastBar8 = bar8;
         }
@@ -911,7 +920,7 @@ namespace TrippinStage
         void UpdateCamera(ShowState s, float beat, float dt)
         {
             float phrase = beat / 64f * Mathf.PI * 2f;
-            int bar8 = Mathf.FloorToInt(beat / 32f);
+            int bar8 = Mathf.FloorToInt(beat / (4f * Mathf.Max(2, Mathf.RoundToInt(shotBars))));
             int shot = s.calm > 0.5f ? (bar8 % 2 == 0 ? 0 : 3) : (int)((bar8 * 3 + 1) % ShotPos.Length);
             if (_pinShot >= 0) shot = _pinShot % ShotPos.Length;
             var want = ShotPos[shot] + new Vector3(Mathf.Sin(phrase) * 4f, Mathf.Sin(phrase * 0.5f) * 1.2f, 3f * s.intensity);
@@ -922,7 +931,7 @@ namespace TrippinStage
             want = Vector3.Lerp(want, look, 0.18f * DropDirector.Tension);
             _camPos = Vector3.Lerp(_camPos, want, k);
             _camLook = Vector3.Lerp(_camLook, look, k);
-            cam.transform.position = _camPos;
+            cam.transform.position = _camLook + (_camPos - _camLook) * zoom;
             cam.transform.LookAt(_camLook);
         }
 

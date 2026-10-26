@@ -14,7 +14,14 @@ namespace TrippinStage
 {
     public sealed class OrbShow : KitShow
     {
+        readonly ClkAcc _spinClk = new ClkAcc();
         const int Rings = 2, Segs = 72;
+        [TrippinParam("Ripple depth", 0.2f, 2.5f)] public float depth = 1f;
+        [TrippinParam("Ripple detail", 0.5f, 2.5f)] public float detail = 1f;
+        [TrippinParam("Ring size", 0.5f, 2f)] public float ringSize = 1f;
+        [TrippinParam("Ring spin", 0f, 3f)] public float ringSpin = 1f;
+        [TrippinParam("Colour", 0f, 1f)] public float hue = 0.5f;
+
         Material _m, _mm;
         BeamPool _beams;
         readonly Vector3[] _pt = new Vector3[Segs + 1];
@@ -35,10 +42,10 @@ namespace TrippinStage
 
         void Apply(Material m, float inten)
         {
-            m.SetFloat("_Amp", 0.8f + 1.4f * rx.bassFast + 0.6f * rx.impact);
-            m.SetFloat("_Freq", 1.3f + 1.2f * rx.highFast);
+            m.SetFloat("_Amp", (0.8f + 1.4f * rx.bassFast + 0.6f * rx.impact) * depth);
+            m.SetFloat("_Freq", (1.3f + 1.2f * rx.highFast) * detail);
             m.SetFloat("_Phase", rx.clk * 0.25f);
-            m.SetFloat("_Hue", 0.5f + 0.1f * Mathf.Sin(rx.phrase));
+            m.SetFloat("_Hue", hue + 0.1f * Mathf.Sin(rx.phrase));
             m.SetFloat("_Intensity", inten);
         }
 
@@ -50,10 +57,11 @@ namespace TrippinStage
             var centre = new Vector3(0f, 10f, 0f);
             float spread = (1f - 0.3f * rx.tension) * (1f + 0.4f * rx.impact);
             int n = 0;
+            float sc = _spinClk.Step(rx.clk, ringSpin);
             for (int k = 0; k < Rings; k++)
             {
-                float rad = (9.5f + 3f * k) * spread * (1f + 0.1f * rx.bassFast);
-                Quaternion q = Quaternion.AngleAxis((rx.clk * 0.03f * (k == 0 ? 1f : -1f) + 0.7f * Mathf.Sin(rx.phrase + k)) * Mathf.Rad2Deg, new Vector3(0.3f + 0.4f * k, 1f, 0.2f).normalized)
+                float rad = (9.5f + 3f * k) * spread * ringSize * (1f + 0.1f * rx.bassFast);
+                Quaternion q = Quaternion.AngleAxis((sc * 0.03f * (k == 0 ? 1f : -1f) + 0.7f * ringSpin * Mathf.Sin(rx.phrase + k)) * Mathf.Rad2Deg, new Vector3(0.3f + 0.4f * k, 1f, 0.2f).normalized)
                               * Quaternion.AngleAxis(30f + 35f * k, Vector3.right);
                 for (int i = 0; i <= Segs; i++)
                 {
@@ -63,7 +71,7 @@ namespace TrippinStage
                 for (int i = 0; i < Segs; i++)
                 {
                     float lvl = rx.Spec(Mathf.Abs(Mathf.Sin((i + 0.5f) / Segs * Mathf.PI)));
-                    _beams.Set(n++, _pt[i], _pt[i + 1], Kit.Hue(0.5f + 0.15f * k + lvl * 0.2f), gain * (0.35f + 1.1f * lvl));
+                    _beams.Set(n++, _pt[i], _pt[i + 1], Kit.Hue(hue + 0.15f * k + lvl * 0.2f), gain * (0.35f + 1.1f * lvl));
                 }
             }
             rig.Orbit(cam, rx, 30f, 11f, 10f, dt);

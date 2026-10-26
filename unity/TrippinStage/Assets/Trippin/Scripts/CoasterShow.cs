@@ -21,6 +21,12 @@ namespace TrippinStage
     {
         public override bool UsesCamera => false;
 
+        [TrippinParam("Lens width", 0.7f, 1.4f)] public float lens = 1f;
+        [TrippinParam("Rail lights", 0f, 2f)] public float railLights = 1f;
+        [TrippinParam("Rail colour", 0f, 1f)] public float railHue = 0.55f;
+        [TrippinParam("Kick ring", 0f, 2f)] public float kickRing = 1f;
+        [TrippinParam("Fog distance", 200f, 800f)] public float fog = 420f;
+
         public Material coasterCityMat, deckMat, noseMat, skyMat;
 
         const float LAP_BEATS = 96f;
@@ -304,7 +310,7 @@ namespace TrippinStage
 
             cam.transform.position = ro;
             cam.transform.rotation = Quaternion.LookRotation(fwd, upv);
-            cam.fieldOfView = Mathf.Lerp(47f, 62f, spdN);
+            cam.fieldOfView = Mathf.Lerp(47f, 62f, spdN) * lens;
 
             // Rail chase lights running forward on the beat (calm-aware).
             float bp = Mathf.Lerp(Mathf.Exp(-s.beat_phase * 6f), 0.25f, s.calm);
@@ -313,9 +319,11 @@ namespace TrippinStage
             {
                 float thi = i / (float)N * TAUf;
                 float chase = Mathf.Pow(0.5f + 0.5f * Mathf.Cos(thi * 260f - flowPh), 8f);
-                float k = (0.5f + 1.8f * chase * (0.4f + rx.Spec(0.1f))) * (0.6f + 0.9f * bp) * drive;
+                float k = (0.5f + 1.8f * chase * (0.4f + rx.Spec(0.1f))) * (0.6f + 0.9f * bp) * drive * railLights;
                 _railL.K[i] = _railR.K[i] = k;
             }
+            _railL.Mat.SetFloat("_Hue", railHue);
+            _railR.Mat.SetFloat("_Hue", railHue);
             _railL.Apply(drive);
             _railR.Apply(drive);
             _deckM.SetFloat("_Gain", drive);
@@ -323,7 +331,7 @@ namespace TrippinStage
             _skyM.SetFloat("_Glow", 0.3f + 0.6f * s.intensity);
 
             // City: kick ring over the rooftops, more windows as it builds.
-            if (rx.kick > 0.8f && _wave > 60f) { _wave = 0f; _waveAmp = Mathf.Clamp01(rx.kick + 0.3f); }
+            if (rx.kick > 0.8f && _wave > 60f) { _wave = 0f; _waveAmp = Mathf.Clamp01(rx.kick + 0.3f) * kickRing; }
             _wave += dt * 140f;
             _waveAmp *= Mathf.Exp(-dt / 1.2f);
             _lit = Mathf.Lerp(_lit, rx.lum, 1f - Mathf.Exp(-dt * 4f));
@@ -332,7 +340,7 @@ namespace TrippinStage
                 m.SetFloat("_Wave", _wave);
                 m.SetFloat("_WaveAmp", _waveAmp);
                 m.SetFloat("_Lit", _lit);
-                m.SetFloat("_FogDist", 420f);
+                m.SetFloat("_FogDist", fog);
                 m.SetFloat("_Block", S);
             }
 

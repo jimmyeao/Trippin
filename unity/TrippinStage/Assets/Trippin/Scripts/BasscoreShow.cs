@@ -20,6 +20,16 @@ namespace TrippinStage
     public class BasscoreShow : MonoBehaviour
     {
         public Camera cam;
+        [TrippinParam("Colour", 0f, 1f)] public float hueBase = 0.02f;
+        [TrippinParam("Ripple depth", 0.2f, 2.5f)] public float ripple = 1f;
+        [TrippinParam("Kick rings", 0f, 2f)] public float kickRings = 1f;
+        [TrippinParam("Ring speed", 0.3f, 2.5f)] public float ringSpeed = 1f;
+        [TrippinParam("Shaft height", 0.3f, 2f)] public float shaftH = 1f;
+        [TrippinParam("Shafts", 0f, 2f)] public float shafts = 1f;
+        [TrippinParam("Haze", 0f, 3f)] public float hazeAmt = 1f;
+        [TrippinParam("Camera distance", 0.5f, 2f)] public float zoom = 1f;
+        // Trippin's Speed control runs the camera's travel (ShowState.speed).
+        readonly ClkAcc _camClk = new ClkAcc();
         public Material membraneMat, beamMat, groundMat, hazeMat;
 
         const int Rings = 72, Segs = 192, Shafts = 24, Slots = 4;
@@ -211,7 +221,7 @@ namespace TrippinStage
             var ra = Vector4.zero;
             // Plate radii per second. 0.22-0.32 took 3-4.5 s per ring, so kick rings piled
             // into a near-static ripple instead of reading as one pulse per kick.
-            float speed = 0.9f + 0.4f * Mathf.Clamp01(s.intensity);
+            float speed = (0.9f + 0.4f * Mathf.Clamp01(s.intensity)) * ringSpeed;
             for (int i = 0; i < Slots; i++)
             {
                 if (!_live[i]) continue;
@@ -220,13 +230,13 @@ namespace TrippinStage
                 if (_r[i] > 1.05f) { _live[i] = false; continue; }
                 float env = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(_age[i] / 0.15f)) * Mathf.Pow(Mathf.Clamp01(1f - _r[i]), 1.5f);
                 rr[i] = _r[i];
-                ra[i] = 1.8f * _str[i] * env;
+                ra[i] = 1.8f * _str[i] * env * kickRings;
             }
 
             float level = Mathf.Lerp(0.8f, 1f, _calmSlow) * (1f - 0.35f * tn) * (1f + 0.8f * _impS);
-            float amp = (0.5f + 1.9f * Mathf.Clamp01(_bassSlow) + 1.2f * _bassFast) * (1f - 0.4f * tn);
+            float amp = (0.5f + 1.9f * Mathf.Clamp01(_bassSlow) + 1.2f * _bassFast) * (1f - 0.4f * tn) * ripple;
             float phase = clk * 0.12f + 1.5f * Mathf.Sin(phrase); // direction reverses with the phrase
-            float hue = 0.02f + 0.05f * Mathf.Sin(phrase * 0.5f);
+            float hue = hueBase + 0.05f * Mathf.Sin(phrase * 0.5f);
             _mpb.Clear();
             // 0.45 left the plate a faint wireframe under the shafts (M2 render): it's the subject.
             ApplyPlate(_plateM, amp, phase, rr, ra, hue, 0.9f * level);
@@ -237,21 +247,21 @@ namespace TrippinStage
             {
                 float a = i / (float)Shafts * Mathf.PI * 2f;
                 float wave = 0.6f + 0.4f * Mathf.Sin(a * 3f - clk * 0.1f);
-                float h = 6f + (22f * Mathf.Clamp01(_bassSlow) + 10f * _kick + 14f * tn + 18f * _impS) * wave;
+                float h = (6f + (22f * Mathf.Clamp01(_bassSlow) + 10f * _kick + 14f * tn + 18f * _impS) * wave) * shaftH;
                 _shaft[i].localScale = new Vector3(1f, h, 1f);
                 Color c = TrippinLink.Palette(hue + 0.1f + i / (float)Shafts * 0.4f);
                 float mx = Mathf.Max(c.r, Mathf.Max(c.g, c.b), 1e-3f);
                 c = new Color(c.r / mx, c.g / mx, c.b / mx);
                 _mpb.Clear();
                 _mpb.SetColor("_Color", c);
-                _mpb.SetFloat("_Intensity", 0.3f * level * (0.6f + 0.6f * s.intensity)); // 0.5 out-shone the plate
+                _mpb.SetFloat("_Intensity", 0.3f * level * (0.6f + 0.6f * s.intensity) * shafts); // 0.5 out-shone the plate
                 _shaftR[i].SetPropertyBlock(_mpb);
             }
 
             for (int i = 0; i < _hazeM.Length; i++)
-                _hazeM[i].SetFloat("_Density", _hazeBase[i] * (1f + 0.8f * tn + 0.8f * _impS));
+                _hazeM[i].SetFloat("_Density", _hazeBase[i] * hazeAmt * (1f + 0.8f * tn + 0.8f * _impS));
 
-            UpdateCamera(beat, dt, tn);
+            UpdateCamera(_camClk.Step(beat, s.speed), dt, tn);
         }
 
         static void ApplyPlate(Material m, float amp, float phase, Vector4 rings, Vector4 ringAmp, float hue, float inten)
@@ -278,7 +288,7 @@ namespace TrippinStage
             float k = 1f - Mathf.Exp(-dt * 0.8f);
             _camPos = Vector3.Lerp(_camPos, want, k);
             _camLook = Vector3.Lerp(_camLook, look, k);
-            cam.transform.position = _camPos;
+            cam.transform.position = _camLook + (_camPos - _camLook) * zoom;
             cam.transform.LookAt(_camLook);
         }
     }

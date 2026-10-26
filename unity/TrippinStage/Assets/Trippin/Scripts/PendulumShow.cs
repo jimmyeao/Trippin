@@ -18,12 +18,19 @@ namespace TrippinStage
 {
     public sealed class PendulumShow : KitShow
     {
+        readonly ClkAcc _spinClk = new ClkAcc();
         const int Traces = 3, Pts = 260, Rods = 6;
         // Frequency ratios (x, y, z) per figure; the three traces share a figure with phase offsets.
         static readonly float[,] Ratios =
         {
             { 2f, 3f, 5f }, { 3f, 4f, 5f }, { 3f, 5f, 7f }, { 2f, 5f, 3f }, { 4f, 5f, 3f }, { 5f, 6f, 4f },
         };
+        [TrippinParam("Size", 0.5f, 2f)] public float sizeAmt = 1f;
+        [TrippinParam("Trail length", 0.3f, 2f)] public float trail = 1f;
+        [TrippinParam("Thickness", 0.3f, 2.5f)] public float thick = 1f;
+        [TrippinParam("Spin", 0f, 3f)] public float spinAmt = 1f;
+        [TrippinParam("Colour", 0f, 1f)] public float hue = 0f;
+
         TubeRibbon[] _t = new TubeRibbon[Traces];
         GlowPool _heads;
         BeamPool _rods;
@@ -62,10 +69,10 @@ namespace TrippinStage
             float gain = rx.Gain();
             // 0.45 swung three thick ribbons out so fast the drop read as a lurch (M2:
             // frame change ~55 for 0.3 s vs a 2.4 median); 0.25 keeps the burst.
-            float shrink = (1f - 0.4f * rx.tension) * (1f + 0.25f * rx.impact);
+            float shrink = (1f - 0.4f * rx.tension) * (1f + 0.25f * rx.impact) * sizeAmt;
             float ax = (7f + 5f * rx.bassFast) * shrink, ay = (6f + 5f * rx.midFast) * shrink, az = (7f + 4f * rx.mhFast) * shrink;
             float T = rx.clk * 0.12f;
-            Quaternion turn = Quaternion.AngleAxis((rx.clk * 0.4f + 40f * Mathf.Sin(rx.phrase)) * 1f, Vector3.up);
+            Quaternion turn = Quaternion.AngleAxis(_spinClk.Step(rx.clk, spinAmt) * 0.4f + 40f * spinAmt * Mathf.Sin(rx.phrase), Vector3.up);
             var centre = new Vector3(0f, 12f, 0f);
             Quaternion face = cam.transform.rotation;
             for (int tr = 0; tr < Traces; tr++)
@@ -75,24 +82,24 @@ namespace TrippinStage
                 for (int i = 0; i < Pts; i++)
                 {
                     float u = i / (Pts - 1f);          // 0 = tail, 1 = pen
-                    float tt = T - (1f - u) * 5.2f;
+                    float tt = T - (1f - u) * 5.2f * trail;
                     Vector3 p = Pos(tt, m, ph, ax, ay, az);
                     p += new Vector3(0f, 0.5f * rx.highFast * Mathf.Sin(u * 40f + rx.clkHigh * 0.5f), 0f);
                     t.P[i] = centre + turn * p;
                     float taper = Mathf.Pow(u, 0.8f);
-                    t.R[i] = 0.05f + 0.36f * taper * (1f + 0.7f * rx.kick);
+                    t.R[i] = (0.05f + 0.36f * taper * (1f + 0.7f * rx.kick)) * thick;
                     t.K[i] = (0.15f + 1.5f * taper * taper) * (0.7f + 0.6f * rx.Spec(u * 0.8f + tr * 0.06f));
-                    t.Hu[i] = tr * 0.28f + u * 0.3f;
+                    t.Hu[i] = hue + tr * 0.28f + u * 0.3f;
                 }
                 t.Mat.SetFloat("_Phase", -rx.clk * 0.3f);
                 t.Mat.SetFloat("_Hue", 0.1f);
                 t.Apply(gain);
                 Vector3 head = t.P[Pts - 1];
-                _heads.Set(tr, head, 1.6f + 1.4f * rx.kick, tr * 0.28f + 0.3f, gain * (0.9f + 0.9f * rx.lum), face);
+                _heads.Set(tr, head, 1.6f + 1.4f * rx.kick, hue + tr * 0.28f + 0.3f, gain * (0.9f + 0.9f * rx.lum), face);
                 // Two thin suspension rods from the pen to a pivot overhead (the pendulum).
                 Vector3 pivA = new Vector3(-8f + tr * 8f, 34f, -6f), pivB = new Vector3(8f - tr * 8f, 34f, 6f);
-                _rods.Set(tr * 2, pivA, head, Kit.Hue(0.1f + tr * 0.28f), gain * 0.18f);
-                _rods.Set(tr * 2 + 1, pivB, head, Kit.Hue(0.1f + tr * 0.28f), gain * 0.18f);
+                _rods.Set(tr * 2, pivA, head, Kit.Hue(hue + 0.1f + tr * 0.28f), gain * 0.18f);
+                _rods.Set(tr * 2 + 1, pivB, head, Kit.Hue(hue + 0.1f + tr * 0.28f), gain * 0.18f);
             }
             rig.Orbit(cam, rx, 38f, 12f, 12f, dt, 0.9f);
         }

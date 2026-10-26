@@ -81,8 +81,8 @@ namespace TrippinStage
 
         protected override void CameraPose(out Vector3 pos, out Vector3 look)
         {
-            float sway = Mathf.Sin(rx.phrase * 0.5f);
-            pos = new Vector3(sway * 7f, 4.6f + 0.6f * Mathf.Sin(rx.phrase), -6f + 6f * rx.tension);
+            float sw = Mathf.Sin(rx.phrase * 0.5f) * sway;
+            pos = new Vector3(sw * 7f, 4.6f + 0.6f * sway * Mathf.Sin(rx.phrase), -6f + 6f * rx.tension);
             look = new Vector3(0f, 9.5f, StageZ);
         }
     }
