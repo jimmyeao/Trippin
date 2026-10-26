@@ -1,6 +1,8 @@
 // Wet asphalt over the mirrored reflections: a dark, mostly opaque layer
 // that thins out in puddles, so the colossus and the city lights reflect
-// patchily like a rain-soaked plaza. Fades into the fog with distance.
+// patchily like a rain-soaked plaza. Fades into the fog with distance, or
+// (_FarFade > 0) out to nothing by that distance, so a backdrop's own floor
+// carries on beyond it.
 Shader "Trippin/Ground"
 {
     Properties { }
@@ -17,7 +19,7 @@ Shader "Trippin/Ground"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "TrippinCommon.hlsl"
 
-            float _FogDist;
+            float _FogDist, _FarFade;
 
             struct A { float4 pos : POSITION; };
             struct V { float4 pos : SV_POSITION; float3 wp : TEXCOORD0; };
@@ -37,7 +39,9 @@ Shader "Trippin/Ground"
                 float fog = 1.0 - exp(-dist / _FogDist);
                 float3 fogCol = lerp(float3(0.02, 0.02, 0.03), TPalette(0.45) * 0.12, 0.6);
                 col = lerp(col, fogCol, fog);
-                return float4(col, lerp(a, 1.0, fog));
+                float alpha = lerp(a, 1.0, fog);
+                if (_FarFade > 0.0) alpha *= 1.0 - smoothstep(_FarFade * 0.5, _FarFade, dist);
+                return float4(col, alpha);
             }
             ENDHLSL
         }

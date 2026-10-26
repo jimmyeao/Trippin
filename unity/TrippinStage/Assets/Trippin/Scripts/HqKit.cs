@@ -22,6 +22,8 @@ namespace TrippinStage
         int _head, _n, _total;
         readonly Vector4[] _b0 = new Vector4[64], _b1 = new Vector4[64], _b2 = new Vector4[64], _b3 = new Vector4[64], _b4 = new Vector4[64], _b5 = new Vector4[64];
         public Vector3 Gravity = new Vector3(0f, -9.8f, 0f);
+        /// A floor the sparks bounce off, keeping `Bounce` of their fall (none by default).
+        public float FloorY = -1e6f, Bounce = 0.35f;
         public Material Mat => _mat;
         public Material MirrorMat => _mirMat;
 
@@ -90,6 +92,8 @@ namespace TrippinStage
             _cs.SetInt("_Count", Count);
             _cs.SetFloat("_Dt", dt);
             _cs.SetVector("_Gravity", Gravity);
+            _cs.SetFloat("_FloorY", FloorY);
+            _cs.SetFloat("_Bounce", Bounce);
             _cs.SetBuffer(_kStep, "_P", _buf);
             _cs.Dispatch(_kStep, (Count + 255) / 256, 1, 1);
             foreach (var m in _mirMat != null ? new[] { _mat, _mirMat } : new[] { _mat })

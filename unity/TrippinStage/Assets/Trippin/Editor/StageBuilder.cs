@@ -315,6 +315,8 @@ namespace TrippinStage.EditorTools
                 ("unity_neon_portals", typeof(NeonPortalsShow)),
                 ("unity_fire", typeof(FireShow)),
                 ("unity_ink", typeof(InkShow)),
+                ("unity_vortex", typeof(VortexShow)),
+                ("unity_sparks", typeof(SparksShow)),
             };
             // Extra materials for the ported scenes: instancing must be on the
             // material asset or the build strips the variant (AGENTS.md).
@@ -366,7 +368,21 @@ namespace TrippinStage.EditorTools
                     fw.backdropMat.SetTexture("_MainTex", Tex("HqSkyline.png", TextureWrapMode.Mirror));
                     fw.skyMat = co.skyMat;
                 }
+                if (ks is VortexShow vx)
+                {
+                    vx.vortexMat = Mat("Trippin/HqVortex", "HqVortex");
+                    vx.skyMat = Mat("Trippin/HqBackdrop", "HqStormSky");
+                    vx.skyMat.SetTexture("_MainTex", Tex("HqStormSky.png"));
+                }
                 if (ks is InkShow ink) ink.inkMat = Mat("Trippin/HqInk", "HqInk");
+                if (ks is SparksShow sk)
+                {
+                    sk.sparkMat = Mat("Trippin/HqSpark", "HqSpark");
+                    sk.smokeMat = Mat("Trippin/HqSmoke", "HqSmoke");
+                    sk.backMat = Mat("Trippin/HqBackdrop", "HqFoundry");
+                    sk.backMat.SetTexture("_MainTex", Tex("HqFoundry.png"));
+                    sk.particles = AssetDatabase.LoadAssetAtPath<ComputeShader>($"{Root}/Shaders/HqParticles.compute");
+                }
                 if (ks is FireShow fire)
                 {
                     fire.fireMat = Mat("Trippin/HqFire", "HqFire");

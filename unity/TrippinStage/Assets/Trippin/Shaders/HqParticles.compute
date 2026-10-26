@@ -1,7 +1,8 @@
 // GPU particles for the HQ shows (HqKit.cs ParticleField): a ring buffer of
 // up to a few hundred thousand sparks. Emit writes a frame's bursts into the
 // ring (one thread per new particle, each finding its burst by the bursts'
-// running start offsets); Step integrates them (gravity, drag, life).
+// running start offsets); Step integrates them (gravity, drag, life, and
+// an optional floor to bounce off).
 #pragma kernel Emit
 #pragma kernel Step
 
@@ -104,6 +105,7 @@ void Emit(uint3 id : SV_DispatchThreadID)
 
 float _Dt;
 float3 _Gravity;
+float _FloorY, _Bounce;          // a floor the sparks bounce off (far below = none)
 
 [numthreads(256, 1, 1)]
 void Step(uint3 id : SV_DispatchThreadID)
@@ -115,6 +117,13 @@ void Step(uint3 id : SV_DispatchThreadID)
     p.vel += _Gravity * p.grav * _Dt;
     p.vel *= exp(-p.drag * _Dt);
     p.pos += p.vel * _Dt;
+    if (p.pos.y < _FloorY && p.vel.y < 0.0)
+    {
+        // Bounce: lose most of the fall, skitter on along the floor.
+        p.pos.y = _FloorY;
+        p.vel.y = -p.vel.y * _Bounce * (0.6 + 0.8 * frac(p.seed * 7.13 + p.life));
+        p.vel.xz *= 0.75;
+    }
     p.life -= _Dt;
     _P[id.x] = p;
 }

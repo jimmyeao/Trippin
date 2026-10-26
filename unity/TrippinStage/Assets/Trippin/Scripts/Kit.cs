@@ -279,7 +279,7 @@ namespace TrippinStage
         }
 
         /// A big floor quad with the wet-asphalt Ground material (fogs to the palette).
-        public static void Floor(Transform parent, Material groundMat, float fog)
+        public static Material Floor(Transform parent, Material groundMat, float fog)
         {
             var g = GameObject.CreatePrimitive(PrimitiveType.Quad);
             Object.Destroy(g.GetComponent<Collider>());
@@ -290,6 +290,7 @@ namespace TrippinStage
             var m = new Material(groundMat);
             m.SetFloat("_FogDist", fog);
             g.GetComponent<Renderer>().sharedMaterial = m;
+            return m;
         }
 
         /// Quads at `pos` (centre) with the given sizes, shared hue-offset per layer.
@@ -690,9 +691,12 @@ namespace TrippinStage
         }
 
         /// Floor (fogged to the palette) plus two haze layers: the common stage.
+        /// The floor Env made (null without one).
+        protected Material floorMat;
+
         protected void Env(float fog = 140f, float hazeBase = 0.07f, bool floor = true)
         {
-            if (floor) Kit.Floor(transform, groundMat, fog);
+            if (floor) floorMat = Kit.Floor(transform, groundMat, fog);
             haze = new HazeSet(transform, hazeMat,
                 new[] { new Vector3(0, 10f, 14f), new Vector3(0, 10f, -14f) },
                 new[] { new Vector2(120f, 36f), new Vector2(120f, 36f) },
