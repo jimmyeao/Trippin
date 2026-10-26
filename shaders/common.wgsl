@@ -45,6 +45,9 @@ struct U {
     clock4: vec4<f32>,
     // x: 1 = transparent background (present writes alpha); yzw spare.
     misc4: vec4<f32>,
+    // The Unity show's Brightness, Saturation, Hue shift (turns); w spare.
+    // Identity (1, 1, 0, 0) for every other scene. See ext_look.
+    look4: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> u: U;
@@ -357,4 +360,18 @@ fn vid_grade(c: vec3<f32>, t: f32, amt: f32) -> vec3<f32> {
     let p = palette(t);
     let tinted = l * p * p * 2.2;
     return mix(c, tinted, amt * smoothstep(0.05, 0.6, l));
+}
+
+// The Unity show's Brightness, Saturation and Hue shift controls (u.look4,
+// showparams::look) on the frame the engine hands back (linear, after the
+// unity_* stub undoes present's tonemap). Identity for every other scene.
+fn ext_look(c: vec3<f32>) -> vec3<f32> {
+    var x = c * u.look4.x;
+    let l = dot(x, vec3<f32>(0.2126, 0.7152, 0.0722));
+    x = max(vec3<f32>(l) + (x - vec3<f32>(l)) * u.look4.y, vec3<f32>(0.0));
+    // Hue: rotate about the grey axis (Rodrigues), a turn per 1.0.
+    let a = u.look4.z * 6.2831853;
+    let k = vec3<f32>(0.57735027);
+    x = x * cos(a) + cross(k, x) * sin(a) + k * dot(k, x) * (1.0 - cos(a));
+    return max(x, vec3<f32>(0.0));
 }

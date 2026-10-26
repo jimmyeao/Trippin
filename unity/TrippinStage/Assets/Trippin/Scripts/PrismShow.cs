@@ -21,6 +21,16 @@ namespace TrippinStage
     public class PrismShow : MonoBehaviour
     {
         public Camera cam;
+        [TrippinParam("Formation bars", 1f, 16f)] public float formBars = 4f;
+        [TrippinParam("Twist", 0.3f, 2f)] public float twist = 1f;
+        [TrippinParam("Cage size", 0.5f, 1.6f)] public float cage = 1f;
+        [TrippinParam("Spin", 0f, 3f)] public float spinAmt = 1f;
+        [TrippinParam("Colour", 0f, 1f)] public float hueOff = 0f;
+        [TrippinParam("Haze", 0f, 3f)] public float hazeAmt = 1f;
+        readonly ClkAcc _spinClk = new ClkAcc();
+        [TrippinParam("Camera distance", 0.5f, 2f)] public float zoom = 1f;
+        // Trippin's Speed control runs the camera's travel (ShowState.speed).
+        readonly ClkAcc _camClk = new ClkAcc();
         public Material beamMat, groundMat, hazeMat;
 
         const int N = 96;
@@ -178,7 +188,7 @@ namespace TrippinStage
             float beat = s.beat;
             DropDirector.Tick(s, dt);
             int bar = Mathf.FloorToInt(beat / 4f);
-            int f = (bar / 4) % Formations;
+            int f = (bar / Mathf.Max(1, Mathf.RoundToInt(formBars))) % Formations;
             float clk = s.clock4 != null && s.clock4.Length > 1 ? s.clock4[1] : beat;
             float ph = Mathf.Sin(beat / 32f * Mathf.PI * 2f);
             float pres0 = s.pres4 != null && s.pres4.Length > 0 ? s.pres4[0] : 0.4f;
@@ -193,10 +203,10 @@ namespace TrippinStage
             _midEase = Eased.Follow(_midEase, Eased.Lvl(s, 1), 4f, 4f, dt);
             float pinch = Mathf.Clamp01(_bassSlow + 0.4f * _midEase);
             // Twist breathes with the slow bass; the drop unwinds a little extra.
-            float tw = 1.1f + 0.9f * pinch + 0.5f * _bassFast + 0.35f * ph + 0.8f * imp;
+            float tw = (1.1f + 0.9f * pinch + 0.5f * _bassFast + 0.35f * ph + 0.8f * imp) * twist;
             // 0.35 rather than 0.5: with the camera creeping in, a 0.5 shrink read as ~0.72
             // on screen and the build's contraction was barely visible (M2 render).
-            float scale = (1f - 0.65f * tn) * (1f + 0.6f * imp) * (1f + 0.18f * _kick); // the cage breathes out on each kick
+            float scale = (1f - 0.65f * tn) * (1f + 0.6f * imp) * (1f + 0.18f * _kick) * cage; // the cage breathes out on each kick
 
             if (_snap)
             {
@@ -215,12 +225,12 @@ namespace TrippinStage
             float m = Mathf.SmoothStep(0, 1, Mathf.Clamp01(beat - _formStart));
 
             // Cage turn: smooth energy clock plus a phrase swing that reverses.
-            float yaw = (clk * 0.012f + 1.1f * Mathf.Sin(beat / 64f * Mathf.PI * 2f)) * Mathf.Rad2Deg;
+            float yaw = (_spinClk.Step(clk, spinAmt) * 0.012f + 1.1f * spinAmt * Mathf.Sin(beat / 64f * Mathf.PI * 2f)) * Mathf.Rad2Deg;
             var rot = Quaternion.Euler(0f, yaw, 0f);
 
             float calmDim = Mathf.Lerp(1f, 0.3f, _calmSlow);
             float drama = (1f - 0.5f * tn) * (1f + 1.6f * imp);
-            float hueBase = 0.1f * f + 0.03f * Mathf.Sin(beat / 64f * Mathf.PI * 2f);
+            float hueBase = hueOff + 0.1f * f + 0.03f * Mathf.Sin(beat / 64f * Mathf.PI * 2f);
             for (int i = 0; i < N; i++)
             {
                 Ends(i, f, tw, pinch, clk, ph, out var ta, out var tb);
@@ -244,9 +254,9 @@ namespace TrippinStage
             }
 
             for (int i = 0; i < _hazeM.Length; i++)
-                _hazeM[i].SetFloat("_Density", _hazeBase[i] * (1f + 0.8f * tn + 0.8f * imp));
+                _hazeM[i].SetFloat("_Density", _hazeBase[i] * hazeAmt * (1f + 0.8f * tn + 0.8f * imp));
 
-            UpdateCamera(beat, dt, tn);
+            UpdateCamera(_camClk.Step(beat, s.speed), dt, tn);
         }
 
         // Outside the cage, low, swinging round with the phrase; creeps in on
@@ -261,7 +271,7 @@ namespace TrippinStage
             float k = 1f - Mathf.Exp(-dt * 0.8f);
             _camPos = Vector3.Lerp(_camPos, want, k);
             _camLook = Vector3.Lerp(_camLook, look, k);
-            cam.transform.position = _camPos;
+            cam.transform.position = _camLook + (_camPos - _camLook) * zoom;
             cam.transform.LookAt(_camLook);
         }
     }

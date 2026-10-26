@@ -6,6 +6,12 @@ namespace TrippinStage
     public class TidalCathedralShow : MonoBehaviour
     {
         public Camera cam;
+        [TrippinParam("Formation bars", 1f, 16f)] public float formBars = 4f;
+        [TrippinParam("Beam scan", 0f, 4f)] public float scanAmt = 1f;
+        [TrippinParam("Beams", 0f, 4f)] public float beams = 1f;
+        [TrippinParam("Beam colour", 0f, 1f)] public float beamHue = 0.12f;
+        [TrippinParam("Sail swing", 0f, 2f)] public float sailSwing = 1f;
+        [TrippinParam("Kick pull", 0f, 2f)] public float kickPull = 1f;
         public Material sailMat, seaMat, skyMat, glowMat, coreMat, frameMat, hazeMat, beamMat;
 
         const int Pairs = 4;
@@ -184,10 +190,11 @@ namespace TrippinStage
             _energy += (s.energy - _energy) * (1f - Mathf.Exp(-dt / (s.energy > _energy ? 0.12f : 0.6f)));
             _kick += (s.kick - _kick) * (1f - Mathf.Exp(-dt / (s.kick > _kick ? 0.04f : 0.18f)));
             float phrase = s.beat * Mathf.PI / 32f;
-            _current += dt * (0.3f + _energy * 0.95f) * Mathf.Sin(phrase * 0.5f + 0.7f);
+            // Trippin's Speed control runs the current (ShowState.speed).
+            _current += dt * (0.3f + _energy * 0.95f) * Mathf.Sin(phrase * 0.5f + 0.7f) * Mathf.Clamp(s.speed, 0f, 4f);
             for (int i = 0; i < _sails.Length; i++)
             {
-                float swing = Mathf.Sin(phrase * 0.5f + i * 0.26f);
+                float swing = Mathf.Sin(phrase * 0.5f + i * 0.26f) * sailSwing;
                 var m = _sails[i];
                 m.SetFloat("_Bass", _bass);
                 m.SetFloat("_Mids", _mids);
@@ -206,33 +213,34 @@ namespace TrippinStage
 
             float clk1 = s.clock4 != null && s.clock4.Length > 1 ? s.clock4[1] : s.flow;
             float clk2 = s.clock4 != null && s.clock4.Length > 2 ? s.clock4[2] : s.flow * 0.7f;
-            int block = Mathf.FloorToInt(s.beat / 16f);
+            float blockBeats = 4f * Mathf.Max(1, Mathf.RoundToInt(formBars));
+            int block = Mathf.FloorToInt(s.beat / blockBeats);
             int formation = ((block % 4) + 4) % 4;
-            float morph = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(s.beat - block * 16f));
+            float morph = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(s.beat - block * blockBeats));
             var focus = new Vector3(0f, 26f, 92f);
             for (int i = 0; i < _beams.Length; i++)
             {
                 int row = i / 2;
                 float side = i % 2 == 0 ? -1f : 1f;
-                float scan = Mathf.Sin(clk1 * Mathf.PI + i * 1.37f) * (2.5f + 6.5f * _energy)
-                           + Mathf.Sin(s.beat * Mathf.PI + i * 0.9f) * (1.2f + 2.2f * _kick);
+                float scan = (Mathf.Sin(clk1 * Mathf.PI + i * 1.37f) * (2.5f + 6.5f * _energy)
+                           + Mathf.Sin(s.beat * Mathf.PI + i * 0.9f) * (1.2f + 2.2f * _kick)) * scanAmt;
                 float lift = Mathf.Sin(clk2 * Mathf.PI * 0.5f + i * 0.83f) * (1.5f + 4f * _energy);
                 var end = Vector3.Lerp(BeamTarget((formation + 3) % 4, row, side, scan, lift),
                                        BeamTarget(formation, row, side, scan, lift), morph);
                 // Kicks pull the rig part-way toward the window — a dip, not a flash.
-                end = Vector3.Lerp(end, focus, _kick * 0.3f);
+                end = Vector3.Lerp(end, focus, _kick * 0.3f * kickPull);
                 var delta = end - _beams[i].localPosition;
                 _beams[i].localRotation = Quaternion.FromToRotation(Vector3.up, delta.normalized);
                 _beams[i].localScale = new Vector3(1f, delta.magnitude, 1f);
                 _beamProperties.Clear();
-                _beamProperties.SetColor("_Color", Color.Lerp(TrippinLink.Palette(0.12f + i * 0.09f), new Color(0.06f, 0.65f, 0.85f), 0.42f));
-                _beamProperties.SetFloat("_Intensity", (0.2f + 0.45f * _energy + 0.3f * _kick) * (1f - 0.6f * s.calm));
+                _beamProperties.SetColor("_Color", Color.Lerp(TrippinLink.Palette(beamHue + i * 0.09f), new Color(0.06f, 0.65f, 0.85f), 0.42f));
+                _beamProperties.SetFloat("_Intensity", (0.2f + 0.45f * _energy + 0.3f * _kick) * (1f - 0.6f * s.calm) * beams);
                 _beamRenderers[i].SetPropertyBlock(_beamProperties);
             }
 
             float move = s.flow * 0.055f;
             var target = new Vector3(Mathf.Sin(phrase * 0.5f) * 1.8f, 7.5f + Mathf.Sin(move * 0.6f) * 1.1f,
-                                     -12f - 24f * Mathf.Cos(move) - _kick * 2.5f);
+                                     -12f - 24f * Mathf.Cos(move) - _kick * 2.5f * kickPull);
             cam.transform.position = Vector3.Lerp(cam.transform.position, target, 1f - Mathf.Exp(-dt * 1.4f));
             cam.transform.LookAt(new Vector3(Mathf.Sin(phrase * 0.5f), 11f, cam.transform.position.z + 80f));
         }

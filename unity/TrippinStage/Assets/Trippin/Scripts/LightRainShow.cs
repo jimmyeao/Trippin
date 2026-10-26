@@ -14,8 +14,14 @@ namespace TrippinStage
 {
     public sealed class LightRainShow : KitShow
     {
+        readonly ClkAcc _spinClk = new ClkAcc();
         const int N = 240;
         const float Top = 40f;
+        [TrippinParam("Lean", 0f, 1f)] public float leanAmt = 0.25f;
+        [TrippinParam("Streak length", 0.3f, 3f)] public float length = 1f;
+        [TrippinParam("Fall speed", 0.2f, 3f)] public float fallSpeed = 1f;
+        [TrippinParam("Colour", 0f, 1f)] public float hue = 0.3f;
+
         BeamPool _beams;
 
         protected override void Build()
@@ -27,21 +33,22 @@ namespace TrippinStage
         protected override void Frame(ShowState s, float dt)
         {
             float gain = rx.Gain(0.5f, 1.3f);
-            float lean = 0.25f * Mathf.Sin(rx.phrase);
-            float lenBase = 2f + 6f * rx.lum + 4f * rx.bassFast + 8f * rx.impact;
+            float lean = leanAmt * Mathf.Sin(rx.phrase);
+            float lenBase = (2f + 6f * rx.lum + 4f * rx.bassFast + 8f * rx.impact) * length;
             float thin = 1f - 0.5f * rx.tension;
+            float fc = _spinClk.Step(rx.clk, fallSpeed);
             for (int i = 0; i < N; i++)
             {
                 float x = (Kit.H(i, 1) - 0.5f) * 56f, z = (Kit.H(i, 2) - 0.5f) * 44f + 12f;
                 float speed = 0.6f + 0.8f * Kit.H(i, 3);
-                float fall = rx.clk * 0.06f * speed + Kit.H(i, 4);
+                float fall = fc * 0.06f * speed + Kit.H(i, 4);
                 fall -= Mathf.Floor(fall);
                 float y = Top * (1f - fall);
                 float len = (0.5f + Kit.H(i, 5)) * lenBase * thin;
                 var p0 = new Vector3(x + lean * y, y, z);
                 var p1 = new Vector3(x + lean * (y + len), y + len, z);
                 float edge = Mathf.Clamp01(y / 4f) * Mathf.Clamp01((Top - y) / 6f);
-                _beams.Set(i, p0, p1, Kit.Hue(0.3f + x * 0.008f), gain * (0.4f + 0.7f * Kit.H(i, 6)) * edge * thin);
+                _beams.Set(i, p0, p1, Kit.Hue(hue + x * 0.008f), gain * (0.4f + 0.7f * Kit.H(i, 6)) * edge * thin);
             }
             rig.Orbit(cam, rx, 32f, 3.5f, 9f, dt, 0.5f, 0.1f);
         }

@@ -17,6 +17,8 @@ namespace TrippinStage
 {
     public sealed class FluidShow : KitShow
     {
+        public override bool UsesCamera => false;
+
         public ComputeShader sim;
         public Material viewMat;
 

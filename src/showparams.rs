@@ -1,10 +1,15 @@
 //! Per-show controls for the Unity shows (Perform tab > show controls, and
 //! the remote). Two kinds:
 //!
-//! - **Built in** (`BUILTIN`): Speed and Reactivity, for every `unity_*`
-//!   show. Trippin applies them to the feed itself (`link.rs`: the travel
-//!   clocks run faster or slower, the audio levels are scaled), so they
-//!   work with any engine build.
+//! - **Built in** (`builtin`), for every `unity_*` show:
+//!   - Speed: Trippin runs the travel clocks faster or slower (`link.rs`),
+//!     and the engine (v18+) runs the camera's travel at it too.
+//!   - Reactivity: sent in the feed; the engine (v18+) applies it to the
+//!     levels as they arrive, after which no show's auto-gain can undo it
+//!     (a gain on the levels here was cancelled out, or saturated at 1).
+//!   - Brightness, Saturation, Hue: applied by Trippin to the frame the
+//!     engine hands back (`look`, `ext_look` in common.wgsl), so they work
+//!     with any engine build.
 //! - **Show-specific**: knobs a show declares in C# with `[TrippinParam]`.
 //!   The engine writes them to a manifest at startup (`-trippinParams`,
 //!   see `engine.rs`); their values go back in the feed's `knobs` array, in
@@ -33,11 +38,17 @@ pub struct ParamDef {
 /// Ids of the built-in controls (Settings keys).
 pub const SPEED: &str = "speed";
 pub const REACT: &str = "react";
+pub const BRIGHT: &str = "bright";
+pub const SAT: &str = "sat";
+pub const HUE: &str = "hue";
 
-pub fn builtin() -> [ParamDef; 2] {
+pub fn builtin() -> [ParamDef; 5] {
     [
         ParamDef { id: SPEED.into(), label: "Speed".into(), min: 0.25, max: 2.5, default: 1.0 },
-        ParamDef { id: REACT.into(), label: "Reactivity".into(), min: 0.0, max: 2.0, default: 1.0 },
+        ParamDef { id: REACT.into(), label: "Reactivity".into(), min: 0.0, max: 3.0, default: 1.0 },
+        ParamDef { id: BRIGHT.into(), label: "Brightness".into(), min: 0.3, max: 2.0, default: 1.0 },
+        ParamDef { id: SAT.into(), label: "Saturation".into(), min: 0.0, max: 2.0, default: 1.0 },
+        ParamDef { id: HUE.into(), label: "Hue shift".into(), min: -0.5, max: 0.5, default: 0.0 },
     ]
 }
 
@@ -136,12 +147,23 @@ pub fn tweak(saved: &BTreeMap<String, BTreeMap<String, f32>>, scene: &str) -> Tw
     if !has_controls(scene) {
         return Tweak::default();
     }
-    let [sp, re] = builtin();
+    let [sp, re, ..] = builtin();
     Tweak {
         speed: value(saved, scene, &sp),
         react: value(saved, scene, &re),
         knobs: show_defs(scene).iter().map(|d| value(saved, scene, d)).collect(),
     }
+}
+
+/// Brightness, saturation and hue shift (turns) for the frame of the Unity
+/// show on air, as `Uniforms::look4` (`ext_look` in common.wgsl); identity
+/// for every other scene.
+pub fn look(saved: &BTreeMap<String, BTreeMap<String, f32>>, scene: &str) -> [f32; 4] {
+    if !has_controls(scene) {
+        return [1.0, 1.0, 0.0, 0.0];
+    }
+    let [_, _, b, s, h] = builtin();
+    [value(saved, scene, &b), value(saved, scene, &s), value(saved, scene, &h), 0.0]
 }
 
 #[cfg(test)]
@@ -165,12 +187,16 @@ mod tests {
     #[test]
     fn unset_values_are_defaults_and_saved_ones_clamp() {
         let mut saved = BTreeMap::new();
-        let [sp, re] = builtin();
+        let [sp, re, ..] = builtin();
         assert_eq!(value(&saved, "unity_orb", &sp), 1.0);
         saved.insert("unity_orb".to_string(), BTreeMap::from([(SPEED.to_string(), 9.0)]));
         assert_eq!(value(&saved, "unity_orb", &sp), 2.5);
         assert_eq!(value(&saved, "unity_orb", &re), 1.0);
-        // Not a Unity show: no tweak.
+        // Not a Unity show: no tweak, and the frame is left alone.
         assert_eq!(tweak(&saved, "tunnel"), Tweak::default());
+        saved.insert("tunnel".to_string(), BTreeMap::from([(BRIGHT.to_string(), 2.0)]));
+        assert_eq!(look(&saved, "tunnel"), [1.0, 1.0, 0.0, 0.0]);
+        saved.insert("unity_orb".to_string(), BTreeMap::from([(HUE.to_string(), 0.25), (SAT.to_string(), 5.0)]));
+        assert_eq!(look(&saved, "unity_orb"), [1.0, 2.0, 0.25, 0.0]);
     }
 }

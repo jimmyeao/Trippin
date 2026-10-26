@@ -21,6 +21,14 @@ namespace TrippinStage
     public class SculptureShow : MonoBehaviour
     {
         public Camera cam;
+        [TrippinParam("Shape bars", 1f, 16f)] public float shapeBars = 8f;
+        [TrippinParam("Spin", 0f, 3f)] public float spinAmt = 1f;
+        [TrippinParam("Swell", 0f, 3f)] public float swell = 1f;
+        [TrippinParam("Twist", 0f, 3f)] public float twistAmt = 1f;
+        [TrippinParam("Kick ripple", 0f, 2f)] public float ripple = 1f;
+        [TrippinParam("Searchlights", 0f, 5f)] public float searchlights = 1f;
+        [TrippinParam("Glow colour", 0f, 1f)] public float glowHue = 0.45f;
+        [TrippinParam("Camera distance", 0.5f, 2f)] public float zoom = 1f;
         public Material sculptMat, skyMat, groundMat, beamMat, glowMat, hazeMat;
 
         const int Forms = 5;
@@ -151,7 +159,7 @@ namespace TrippinStage
         {
             var s = TrippinLink.State;
             float dt = Mathf.Min(Time.deltaTime, 1f / 30f);
-            int bar8 = Mathf.FloorToInt(s.beat / 32f);
+            int bar8 = Mathf.FloorToInt(s.beat / (4f * Mathf.Max(1, Mathf.RoundToInt(shapeBars))));
             if (bar8 != _lastBar8)
             {
                 _formA = _formB;
@@ -170,7 +178,7 @@ namespace TrippinStage
             if (kt > 0.45f && kt > _kick + 0.25f && Time.time - _lastKickT > 0.15f)
             {
                 _wave = 1.15f;
-                _waveAmp = Mathf.Clamp01(kt);
+                _waveAmp = Mathf.Clamp01(kt) * ripple;
                 _lastKickT = Time.time;
             }
             _kick = kt;
@@ -184,16 +192,18 @@ namespace TrippinStage
             _burst = Mathf.Max(0f, _burst - dt * 0.4f);
 
             float phrase = s.beat / 64f * Mathf.PI * 2f;
-            _rot += dt * (0.12f + 0.9f * _energy) * (1f - 0.5f * s.calm) * Mathf.Sin(phrase * 0.5f + 0.4f);
-            _lineT += dt * (0.25f + 0.9f * _energy);
+            // Trippin's Speed control runs the turn, the lines and the orbit (ShowState.speed).
+            float spd = Mathf.Clamp(s.speed, 0f, 4f);
+            _rot += dt * (0.12f + 0.9f * _energy) * (1f - 0.5f * s.calm) * Mathf.Sin(phrase * 0.5f + 0.4f) * spinAmt * spd;
+            _lineT += dt * (0.25f + 0.9f * _energy) * spd;
 
             foreach (var m in new[] { _mat, _mirMat })
             {
                 m.SetFloat("_FormA", _formA);
                 m.SetFloat("_FormB", _formB);
                 m.SetFloat("_Morph", morph);
-                m.SetFloat("_Swell", 0.1f * _bass * (1f - 0.5f * s.calm));
-                m.SetFloat("_Twist", 0.9f * Mathf.Sin(phrase * 0.5f));
+                m.SetFloat("_Swell", 0.1f * swell * _bass * (1f - 0.5f * s.calm));
+                m.SetFloat("_Twist", 0.9f * twistAmt * Mathf.Sin(phrase * 0.5f));
                 m.SetFloat("_WaveFront", _wave);
                 m.SetFloat("_WaveAmp", _waveAmp);
                 m.SetFloat("_LineT", _lineT);
@@ -203,8 +213,8 @@ namespace TrippinStage
             _mirror.localRotation = _obj.localRotation;
 
             // Camera: a slow orbit, rising and falling with the phrase.
-            _orbit += dt * (0.05f + 0.06f * s.intensity);
-            float dist = 10.5f + 1.4f * s.calm;
+            _orbit += dt * (0.05f + 0.06f * s.intensity) * spd;
+            float dist = (10.5f + 1.4f * s.calm) * zoom;
             var p = new Vector3(Mathf.Sin(_orbit) * dist, 1.4f + 1.6f * Mathf.Sin(phrase * 0.5f + 1f), Mathf.Cos(_orbit) * dist);
             // First frame after a cut-in: on the orbit, not eased in from the previous show's camera.
             cam.transform.position = _placeCam ? p : Vector3.Lerp(cam.transform.position, p, 1f - Mathf.Exp(-dt * 1.5f));
@@ -218,7 +228,7 @@ namespace TrippinStage
             _glowT.rotation = Quaternion.LookRotation(back);
             _glowT.localScale = Vector3.one * 130f;
             _glowM.SetFloat("_Glow", 0.3f + 0.35f * s.intensity + 0.8f * Mathf.SmoothStep(0, 1, _burst));
-            _glowM.SetFloat("_Hue", 0.45f + 0.08f * Mathf.Sin(phrase * 0.25f));
+            _glowM.SetFloat("_Hue", glowHue + 0.08f * Mathf.Sin(phrase * 0.25f));
 
             // Searchlights: slow sweeps swinging with the phrase, brighter
             // with energy, settled in breakdowns — never flashing.
@@ -232,7 +242,7 @@ namespace TrippinStage
                 _beams[i].localRotation = Quaternion.Euler(0, baseYaw + sweep, 0) * Quaternion.Euler(tilt, 0, 0);
                 _mpb.Clear();
                 _mpb.SetColor("_Color", TrippinLink.Palette(0.3f + u * 0.45f));
-                _mpb.SetFloat("_Intensity", (0.05f + 0.1f * _energy) * (1f - 0.6f * s.calm));
+                _mpb.SetFloat("_Intensity", (0.05f + 0.1f * _energy) * (1f - 0.6f * s.calm) * searchlights);
                 _beamR[i].SetPropertyBlock(_mpb);
             }
             _skyM.SetFloat("_Glow", 0.3f + 0.5f * s.intensity);

@@ -14,8 +14,14 @@ namespace TrippinStage
 {
     public sealed class SpectrumShow : KitShow
     {
+        readonly ClkAcc _spinClk = new ClkAcc();
         const int Rings = 3, Bars = 64, Hist = 16;
         static readonly float[] Radius = { 7f, 11f, 15f };
+        [TrippinParam("Bar height", 0.3f, 2.5f)] public float height = 1f;
+        [TrippinParam("Spin", 0f, 4f)] public float spinAmt = 1f;
+        [TrippinParam("Size", 0.5f, 2f)] public float size = 1f;
+        [TrippinParam("Colour spread", 0f, 1f)] public float spread = 0.8f;
+
         BeamPool _beams;
         readonly float[][] _hist = new float[Hist][];
         int _head;
@@ -40,19 +46,20 @@ namespace TrippinStage
             float gain = rx.Gain(0.55f, 1.3f);
             float tight = (1f - 0.35f * rx.tension) * (1f + 0.4f * rx.impact);
             int n = 0;
+            float sc = _spinClk.Step(rx.clk, spinAmt);
             for (int r = 0; r < Rings; r++)
             {
                 float[] src = r == 0 ? rx.spec : _hist[((_head - r * 3) % Hist + Hist) % Hist];
-                float spin = (rx.clk * 0.015f * (r % 2 == 0 ? 1f : -1f) + 0.4f * Mathf.Sin(rx.phrase + r)) ;
+                float spin = sc * 0.015f * (r % 2 == 0 ? 1f : -1f) + 0.4f * spinAmt * Mathf.Sin(rx.phrase + r);
                 for (int i = 0; i < Bars; i++)
                 {
                     int j = i < 32 ? i : 63 - i;
                     float lvl = Mathf.Pow(Mathf.Clamp01(src[j]), 0.8f);
                     float a = i / (float)Bars * Mathf.PI * 2f + spin;
-                    float rad = Radius[r] * tight;
+                    float rad = Radius[r] * tight * size;
                     var foot = new Vector3(Mathf.Cos(a) * rad, 0.3f, Mathf.Sin(a) * rad);
-                    var top = foot + new Vector3(0f, 0.4f + 14f * lvl * tight, 0f);
-                    _beams.Set(n++, foot, top, Kit.Hue(0.02f + j / 31f * 0.8f), gain * (0.25f + 1.4f * lvl) * (1f - 0.18f * r));
+                    var top = foot + new Vector3(0f, 0.4f + 14f * lvl * tight * height, 0f);
+                    _beams.Set(n++, foot, top, Kit.Hue(0.02f + j / 31f * spread), gain * (0.25f + 1.4f * lvl) * (1f - 0.18f * r));
                 }
             }
             rig.Orbit(cam, rx, 36f, 14f, 5f, dt);

@@ -18,6 +18,11 @@ namespace TrippinStage
 {
     public sealed class NebulaShow : KitShow
     {
+        [TrippinParam("Colour", 0f, 1f)] public float hue = 0.55f;
+        [TrippinParam("Colour drift", 0f, 0.4f)] public float colourDrift = 0.1f;
+        [TrippinParam("Spin", 0f, 3f)] public float spin = 1f;
+        [TrippinParam("Camera sway", 0f, 2f)] public float sway = 1f;
+
         Material _m;
 
         protected override void Build()
@@ -28,12 +33,12 @@ namespace TrippinStage
         protected override void Frame(ShowState s, float dt)
         {
             _m.SetFloat("_Gain", rx.Gain(0.6f, 1.5f));
-            _m.SetFloat("_Hue", 0.55f + 0.1f * Mathf.Sin(rx.phrase * 0.5f));
-            _m.SetFloat("_Spin", 0.2f * Mathf.Sin(rx.phrase * 0.5f));
+            _m.SetFloat("_Hue", hue + colourDrift * Mathf.Sin(rx.phrase * 0.5f));
+            _m.SetFloat("_Spin", 0.2f * spin * Mathf.Sin(rx.phrase * 0.5f));
             _m.SetFloat("_Zoom", 1f + 0.4f * rx.tension);
             _m.SetFloat("_Drift", rx.clk);
-            float sway = Mathf.Sin(rx.phrase * 0.5f);
-            rig.Move(cam, new Vector3(sway * 60f, 10f + 20f * Mathf.Sin(rx.phrase * 0.3f), -20f + 30f * Mathf.Sin(rx.beat / 256f * Mathf.PI * 2f)), new Vector3(0f, 12f, 60f), dt, 0.5f);
+            float sw = Mathf.Sin(rx.phrase * 0.5f) * sway;
+            rig.Move(cam, new Vector3(sw * 60f, 10f + 20f * sway * Mathf.Sin(rx.phrase * 0.3f), -20f + 30f * Mathf.Sin(rx.beat / 256f * Mathf.PI * 2f)), new Vector3(0f, 12f, 60f), dt, 0.5f);
         }
     }
 }

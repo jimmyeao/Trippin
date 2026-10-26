@@ -87,6 +87,7 @@ fn groove(t: f32, w: u32, h: u32, frame: u32, bloom: f32, tonemap: f32, calm: f3
         pres4: [0.55 - 0.3 * calm, 0.5, 0.45, 0.4],
         clock4: [beat * (1.0 - 0.3 * calm); 4],
         misc4: [0.0; 4],
+        look4: [1.0, 1.0, 0.0, 0.0],
     }
 }
 

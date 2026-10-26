@@ -21,6 +21,13 @@ namespace TrippinStage
         const int Arms = 8, Sparks = 5;
         const float Ring = 15f;
         static readonly Vector3 Core = new Vector3(0f, 9f, 0f);
+        [TrippinParam("Colour", 0f, 1f)] public float hueBase = 0.08f;
+        [TrippinParam("Reach", 0.5f, 1.5f)] public float reachAmt = 1f;
+        [TrippinParam("Arm sway", 0f, 2f)] public float armSway = 1f;
+        float sparks = 1f;   // (a "Sparks" control did nothing visible: specks at the tool tips)
+        [TrippinParam("Overhead lights", 0f, 2f)] public float overhead = 1f;
+        [TrippinParam("Core ripple", 0.2f, 2.5f)] public float coreRipple = 1f;
+
         RobotMats _mats;
         PartPool _cer, _chr, _dark, _tip, _seam;
         GlowPool _sparks;
@@ -55,13 +62,13 @@ namespace TrippinStage
         protected override void Frame(ShowState s, float dt)
         {
             float gain = rx.Gain(0.6f, 1.45f);
-            float hue = 0.08f + 0.06f * Mathf.Sin(rx.phrase * 0.5f);      // warm industrial palette
+            float hue = hueBase + 0.06f * Mathf.Sin(rx.phrase * 0.5f);      // warm industrial palette
             _mats.Tune(hue, gain);
             float kick = rx.kick, bass = rx.bassFast;
             float dir = Mathf.Clamp(Mathf.Sin(rx.phrase) * 4f, -1f, 1f);
-            float reach = (5.4f + 2.2f * bass + 1.2f * rx.impact) * (1f - 0.25f * rx.tension);
+            float reach = (5.4f + 2.2f * bass + 1.2f * rx.impact) * (1f - 0.25f * rx.tension) * reachAmt;
 
-            _core.SetFloat("_Amp", 0.7f + 1.4f * bass + 0.7f * rx.impact);
+            _core.SetFloat("_Amp", (0.7f + 1.4f * bass + 0.7f * rx.impact) * coreRipple);
             _core.SetFloat("_Freq", 1.3f + 1.1f * rx.highFast);
             _core.SetFloat("_Phase", rx.clk * 0.3f);
             _core.SetFloat("_Hue", hue + 0.1f);
@@ -78,13 +85,13 @@ namespace TrippinStage
                 Vector3 B = new Vector3(Mathf.Cos(a) * Ring, 0f, Mathf.Sin(a) * Ring);
                 Vector3 S = B + new Vector3(0f, 4.2f, 0f);
                 // The tool tip orbits and swoops round the core.
-                float th = a + Mathf.PI + 0.9f * dir * Mathf.Sin(rx.clk * 0.07f + j) + 0.5f * Mathf.Sin(rx.clk * 0.21f + j * 1.7f);
-                float el = 0.5f * Mathf.Sin(rx.clk * 0.13f + j * 2.1f) + 0.2f;
+                float th = a + Mathf.PI + (0.9f * dir * Mathf.Sin(rx.clk * 0.07f + j) + 0.5f * Mathf.Sin(rx.clk * 0.21f + j * 1.7f)) * armSway;
+                float el = 0.5f * armSway * Mathf.Sin(rx.clk * 0.13f + j * 2.1f) + 0.2f;
                 float r = reach * (0.8f + 0.5f * lvl);
                 Vector3 T = Core + new Vector3(Mathf.Cos(a) * Mathf.Cos(el) * r * (1f - 0.3f * Mathf.Cos(th - a - Mathf.PI)),
                                                 Mathf.Sin(el) * r, Mathf.Sin(a) * Mathf.Cos(el) * r);
                 // Swing round the core a little way.
-                float swing = 0.7f * Mathf.Sin(rx.clk * 0.09f * dir + j);
+                float swing = 0.7f * armSway * Mathf.Sin(rx.clk * 0.09f * dir + j);
                 float ca = Mathf.Cos(swing), sa = Mathf.Sin(swing);
                 Vector3 rel = T - Core;
                 T = Core + new Vector3(rel.x * ca - rel.z * sa, rel.y, rel.x * sa + rel.z * ca);
@@ -112,15 +119,15 @@ namespace TrippinStage
                     float u = Kit.H(j * 7 + k, 3);
                     Vector3 d = new Vector3(Kit.H(j * 13 + k, 4) - 0.5f, Kit.H(j * 13 + k, 5) * 0.8f - 0.1f, Kit.H(j * 13 + k, 6) - 0.5f).normalized;
                     float life = Mathf.Repeat(rx.clk * 0.6f + u, 1f);
-                    float spread = kick * (0.4f + 3.2f * life);
-                    _sparks.Set(j * Sparks + k, tipP + d * spread + new Vector3(0f, -2f * life * life * kick, 0f), 0.35f + 0.3f * u, hue + 0.05f, gain * 1.2f * kick * (1f - life), face);
+                    float spread = kick * (0.4f + 3.2f * life) * sparks;
+                    _sparks.Set(j * Sparks + k, tipP + d * spread + new Vector3(0f, -2f * life * life * kick, 0f), (0.35f + 0.3f * u) * (0.4f + 0.6f * sparks), hue + 0.05f, gain * 1.2f * Mathf.Min(sparks, 1f) * kick * (1f - life), face);
                 }
             }
             for (int i = 0; i < 12; i++)
             {
                 float a = i / 12f * Mathf.PI * 2f;
                 var from = new Vector3(Mathf.Cos(a) * 24f, 24f, Mathf.Sin(a) * 24f);
-                _lights.Set(i, from, Core + new Vector3(Mathf.Sin(rx.phrase + i) * 1.2f, 0f, 0f), Kit.Hue(hue + 0.04f * (i % 6)), gain * (0.08f + 0.3f * rx.Spec(i / 11f) + 0.25f * rx.impact));
+                _lights.Set(i, from, Core + new Vector3(Mathf.Sin(rx.phrase + i) * 1.2f, 0f, 0f), Kit.Hue(hue + 0.04f * (i % 6)), gain * overhead * (0.08f + 0.3f * rx.Spec(i / 11f) + 0.25f * rx.impact));
             }
             _floorM.SetFloat("_Hue", hue + 0.05f);
             _floorM.SetFloat("_Gain", gain);

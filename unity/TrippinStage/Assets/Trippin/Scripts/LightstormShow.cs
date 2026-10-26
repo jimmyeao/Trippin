@@ -21,6 +21,14 @@ namespace TrippinStage
     public class LightstormShow : MonoBehaviour
     {
         public Camera cam;
+        [TrippinParam("Formation bars", 1f, 16f)] public float formBars = 4f;
+        [TrippinParam("Sweep speed", 0f, 3f)] public float sweep = 1f;
+        [TrippinParam("Beam width", 0.3f, 2.5f)] public float beamWidth = 1f;
+        [TrippinParam("Beam haze", 0f, 2f)] public float coneAmt = 1f;
+        [TrippinParam("Colour", 0f, 1f)] public float hueOff = 0f;
+        [TrippinParam("Haze", 0f, 3f)] public float hazeAmt = 1f;
+        [TrippinParam("Camera distance", 0.5f, 2f)] public float zoom = 1f;
+        readonly ClkAcc _sweepClk = new ClkAcc(), _camClk = new ClkAcc();
         public Material beamMat, glowMat, groundMat, hazeMat;
 
         const int Rows = 3, PerRow = 10, Ring = 18, Heads = Rows * PerRow + Ring;
@@ -205,7 +213,7 @@ namespace TrippinStage
             float beat = s.beat;
             DropDirector.Tick(s, dt);
             int bar = Mathf.FloorToInt(beat / 4f);
-            int f = (bar / 4) % Formations;
+            int f = (bar / Mathf.Max(1, Mathf.RoundToInt(formBars))) % Formations;
             if (_snap)
             {
                 _formation = f;
@@ -249,13 +257,14 @@ namespace TrippinStage
             // Breakdowns keep every third head, dim and slow; tension wakes them up.
             float on = Mathf.Lerp(1f, 0.15f, _calmSlow);
             float drama = (1f - 0.5f * tn) * (1f + 1.6f * imp);
-            float iris = 0.55f + 0.4f * _bassSlow + 0.9f * Mathf.Clamp01(_bassFast) + 0.5f * imp; // cone opening, eased bass level
+            float iris = (0.55f + 0.4f * _bassSlow + 0.9f * Mathf.Clamp01(_bassFast) + 0.5f * imp) * beamWidth; // cone opening, eased bass level
 
-            float hueBase = 0.1f * f + 0.03f * Mathf.Sin(beat / 64f * Mathf.PI * 2f);
+            float hueBase = hueOff + 0.1f * f + 0.03f * Mathf.Sin(beat / 64f * Mathf.PI * 2f);
+            float sweepClk = _sweepClk.Step(clk, sweep);
             for (int i = 0; i < Heads; i++)
             {
                 // Sweeps 1.6x faster on the energy clock (it already surges on drops).
-                var tgt = Target(i, f, clk * 1.6f, ph, beat);
+                var tgt = Target(i, f, sweepClk * 1.6f, ph, beat);
                 tgt = new Vector3(tgt.x * burst * breathe, tgt.y, tgt.z * burst * breathe);
                 tgt = Vector3.Lerp(tgt, focus, tn * 0.55f); // 0.8 stacked all 48 beams in one point: white-out
                 var dirv = tgt - _pos[i];
@@ -284,7 +293,7 @@ namespace TrippinStage
                 _mpb.SetFloat("_Width", 0.12f * iris);
                 _mpb.SetFloat("_Spread", 0.012f + 0.008f * iris);
                 _mpb.SetFloat("_Fade", hit ? 0.95f : 0.5f);
-                _mpb.SetFloat("_Intensity", vis * drama * 0.16f * (0.55f + 0.45f * s.intensity));
+                _mpb.SetFloat("_Intensity", vis * drama * 0.16f * coneAmt * (0.55f + 0.45f * s.intensity));
                 _coneR[i].SetPropertyBlock(_mpb);
                 _mpb.Clear();
                 _mpb.SetColor("_Color", c);
@@ -312,9 +321,9 @@ namespace TrippinStage
 
             // Fog thickens through a build and puffs out on the drop.
             for (int i = 0; i < _hazeM.Length; i++)
-                _hazeM[i].SetFloat("_Density", _hazeBase[i] * (1f + 0.8f * tn + 0.8f * imp));
+                _hazeM[i].SetFloat("_Density", _hazeBase[i] * hazeAmt * (1f + 0.8f * tn + 0.8f * imp));
 
-            UpdateCamera(s, beat, dt, tn);
+            UpdateCamera(s, _camClk.Step(beat, s.speed), dt, tn);
         }
 
         // A slow orbit round the rig that swings direction with the phrase,
@@ -329,7 +338,7 @@ namespace TrippinStage
             float k = 1f - Mathf.Exp(-dt * 0.8f);
             _camPos = Vector3.Lerp(_camPos, want, k);
             _camLook = Vector3.Lerp(_camLook, look, k);
-            cam.transform.position = _camPos;
+            cam.transform.position = _camLook + (_camPos - _camLook) * zoom;
             cam.transform.LookAt(_camLook);
         }
     }

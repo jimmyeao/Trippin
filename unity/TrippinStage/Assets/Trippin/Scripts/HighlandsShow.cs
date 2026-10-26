@@ -22,6 +22,12 @@ namespace TrippinStage
     {
         public Material highlandsMat;
 
+        [TrippinParam("Flight speed", 0.3f, 3f)] public float flight = 1f;
+        [TrippinParam("Mist", 0f, 2f)] public float mist = 1f;
+        [TrippinParam("Sun height", 0.02f, 0.4f)] public float sunH = 0.1f;
+        [TrippinParam("Sky colour", 0f, 1f)] public float skyHue = 0.02f;
+        [TrippinParam("Camera sway", 0f, 2f)] public float sway = 1f;
+
         Material _land, _sky;
 
         protected override void Build()
@@ -49,7 +55,9 @@ namespace TrippinStage
             float gain = rx.Gain(0.6f, 1.4f);
             // Dawn palette: warm low sun, cool indigo zenith — fixed hue window,
             // not the track palette (this scene's look is the dawn light).
-            float hue = 0.02f;
+            float hue = skyHue;
+            _sky.SetFloat("_SunH", sunH);
+            _land.SetFloat("_SunH", sunH);
             _sky.SetFloat("_SkyHue", hue);
             _sky.SetFloat("_SkyGain", gain);
             _sky.SetFloat("_SkyClk", rx.clk);
@@ -61,14 +69,28 @@ namespace TrippinStage
             // The ridges sharpen with the slow bass; the mist stirs and warms
             // with the music, thicker when the drums are out.
             _land.SetFloat("_Ridge", Mathf.Clamp01(rx.bassSlow * 1.2f));
-            _land.SetFloat("_Mist", 0.35f + 0.4f * rx.lum + 0.35f * rx.bassFast + 0.25f * rx.calm);
-            _land.SetFloat("_Scroll", rx.clk * 6f);
+            _land.SetFloat("_Mist", (0.35f + 0.4f * rx.lum + 0.35f * rx.bassFast + 0.25f * rx.calm) * mist);
+            float step = Step(rx.clk);
+            _scroll += step * 6f * flight;
+            _land.SetFloat("_Scroll", _scroll);
 
-            float sway = Mathf.Sin(rx.phrase);
+            float sw = Mathf.Sin(rx.phrase) * sway;
             float bob = Mathf.Sin(rx.beat / 16f * Mathf.PI * 2f);
             rig.Move(cam,
-                new Vector3(9f * sway, 8f + 1.5f * bob + 2.5f * rx.bassFast, 0f),
-                new Vector3(16f * Mathf.Sin(rx.phrase * 0.6f), 2f, 300f), dt, 1.0f);
+                new Vector3(9f * sw, 8f + 1.5f * bob + 2.5f * rx.bassFast, 0f),
+                new Vector3(16f * sway * Mathf.Sin(rx.phrase * 0.6f), 2f, 300f), dt, 1.0f);
+        }
+
+        // The energy clock's step this frame (it wraps at 4096; a jump is no
+        // travel), so Flight speed scales the scroll without jumping it.
+        float _scroll, _clkPrev = -1f;
+        float Step(float clk)
+        {
+            if (_clkPrev < 0f) { _clkPrev = clk; _scroll = clk * 6f; return 0f; }
+            float d = clk - _clkPrev;
+            _clkPrev = clk;
+            if (d < -2048f) d += 4096f;
+            return d < 0f || d > 4f ? 0f : d;
         }
     }
 }

@@ -85,6 +85,9 @@ pub struct Uniforms {
     /// x: 1 = transparent background (the renderer sets it — scenes are
     /// skipped and present writes real alpha for OBS/NDI/Spout); yzw spare.
     pub misc4: [f32; 4],
+    /// The Unity show's Brightness, Saturation and Hue shift (turns) for
+    /// `ext_look` (showparams::look); identity (1, 1, 0, 0) otherwise.
+    pub look4: [f32; 4],
 }
 
 #[derive(Default, Clone, Copy, PartialEq)]
@@ -1718,7 +1721,9 @@ impl Renderer {
     /// Render one scene once into a small RGBA8 image — the editor's cue
     /// block thumbnails. Reuses the real scene+present pipelines on tiny
     /// offscreen targets with a lively canned frame of uniforms.
-    pub fn thumbnail(&mut self, scene: usize, w: u32, h: u32) -> Option<Vec<u8>> {
+    /// `look` is the scene's `Uniforms::look4` (a Unity show's colour
+    /// controls, so its live tile matches the output).
+    pub fn thumbnail(&mut self, scene: usize, w: u32, h: u32, look: [f32; 4]) -> Option<Vec<u8>> {
         let pipeline = self.scenes.get(scene)?.pipeline.clone()?;
         let present = self.present.pipeline.clone()?;
         let mut spectrum = [0.35f32; SPECTRUM_BINS];
@@ -1766,6 +1771,7 @@ impl Renderer {
             pres4: [0.6, 0.5, 0.45, 0.4],
             clock4: [8.0, 8.0, 8.0, 8.0],
             misc4: [0.0; 4],
+            look4: look,
         };
         self.queue
             .write_buffer(&self.uniform_buf, 0, bytemuck::bytes_of(&u));

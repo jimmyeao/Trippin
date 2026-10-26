@@ -906,8 +906,9 @@ fn render_loop(
                             None => continue,
                         }
                     }
+                    let look = showparams::look(&lock(&shared.settings).show_params, name);
                     match r.scene_names().iter().position(|n| *n == name) {
-                        Some(i) => match r.thumbnail(i, 128, 72) {
+                        Some(i) => match r.thumbnail(i, 128, 72, look) {
                             Some(px) => {
                                 lock(&shared.thumbs).insert(key.clone(), (128, 72, px));
                             }
@@ -1673,6 +1674,7 @@ fn render_loop(
             clock4: clock4.map(|c| c as f32),
             // y: video frame blend (vid() in common.wgsl).
             misc4: [0.0, video.blend, 0.0, 0.0],
+            look4: showparams::look(&s.show_params, r.scene_name(dir.scene)),
         };
         // Lights follow the show (lights.rs). The palette LUT is rebuilt
         // only when the palette changes.

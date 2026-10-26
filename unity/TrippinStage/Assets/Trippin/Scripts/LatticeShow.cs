@@ -13,8 +13,15 @@ namespace TrippinStage
 {
     public sealed class LatticeShow : KitShow
     {
+        readonly ClkAcc _spinClk = new ClkAcc();
         const int N = 5, Nodes = N * N * N;
         const float Pitch = 3.8f;
+        [TrippinParam("Wobble", 0f, 3f)] public float wobble = 1f;
+        [TrippinParam("Spin", 0f, 3f)] public float spinAmt = 1f;
+        [TrippinParam("Spacing", 0.6f, 1.6f)] public float spacing = 1f;
+        [TrippinParam("Node glow", 0.3f, 2f)] public float nodeGlow = 1f;
+        [TrippinParam("Colour", 0f, 1f)] public float hue = 0.15f;
+
         BeamPool _beams;
         GlowPool _glows;
         readonly Vector3[] _base = new Vector3[Nodes], _pos = new Vector3[Nodes];
@@ -40,13 +47,13 @@ namespace TrippinStage
         protected override void Frame(ShowState s, float dt)
         {
             float gain = rx.Gain();
-            float amp = (0.5f + 1.1f * rx.bassFast) * (1f - 0.4f * rx.tension) * (1f + 0.9f * rx.impact);
-            float spin = rx.clk * 0.02f + 0.6f * Mathf.Sin(rx.phrase);
+            float amp = (0.5f + 1.1f * rx.bassFast) * (1f - 0.4f * rx.tension) * (1f + 0.9f * rx.impact) * wobble;
+            float spin = _spinClk.Step(rx.clk, spinAmt) * 0.02f + 0.6f * spinAmt * Mathf.Sin(rx.phrase);
             Quaternion q = Quaternion.Euler(18f, spin * Mathf.Rad2Deg, 0f);
             var centre = new Vector3(0f, 11f, 0f);
             for (int i = 0; i < Nodes; i++)
             {
-                Vector3 b = _base[i];
+                Vector3 b = _base[i] * spacing;
                 float lvl = rx.Spec(_shell[i]);
                 Vector3 off = new Vector3(
                     Mathf.Sin(b.y * 0.7f + rx.clk * 0.25f),
@@ -69,7 +76,7 @@ namespace TrippinStage
             for (int i = 0; i < Nodes; i++)
             {
                 float lvl = rx.Spec(_shell[i]);
-                _glows.Set(i, _pos[i], 0.9f + 1.4f * lvl + 0.5f * rx.kick, 0.1f + _shell[i] * 0.6f, gain * (0.45f + 0.9f * lvl), cam.transform.rotation);
+                _glows.Set(i, _pos[i], (0.9f + 1.4f * lvl + 0.5f * rx.kick) * nodeGlow, 0.1f + _shell[i] * 0.6f, gain * (0.45f + 0.9f * lvl), cam.transform.rotation);
             }
             rig.Orbit(cam, rx, 36f, 12f, 11f, dt);
         }
@@ -77,7 +84,7 @@ namespace TrippinStage
         int Edge(int n, int a, int b, float gain, float la)
         {
             float lb = rx.Spec(_shell[b]);
-            _beams.Set(n, _pos[a], _pos[b], Kit.Hue(0.15f + 0.5f * _shell[a]), gain * (0.3f + 0.8f * 0.5f * (la + lb)));
+            _beams.Set(n, _pos[a], _pos[b], Kit.Hue(hue + 0.5f * _shell[a]), gain * (0.3f + 0.8f * 0.5f * (la + lb)));
             return n + 1;
         }
     }

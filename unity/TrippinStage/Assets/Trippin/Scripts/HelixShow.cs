@@ -18,8 +18,16 @@ namespace TrippinStage
 {
     public sealed class HelixShow : KitShow
     {
+        readonly ClkAcc _spinClk = new ClkAcc();
         const int Pts = 72, Rungs = 30, RungPts = 5, Nodes = 40, Motes = 70;
         const float Height = 28f;
+        [TrippinParam("Twist", 0.3f, 2.5f)] public float twistAmt = 1f;
+        [TrippinParam("Spin", 0f, 3f)] public float spinAmt = 1f;
+        [TrippinParam("Width", 0.5f, 2f)] public float width = 1f;
+        [TrippinParam("Thickness", 0.3f, 2.5f)] public float thick = 1f;
+        float motes = 1f;   // (a "Motes" control was invisible)
+        [TrippinParam("Colour", 0f, 1f)] public float hue = 0.45f;
+
         TubeRibbon[] _strand = new TubeRibbon[2];
         TubeRibbon _rungs;
         GlowPool _nodes, _motes;
@@ -48,9 +56,9 @@ namespace TrippinStage
         protected override void Frame(ShowState s, float dt)
         {
             float gain = rx.Gain();
-            float spin = rx.clk * 0.07f + 1.1f * Mathf.Sin(rx.phrase);
-            float twist = 0.3f + 0.1f * rx.midFast;
-            float r0 = 5.2f * (1f - 0.45f * rx.tension) * (1f + 0.55f * rx.impact);
+            float spin = _spinClk.Step(rx.clk, spinAmt) * 0.07f + 1.1f * spinAmt * Mathf.Sin(rx.phrase);
+            float twist = (0.3f + 0.1f * rx.midFast) * twistAmt;
+            float r0 = 5.2f * width * (1f - 0.45f * rx.tension) * (1f + 0.55f * rx.impact);
             for (int st = 0; st < 2; st++)
             {
                 var t = _strand[st];
@@ -63,12 +71,12 @@ namespace TrippinStage
                     float th = y * twist + st * Mathf.PI + spin;
                     t.P[i] = new Vector3(Mathf.Cos(th) * r, y, Mathf.Sin(th) * r);
                     _p[st, i] = t.P[i];
-                    t.R[i] = 0.26f * (1f + 0.9f * bulge + 0.4f * rx.kick);
+                    t.R[i] = 0.26f * thick * (1f + 0.9f * bulge + 0.4f * rx.kick);
                     t.K[i] = 0.55f + 1.5f * bulge;
                     t.Hu[i] = (st == 0 ? 0.0f : 0.32f) + u * 0.25f;
                 }
                 t.Mat.SetFloat("_Phase", rx.clk * 0.5f * (st == 0 ? 1f : -1f));
-                t.Mat.SetFloat("_Hue", 0.45f + 0.05f * Mathf.Sin(rx.phrase * 0.5f));
+                t.Mat.SetFloat("_Hue", hue + 0.05f * Mathf.Sin(rx.phrase * 0.5f));
                 t.Apply(gain * 0.9f);
             }
             // Rungs: for each, strand A -> strand B across RungPts points, then a dark hop to the next.
@@ -99,7 +107,7 @@ namespace TrippinStage
                     n++;
                 }
             }
-            _rungs.Mat.SetFloat("_Hue", 0.45f);
+            _rungs.Mat.SetFloat("_Hue", hue);
             _rungs.Apply(gain);
 
             // Nodes on the backbone, sized by their own band; motes rising round the coil.
@@ -110,7 +118,7 @@ namespace TrippinStage
                 int idx = 3 + (i >> 1) * (Pts - 6) / (Nodes / 2);
                 float u = idx / (Pts - 1f);
                 float lvl = rx.Spec(u);
-                _nodes.Set(i, _p[st, idx], 0.9f + 2.4f * lvl + 0.8f * rx.kick, 0.45f + (st == 0 ? 0f : 0.32f) + u * 0.25f, gain * (0.3f + 1.1f * lvl), face);
+                _nodes.Set(i, _p[st, idx], 0.9f + 2.4f * lvl + 0.8f * rx.kick, hue + (st == 0 ? 0f : 0.32f) + u * 0.25f, gain * (0.3f + 1.1f * lvl), face);
             }
             float rise = rx.clk * 0.05f;
             for (int i = 0; i < Motes; i++)
@@ -120,7 +128,7 @@ namespace TrippinStage
                 float rr = r0 * (1.4f + 1.6f * Kit.H(i, 5)) * (1f + 0.3f * rx.bassFast);
                 float fade = Mathf.Sin(u * Mathf.PI);
                 _motes.Set(i, new Vector3(Mathf.Cos(a) * rr, 0.5f + u * (Height + 4f), Mathf.Sin(a) * rr),
-                    0.35f + 0.5f * Kit.H(i, 6), 0.4f + Kit.H(i, 7) * 0.4f, gain * 0.55f * fade * (0.6f + 0.8f * rx.highFast), face);
+                    0.35f + 0.5f * Kit.H(i, 6), 0.4f + Kit.H(i, 7) * 0.4f, gain * 0.55f * motes * fade * (0.6f + 0.8f * rx.highFast), face);
             }
             // Backlight shafts rising behind the coil, slowly turning with the phrase.
             for (int i = 0; i < 8; i++)

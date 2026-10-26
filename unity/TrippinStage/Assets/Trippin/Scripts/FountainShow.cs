@@ -17,6 +17,12 @@ namespace TrippinStage
     {
         const int N = 360;
         const float G = 12f;
+        [TrippinParam("Jet height", 0.5f, 2f)] public float jet = 1f;
+        [TrippinParam("Spray", 0f, 2f)] public float spray = 1f;
+        [TrippinParam("Drop size", 0.5f, 2f)] public float dropSize = 1f;
+        [TrippinParam("Sway", 0f, 3f)] public float sway = 1f;
+        [TrippinParam("Colour", 0f, 1f)] public float hue = 0.1f;
+
         GlowPool _drops;
         readonly Vector3[] _p0 = new Vector3[N], _v = new Vector3[N];
         readonly float[] _age = new float[N], _life = new float[N], _size = new float[N];
@@ -42,9 +48,9 @@ namespace TrippinStage
             _p0[i] = new Vector3((nozzle - 1) * 9f, 0.3f, 0f);
             float az = R() * Mathf.PI * 2f;
             float elev = (68f + 17f * R()) * Mathf.Deg2Rad;
-            float speed = (10f + 9f * rx.bassFast + 6f * rx.midFast + 7f * rx.impact) * (0.8f + 0.4f * R());
-            float lean = 5f * Mathf.Sin(rx.phrase + nozzle * 1.4f);
-            _v[i] = new Vector3(Mathf.Cos(az) * Mathf.Cos(elev) * speed * 0.5f + lean, Mathf.Sin(elev) * speed, Mathf.Sin(az) * Mathf.Cos(elev) * speed * 0.5f);
+            float speed = (10f + 9f * rx.bassFast + 6f * rx.midFast + 7f * rx.impact) * (0.8f + 0.4f * R()) * Mathf.Sqrt(jet);
+            float lean = 5f * sway * Mathf.Sin(rx.phrase + nozzle * 1.4f);
+            _v[i] = new Vector3(Mathf.Cos(az) * Mathf.Cos(elev) * speed * 0.5f * spray + lean, Mathf.Sin(elev) * speed, Mathf.Sin(az) * Mathf.Cos(elev) * speed * 0.5f * spray);
             _life[i] = 2.2f + 0.8f * R();
             _age[i] = 0f;
             _size[i] = 0.5f + 0.6f * R();
@@ -71,7 +77,7 @@ namespace TrippinStage
                 float f = t / _life[i];
                 if (pos.y < 0.1f) { _drops.Set(i, Vector3.zero, 0f, 0f, 0f, face); continue; }
                 float fade = Mathf.Clamp01(f * 8f) * (1f - f * f);
-                _drops.Set(i, pos, _size[i] * (0.6f + 0.8f * rx.lum) * (1f - 0.4f * f), 0.1f + (i % 3) * 0.15f + f * 0.2f, gain * fade * 1.2f, face);
+                _drops.Set(i, pos, _size[i] * dropSize * (0.6f + 0.8f * rx.lum) * (1f - 0.4f * f), hue + (i % 3) * 0.15f + f * 0.2f, gain * fade * 1.2f, face);
             }
             rig.Orbit(cam, rx, 32f, 9f, 9f, dt);
         }

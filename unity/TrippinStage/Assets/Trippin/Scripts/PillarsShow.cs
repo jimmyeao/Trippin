@@ -20,6 +20,14 @@ namespace TrippinStage
     public class PillarsShow : MonoBehaviour
     {
         public Camera cam;
+        [TrippinParam("Colour", 0f, 1f)] public float hueBase = 0.62f;
+        [TrippinParam("Wave depth", 0.2f, 2f)] public float depth = 1f;
+        [TrippinParam("Kick lift", 0f, 3f)] public float kickLift = 1f;
+        [TrippinParam("Drop wave", 0f, 2f)] public float dropWave = 1f;
+        [TrippinParam("Haze", 0f, 3f)] public float hazeAmt = 1f;
+        [TrippinParam("Camera distance", 0.5f, 2f)] public float zoom = 1f;
+        // Trippin's Speed control runs the camera's travel (ShowState.speed).
+        readonly ClkAcc _camClk = new ClkAcc();
         public Material beamMat, groundMat, hazeMat;
 
         const int Grid = 15, N = Grid * Grid;
@@ -133,11 +141,11 @@ namespace TrippinStage
             float phrase = beat / 64f * Mathf.PI * 2f;
 
             float level = Mathf.Lerp(0.75f, 1f, _calmSlow) * (1f - 0.4f * tn) * (1f + 0.7f * _impS);
-            float waveDepth = 3f + 11f * Mathf.Clamp01(_bassSlow) + 7f * _bassFast;
+            float waveDepth = (3f + 11f * Mathf.Clamp01(_bassSlow) + 7f * _bassFast) * depth;
             float p1 = clk * 0.09f + 1.6f * Mathf.Sin(phrase);       // radial wave, breathes in and out
             float p2 = clk * 0.06f - 1.2f * Mathf.Sin(phrase * 0.5f); // cross wave, opposite swing
             float sink = 1f - 0.75f * tn;                             // a build sinks the field to a carpet
-            float hue = 0.62f + 0.05f * Mathf.Sin(phrase * 0.5f);
+            float hue = hueBase + 0.05f * Mathf.Sin(phrase * 0.5f);
 
             for (int i = 0; i < N; i++)
             {
@@ -145,10 +153,10 @@ namespace TrippinStage
                 float d = p.magnitude;
                 float radial = 0.5f + 0.5f * Mathf.Sin(d * 0.34f - p1 * 2f);
                 float cross = 0.5f + 0.5f * Mathf.Sin(p.x * 0.19f + p.y * 0.13f + p2 * 2f);
-                float h = 1.5f + waveDepth * (0.65f * radial + (0.35f + 0.3f * _midEase) * cross) + 4f * _kick * radial; // the field breathes up on kicks
+                float h = 1.5f + waveDepth * (0.65f * radial + (0.35f + 0.3f * _midEase) * cross) + 4f * kickLift * _kick * radial; // the field breathes up on kicks
                 h *= sink;
                 float fd = (d - front) / 4f;
-                h += 16f * Mathf.Exp(-fd * fd) * Mathf.Clamp01(1f - _dropAge / 3f); // drop front: travels, then fades out
+                h += 16f * dropWave * Mathf.Exp(-fd * fd) * Mathf.Clamp01(1f - _dropAge / 3f); // drop front: travels, then fades out
                 _pil[i].localScale = new Vector3(1f, Mathf.Max(h, 0.3f), 1f);
 
                 Color c = TrippinLink.Palette(hue + d * 0.012f + radial * 0.08f);
@@ -166,9 +174,9 @@ namespace TrippinStage
             }
 
             for (int i = 0; i < _hazeM.Length; i++)
-                _hazeM[i].SetFloat("_Density", _hazeBase[i] * (1f + 0.8f * tn + 0.8f * _impS));
+                _hazeM[i].SetFloat("_Density", _hazeBase[i] * hazeAmt * (1f + 0.8f * tn + 0.8f * _impS));
 
-            UpdateCamera(beat, dt, tn);
+            UpdateCamera(_camClk.Step(beat, s.speed), dt, tn);
         }
 
         // Orbits the field low and wide, swinging with the phrase, creeping in
@@ -183,7 +191,7 @@ namespace TrippinStage
             float k = 1f - Mathf.Exp(-dt * 0.8f);
             _camPos = Vector3.Lerp(_camPos, want, k);
             _camLook = Vector3.Lerp(_camLook, look, k);
-            cam.transform.position = _camPos;
+            cam.transform.position = _camLook + (_camPos - _camLook) * zoom;
             cam.transform.LookAt(_camLook);
         }
     }

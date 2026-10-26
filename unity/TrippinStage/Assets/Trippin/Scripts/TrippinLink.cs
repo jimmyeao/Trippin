@@ -26,6 +26,12 @@ namespace TrippinStage
         public bool cut, drums = true;
         /// The on-air show's [TrippinParam] values, in manifest order (ShowParams).
         public float[] knobs = new float[0];
+        /// Trippin's Speed and Reactivity controls for the show on air (1 = as
+        /// played; older Trippins send neither). Speed already runs the energy
+        /// clocks faster in Trippin; here it also drives the camera's travel
+        /// (Rx.camBeat). Reactivity is applied to the levels as they arrive
+        /// (TrippinLink.ApplyReact), so every show gets it.
+        public float speed = 1f, react = 1f;
     }
 
     [DefaultExecutionOrder(-100)]
@@ -37,6 +43,7 @@ namespace TrippinStage
         public static ShowState State { get; private set; } = new ShowState();
         /// True while datagrams are arriving.
         public static bool Live { get; private set; }
+        float _argSpeed = -1f, _argReact = -1f;
 
         UdpClient _udp;
         Thread _thread;
@@ -88,6 +95,9 @@ namespace TrippinStage
                     catch (Exception e) { Debug.LogError($"[TrippinLink] can't read replay feed {a[i + 1]}: {e.Message}"); }
                     if (_replay != null) Debug.Log($"[TrippinLink] replaying {_replay.Length} frames ({_replay.Length / 60f:F0} s) from {a[i + 1]}");
                 }
+                // `-speed 2 -react 0.5`: Trippin's Speed and Reactivity for a replay.
+                if (a[i] == "-speed") float.TryParse(a[i + 1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _argSpeed);
+                if (a[i] == "-react") float.TryParse(a[i + 1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _argReact);
                 if (a[i] == "-replayFrom" && float.TryParse(a[i + 1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var from)) _replayT = from;
             }
             _heard = Time.realtimeSinceStartup;
@@ -127,13 +137,62 @@ namespace TrippinStage
             }
         }
 
+        /// Reactivity on a level (0..1): below 1 it scales the level down (0 =
+        /// the music moves nothing); above 1 it lifts the quiet and middle of
+        /// the range toward full (v^(1/r)), so shapes swing harder and kicks
+        /// cross the shows' thresholds sooner. Loud levels already sit near 1,
+        /// so a plain gain above 1 did nothing.
+        public static float React(float v, float r)
+        {
+            v = Mathf.Clamp01(v);
+            return r <= 1f ? v * Mathf.Max(r, 0f) : Mathf.Pow(v, 1f / r);
+        }
+
+        // Replay only: Trippin's Speed re-integration (link.rs::apply) of flow
+        // and the energy clocks, so -speed records what the app would show.
+        float[] _clkIn, _clkOut;
+        void ScaleClocks(ShowState s, float speed)
+        {
+            if (s.clock4 == null || s.clock4.Length < 4) return;
+            var now = new[] { s.flow, s.clock4[0], s.clock4[1], s.clock4[2], s.clock4[3] };
+            if (_clkIn == null) { _clkIn = now; _clkOut = (float[])now.Clone(); return; }
+            for (int i = 0; i < 5; i++)
+            {
+                float d = now[i] - _clkIn[i];
+                if (d < -2048f) d += 4096f;
+                _clkOut[i] = (_clkOut[i] + (d >= 0f && d < 64f ? d * speed : 0f)) % 4096f;
+            }
+            _clkIn = now;
+            s.flow = _clkOut[0];
+            for (int i = 0; i < 4; i++) s.clock4[i] = _clkOut[i + 1];
+        }
+
+        static void ApplyReact(ShowState s)
+        {
+            float r = s.react;
+            if (Mathf.Abs(r - 1f) < 1e-3f) return;
+            s.bass = React(s.bass, r); s.mid = React(s.mid, r); s.high = React(s.high, r);
+            s.energy = React(s.energy, r); s.onset = React(s.onset, r); s.kick = React(s.kick, r);
+            foreach (var a in new[] { s.lvl4, s.hits4, s.spectrum })
+                if (a != null)
+                    for (int i = 0; i < a.Length; i++) a[i] = React(a[i], r);
+        }
+
         void Update()
         {
             if (_replay != null && _replay.Length > 0)
             {
                 _replayT += Time.deltaTime;
                 int idx = ((int)(_replayT * 60f)) % _replay.Length;
-                try { State = JsonUtility.FromJson<ShowState>(_replay[idx]); } catch (Exception) { }
+                try
+                {
+                    var rs = JsonUtility.FromJson<ShowState>(_replay[idx]);
+                    if (_argSpeed > 0f) { rs.speed = _argSpeed; ScaleClocks(rs, _argSpeed); }
+                    if (_argReact >= 0f) rs.react = _argReact;
+                    ApplyReact(rs);
+                    State = rs;
+                }
+                catch (Exception) { }
                 Live = false;   // the show manager cycles on the beat, as it does with no feed
                 PushGlobals(State);
                 return;
@@ -147,6 +206,7 @@ namespace TrippinStage
                     var s = JsonUtility.FromJson<ShowState>(json);
                     if (s != null)
                     {
+                        ApplyReact(s);
                         State = s;
                         _lastPacket = Time.unscaledTime;
                     }

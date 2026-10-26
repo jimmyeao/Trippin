@@ -20,7 +20,14 @@ namespace TrippinStage
 {
     public sealed class GalaxyShow : KitShow
     {
+        readonly ClkAcc _spinClk = new ClkAcc();
         const int N = 1400;
+        [TrippinParam("Arm twist", 0.3f, 2.5f)] public float twist = 1f;
+        [TrippinParam("Spin", 0f, 3f)] public float spinAmt = 1f;
+        [TrippinParam("Kick wave", 0f, 3f)] public float waveAmt = 1f;
+        [TrippinParam("Tilt", 0f, 2f)] public float tiltAmt = 1f;
+        [TrippinParam("Colour", 0f, 1f)] public float hue = 0.05f;
+
         GlowPool _stars, _core;
         float _waveR = 99f, _waveA, _kickPrev;
 
@@ -34,18 +41,19 @@ namespace TrippinStage
         {
             float gain = rx.Gain(0.8f, 2.2f) /* was 0.5-1.35: luma ~3 */;
             Quaternion face = cam.transform.rotation;
-            float tight = 0.18f + 0.1f * rx.bassSlow + 0.06f * rx.bassFast;
-            if (rx.kick > 0.55f && _kickPrev <= 0.55f) { _waveR = 0f; _waveA = 1.2f + 1.6f * rx.bassFast; }
+            float tight = (0.18f + 0.1f * rx.bassSlow + 0.06f * rx.bassFast) * twist;
+            if (rx.kick > 0.55f && _kickPrev <= 0.55f) { _waveR = 0f; _waveA = (1.2f + 1.6f * rx.bassFast) * waveAmt; }
             _kickPrev = rx.kick;
             _waveR += 34f * dt;
             _waveA *= Mathf.Exp(-1.8f * dt);
             float open = (1f - 0.3f * rx.tension) * (1f + 0.35f * rx.impact);
             float tw = rx.clkHigh * 0.3f;
+            float sc = _spinClk.Step(rx.clk, spinAmt);
             for (int i = 0; i < N; i++)
             {
                 int arm = i % 2;
                 float r = 1f + 22f * Mathf.Sqrt(Kit.H(i, 1));
-                float th = arm * Mathf.PI + r * tight + rx.clk * 0.035f + 0.35f * Mathf.Sin(rx.clk * 0.03f) * (8f / (r + 4f)) + 0.15f * Mathf.Sin(rx.phrase);
+                float th = arm * Mathf.PI + r * tight + sc * 0.035f + 0.35f * Mathf.Sin(rx.clk * 0.03f) * (8f / (r + 4f)) + 0.15f * Mathf.Sin(rx.phrase);
                 float wv = (r - _waveR) / 2.6f;
                 float wave = _waveA * Mathf.Exp(-wv * wv);
                 r *= 1f + 0.16f * rx.Spec(r / 24f);
@@ -55,11 +63,11 @@ namespace TrippinStage
                 float py = (Kit.H(i, 3) - 0.5f) * 1.5f * (1f - r / 26f) + wave;
                 float twinkle = 0.85f + 0.15f * Mathf.Sin(tw + i);
                 float size = (0.4f + Kit.H(i, 4) * 0.9f) * (0.8f + 0.6f * rx.highFast) * (1f + 0.5f * wave);
-                _stars.Set(i, new Vector3(px, py, pz) * open, size, 0.05f + r * 0.02f, gain * 2.2f * (0.3f + 0.7f * Kit.H(i, 5)) * twinkle, face);
+                _stars.Set(i, new Vector3(px, py, pz) * open, size, hue + r * 0.02f, gain * 2.2f * (0.3f + 0.7f * Kit.H(i, 5)) * twinkle, face);
             }
             _core.Set(0, Vector3.zero, 9f * (1f + 0.5f * rx.bassFast), 0.08f, gain * 1.8f, face);
             _core.Set(1, Vector3.zero, 4.5f * (1f + 0.4f * rx.bassFast), 0.0f, gain * 2.2f, face);
-            float tilt = 18f + 6f * Mathf.Sin(rx.phrase * 0.5f);
+            float tilt = 2f + (16f + 6f * Mathf.Sin(rx.phrase * 0.5f)) * tiltAmt;
             rig.Orbit(cam, rx, 33f, tilt, 0f, dt, 1f, 0.15f);
         }
     }

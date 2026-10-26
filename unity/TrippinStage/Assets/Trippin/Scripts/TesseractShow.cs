@@ -15,7 +15,13 @@ namespace TrippinStage
 {
     public sealed class TesseractShow : KitShow
     {
+        readonly ClkAcc _spinClk = new ClkAcc();
         const int Edges = 32;
+        [TrippinParam("Size", 0.5f, 2f)] public float sizeAmt = 1f;
+        [TrippinParam("Spin", 0f, 3f)] public float spinAmt = 1f;
+        [TrippinParam("Pulse", 0f, 3f)] public float pulse = 1f;
+        [TrippinParam("Colour", 0f, 1f)] public float hue = 0.55f;
+
         BeamPool _beams;
         readonly float[] _a = new float[6];
         readonly float[] _v = new float[4];
@@ -48,11 +54,12 @@ namespace TrippinStage
 
         protected override void Frame(ShowState s, float dt)
         {
+            float sc = _spinClk.Step(rx.clk, spinAmt);
             for (int k = 0; k < 6; k++)
-                _a[k] = Rate[k] * rx.clk + 0.6f * Mathf.Sin(rx.phrase * (1f + k * 0.13f) + k);
+                _a[k] = Rate[k] * sc + 0.6f * spinAmt * Mathf.Sin(rx.phrase * (1f + k * 0.13f) + k);
             float gain = rx.Gain();
-            float d = 3.4f - 0.7f * rx.bassFast;
-            float size = 8f * (1f + 0.22f * rx.bassFast + 0.12f * rx.kick) * (1f - 0.4f * rx.tension) * (1f + 0.5f * rx.impact);
+            float d = 3.4f - 0.7f * Mathf.Min(1.3f, rx.bassFast * pulse);
+            float size = 8f * sizeAmt * (1f + (0.22f * rx.bassFast + 0.12f * rx.kick) * pulse) * (1f - 0.4f * rx.tension) * (1f + 0.5f * rx.impact);
             var centre = new Vector3(0f, 10f, 0f);
             int n = 0;
             for (int layer = 0; layer < 2; layer++)
@@ -69,7 +76,7 @@ namespace TrippinStage
                         float w = 0.5f * (w0 + w1);
                         float near = 0.5f + 0.5f * w;
                         _beams.Set(n++, centre + new Vector3(p0.x, p0.y, p0.z), centre + new Vector3(p1.x, p1.y, p1.z),
-                            Kit.Hue(0.55f + 0.3f * w + 0.15f * layer), gain * (0.35f + 0.9f * near) * (layer == 0 ? 1f : 0.8f));
+                            Kit.Hue(hue + 0.3f * w + 0.15f * layer), gain * (0.35f + 0.9f * near) * (layer == 0 ? 1f : 0.8f));
                     }
             }
             rig.Orbit(cam, rx, 34f, 8f, 10f, dt);

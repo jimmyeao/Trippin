@@ -23,6 +23,11 @@ namespace TrippinStage
     {
         const int W = 36, H = 20, Patterns = 4;
         const float Pitch = 1.0f, Z = 10f;
+        [TrippinParam("Pattern bars", 1f, 16f)] public float patternBars = 4f;
+        [TrippinParam("Cell size", 0.4f, 1.6f)] public float cell = 1f;
+        [TrippinParam("Ripple speed", 0.3f, 2.5f)] public float rippleSpeed = 1f;
+        [TrippinParam("Colour", 0f, 1f)] public float hue = 0f;
+
         GlowPool _cells;
         int _cur = -1, _prev;
         float _start, _kickPrev;
@@ -76,7 +81,7 @@ namespace TrippinStage
 
         protected override void Frame(ShowState s, float dt)
         {
-            int p = (Mathf.FloorToInt(rx.beatS / 4f) / 4) % Patterns;
+            int p = (Mathf.FloorToInt(rx.beatS / 4f) / Mathf.Max(1, Mathf.RoundToInt(patternBars))) % Patterns;
             if (_cur < 0) { _cur = _prev = p; _start = rx.beatS - 4f; }
             else if (p != _cur) { _prev = _cur; _cur = p; _start = rx.beatS; }
             float m = Mathf.SmoothStep(0f, 1f, rx.beatS - _start);
@@ -87,7 +92,7 @@ namespace TrippinStage
                 _ringR[slot] = 0f; _ringA[slot] = 1.0f + 0.6f * rx.bassFast;
             }
             _kickPrev = rx.kick;
-            for (int k = 0; k < _ringA.Length; k++) { _ringR[k] += 12f * dt; _ringA[k] *= Mathf.Exp(-0.7f * dt); }
+            for (int k = 0; k < _ringA.Length; k++) { _ringR[k] += 12f * rippleSpeed * dt; _ringA[k] *= Mathf.Exp(-0.7f * dt); }
             float gain = rx.Gain(0.5f, 1.4f);
             float cx = (W - 1) * 0.5f, cy = (H - 1) * 0.5f;
             Quaternion face = Quaternion.identity; // the wall faces the audience (-z)
@@ -97,7 +102,7 @@ namespace TrippinStage
                     float v = Mathf.Lerp(Pattern(_prev, i, j, cx, cy), Pattern(_cur, i, j, cx, cy), m);
                     var pos = new Vector3((i - cx) * Pitch, 2f + j * Pitch, Z);
                     float lit = 0.06f + v;                           // a faint grid even where dark
-                    _cells.Set(j * W + i, pos, 0.55f + 0.65f * v, 0.1f * _cur + i * 0.012f + j * 0.008f, gain * lit * 1.4f, face);
+                    _cells.Set(j * W + i, pos, (0.55f + 0.65f * v) * cell, hue + 0.1f * _cur + i * 0.012f + j * 0.008f, gain * lit * 1.4f, face);
                 }
             rig.Orbit(cam, rx, 20f, 11f, 12f, dt, 0.4f);
         }

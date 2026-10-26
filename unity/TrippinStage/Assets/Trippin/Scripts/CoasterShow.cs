@@ -19,6 +19,14 @@ namespace TrippinStage
 {
     public sealed class CoasterShow : KitShow
     {
+        public override bool UsesCamera => false;
+
+        [TrippinParam("Lens width", 0.7f, 1.4f)] public float lens = 1f;
+        [TrippinParam("City lights", 0f, 2f)] public float cityLights = 1f;
+        [TrippinParam("Sky glow", 0f, 3f)] public float skyGlow = 1f;
+        float kickRing = 1f;   // (a control here never showed: the ring needs a kick over 0.8)
+        [TrippinParam("Fog distance", 200f, 800f)] public float fog = 420f;
+
         public Material coasterCityMat, deckMat, noseMat, skyMat;
 
         const float LAP_BEATS = 96f;
@@ -302,7 +310,7 @@ namespace TrippinStage
 
             cam.transform.position = ro;
             cam.transform.rotation = Quaternion.LookRotation(fwd, upv);
-            cam.fieldOfView = Mathf.Lerp(47f, 62f, spdN);
+            cam.fieldOfView = Mathf.Lerp(47f, 62f, spdN) * lens;
 
             // Rail chase lights running forward on the beat (calm-aware).
             float bp = Mathf.Lerp(Mathf.Exp(-s.beat_phase * 6f), 0.25f, s.calm);
@@ -318,10 +326,10 @@ namespace TrippinStage
             _railR.Apply(drive);
             _deckM.SetFloat("_Gain", drive);
             _noseM.SetFloat("_Gain", drive);
-            _skyM.SetFloat("_Glow", 0.3f + 0.6f * s.intensity);
+            _skyM.SetFloat("_Glow", (0.3f + 0.6f * s.intensity) * skyGlow);
 
             // City: kick ring over the rooftops, more windows as it builds.
-            if (rx.kick > 0.8f && _wave > 60f) { _wave = 0f; _waveAmp = Mathf.Clamp01(rx.kick + 0.3f); }
+            if (rx.kick > 0.8f && _wave > 60f) { _wave = 0f; _waveAmp = Mathf.Clamp01(rx.kick + 0.3f) * kickRing; }
             _wave += dt * 140f;
             _waveAmp *= Mathf.Exp(-dt / 1.2f);
             _lit = Mathf.Lerp(_lit, rx.lum, 1f - Mathf.Exp(-dt * 4f));
@@ -329,8 +337,8 @@ namespace TrippinStage
             {
                 m.SetFloat("_Wave", _wave);
                 m.SetFloat("_WaveAmp", _waveAmp);
-                m.SetFloat("_Lit", _lit);
-                m.SetFloat("_FogDist", 420f);
+                m.SetFloat("_Lit", Mathf.Clamp01(_lit * cityLights));
+                m.SetFloat("_FogDist", fog);
                 m.SetFloat("_Block", S);
             }
 

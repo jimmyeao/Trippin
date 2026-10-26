@@ -25,6 +25,13 @@ namespace TrippinStage
     {
         const float H = 8f;
         static readonly Quaternion Face = Quaternion.Euler(0f, 180f, 0f);
+        [TrippinParam("Colour", 0f, 1f)] public float hueBase = 0.5f;
+        [TrippinParam("Lasers", 0f, 3f)] public float lasers = 1f;
+        [TrippinParam("Laser spread", 0.3f, 2f)] public float laserSpread = 1f;
+        [TrippinParam("LED wall", 0f, 2f)] public float wall = 1f;
+        [TrippinParam("Floor", 0f, 2f)] public float floor = 1f;
+        [TrippinParam("Camera sway", 0f, 2f)] public float sway = 1f;
+
         RobotMats _mats;
         Android _drum, _bass, _keys, _vox;
         // Props.
@@ -87,7 +94,7 @@ namespace TrippinStage
         protected override void Frame(ShowState s, float dt)
         {
             float gain = rx.Gain(0.6f, 1.45f);
-            float hue = 0.5f + 0.08f * Mathf.Sin(rx.phrase * 0.5f);
+            float hue = hueBase + 0.08f * Mathf.Sin(rx.phrase * 0.5f);
             _mats.Tune(hue, gain);
             float b = rx.beatS;
             float play = 1f - Mathf.Clamp01(rx.calm * 1.6f);          // the band lays out in a breakdown
@@ -100,8 +107,8 @@ namespace TrippinStage
             DrawVox(b, play, hue, gain, kick);
 
             // The wall, the floor and the lasers.
-            _wallM.SetFloat("_Hue", hue + 0.05f); _wallM.SetFloat("_Gain", gain * 0.9f); _wallM.SetFloat("_Clk", rx.clk);
-            _floorM.SetFloat("_Hue", hue); _floorM.SetFloat("_Gain", gain); _floorM.SetFloat("_Clk", rx.clk);
+            _wallM.SetFloat("_Hue", hue + 0.05f); _wallM.SetFloat("_Gain", gain * 0.9f * wall); _wallM.SetFloat("_Clk", rx.clk);
+            _floorM.SetFloat("_Hue", hue); _floorM.SetFloat("_Gain", gain * floor); _floorM.SetFloat("_Clk", rx.clk);
             // A new laser formation every 16 beats, morphing in over the first beat.
             int blk = Mathf.FloorToInt(b / 16f);
             int form = ((blk % 3) + 3) % 3, prevForm = (form + 2) % 3;
@@ -111,11 +118,11 @@ namespace TrippinStage
                 float u = (i - 5.5f) / 5.5f;
                 var from = new Vector3(u * 20f * tight, 0.4f, 20f);
                 float ang = Mathf.Lerp(FormAng(prevForm, u, i, rx.phrase), FormAng(form, u, i, rx.phrase), morph);
-                _lasers.Set(i, from, from + new Vector3(Mathf.Sin(ang) * 22f, 26f, -6f * Mathf.Cos(ang)), Kit.Hue(hue + 0.06f * (i % 5)), gain * (0.25f + 0.6f * rx.midFast + 0.4f * rx.impact) * (0.4f + 0.6f * play));
+                _lasers.Set(i, from, from + new Vector3(Mathf.Sin(ang * laserSpread) * 22f, 26f, -6f * Mathf.Cos(ang * laserSpread)), Kit.Hue(hue + 0.06f * (i % 5)), gain * lasers * (0.25f + 0.6f * rx.midFast + 0.4f * rx.impact) * (0.4f + 0.6f * play));
             }
 
-            float sway = Mathf.Sin(rx.phrase * 0.5f);
-            rig.Move(cam, new Vector3(sway * 6f, 5.4f + 0.8f * Mathf.Sin(rx.phrase), -13f + 3f * rx.tension), new Vector3(0f, 5.0f, 9f), dt, 0.6f);
+            float sw = Mathf.Sin(rx.phrase * 0.5f) * sway;
+            rig.Move(cam, new Vector3(sw * 6f, 5.4f + 0.8f * sway * Mathf.Sin(rx.phrase), -13f + 3f * rx.tension), new Vector3(0f, 5.0f, 9f), dt, 0.6f);
         }
 
         void DrawDrums(float b, float play, float hue, float gain, float kick)
