@@ -104,8 +104,8 @@ namespace TrippinStage
                 _emberAcc -= 1f;
                 _sparks.Burst(new Vector3(X(i, n), _h[i] * 0.6f, Z), Mathf.RoundToInt(10 * embers + _h[i] * 2f), ParticleField.Shape.Sphere, 3f, 0.09f, 2.2f,
                               new Color(2.4f, 0.9f, 0.25f), 0.8f, 1f, new Vector3(0f, 4f + _h[i] * 0.5f, 0f), default, 0.7f);
-                if (smoke > 0f && Random.value < 0.25f * smoke)
-                    _smoke.Burst(new Vector3(X(i, n), _h[i] * 1.1f, Z), 6, ParticleField.Shape.Sphere, 1.5f, 3.5f, 7f, Color.white, 0.6f, 0.3f, new Vector3(0f, 2f, 0f), default, 0.6f);
+                if (smoke > 0f && Random.value < 0.15f * smoke)
+                    _smoke.Burst(new Vector3(X(i, n), _h[i] * 1.1f, Z), 3, ParticleField.Shape.Sphere, 1.5f, 2.4f, 4.5f, Color.white, 0.6f, 0.3f, new Vector3(0f, 2f, 0f), default, 0.6f);
             }
             _sparks.Tick(dt, gain, 0.03f, 0.8f);
             _smoke.Mat.SetVectorArray("_Flash", _flash);

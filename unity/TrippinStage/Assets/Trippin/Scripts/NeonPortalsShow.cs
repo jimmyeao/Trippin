@@ -23,7 +23,7 @@ namespace TrippinStage
         [TrippinParam("Second tube", 0f, 1.5f)] public float second = 1f;
         [TrippinParam("Floor glow", 0f, 2f)] public float floorGlow = 1f;
 
-        const int Arches = 12, Pts = 160;
+        const int Arches = 12, Pts = 96;
         const float Gap = 9f, R0 = 4.2f;
         static readonly int[] Sides = { 0, 6, 3, 4 };     // 0 = circle
         TubeRibbon[] _main = new TubeRibbon[Arches], _inner = new TubeRibbon[Arches];
@@ -41,11 +41,11 @@ namespace TrippinStage
             _pools = new GlowPool(transform, glowMat, Arches, "floor light", false);
             for (int i = 0; i < Arches; i++)
             {
-                _main[i] = new TubeRibbon(transform, ribbonMat, Pts + 1, 8, "arch " + i, true);
+                _main[i] = new TubeRibbon(transform, ribbonMat, Pts + 1, 6, "arch " + i, true);
                 _main[i].Mat.SetFloat("_PulseAmt", 0f);
                 _main[i].Mat.SetFloat("_Core", 7f);
                 _main[i].Mat.SetFloat("_White", 0.55f);
-                _inner[i] = new TubeRibbon(transform, ribbonMat, Pts + 1, 6, "arch inner " + i, true);
+                _inner[i] = new TubeRibbon(transform, ribbonMat, Pts + 1, 5, "arch inner " + i, true);
                 _inner[i].Mat.SetFloat("_PulseAmt", 0f);
                 _inner[i].Mat.SetFloat("_Core", 9f);
             }
