@@ -1,9 +1,46 @@
 {
-  "video_club_mixer": ["stage", "dark"],
-  "video_club_movingheads": ["stage", "dark", "driving"],
-  "video_club_vinyl": ["stage", "dark", "slow"],
-  "video_dance_feet": ["stage", "neon", "driving"],
-  "video_dance_freestyle": ["stage", "driving"],
-  "video_dance_rooftop": ["stage", "bright"],
-  "video_dance_solo": ["stage", "neon", "dark"]
+  "video_club_drummer": [
+    "stage",
+    "dark",
+    "driving"
+  ],
+  "video_club_mixer": [
+    "stage",
+    "dark"
+  ],
+  "video_club_movingheads": [
+    "stage",
+    "dark",
+    "driving"
+  ],
+  "video_club_vinyl": [
+    "stage",
+    "dark",
+    "slow"
+  ],
+  "video_dance_bboy": [
+    "stage",
+    "dark",
+    "driving"
+  ],
+  "video_dance_feet": [
+    "stage",
+    "neon",
+    "driving"
+  ],
+  "video_dance_poi": [
+    "stage",
+    "neon",
+    "dark"
+  ],
+  "video_dance_popper": [
+    "stage",
+    "neon",
+    "driving"
+  ],
+  "video_dance_solo": [
+    "stage",
+    "neon",
+    "dark"
+  ]
 }

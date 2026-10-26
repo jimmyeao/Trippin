@@ -430,8 +430,8 @@ itself. Buildings and roads never warp.
 | Club Nights | club lasers and rig, crowd and warehouse flights (4) | about 105 MB |
 | Liquid | ink, smoke and liquid chrome (3) | about 90 MB |
 | Club Nights 2 | the decks, a speaker cone, an LED wall, a laser tunnel (4), locked to the bar | about 100 MB |
-| Liquid 2 | marbled paint, oil on water, ferrofluid, a jellyfish, a powder burst, molten gold, ink drops (7) | about 185 MB |
-| Dance Floor | freestyle dancers, feet on a light-up floor, a rooftop party, a solo dancer, the mixer, the vinyl, moving heads (7), locked to the bar | about 181 MB |
+| Liquid 2 | marbled paint, oil on water, ferrofluid, a pulsing ferrofluid crown, paint leaping off a speaker, a jellyfish, a powder burst, molten gold, ink drops (9) | about 227 MB |
+| Dance Floor | a b-boy, a popper, LED poi, a solo dancer, a drummer, feet on a light-up floor, the mixer, the vinyl, moving heads (9), locked to the bar | about 207 MB |
 
 The Club Nights 2 and Dance Floor scenes play locked to the bar: each loop
 spans whole bars from the downbeat, the lights flare on every kick, drum

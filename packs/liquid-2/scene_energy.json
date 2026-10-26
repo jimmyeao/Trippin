@@ -1,9 +1,11 @@
 {
-  "video_fluid_ferro": 0.42,
-  "video_fluid_gold": 0.57,
-  "video_fluid_inkdrop": 0.68,
-  "video_fluid_jelly": 0.21,
-  "video_fluid_marble": 0.54,
-  "video_fluid_oilwater": 0.37,
-  "video_fluid_powder": 0.62
+  "video_fluid_ferro": 0.46,
+  "video_fluid_ferropulse": 0.25,
+  "video_fluid_gold": 0.62,
+  "video_fluid_inkdrop": 0.71,
+  "video_fluid_jelly": 0.28,
+  "video_fluid_marble": 0.6,
+  "video_fluid_oilwater": 0.41,
+  "video_fluid_powder": 0.67,
+  "video_fluid_speakerpaint": 0.47
 }

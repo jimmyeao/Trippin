@@ -79,18 +79,19 @@ pub const CATALOG: &[CatalogEntry] = &[
     CatalogEntry {
         id: "liquid-2",
         name: "Liquid 2",
-        about: "Seven video scenes: marbled paint, oil on water, ferrofluid, a jellyfish, a powder \
-                burst, molten gold and ink drops, swirled by the music.",
-        size_mb: 186,
-        asset: ("liquid-2-1.trippinpack", "f4499fce6272d3532c56234df7dcd1af26e0a1a2703581024fa057a2c4e76506"),
+        about: "Nine video scenes: marbled paint, oil on water, ferrofluid and a pulsing ferrofluid \
+                crown, paint leaping off a speaker, a jellyfish, a powder burst, molten gold and ink \
+                drops, swirled by the music.",
+        size_mb: 227,
+        asset: ("liquid-2-1.1.trippinpack", "a341eaa86589c67c072e23b23a299ea81cb98cce19133318a82e4393c54fd94e"),
     },
     CatalogEntry {
         id: "dance-floor",
         name: "Dance Floor",
-        about: "Seven scenes locked to the bar: dancers each in their own groove, feet on a light-up \
-                floor, a rooftop party, a solo dancer, and the mixer, the vinyl and the moving heads.",
-        size_mb: 182,
-        asset: ("dance-floor-1.trippinpack", "588d24d64fd82a0d7342e5f8eaece87f28ea9d9d1081cd271fe1515b7fa4b2c1"),
+        about: "Nine scenes locked to the bar: a b-boy, a popper, LED poi, a solo dancer, a drummer, \
+                feet on a light-up floor, and the mixer, the vinyl and the moving heads.",
+        size_mb: 207,
+        asset: ("dance-floor-1.1.trippinpack", "f9b9b89be3ef1ff65083039ab7e5a4f8ba431281bf590f8484270a38f544f8b1"),
     },
 ];
 

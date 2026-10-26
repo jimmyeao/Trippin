@@ -1,9 +1,11 @@
 {
-  "video_club_mixer": 0.32,
-  "video_club_movingheads": 0.45,
-  "video_club_vinyl": 0.27,
-  "video_dance_feet": 0.61,
-  "video_dance_freestyle": 0.5,
-  "video_dance_rooftop": 0.6,
-  "video_dance_solo": 0.36
+  "video_club_drummer": 0.65,
+  "video_club_mixer": 0.41,
+  "video_club_movingheads": 0.53,
+  "video_club_vinyl": 0.35,
+  "video_dance_bboy": 0.64,
+  "video_dance_feet": 0.71,
+  "video_dance_poi": 0.45,
+  "video_dance_popper": 0.53,
+  "video_dance_solo": 0.48
 }
