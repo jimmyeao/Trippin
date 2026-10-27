@@ -446,6 +446,14 @@ and AI-generated backdrops:
 - `unity_jellyfish`: pulsing jellyfish with trailing tentacles, marine snow
   and light shafts.
 
+`unity_decks` (engine v20) is close-ups of a real DJ setup: two direct-drive
+turntables and a four-channel club mixer, modelled on the real layouts. It
+plays a 32-bar mix on loop: the incoming record is cued, the needle drops,
+START spins it up, the faders cross with a bass swap, and the outgoing deck
+brakes to a stop. The platters run at the pitch the tempo needs (the strobe
+dots freeze on the matching row), the LED meters follow the music, and the
+filter rides each build.
+
 ### Video scenes
 
 Video scenes come in **effects packs**, which install separately from the

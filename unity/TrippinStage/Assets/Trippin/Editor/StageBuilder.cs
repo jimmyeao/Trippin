@@ -36,6 +36,20 @@ namespace TrippinStage.EditorTools
             return t;
         }
 
+        /// A gear print (faceplate, label): anisotropic filtering keeps the small
+        /// text legible at the grazing angles of the close-ups.
+        static Texture2D GearTex(string file)
+        {
+            var t = Tex(file);
+            if (AssetImporter.GetAtPath($"{Root}/Textures/{file}") is TextureImporter ti && ti.anisoLevel != 8)
+            {
+                ti.anisoLevel = 8;
+                ti.SaveAndReimport();
+                t = AssetDatabase.LoadAssetAtPath<Texture2D>($"{Root}/Textures/{file}");
+            }
+            return t;
+        }
+
         static Material Mat(string shader, string name)
         {
             Directory.CreateDirectory($"{Root}/Materials");
@@ -322,6 +336,7 @@ namespace TrippinStage.EditorTools
                 ("unity_meteors", typeof(MeteorsShow)),
                 ("unity_lava", typeof(LavaShow)),
                 ("unity_jellyfish", typeof(JellyfishShow)),
+                ("unity_decks", typeof(DecksShow)),
             };
             // Extra materials for the ported scenes: instancing must be on the
             // material asset or the build strips the variant (AGENTS.md).
@@ -385,6 +400,16 @@ namespace TrippinStage.EditorTools
                     jf.jellyMat = Mat("Trippin/HqJelly", "HqJelly");
                     jf.waterMat = Mat("Trippin/HqDeep", "HqDeep");
                     jf.snowMat = Mat("Trippin/HqSnow", "HqSnow");
+                }
+                if (ks is DecksShow dk)
+                {
+                    dk.gearMat = Mat("Trippin/HqGear", "HqGear");
+                    dk.clubMat = Mat("Trippin/HqClub", "HqClub");
+                    dk.ttTex = GearTex("GearTTPlate.png"); dk.startTex = GearTex("GearStartBtn.png");
+                    dk.mixTex = GearTex("GearMixPanel.png"); dk.fxTex = GearTex("GearFxScreen.png");
+                    dk.slipTex = GearTex("GearSlipmat.png");
+                    dk.label0 = GearTex("GearLabel0.png"); dk.label1 = GearTex("GearLabel1.png");
+                    dk.label2 = GearTex("GearLabel2.png"); dk.label3 = GearTex("GearLabel3.png");
                 }
                 if (ks is LavaShow lavaShow) lavaShow.lavaMat = Mat("Trippin/HqLava", "HqLava");
                 if (ks is MeteorsShow mt)
