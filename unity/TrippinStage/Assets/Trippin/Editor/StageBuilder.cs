@@ -322,6 +322,7 @@ namespace TrippinStage.EditorTools
                 ("unity_bubbles", typeof(BubblesShow)),
                 ("unity_halloween", typeof(HalloweenShow)),
                 ("unity_meteors", typeof(MeteorsShow)),
+                ("unity_lava", typeof(LavaShow)),
             };
             // Extra materials for the ported scenes: instancing must be on the
             // material asset or the build strips the variant (AGENTS.md).
@@ -380,6 +381,7 @@ namespace TrippinStage.EditorTools
                     vx.skyMat.SetTexture("_MainTex", Tex("HqStormSky.png"));
                 }
                 if (ks is InkShow ink) ink.inkMat = Mat("Trippin/HqInk", "HqInk");
+                if (ks is LavaShow lavaShow) lavaShow.lavaMat = Mat("Trippin/HqLava", "HqLava");
                 if (ks is MeteorsShow mt)
                 {
                     mt.sparkMat = Mat("Trippin/HqSpark", "HqSpark");

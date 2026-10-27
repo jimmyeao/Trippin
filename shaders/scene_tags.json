@@ -136,6 +136,7 @@
   "unity_ribbons": ["abstract", "geometric", "neon"],
   "unity_bloom": ["organic", "geometric", "neon"],
   "unity_marble": ["organic", "abstract", "bright"],
+  "unity_lava": ["retro", "warm", "slow"],
   "unity_meteors": ["space", "cold", "dark"],
   "unity_halloween": ["seasonal", "dark", "organic"],
   "unity_bubbles": ["abstract", "organic", "slow"],
