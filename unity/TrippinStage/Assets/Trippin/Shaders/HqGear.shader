@@ -19,6 +19,10 @@
 //    a loop shaded while _Smear > 0.5, and the whole-track overview with
 //    the progress (_Level).
 //  8 jog ring: a dark glossy ring dimpled all round (30 dimples).
+//  9 speaker cone: matte pressed paper, fine radial fibres and a few ribs.
+// Any mode: _ExcR (inner, outer radius) > 0 moves vertices along object y by
+// _Exc, fully inside the inner radius and fading to 0 at the outer: a
+// loudspeaker cone and dust cap move rigidly while the surround stretches.
 Shader "Trippin/HqGear"
 {
     Properties
@@ -53,7 +57,8 @@ Shader "Trippin/HqGear"
 
             TEXTURE2D(_MainTex); SAMPLER(sampler_MainTex);
             float4 _Tint, _Side, _Emit, _UVScale;
-            float _UseTex, _Metal, _Rough, _Aniso, _Mode, _Level, _Spin, _Smear;
+            float _UseTex, _Metal, _Rough, _Aniso, _Mode, _Level, _Spin, _Smear, _Exc;
+            float4 _ExcR;
             // Shared by the show for every part.
             float4 _GLPos[4], _GLCol[4];
             float4 _GEnvA, _GEnvB, _GEnvC;      // softbox colour, low glow 1, low glow 2 (rgb, w = angle)
@@ -73,6 +78,11 @@ Shader "Trippin/HqGear"
             V vert(A i)
             {
                 V o;
+                if (_ExcR.y > 0.0)
+                {
+                    float rr0 = length(i.pos.xz);
+                    i.pos.y += _Exc * saturate((_ExcR.y - rr0) / max(_ExcR.y - _ExcR.x, 1e-4));
+                }
                 o.wp = TransformObjectToWorld(i.pos.xyz);
                 o.wn = TransformObjectToWorldNormal(i.n);
                 o.op = i.pos.xyz; o.on = i.n;
@@ -319,6 +329,15 @@ Shader "Trippin/HqGear"
                         base = float3(0.05, 0.05, 0.055); rough = 0.25; metal = 0.6;
                     }
                 }
+                else if (mode == 9)
+                {
+                    float ang = atan2(i.op.x, i.op.z);
+                    float fib = GHash(floor(ang * 900.0)) * 0.5 + GHash(floor(ang * 260.0 + rr * 30.0)) * 0.5;
+                    base = _Tint.rgb * (0.8 + 0.35 * fib);
+                    float rib = sin(rr * 95.0);
+                    n = normalize(n + normalize(radial + 1e-5) * rib * 0.035);
+                    metal = 0.0; rough = 0.75;
+                }
                 else if (mode == 5)
                 {
                     float3 s = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, i.uv).rgb;
@@ -340,7 +359,12 @@ Shader "Trippin/HqGear"
             #pragma fragment frag
             #pragma target 4.5
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
-            float4 vert(float4 pos : POSITION) : SV_POSITION { return TransformObjectToHClip(pos.xyz); }
+            float _Exc; float4 _ExcR;
+            float4 vert(float4 pos : POSITION) : SV_POSITION
+            {
+                if (_ExcR.y > 0.0) pos.y += _Exc * saturate((_ExcR.y - length(pos.xz)) / max(_ExcR.y - _ExcR.x, 1e-4));
+                return TransformObjectToHClip(pos.xyz);
+            }
             float4 frag() : SV_Target { return 0; }
             ENDHLSL
         }

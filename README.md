@@ -457,6 +457,9 @@ filter rides each build.
 waveform scrolls on the screen at the tempo, the jog display's playhead
 turns, the next track loads and cues before PLAY, a hot cue fires on the
 drop and a beat loop holds through breakdowns.
+`unity_speaker` is close-ups of a club speaker stack (an 18" sub under a
+15" top with a horn): the cones push out on every kick and settle, the
+surrounds flex, and dust blows out of the bass ports in the key light.
 
 ### Video scenes
 

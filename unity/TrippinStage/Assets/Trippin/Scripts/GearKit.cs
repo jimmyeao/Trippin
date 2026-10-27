@@ -166,6 +166,79 @@ namespace TrippinStage
             return Make(name, verts, norms, uvs, tris);
         }
 
+        /// A rectangular flared horn (a loudspeaker's constant-directivity horn):
+        /// the inside walls only, from a `throat` (half width, half height) at
+        /// z = +depth (inside the cabinet) out to the `mouth` at z = 0, flaring
+        /// by t^flare. Normals face in.
+        public static Mesh Horn(Vector2 throat, Vector2 mouth, float depth, float flare = 1.6f, int steps = 24, string name = "horn")
+        {
+            var verts = new List<Vector3>(); var norms = new List<Vector3>(); var uvs = new List<Vector2>(); var tris = new List<int>();
+            Vector3 P(float t, float a, float b)
+            {
+                float f = Mathf.Pow(t, flare);
+                var hs = Vector2.Lerp(throat, mouth, f);
+                return new Vector3(a * hs.x, b * hs.y, depth * (1f - t));     // the throat is behind the mouth
+            }
+            // Each wall: a grid across (s -1..1) and along (t 0..1).
+            var walls = new[] { (new Vector2(1, 0), new Vector2(0, 1)), (new Vector2(-1, 0), new Vector2(0, 1)), (new Vector2(0, 1), new Vector2(1, 0)), (new Vector2(0, -1), new Vector2(1, 0)) };
+            const int across = 8;
+            foreach (var (fix, run) in walls)
+            {
+                int b0 = verts.Count;
+                for (int i = 0; i <= steps; i++)
+                    for (int j = 0; j <= across; j++)
+                    {
+                        float t = i / (float)steps, s = j / (float)across * 2f - 1f;
+                        float a = fix.x != 0 ? fix.x : s, bb = fix.y != 0 ? fix.y : s;
+                        var p = P(t, a, bb);
+                        verts.Add(p); uvs.Add(new Vector2(j / (float)across, t));
+                        // Inward normal: across the wall's own slope.
+                        var pn = P(Mathf.Min(t + 0.01f, 1f), a, bb) - P(Mathf.Max(t - 0.01f, 0f), a, bb);
+                        var outward = new Vector3(fix.x, fix.y, 0f);
+                        var n = -(outward - pn.normalized * Vector3.Dot(outward, pn.normalized)).normalized;
+                        norms.Add(n);
+                    }
+                int w = across + 1;
+                for (int i = 0; i < steps; i++)
+                    for (int j = 0; j < across; j++)
+                    {
+                        int a = b0 + i * w + j;
+                        Quad(verts, tris, a, a + 1, a + w + 1, a + w, norms[a]);
+                    }
+            }
+            return Make(name, verts, norms, uvs, tris);
+        }
+
+        /// A loudspeaker baffle: a flat board `w` x `h` facing -z (centred on the
+        /// origin) with holes cut in it: each hole is (x, y, r, 0) for a circle
+        /// or (x, y, half width, -half height) for a rectangle. The cut edge is
+        /// stepped at `cell`; the driver frames and lips cover it, as on a real cabinet.
+        public static Mesh Baffle(float w, float h, Vector4[] holes, float cell = 0.04f, string name = "baffle")
+        {
+            var verts = new List<Vector3>(); var norms = new List<Vector3>(); var uvs = new List<Vector2>(); var tris = new List<int>();
+            int nx = Mathf.CeilToInt(w / cell), ny = Mathf.CeilToInt(h / cell);
+            bool Cut(float x, float y)
+            {
+                foreach (var o in holes)
+                {
+                    if (o.w >= 0f) { if ((x - o.x) * (x - o.x) + (y - o.y) * (y - o.y) < o.z * o.z) return true; }
+                    else if (Mathf.Abs(x - o.x) < o.z && Mathf.Abs(y - o.y) < -o.w) return true;
+                }
+                return false;
+            }
+            for (int j = 0; j < ny; j++)
+                for (int i = 0; i < nx; i++)
+                {
+                    float x0 = -w / 2 + i * w / nx, x1 = -w / 2 + (i + 1) * w / nx, y0 = -h / 2 + j * h / ny, y1 = -h / 2 + (j + 1) * h / ny;
+                    if (Cut((x0 + x1) * 0.5f, (y0 + y1) * 0.5f)) continue;
+                    int b = verts.Count;
+                    verts.Add(new Vector3(x0, y0, 0)); verts.Add(new Vector3(x1, y0, 0)); verts.Add(new Vector3(x1, y1, 0)); verts.Add(new Vector3(x0, y1, 0));
+                    for (int k = 0; k < 4; k++) { norms.Add(Vector3.back); uvs.Add(new Vector2(verts[b + k].x / w + 0.5f, verts[b + k].y / h + 0.5f)); }
+                    Quad(verts, tris, b, b + 1, b + 2, b + 3, Vector3.back);
+                }
+            return Make(name, verts, norms, uvs, tris);
+        }
+
         /// A flat quad on the xz plane facing up, `w` x `d`, uv 0..1 (v along +z).
         public static Mesh Quad(float w, float d, string name = "quad")
         {

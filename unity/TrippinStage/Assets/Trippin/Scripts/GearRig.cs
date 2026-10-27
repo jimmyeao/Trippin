@@ -212,6 +212,8 @@ namespace TrippinStage
         readonly Mesh _tableM;
         readonly Vector4[] _lp = new Vector4[4], _lc = new Vector4[4];
 
+        public bool drawTable = true;
+
         public Booth(Transform parent, Material clubMat, GearMats m)
         {
             _club = Kit.Fullscreen(parent, clubMat, "club");
@@ -240,7 +242,7 @@ namespace TrippinStage
             _club.SetFloat("_Beams", club * (0.6f + 0.4f * gain));
             _club.SetFloat("_Wall", club);
             _club.SetFloat("_Gain", 1f);
-            GearDraw.Draw(_tableM, _table, GearDraw.T(new Vector3(0f, -0.25f, 0.4f)));
+            if (drawTable) GearDraw.Draw(_tableM, _table, GearDraw.T(new Vector3(0f, -0.25f, 0.4f)));
         }
     }
 }
