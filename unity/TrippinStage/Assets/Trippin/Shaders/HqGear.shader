@@ -11,6 +11,14 @@
 //  3 knob: knurled skirt, white pointer line at object +z.
 //  4 meter: a 15-segment LED ladder along uv.y lit to _Level.
 //  5 screen: _MainTex as emission.
+//  6 jog display: the round LCD in a media player's jog: a playhead marker
+//    turning at _Smear revolutions, the track's progress (_Level) round the
+//    rim, the cue point at the top.
+//  7 player screen: _MainTex's text over a waveform the shader draws: the
+//    zoomed waveform scrolling past the playhead at _Spin beats, beat grid,
+//    a loop shaded while _Smear > 0.5, and the whole-track overview with
+//    the progress (_Level).
+//  8 jog ring: a dark glossy ring dimpled all round (30 dimples).
 Shader "Trippin/HqGear"
 {
     Properties
@@ -230,6 +238,86 @@ Shader "Trippin/HqGear"
                     float3 c = seg < 9.0 ? float3(0.15, 1.0, 0.25) : seg < 13.0 ? float3(1.0, 0.6, 0.05) : float3(1.0, 0.1, 0.06);
                     float3 off = c * 0.012;
                     return float4(lerp(off, c * 2.2, on), 1);
+                }
+                else if (mode == 6)
+                {
+                    float r = rr / 0.36;
+                    float ang = atan2(i.op.x, i.op.z) / 6.2831853;            // 0 at the top, clockwise
+                    float a01 = frac(ang + 1.0);
+                    float3 c = float3(0.004, 0.01, 0.03);
+                    // Progress round the rim: 60 segments.
+                    float seg = frac(a01 * 60.0);
+                    float rim = step(0.8, r) * step(r, 0.95) * step(0.15, seg) * step(seg, 0.85);
+                    c += rim * lerp(float3(0.05, 0.08, 0.16), float3(0.75, 0.88, 1.2), step(a01, _Level));
+                    // The playhead: a bar turning with the music.
+                    float pa = frac(a01 - frac(_Smear) + 0.5) - 0.5;
+                    float bar = (1.0 - smoothstep(0.006, 0.014, abs(pa))) * step(0.3, r) * step(r, 0.76);
+                    c += bar * float3(1.6, 1.7, 1.9);
+                    // The cue point at the top, and the inner ring.
+                    c += (1.0 - smoothstep(0.01, 0.02, abs(frac(a01 + 0.5) - 0.5))) * step(0.96, r) * step(r, 1.0) * float3(2.2, 0.9, 0.1);
+                    c += (1.0 - smoothstep(0.0, 0.015, abs(r - 0.28))) * float3(0.2, 0.35, 0.8);
+                    return float4(c * _Emit.rgb + 0.002, 1);
+                }
+                else if (mode == 7)
+                {
+                    float2 uv = i.uv;
+                    float3 c = 0;
+                    // Zoomed waveform: 16 beats across, the playhead in the middle.
+                    float b = _Spin + (uv.x - 0.5) * 16.0;
+                    if (uv.y > 0.36 && uv.y < 0.88)
+                    {
+                        float sec = floor(b / 64.0);
+                        float brk = step(GHash(sec * 3.7 + 1.0), 0.25) * step(1.0, sec);
+                        float k = exp(-frac(b) * 7.0);
+                        float hat = exp(-frac(b * 2.0 + 0.5) * 9.0) * 0.25;
+                        float nz = GHash(floor(b * 48.0)) * 0.22;
+                        float amp = lerp(saturate(0.22 + 0.55 * k + hat + nz), 0.12 + nz * 0.6, brk) * step(0.0, b);
+                        float y = abs(uv.y - 0.62) / 0.26;
+                        float body = step(y, amp);
+                        float3 wc = lerp(float3(0.1, 0.32, 1.0), float3(0.85, 0.92, 1.0), saturate(k * 0.8 + (amp - y) * 0.5));
+                        c += wc * body * (uv.x < 0.5 ? 0.75 : 1.0);
+                        // Beat grid along the top and bottom, bars in red.
+                        float bf = frac(b);
+                        float grid = (1.0 - smoothstep(0.0, 0.02, min(bf, 1.0 - bf))) * step(0.82, abs(uv.y - 0.62) / 0.26 * 0.8 + 0.2);
+                        float isBar = step(frac(b / 4.0), 0.25 / 4.0 + 0.001) + step(1.0 - 0.25 / 4.0, frac(b / 4.0));
+                        c += grid * lerp(float3(0.5, 0.5, 0.55), float3(1.0, 0.15, 0.1), saturate(isBar));
+                        // A loop: four beats shaded.
+                        float l0 = floor(_Spin / 4.0) * 4.0;
+                        c += step(0.5, _Smear) * step(l0, b) * step(b, l0 + 4.0) * float3(0.22, 0.12, 0.0);
+                        // Playhead.
+                        c += (1.0 - smoothstep(0.0, 0.0018, abs(uv.x - 0.5))) * float3(2.0, 2.0, 2.0);
+                    }
+                    // Overview: the whole track, played part greyed, a white needle.
+                    if (uv.y > 0.21 && uv.y < 0.33)
+                    {
+                        float tb = uv.x * 1024.0;
+                        float sec = floor(tb / 64.0);
+                        float brk = step(GHash(sec * 3.7 + 1.0), 0.25) * step(1.0, sec);
+                        float amp = lerp(0.45 + 0.4 * GHash(floor(tb / 2.0)), 0.18, brk);
+                        float y = abs(uv.y - 0.27) / 0.06;
+                        float3 oc = uv.x < _Level ? float3(0.25, 0.27, 0.32) : float3(0.15, 0.45, 1.0);
+                        c += oc * step(y, amp);
+                        c += (1.0 - smoothstep(0.0, 0.002, abs(uv.x - _Level))) * float3(2, 2, 2);
+                    }
+                    float3 t = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, uv).rgb;
+                    c = max(c, t);
+                    return float4(c * _Emit.rgb + 0.003, 1);
+                }
+                else if (mode == 8)
+                {
+                    // Dimples round the ring: concave, so their normals lean in.
+                    float ang = atan2(i.op.x, i.op.z);
+                    float cell = frac(ang / 6.2831853 * 30.0) - 0.5;
+                    float arc = cell * 6.2831853 / 30.0 * rr;                  // along the ring, units
+                    float rad = (rr - 0.915) ;
+                    float2 dd = float2(arc, rad) / 0.07;
+                    float d = length(dd);
+                    if (d < 1.0 && i.on.y > 0.3)
+                    {
+                        float3 radial3 = normalize(radial + 1e-5);
+                        n = normalize(n - (tCirc * dd.x + radial3 * dd.y) * 0.55);
+                        base = float3(0.05, 0.05, 0.055); rough = 0.25; metal = 0.6;
+                    }
                 }
                 else if (mode == 5)
                 {

@@ -470,6 +470,92 @@ def slipmat():
 
 
 
+# ---------------- media player (CDJ-style), 320 x 406 mm ----------------
+def cdj():
+    P = Panel(320, 406, 4.6, (17, 17, 19))
+    jx, jz = 165, 160
+    # Jog well: a dark surround with a fine bright edge and its shadow.
+    P.circle(jx, jz, 110, fill=(26, 26, 29)); P.circle(jx, jz, 107, fill=(7, 7, 8))
+    P.shadow_circle(jx, jz, 106, 190)
+    for a, lab in ((-128, "REV"), (128, "FWD")):
+        r = math.radians(a)
+        P.text(jx + 118 * math.sin(r), jz + 118 * math.cos(r), lab, 2.6, WHITE)
+    
+    # PLAY/PAUSE and CUE, bottom-left.
+    for z, lab in ((40, "PLAY/PAUSE"), (95, "CUE")):
+        P.circle(35, z, 21, fill=(8, 8, 9)); P.shadow_circle(35, z, 19, 170)
+        P.text(35, z - 25, lab, 2.4, WHITE)
+    # Left column: search, track search, direction, loop.
+    for z, lab in ((128, "SEARCH"), (158, "TRACK SEARCH")):
+        for x in (22, 47):
+            P.rect(x - 9, z - 5, x + 9, z + 5, fill=(7, 7, 8), r=1.5)
+        P.text(34.5, z + 9, lab, 2.0, WHITE)
+        P.text(22, z, "<<", 2.0, GREY); P.text(47, z, ">>", 2.0, GREY)
+    P.rect(26, 188, 42, 214, fill=(7, 7, 8), r=2); P.text(34, 219, "DIRECTION", 2.0, WHITE)
+    P.text(20, 182, "REV", 1.7, GREY); P.text(48, 182, "FWD", 1.7, GREY)
+    for x, lab in ((24, "IN/CUE"), (48, "OUT")):
+        P.circle(x, 262, 9, fill=(7, 7, 8)); P.text(x, 250, lab, 1.8, WHITE)
+    P.rect(26, 232, 46, 240, fill=(7, 7, 8), r=1.5); P.text(36, 227, "RELOOP/EXIT", 1.7, WHITE)
+    P.text(36, 275, "LOOP", 2.2, WHITE, bold=True)
+    # Source buttons left of the display.
+    for i, lab in enumerate(("SD", "USB", "LINK", "BROWSE")):
+        z = 392 - i * 22
+        P.rect(22, z - 5, 44, z + 5, fill=(7, 7, 8), r=1.5); P.text(14, z, lab, 1.6, GREY, anchor="rm")
+    # Hot cue pads under the display, A..H.
+    for i in range(8):
+        x = 78 + i * 26
+        P.rect(x - 11, 277, x + 11, 290, fill=(6, 6, 7), r=2)
+        P.text(x, 271, "ABCDEFGH"[i], 2.0, WHITE)
+    P.text(56, 283.5, "HOT CUE", 1.8, WHITE, anchor="rm")
+    # Right column: tempo, sync, jog mode.
+    P.rect(290, 30, 305, 182, fill=(26, 26, 29), r=2); P.rect(295, 36, 300, 176, fill=(2, 2, 2), r=1)
+    for k in range(-10, 11, 2):
+        z = 106 - k * 6.8
+        P.line(284, z, 288, z, WHITE, 0.3)
+        if k % 10 == 0: P.text(282, z, ("+" if k > 0 else "-" if k < 0 else "") + str(abs(k)), 2.0, WHITE, anchor="rm")
+    P.text(297.5, 22, "TEMPO", 2.4, WHITE)
+    for z, lab in ((192, "MASTER TEMPO"), (210, "TEMPO ±6/10/16/WIDE")):
+        P.rect(290, z - 4, 305, z + 4, fill=(7, 7, 8), r=1.5); P.text(286, z, lab, 1.6, GREY, anchor="rm")
+    for x, lab in ((282, "BEAT SYNC"), (305, "MASTER")):
+        P.rect(x - 9, 230, x + 9, 240, fill=(7, 7, 8), r=1.5); P.text(x, 245, lab, 1.7, WHITE)
+    P.rect(276, 257, 294, 265, fill=(7, 7, 8), r=1.5); P.text(285, 270, "JOG MODE", 1.7, WHITE)
+    P.text(285, 252, "VINYL  CDJ", 1.5, GREY)
+    knob_scale(P, 306, 284, 6, ticks=9, lab="JOG ADJUST", labz=275)
+    # Right of the display: browse knob, back, tag track.
+    P.circle(300, 372, 15, fill=(8, 8, 9)); P.shadow_circle(300, 372, 13, 160)
+    P.rect(292, 338, 308, 345, fill=(7, 7, 8), r=1.5); P.text(300, 333, "BACK", 1.6, WHITE)
+    P.rect(292, 316, 308, 323, fill=(7, 7, 8), r=1.5); P.text(300, 311, "TAG TRACK", 1.5, WHITE)
+    # The display pod sits on the plate here; its shadow.
+    P.shadow_rect(62, 298, 278, 406, 160)
+    P.text(245, 12, "MULTI PLAYER", 3.0, WHITE, bold=True)
+    P.finish("GearCdjPlate")
+
+# The player's screen: everything but the waveforms, which the shader draws.
+def cdj_screens():
+    for i, (title, artist, bpm, key) in enumerate((("Deep Into The Groove (Extended Mix)", "Night Shift", "124.00", "8A"),
+                                                   ("Warehouse Theory (Original Mix)", "Low End", "126.00", "5A"))):
+        img = Image.new("RGB", (1024, 576), (0, 0, 0)); d = ImageDraw.Draw(img)
+        d.rectangle([0, 0, 1023, 54], fill=(18, 22, 34))
+        d.text((16, 27), "♪", font=ImageFont.truetype(F + "seguisym.ttf", 34), fill=(120, 180, 255), anchor="lm")
+        d.text((56, 27), title, font=font(28, True), fill=(235, 240, 250), anchor="lm")
+        d.text((1008, 27), artist, font=font(24), fill=(150, 160, 180), anchor="rm")
+        # Bottom info bar: deck number, time, tempo, BPM, key.
+        d.rectangle([0, 470, 1023, 575], fill=(10, 12, 18))
+        d.rectangle([14, 482, 84, 562], outline=(120, 170, 255), width=3)
+        d.text((49, 522), str(i + 1), font=font(56, True), fill=(140, 190, 255), anchor="mm")
+        d.text((110, 488), "REMAIN", font=font(18), fill=(130, 140, 160))
+        d.text((110, 512), "04:12", font=font(40, True), fill=(235, 240, 250))
+        d.text((230, 520), ".3", font=font(26), fill=(200, 210, 230))
+        d.text((330, 488), "TEMPO", font=font(18), fill=(130, 140, 160))
+        d.text((330, 512), "+0.0%", font=font(36, True), fill=(235, 240, 250))
+        d.text((500, 488), "BPM", font=font(18), fill=(130, 140, 160))
+        d.text((500, 508), bpm, font=font(44, True), fill=(235, 240, 250))
+        d.text((690, 488), "KEY", font=font(18), fill=(130, 140, 160))
+        d.text((690, 512), key, font=font(36, True), fill=(120, 230, 160))
+        d.text((790, 488), "QUANTIZE", font=font(18), fill=(250, 170, 60))
+        d.text((790, 516), "MASTER", font=font(24, True), fill=(250, 170, 60))
+        img.save(f"{OUT}/GearCdjScreen{i}.png"); print("GearCdjScreen", i)
+
 def start_button():
 
     img = Image.new("RGB", (600, 490), (150, 152, 156)); d = ImageDraw.Draw(img)
@@ -485,5 +571,5 @@ def start_button():
 
 
 
-turntable(); start_button(); mixer(); fx_screen(); labels(); slipmat()
+turntable(); start_button(); cdj(); cdj_screens(); mixer(); fx_screen(); labels(); slipmat()
 

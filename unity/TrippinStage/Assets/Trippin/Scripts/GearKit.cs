@@ -209,6 +209,9 @@ namespace TrippinStage
             }
         }
 
+        public static Matrix4x4 TRS(Vector3 p, Quaternion q) => Matrix4x4.TRS(p, q, Vector3.one);
+        public static Matrix4x4 T(Vector3 p) => Matrix4x4.Translate(p);
+
         public static void Draw(Mesh mesh, Material mat, Matrix4x4 m, MaterialPropertyBlock props = null)
         {
             var rp = new RenderParams(mat) { matProps = props, shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off };

@@ -453,6 +453,10 @@ START spins it up, the faders cross with a bass swap, and the outgoing deck
 brakes to a stop. The platters run at the pitch the tempo needs (the strobe
 dots freeze on the matching row), the LED meters follow the music, and the
 filter rides each build.
+`unity_cdj` (engine v20) is the same booth with two media players: the
+waveform scrolls on the screen at the tempo, the jog display's playhead
+turns, the next track loads and cues before PLAY, a hot cue fires on the
+drop and a beat loop holds through breakdowns.
 
 ### Video scenes
 

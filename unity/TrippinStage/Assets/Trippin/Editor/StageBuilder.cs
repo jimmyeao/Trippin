@@ -337,6 +337,7 @@ namespace TrippinStage.EditorTools
                 ("unity_lava", typeof(LavaShow)),
                 ("unity_jellyfish", typeof(JellyfishShow)),
                 ("unity_decks", typeof(DecksShow)),
+                ("unity_cdj", typeof(CdjShow)),
             };
             // Extra materials for the ported scenes: instancing must be on the
             // material asset or the build strips the variant (AGENTS.md).
@@ -400,6 +401,14 @@ namespace TrippinStage.EditorTools
                     jf.jellyMat = Mat("Trippin/HqJelly", "HqJelly");
                     jf.waterMat = Mat("Trippin/HqDeep", "HqDeep");
                     jf.snowMat = Mat("Trippin/HqSnow", "HqSnow");
+                }
+                if (ks is CdjShow cj)
+                {
+                    cj.gearMat = Mat("Trippin/HqGear", "HqGear");
+                    cj.clubMat = Mat("Trippin/HqClub", "HqClub");
+                    cj.plateTex = GearTex("GearCdjPlate.png");
+                    cj.mixTex = GearTex("GearMixPanel.png"); cj.fxTex = GearTex("GearFxScreen.png");
+                    cj.screen0 = GearTex("GearCdjScreen0.png"); cj.screen1 = GearTex("GearCdjScreen1.png");
                 }
                 if (ks is DecksShow dk)
                 {
