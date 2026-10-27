@@ -136,6 +136,7 @@
   "unity_ribbons": ["abstract", "geometric", "neon"],
   "unity_bloom": ["organic", "geometric", "neon"],
   "unity_marble": ["organic", "abstract", "bright"],
+  "unity_stylus": ["organic", "abstract", "dark"],
   "unity_controller": ["stage", "dark", "analyser"],
   "unity_groovebox": ["stage", "retro", "analyser"],
   "unity_movingheads": ["stage", "neon", "dark"],

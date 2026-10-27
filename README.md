@@ -472,6 +472,10 @@ and the bass drum drops out in breakdowns.
 laptop on a stand behind it running the DJ software. The same mix plays
 on it: waveforms scroll on the laptop, pads fire hot cues on the drop,
 roll through builds and hold a loop in breakdowns.
+`unity_stylus` is an extreme macro of a diamond stylus riding a record
+groove: the groove walls swing with the music (bass the big slow swings,
+the highs the fine ones), the tip shakes along with them, and a rainbow
+sheen slides over the grooves as the record turns in slow motion.
 
 ### Video scenes
 
