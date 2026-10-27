@@ -556,6 +556,47 @@ def cdj_screens():
         d.text((790, 516), "MASTER", font=font(24, True), fill=(250, 170, 60))
         img.save(f"{OUT}/GearCdjScreen{i}.png"); print("GearCdjScreen", i)
 
+# ---------------- 16-step drum machine, 500 x 300 mm ----------------
+DRUM_INST = ["BASS DRUM", "SNARE DRUM", "LOW TOM", "MID TOM", "HI TOM", "RIM SHOT", "HAND CLAP", "CLOSED HAT", "OPEN HAT", "CRASH", "RIDE"]
+DRUM_KNOBS = [("LEVEL", "TUNE", "DECAY"), ("LEVEL", "TONE", "SNAPPY"), ("LEVEL", "TUNE", "DECAY"), ("LEVEL", "TUNE", "DECAY"),
+              ("LEVEL", "TUNE", "DECAY"), ("LEVEL", None, None), ("LEVEL", None, None), ("LEVEL", "DECAY", None),
+              ("LEVEL", "DECAY", None), ("LEVEL", "TUNE", None), ("LEVEL", "TUNE", None)]
+def drum():
+    P = Panel(500, 300, 4.0, (40, 40, 43))
+    # Upper deck slightly darker, a pinstripe between.
+    P.rect(0, 92, 500, 300, fill=(30, 30, 33))
+    P.line(0, 92, 500, 92, (230, 120, 40), 0.8)
+    P.line(0, 268, 500, 268, (230, 120, 40), 0.5)
+    P.text(14, 284, "DRUM MACHINE", 5.0, (235, 235, 235), bold=True, anchor="lm")
+    P.text(120, 284, "DM-16  RHYTHM PROGRAMMER", 3.4, (230, 120, 40), anchor="lm")
+    # Instrument columns.
+    for i, name in enumerate(DRUM_INST):
+        x = 82 + i * 38
+        P.text(x, 258, name, 2.3, (235, 235, 235), bold=True)
+        P.line(x - 17, 252, x + 17, 252, (120, 120, 125), 0.25)
+        for k, lab in enumerate(DRUM_KNOBS[i]):
+            if lab is None: continue
+            z = 228 - k * 46
+            knob_scale(P, x, z, 9, ticks=11, lab=lab, labz=z - 14)
+        if i < 10: P.line(x + 19, 110, x + 19, 252, (60, 60, 64), 0.3)
+    # Left column: tempo, volume, instrument select, start/stop, tap.
+    knob_scale(P, 32, 228, 13, ticks=21, lab="TEMPO", labz=208)
+    knob_scale(P, 32, 170, 10, lab="VOLUME", labz=154)
+    knob_scale(P, 32, 120, 10, ticks=11, lab="INSTRUMENT", labz=104)
+    P.rect(14, 26, 50, 62, fill=(10, 10, 11), r=3); P.text(32, 18, "START / STOP", 2.2, (235, 235, 235))
+    P.rect(18, 72, 46, 86, fill=(10, 10, 11), r=2); P.text(32, 66, "TAP", 1.9, (235, 235, 235))
+    # Step keys: 16 in four colour groups, numbered, LEDs above.
+    for i in range(16):
+        x = 82 + i * 25.6
+        P.rect(x - 11, 22, x + 11, 56, fill=(12, 12, 13), r=2)
+        P.text(x, 12, str(i + 1), 2.6, (235, 235, 235))
+        P.circle(x, 66, 2.4, fill=(20, 8, 8))
+    for g in range(4):
+        x0 = 82 + g * 4 * 25.6 - 12
+        P.line(x0, 76, x0 + 4 * 25.6 - 2, 76, [(200, 40, 30), (230, 120, 30), (230, 200, 40), (225, 222, 210)][g], 0.8)
+    P.text(250, 84, "STEP", 2.2, (235, 235, 235))
+    P.finish("GearDrumPlate", blur_mm=2.0)
+
 def start_button():
 
     img = Image.new("RGB", (600, 490), (150, 152, 156)); d = ImageDraw.Draw(img)
@@ -571,5 +612,5 @@ def start_button():
 
 
 
-turntable(); start_button(); cdj(); cdj_screens(); mixer(); fx_screen(); labels(); slipmat()
+turntable(); start_button(); cdj(); drum(); cdj_screens(); mixer(); fx_screen(); labels(); slipmat()
 

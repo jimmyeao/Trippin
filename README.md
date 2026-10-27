@@ -464,6 +464,10 @@ surrounds flex, and dust blows out of the bass ports in the key light.
 and the stage front: every 4 bars the heads pan and tilt into a new
 formation (fan, cross, focus, wave, circles, sweep), their beams cutting
 through the haze, the zoom breathing with the bass.
+`unity_groovebox` is a classic 16-step drum machine on the booth table: the
+running light chases the steps on the 16ths, keys dip as their steps fire,
+the instrument select moves on every 4 bars, the decays follow the music
+and the bass drum drops out in breakdowns.
 
 ### Video scenes
 
