@@ -62,8 +62,8 @@ namespace TrippinStage
             _lens = GearMesh.Lathe(new[] { new Vector2(0f, 0.192f), new Vector2(0.10f, 0.186f), new Vector2(0.10f, 0.186f), new Vector2(0.10f, 0.18f) }, 40, "mh lens");
             _clamp = GearMesh.RoundedBox(new Vector3(0.08f, 0.16f, 0.08f), 0.02f, 2, "clamp");
             _disp = GearMesh.RoundedBox(new Vector3(0.10f, 0.06f, 0.005f), 0.004f, 1, "mh display");
-            _trussM = Truss(TrussHalf * 2f, 0.29f, "truss");
-            _legM = Truss(TrussY + 0.3f, 0.29f, "truss leg");
+            _trussM = GearMesh.Truss(TrussHalf * 2f, 0.29f, "truss");
+            _legM = GearMesh.Truss(TrussY + 0.3f, 0.29f, "truss leg");
 
             for (int i = 0; i < Hang; i++)
             {
@@ -75,35 +75,6 @@ namespace TrippinStage
                 _root[Hang + i] = new Vector3(-4.5f + i * 1.8f, 0.02f, -1.2f);
                 _rootQ[Hang + i] = Quaternion.identity;
             }
-        }
-
-        /// A box truss `len` long along x (centred), `w` square: four chords and
-        /// zig-zag bracing on each face, as one mesh.
-        static Mesh Truss(float len, float w, string name)
-        {
-            var parts = new System.Collections.Generic.List<CombineInstance>();
-            float h = w * 0.5f;
-            var chords = new[] { new Vector2(-h, -h), new Vector2(h, -h), new Vector2(h, h), new Vector2(-h, h) };
-            var chordMesh = GearMesh.Tube(new[] { new Vector3(-len / 2, 0, 0), new Vector3(len / 2, 0, 0) }, new[] { 0.024f, 0.024f }, 10, "chord");
-            foreach (var c in chords)
-                parts.Add(new CombineInstance { mesh = chordMesh, transform = Matrix4x4.Translate(new Vector3(0f, c.x, c.y)) });
-            int bays = Mathf.Max(1, Mathf.RoundToInt(len / w));
-            float step = len / bays;
-            for (int f = 0; f < 4; f++)
-            {
-                var a = chords[f]; var b = chords[(f + 1) % 4];
-                for (int i = 0; i < bays; i++)
-                {
-                    float x0 = -len / 2 + i * step, x1 = x0 + step;
-                    var p0 = new Vector3(x0, (i % 2 == 0 ? a : b).x, (i % 2 == 0 ? a : b).y);
-                    var p1 = new Vector3(x1, (i % 2 == 0 ? b : a).x, (i % 2 == 0 ? b : a).y);
-                    var brace = GearMesh.Tube(new[] { p0, p1 }, new[] { 0.011f, 0.011f }, 6, "brace");
-                    parts.Add(new CombineInstance { mesh = brace, transform = Matrix4x4.identity });
-                }
-            }
-            var m = new Mesh { name = name, indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
-            m.CombineMeshes(parts.ToArray(), true, true);
-            return m;
         }
 
         static float Ease(float x) => MixClock.Ease(x);

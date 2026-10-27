@@ -479,6 +479,10 @@ sheen slides over the grooves as the record turns in slow motion.
 `unity_gold` is molten gold pouring into a glowing pool in a dark crucible:
 each kick drops a droplet that ripples out across the mirror-bright
 surface, the bass thickens the pour and a build swells the pool.
+`unity_lasers` is a laser show: thin saturated beams cutting through the
+haze from projectors on a truss and the stage, morphing into a new
+formation every 4 bars (fan, rotating tunnel, a sheet rolling over the
+crowd, crossing beams, a scan, a starburst).
 
 ### Video scenes
 

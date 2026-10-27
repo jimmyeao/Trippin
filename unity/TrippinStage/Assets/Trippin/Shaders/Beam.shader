@@ -15,6 +15,8 @@ Shader "Trippin/Beam"
         _Smoke ("Smoke patchiness 0..1", Float) = 0.7
         _Fade ("Length fade start 0..1", Float) = 0.55
         _Hot ("White-hot core", Float) = 0.6
+        _SmokeScale ("Smoke patch scale (1/m)", Float) = 0.22
+        _SmokeEdge ("Smoke threshold lo/hi", Vector) = (0.25, 0.85, 0, 0)
     }
     SubShader
     {
@@ -32,7 +34,8 @@ Shader "Trippin/Beam"
 
             CBUFFER_START(UnityPerMaterial)
             float4 _Color;
-            float _Intensity, _Width, _Spread, _Core, _Smoke, _Fade, _Hot;
+            float _Intensity, _Width, _Spread, _Core, _Smoke, _Fade, _Hot, _SmokeScale;
+            float4 _SmokeEdge;
             CBUFFER_END
 
             struct A { float4 pos : POSITION; float2 uv : TEXCOORD0; };
@@ -65,8 +68,8 @@ Shader "Trippin/Beam"
                 float core = exp(-x * x * _Core * 0.05);
                 float glow = exp(-x * x * 0.9) * 0.35 * saturate(_Hot * 2.0 + 0.3);
                 // Haze: the beam is only visible where smoke hangs.
-                float3 q = i.wp * 0.22 + float3(0, -_TFlow * 0.08, _TFlow * 0.05);
-                float smoke = lerp(1.0, smoothstep(0.25, 0.85, TFbm3(q)) * 1.6, _Smoke);
+                float3 q = i.wp * _SmokeScale + float3(0, -_TFlow * 0.08, _TFlow * 0.05);
+                float smoke = lerp(1.0, smoothstep(_SmokeEdge.x, _SmokeEdge.y, TFbm3(q)) * 1.6, _Smoke);
                 float along = 1.0 - smoothstep(_Fade, 1.0, i.uv.y);
                 float near = smoothstep(0.0, 0.02, i.uv.y);
                 // Lasers get a white-hot centre; shafts stay pure colour.

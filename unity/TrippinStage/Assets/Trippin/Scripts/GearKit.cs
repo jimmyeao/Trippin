@@ -239,6 +239,35 @@ namespace TrippinStage
             return Make(name, verts, norms, uvs, tris);
         }
 
+        /// A box truss `len` long along x (centred), `w` square: four chords and
+        /// zig-zag bracing on each face, as one mesh.
+        public static Mesh Truss(float len, float w, string name = "truss")
+        {
+            var parts = new System.Collections.Generic.List<CombineInstance>();
+            float h = w * 0.5f;
+            var chords = new[] { new Vector2(-h, -h), new Vector2(h, -h), new Vector2(h, h), new Vector2(-h, h) };
+            var chordMesh = Tube(new[] { new Vector3(-len / 2, 0, 0), new Vector3(len / 2, 0, 0) }, new[] { 0.024f, 0.024f }, 10, "chord");
+            foreach (var c in chords)
+                parts.Add(new CombineInstance { mesh = chordMesh, transform = Matrix4x4.Translate(new Vector3(0f, c.x, c.y)) });
+            int bays = Mathf.Max(1, Mathf.RoundToInt(len / w));
+            float step = len / bays;
+            for (int f = 0; f < 4; f++)
+            {
+                var a = chords[f]; var b = chords[(f + 1) % 4];
+                for (int i = 0; i < bays; i++)
+                {
+                    float x0 = -len / 2 + i * step, x1 = x0 + step;
+                    var p0 = new Vector3(x0, (i % 2 == 0 ? a : b).x, (i % 2 == 0 ? a : b).y);
+                    var p1 = new Vector3(x1, (i % 2 == 0 ? b : a).x, (i % 2 == 0 ? b : a).y);
+                    var brace = Tube(new[] { p0, p1 }, new[] { 0.011f, 0.011f }, 6, "brace");
+                    parts.Add(new CombineInstance { mesh = brace, transform = Matrix4x4.identity });
+                }
+            }
+            var m = new Mesh { name = name, indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
+            m.CombineMeshes(parts.ToArray(), true, true);
+            return m;
+        }
+
         /// A flat quad on the xz plane facing up, `w` x `d`, uv 0..1 (v along +z).
         public static Mesh Quad(float w, float d, string name = "quad")
         {
