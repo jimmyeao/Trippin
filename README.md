@@ -432,7 +432,6 @@ and AI-generated backdrops:
 - `unity_rain`: raindrops running down a window over a blurred neon street.
 - `unity_pool`: swimming-pool caustics.
 - `unity_synthwave`: a neon terrain, sun and road.
-- `unity_bokeh`: strings of fairy lights with real lens blur.
 - `unity_neon_portals`: neon tube archways mirrored in a wet floor.
 - `unity_fire`: concert flame cannons with embers and smoke.
 - `unity_ink`: ink drops sinking and blooming through water.

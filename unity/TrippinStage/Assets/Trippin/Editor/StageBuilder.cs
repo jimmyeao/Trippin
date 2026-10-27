@@ -311,7 +311,6 @@ namespace TrippinStage.EditorTools
                 ("unity_rain", typeof(RainShow)),
                 ("unity_pool", typeof(PoolShow)),
                 ("unity_synthwave", typeof(SynthwaveShow)),
-                ("unity_bokeh", typeof(FairyLightsShow)),
                 ("unity_neon_portals", typeof(NeonPortalsShow)),
                 ("unity_fire", typeof(FireShow)),
                 ("unity_ink", typeof(InkShow)),
@@ -432,7 +431,6 @@ namespace TrippinStage.EditorTools
                     fire.smokeMat = Mat("Trippin/HqSmoke", "HqSmoke");
                     fire.particles = AssetDatabase.LoadAssetAtPath<ComputeShader>($"{Root}/Shaders/HqParticles.compute");
                 }
-                if (ks is FairyLightsShow fl2) fl2.bulbMat = Mat("Trippin/HqBulb", "HqBulb");
                 if (ks is SynthwaveShow sw)
                 {
                     sw.synthMat = Mat("Trippin/HqSynth", "HqSynth");
