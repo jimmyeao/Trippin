@@ -323,6 +323,7 @@ namespace TrippinStage.EditorTools
                 ("unity_halloween", typeof(HalloweenShow)),
                 ("unity_meteors", typeof(MeteorsShow)),
                 ("unity_lava", typeof(LavaShow)),
+                ("unity_jellyfish", typeof(JellyfishShow)),
             };
             // Extra materials for the ported scenes: instancing must be on the
             // material asset or the build strips the variant (AGENTS.md).
@@ -381,6 +382,12 @@ namespace TrippinStage.EditorTools
                     vx.skyMat.SetTexture("_MainTex", Tex("HqStormSky.png"));
                 }
                 if (ks is InkShow ink) ink.inkMat = Mat("Trippin/HqInk", "HqInk");
+                if (ks is JellyfishShow jf)
+                {
+                    jf.jellyMat = Mat("Trippin/HqJelly", "HqJelly");
+                    jf.waterMat = Mat("Trippin/HqDeep", "HqDeep");
+                    jf.snowMat = Mat("Trippin/HqSnow", "HqSnow");
+                }
                 if (ks is LavaShow lavaShow) lavaShow.lavaMat = Mat("Trippin/HqLava", "HqLava");
                 if (ks is MeteorsShow mt)
                 {
@@ -536,6 +543,12 @@ namespace TrippinStage.EditorTools
                     options = BuildOptions.None,
                 });
                 Debug.Log($"[StageBuilder] build {report.summary.result}: {report.summary.totalSize / 1048576} MB, {report.summary.totalErrors} errors");
+                // The report's errors aren't always in the log (shader errors on
+                // another graphics API, for one): print them.
+                foreach (var step in report.steps)
+                    foreach (var m in step.messages)
+                        if (m.type == LogType.Error || m.type == LogType.Exception)
+                            Debug.Log("[StageBuilder] error: " + m.content.Split('\n')[0]);
                 if (report.summary.result != BuildResult.Succeeded) code = 1;
             }
             catch (System.Exception e)
