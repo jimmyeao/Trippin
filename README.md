@@ -460,6 +460,10 @@ drop and a beat loop holds through breakdowns.
 `unity_speaker` is close-ups of a club speaker stack (an 18" sub under a
 15" top with a horn): the cones push out on every kick and settle, the
 surrounds flex, and dust blows out of the bass ports in the key light.
+`unity_movingheads` is a stage rig of moving-head beam fixtures on a truss
+and the stage front: every 4 bars the heads pan and tilt into a new
+formation (fan, cross, focus, wave, circles, sweep), their beams cutting
+through the haze, the zoom breathing with the bass.
 
 ### Video scenes
 

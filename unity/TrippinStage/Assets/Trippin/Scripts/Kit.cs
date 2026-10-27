@@ -687,8 +687,11 @@ namespace TrippinStage
             rx.Tick(TrippinLink.State, dt);
             rig.zoom = zoom;
             Frame(TrippinLink.State, dt);
-            if (haze != null) haze.Apply(1f + 0.8f * rx.tension + 0.8f * rx.impact);
+            if (haze != null) haze.Apply((1f + 0.8f * rx.tension + 0.8f * rx.impact) * hazeScale);
         }
+
+        /// A show's own haze control scales the common haze.
+        protected float hazeScale = 1f;
 
         /// Floor (fogged to the palette) plus two haze layers: the common stage.
         /// The floor Env made (null without one).
