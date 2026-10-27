@@ -699,6 +699,9 @@ mod tests {
         for s in ["unity_fluid", "unity_murmuration", "unity_ribbons", "unity_bloom", "unity_marble"] {
             assert!(crate::engine::scene_supported(s), "engine v18 draws {s}");
         }
+        for s in ["unity_fireworks", "unity_rain", "unity_lava", "unity_jellyfish"] {
+            assert!(crate::engine::scene_supported(s), "engine v19 draws {s}");
+        }
     }
 
     /// Moving packs to another folder copies them all, then deletes the old
