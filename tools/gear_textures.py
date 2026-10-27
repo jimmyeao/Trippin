@@ -597,6 +597,92 @@ def drum():
     P.text(250, 84, "STEP", 2.2, (235, 235, 235))
     P.finish("GearDrumPlate", blur_mm=2.0)
 
+# ---------------- 2-deck all-in-one controller, 640 x 360 mm ----------------
+def controller():
+    P = Panel(640, 360, 3.6, (22, 22, 24))
+    for side, (jx, tx, px0, playx) in enumerate(((130, 230, 65, 25), (510, 615, 455, 410))):
+        P.circle(jx, 200, 84, fill=(30, 30, 33)); P.circle(jx, 200, 81, fill=(8, 8, 9)); P.shadow_circle(jx, 200, 80, 190)
+        P.text(jx, 292, "DECK " + str(side + 1), 2.8, WHITE, bold=True)
+        # Pads, 2 x 4.
+        for r in range(2):
+            for c in range(4):
+                x = px0 + c * 40; z = 75 - r * 35
+                P.rect(x - 17, z - 15, x + 17, z + 15, fill=(6, 6, 7), r=2.5)
+        for i, lab in enumerate(("HOT CUE", "PAD FX", "BEAT JUMP", "SAMPLER")):
+            P.text(px0 + i * 40, 100, lab, 1.8, GREY)
+        # PLAY, CUE, SYNC.
+        for z, lab in ((30, "PLAY/PAUSE"), (68, "CUE")):
+            P.circle(playx, z, 14, fill=(7, 7, 8)); P.text(playx, z + 18 if z > 40 else z - 19, lab, 1.8, WHITE)
+        P.rect(playx - 10, 98, playx + 10, 108, fill=(7, 7, 8), r=1.5); P.text(playx, 113, "SYNC", 1.8, WHITE)
+        # Tempo slider.
+        P.rect(tx - 8, 115, tx + 8, 285, fill=(28, 28, 31), r=2); P.rect(tx - 2.5, 120, tx + 2.5, 280, fill=(2, 2, 2), r=1)
+        for k in range(-8, 9, 4):
+            z = 200 - k * 9.5
+            P.line(tx - 14, z, tx - 10, z, WHITE, 0.3)
+        P.text(tx, 108, "TEMPO", 1.8, WHITE)
+        # Loop and beat FX up top.
+        for i, lab in enumerate(("IN", "OUT", "4 BEAT")):
+            x = jx - 60 + i * 30
+            P.rect(x - 11, 307, x + 11, 317, fill=(7, 7, 8), r=1.5); P.text(x, 302, lab, 1.7, WHITE)
+        knob_scale(P, jx + 50, 330, 8, lab="BEAT FX", labz=318)
+        knob_scale(P, jx + 80, 330, 7, centre=True, lab="LEVEL", labz=318)
+    # Mixer.
+    P.line(250, 10, 250, 350, (60, 60, 64), 0.5); P.line(390, 10, 390, 350, (60, 60, 64), 0.5)
+    for ch, cx in ((1, 285), (2, 355)):
+        P.text(cx, 345, str(ch), 3.6, WHITE, bold=True)
+        knob_scale(P, cx, 318, 7, lab="TRIM", labz=307)
+        for z, lab in ((288, "HI"), (260, "MID"), (232, "LOW")):
+            knob_scale(P, cx, z, 7, centre=True); P.text(cx + (-15 if cx < 320 else 15), z, lab, 1.8, WHITE)
+        knob_scale(P, cx, 198, 9, centre=True, lab="FILTER", labz=185)
+        P.rect(cx - 10, 162, cx + 10, 174, fill=(7, 7, 8), r=2); P.text(cx, 157, "CUE", 1.8, WHITE)
+        P.rect(cx - 2, 55, cx + 2, 145, fill=(2, 2, 2), r=1)
+        for i in range(10):
+            P.line(cx + 6, 60 + i * 9.5, cx + 9, 60 + i * 9.5, WHITE, 0.25)
+    for mx in (314, 326):
+        P.rect(mx - 2.4, 220, mx + 2.4, 300, fill=(5, 5, 6), r=0.8)
+        for i in range(12):
+            z0 = 222 + i * 6.5
+            P.rect(mx - 1.6, z0, mx + 1.6, z0 + 4.8, fill=(28, 34, 28) if i < 8 else (40, 32, 22) if i < 10 else (44, 22, 22))
+    P.circle(320, 336, 11, fill=(8, 8, 9)); P.text(320, 322, "BROWSE", 1.7, WHITE)
+    for x, lab in ((298, "LOAD"), (342, "LOAD")):
+        P.rect(x - 9, 331, x + 9, 340, fill=(7, 7, 8), r=1.5); P.text(x, 345, lab, 1.5, GREY)
+    knob_scale(P, 320, 190, 7, lab="MASTER", labz=179)
+    knob_scale(P, 320, 160, 6, centre=True, lab="CUE/MASTER", labz=150)
+    P.rect(320 - 30, 26, 320 + 30, 31, fill=(2, 2, 2), r=1); P.text(320, 40, "CROSSFADER", 1.8, WHITE)
+    P.text(320, 12, "2-CHANNEL DJ CONTROLLER", 2.4, GREY)
+    P.finish("GearCtrlPlate", blur_mm=2.0)
+
+# The laptop's DJ software: everything but the two scrolling waveforms.
+def laptop_ui():
+    img = Image.new("RGB", (1280, 800), (12, 13, 17)); d = ImageDraw.Draw(img)
+    d.rectangle([0, 0, 1279, 34], fill=(26, 28, 36)); d.text((14, 17), "DJ SOFTWARE", font=font(18, True), fill=(200, 205, 220), anchor="lm")
+    d.text((1266, 17), "MASTER  REC  ▣", font=font(16), fill=(150, 155, 170), anchor="rm")
+    for i, (title, bpm, key, col) in enumerate((("Deep Into The Groove (Extended Mix)", "124.00", "8A", (90, 160, 255)),
+                                                 ("Warehouse Theory (Original Mix)", "126.00", "5A", (255, 150, 60)))):
+        y0 = 44 + i * 130
+        d.rectangle([8, y0, 1271, y0 + 122], fill=(18, 20, 26), outline=(40, 44, 56))
+        d.text((20, y0 + 18), f"DECK {i + 1}", font=font(16, True), fill=col)
+        d.text((100, y0 + 18), title, font=font(18, True), fill=(225, 230, 240))
+        d.text((1260, y0 + 18), f"{bpm} BPM   {key}", font=font(18, True), fill=(225, 230, 240), anchor="ra")
+    # Library.
+    d.rectangle([8, 318, 1271, 792], fill=(16, 17, 22), outline=(40, 44, 56))
+    d.rectangle([8, 318, 1271, 346], fill=(26, 28, 36))
+    for x, h in ((20, "#"), (60, "TITLE"), (620, "ARTIST"), (900, "BPM"), (990, "KEY"), (1070, "TIME")):
+        d.text((x, 332), h, font=font(15, True), fill=(140, 145, 160), anchor="lm")
+    tracks = [("Deep Into The Groove (Extended Mix)", "Night Shift", "124", "8A", "6:42"), ("Warehouse Theory (Original Mix)", "Low End", "126", "5A", "7:05"),
+              ("Blue Hour (Club Dub)", "Submerge", "125", "4A", "6:18"), ("Smiley Faces (Peak Time Mix)", "Acid House Co.", "127", "10B", "5:57"),
+              ("Midnight Transit", "Parallel Lines", "124", "8B", "6:30"), ("Low Light", "Kinetic", "123", "7A", "7:12"),
+              ("Signal Fire (Vocal Mix)", "Harbour", "126", "11A", "6:01"), ("Northern Lights", "Polar", "122", "2A", "8:04"),
+              ("Second Wind", "The Collective", "125", "9A", "6:45"), ("After Hours", "Late Shift", "124", "6A", "6:33"),
+              ("Gravity Well", "Orbital Drift", "128", "1A", "5:49"), ("Paper Moon", "Velvet", "121", "3B", "7:20"),
+              ("Static Bloom", "Neon Field", "126", "12A", "6:12"), ("Deep Water", "Submerge", "123", "4B", "7:01"), ("Glass House", "Low End", "125", "5B", "6:26")]
+    for r, t in enumerate(tracks):
+        y = 362 + r * 28
+        if r == 1: d.rectangle([9, y - 13, 1270, y + 13], fill=(40, 60, 100))
+        for x, v in zip((20, 60, 620, 900, 990, 1070), (str(r + 1),) + t):
+            d.text((x, y), v, font=font(15), fill=(205, 210, 222) if r != 1 else (240, 245, 255), anchor="lm")
+    img.save(f"{OUT}/GearLaptopUI.png"); print("GearLaptopUI")
+
 def start_button():
 
     img = Image.new("RGB", (600, 490), (150, 152, 156)); d = ImageDraw.Draw(img)
@@ -612,5 +698,5 @@ def start_button():
 
 
 
-turntable(); start_button(); cdj(); drum(); cdj_screens(); mixer(); fx_screen(); labels(); slipmat()
+turntable(); start_button(); cdj(); drum(); controller(); laptop_ui(); cdj_screens(); mixer(); fx_screen(); labels(); slipmat()
 

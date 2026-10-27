@@ -468,6 +468,10 @@ through the haze, the zoom breathing with the bass.
 running light chases the steps on the 16ths, keys dip as their steps fire,
 the instrument select moves on every 4 bars, the decays follow the music
 and the bass drum drops out in breakdowns.
+`unity_controller` is the streamer's setup: a two-deck DJ controller with a
+laptop on a stand behind it running the DJ software. The same mix plays
+on it: waveforms scroll on the laptop, pads fire hot cues on the drop,
+roll through builds and hold a loop in breakdowns.
 
 ### Video scenes
 

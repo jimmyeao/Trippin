@@ -337,6 +337,7 @@ namespace TrippinStage.EditorTools
                 ("unity_lava", typeof(LavaShow)),
                 ("unity_jellyfish", typeof(JellyfishShow)),
                 ("unity_decks", typeof(DecksShow)),
+                ("unity_controller", typeof(ControllerShow)),
                 ("unity_groovebox", typeof(GrooveboxShow)),
                 ("unity_movingheads", typeof(MovingHeadsShow)),
                 ("unity_speaker", typeof(SpeakerShow)),
@@ -428,6 +429,13 @@ namespace TrippinStage.EditorTools
                     g_groovebox.gearMat = Mat("Trippin/HqGear", "HqGear");
                     g_groovebox.clubMat = Mat("Trippin/HqClub", "HqClub");
                     g_groovebox.plateTex = GearTex("GearDrumPlate.png");
+                }
+                if (ks is ControllerShow g_controller)
+                {
+                    g_controller.gearMat = Mat("Trippin/HqGear", "HqGear");
+                    g_controller.clubMat = Mat("Trippin/HqClub", "HqClub");
+                    g_controller.plateTex = GearTex("GearCtrlPlate.png");
+                    g_controller.uiTex = GearTex("GearLaptopUI.png");
                 }
                 if (ks is DecksShow dk)
                 {

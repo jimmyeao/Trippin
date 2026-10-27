@@ -20,6 +20,8 @@
 //    the progress (_Level).
 //  8 jog ring: a dark glossy ring dimpled all round (30 dimples).
 //  9 speaker cone: matte pressed paper, fine radial fibres and a few ribs.
+// 10 laptop DJ software: _MainTex's interface over two waveform lanes (deck
+//    1 at _Spin beats, deck 2 at _Smear), each scrolling past its playhead.
 // Any mode: _ExcR (inner, outer radius) > 0 moves vertices along object y by
 // _Exc, fully inside the inner radius and fading to 0 at the outer: a
 // loudspeaker cone and dust cap move rigidly while the surround stretches.
@@ -144,6 +146,33 @@ Shader "Trippin/HqGear"
                 float3 Fv = f0 + (1.0 - f0) * pow(1.0 - nv, 5.0) * (1.0 - rough);
                 col += env * Fv + diff * 0.02;
                 return col;
+            }
+
+            // A track's waveform at beat b: kicks, hats, breakdowns every few sections.
+            float WaveAmp(float b, out float k)
+            {
+                float sec = floor(b / 64.0);
+                float brk = step(GHash(sec * 3.7 + 1.0), 0.25) * step(1.0, sec);
+                k = exp(-frac(b) * 7.0);
+                float hat = exp(-frac(b * 2.0 + 0.5) * 9.0) * 0.25;
+                float nz = GHash(floor(b * 48.0)) * 0.22;
+                return lerp(saturate(0.22 + 0.55 * k + hat + nz), 0.12 + nz * 0.6, brk) * step(0.0, b);
+            }
+
+            // One waveform lane between v0 and v1, 12 beats across, the playhead at u 0.5.
+            float3 Lane(float2 uv, float v0, float v1, float pos, float3 tint)
+            {
+                if (uv.y < v0 || uv.y > v1) return 0;
+                float b = pos + (uv.x - 0.5) * 12.0;
+                float k;
+                float amp = WaveAmp(b, k);
+                float mid = (v0 + v1) * 0.5, half = (v1 - v0) * 0.5;
+                float y = abs(uv.y - mid) / half;
+                float3 c = lerp(tint * 0.6, float3(1, 1, 1), saturate(k * 0.7)) * step(y, amp) * (uv.x < 0.5 ? 0.7 : 1.0);
+                float bf = frac(b);
+                c += (1.0 - smoothstep(0.0, 0.015, min(bf, 1.0 - bf))) * float3(0.35, 0.35, 0.4) * step(0.85, y);
+                c += (1.0 - smoothstep(0.0, 0.0015, abs(uv.x - 0.5))) * float3(2.0, 0.4, 0.3);
+                return c;
             }
 
             float4 frag(V i) : SV_Target
@@ -311,6 +340,14 @@ Shader "Trippin/HqGear"
                     }
                     float3 t = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, uv).rgb;
                     c = max(c, t);
+                    return float4(c * _Emit.rgb + 0.003, 1);
+                }
+                else if (mode == 10)
+                {
+                    float2 uv = i.uv;
+                    float3 c = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, uv).rgb;
+                    c += Lane(uv, 0.80, 0.895, _Spin, float3(0.35, 0.62, 1.0));
+                    c += Lane(uv, 0.6375, 0.7325, _Smear, float3(1.0, 0.6, 0.25));
                     return float4(c * _Emit.rgb + 0.003, 1);
                 }
                 else if (mode == 8)
