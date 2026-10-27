@@ -420,6 +420,33 @@ live: every kick drops a ring of thick glossy paint (black and gold between
 the palette's colours), and a vortex and a comb stir the rings into marbled
 swirls.
 
+**HQ shows** (engine v19) are high-quality versions of favourite 2D scenes,
+built with real geometry, GPU particles, ray-marched volumes, depth of field
+and AI-generated backdrops:
+
+- `unity_fireworks`: shells bursting over a harbour skyline, reflected in
+  the water.
+- `unity_chrome`: liquid-metal blobs in a softbox studio.
+- `unity_kaleido`: glass shards in a mirror chamber.
+- `unity_confetti`: cannons firing paper confetti that flutters down.
+- `unity_rain`: raindrops running down a window over a blurred neon street.
+- `unity_pool`: swimming-pool caustics.
+- `unity_synthwave`: a neon terrain, sun and road.
+- `unity_bokeh`: strings of fairy lights with real lens blur.
+- `unity_neon_portals`: neon tube archways mirrored in a wet floor.
+- `unity_fire`: concert flame cannons with embers and smoke.
+- `unity_ink`: ink drops sinking and blooming through water.
+- `unity_vortex`: a tornado of sparks under a storm sky.
+- `unity_fireflies`: a firefly swarm in a misty forest; kicks send flash
+  waves through it.
+- `unity_winter`: snow and strings of lights over an alpine village.
+- `unity_bubbles`: soap bubbles with rainbow film that pop on kicks.
+- `unity_halloween`: a haunted mansion, a bat flock, wisps and mist.
+- `unity_meteors`: a meteor shower over a lake that mirrors it.
+- `unity_lava`: three lava lamps on a glossy table.
+- `unity_jellyfish`: pulsing jellyfish with trailing tentacles, marine snow
+  and light shafts.
+
 ### Video scenes
 
 Video scenes come in **effects packs**, which install separately from the
