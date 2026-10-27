@@ -124,8 +124,9 @@ namespace TrippinStage
             if (rx.calm > 0.5f) want = 1.2f;     // a breakdown lets it all melt into bokeh
             _focus = Mathf.Lerp(_focus, want, 1f - Mathf.Exp(-dt * 1.6f));
             rig.Move(cam, camPos, camPos + new Vector3(0f, 1.6f, 12f), dt, 0.6f);
-            // A long lens wide open: URP bokeh discs only get big this way.
-            HqPost.Focus(_focus, Mathf.Lerp(2.8f, 1f, Mathf.Clamp01(blur * 0.5f)), 220f);
+            // 85 mm at about f/2.8: the string in focus is crisp, the others
+            // soften into bokeh (220 mm wide open left nothing sharp).
+            HqPost.Focus(_focus, Mathf.Lerp(4f, 1.8f, Mathf.Clamp01(blur * 0.5f)), 85f);
         }
     }
 }
