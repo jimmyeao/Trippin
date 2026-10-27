@@ -107,9 +107,9 @@ def turntable():
 
     # Platter well (covered by the platter) and its contact shadow.
 
-    P.circle(176, 180, 168, fill=(10, 10, 11))
+    P.circle(176, 184, 168, fill=(10, 10, 11))
 
-    P.shadow_circle(176, 180, 171, 200)
+    P.shadow_circle(176, 184, 171, 200)
 
     # Tonearm well: a recessed dark disc with a thin bright edge.
 
@@ -121,24 +121,24 @@ def turntable():
 
     # Start-stop recess and the speed buttons' recess.
 
-    P.rect(10, 6, 87, 47, fill=(8, 8, 9), r=2)
+    P.rect(10, 6, 59, 47, fill=(8, 8, 9), r=2)
 
-    P.shadow_rect(12, 8, 85, 45, 170)
+    P.shadow_rect(12, 8, 57, 45, 170)
 
-    P.rect(90, 10, 200, 26, fill=(8, 8, 9), r=1.5)
+    P.rect(59, 8, 111, 22, fill=(8, 8, 9), r=1.5)
 
 
-    P.text(117, 30, "33", 3.2, WHITE); P.text(173, 30, "45", 3.2, WHITE)
+    P.text(72.5, 26.5, "33", 3.0, WHITE); P.text(97.5, 26.5, "45", 3.0, WHITE)
 
     # Power/strobe knob ring.
 
-    P.circle(32, 82, 16, fill=(14, 14, 15)); P.shadow_circle(32, 82, 15, 150)
+    P.circle(26, 72, 16, fill=(14, 14, 15)); P.shadow_circle(26, 72, 15, 150)
 
     for a, lab in ((-50, "OFF"), (40, "ON")):
 
         r = math.radians(a)
 
-        P.text(32 + 21 * math.sin(r), 82 + 21 * math.cos(r), lab, 2.4, GREY)
+        P.text(26 + 21 * math.sin(r), 72 + 21 * math.cos(r), lab, 2.4, GREY)
 
     # Target light socket.
 
@@ -178,7 +178,7 @@ def turntable():
 
     # 45 adapter recess and hinge marks at the back.
 
-    P.circle(45, 318, 23, fill=(12, 12, 13)); P.shadow_circle(45, 318, 22, 120)
+    P.circle(36, 326, 23, fill=(12, 12, 13)); P.shadow_circle(36, 326, 22, 120)
 
     for hx in (70, 330):
 
@@ -472,11 +472,12 @@ def slipmat():
 
 def start_button():
 
-    img = Image.new("RGB", (730, 370), (150, 152, 156)); d = ImageDraw.Draw(img)
+    img = Image.new("RGB", (600, 490), (150, 152, 156)); d = ImageDraw.Draw(img)
 
-    d.rectangle([0, 0, 729, 369], outline=(90, 90, 94), width=10)
+    d.rectangle([0, 0, 599, 489], outline=(90, 90, 94), width=10)
 
-    d.text((365, 185), "START · STOP", font=font(70), fill=(30, 30, 32), anchor="mm")
+    d.text((300, 200), "START", font=font(84), fill=(30, 30, 32), anchor="mm")
+    d.text((300, 300), "STOP", font=font(84), fill=(30, 30, 32), anchor="mm")
 
     noise = Image.effect_noise(img.size, 20).convert("RGB")
 

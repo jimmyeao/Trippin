@@ -63,7 +63,7 @@ namespace TrippinStage
             public readonly float[] rows = new float[4];
             public float playBars;       // bars since the needle went down
             public Vector3 TT(float x, float z, float y = 0f) => o + new Vector3((x - 226.5f) * 0.01f, y * 0.01f, (z - 176.5f) * 0.01f);
-            public Vector3 Centre => TT(176f, 180f);
+            public Vector3 Centre => TT(176f, 184f);
             public Vector3 Pivot => TT(375f, 265f);
         }
         readonly Deck[] _d = { new Deck(), new Deck() };
@@ -133,8 +133,8 @@ namespace TrippinStage
             _spindle = GearMesh.Lathe(new[] { new Vector2(0f, 0.30f), new Vector2(0.025f, 0.295f), new Vector2(0.035f, 0.27f), new Vector2(0.035f, 0.27f), new Vector2(0.035f, 0.10f) }, 24, "spindle");
             _powerBody = GearMesh.Lathe(new[] { new Vector2(0f, 0.26f), new Vector2(0.15f, 0.26f), new Vector2(0.15f, 0.26f), new Vector2(0.155f, 0f) }, 48, "power body");
             _powerCap = GearMesh.Knob(0.13f, 0.13f, "power cap");
-            _startM = GearMesh.RoundedBox(new Vector3(0.71f, 0.08f, 0.35f), 0.015f, 3, "start");
-            _speedM = GearMesh.RoundedBox(new Vector3(0.46f, 0.05f, 0.11f), 0.012f, 3, "speed");
+            _startM = GearMesh.RoundedBox(new Vector3(0.43f, 0.08f, 0.35f), 0.015f, 3, "start");
+            _speedM = GearMesh.RoundedBox(new Vector3(0.22f, 0.05f, 0.10f), 0.012f, 3, "speed");
             _ledSmall = GearMesh.RoundedBox(new Vector3(0.05f, 0.012f, 0.025f), 0.004f, 2, "led");
             _target = GearMesh.Lathe(new[] { new Vector2(0.07f, 0.31f), new Vector2(0.075f, 0.30f), new Vector2(0.075f, 0.30f), new Vector2(0.08f, 0f) }, 32, "target light");
             _targetTip = GearMesh.Lathe(new[] { new Vector2(0f, 0.315f), new Vector2(0.06f, 0.31f), new Vector2(0.06f, 0.31f), new Vector2(0.06f, 0.29f) }, 32, "target tip");
@@ -308,7 +308,7 @@ namespace TrippinStage
             GearDraw.Draw(_platter, _aluDark, TRS(c, spin));
             {
                 var pr = GearDraw.Props;
-                var sd = (d.TT(32f, 82f) - c); sd.y = 0f; sd.Normalize();
+                var sd = (d.TT(26f, 72f) - c); sd.y = 0f; sd.Normalize();
                 pr.SetVector("_StrobeDir", new Vector4(sd.x, sd.y, sd.z, strobe));
                 pr.SetVector("_StrobeRows", new Vector4(d.rows[0], d.rows[1], d.rows[2], d.rows[3]));
                 pr.SetFloat("_Smear", Mathf.Clamp01(d.speed / 0.15f));
@@ -327,18 +327,18 @@ namespace TrippinStage
             }
             GearDraw.Draw(_spindle, _chrome, T(c));
             // Power knob / strobe illuminator, START-STOP, 33/45, target light.
-            GearDraw.Draw(_powerBody, _alu, T(d.TT(32f, 82f)));
+            GearDraw.Draw(_powerBody, _alu, T(d.TT(26f, 72f)));
             {
                 var pr = GearDraw.Props; pr.SetFloat("_Spin", 0.13f);
-                GearDraw.Draw(_powerCap, _knob, TRS(d.TT(32f, 82f, 26f), Quaternion.Euler(0f, 40f, 0f)), pr);
+                GearDraw.Draw(_powerCap, _knob, TRS(d.TT(26f, 72f, 26f), Quaternion.Euler(0f, 40f, 0f)), pr);
             }
             float press = Mathf.Clamp01(1f - (_t - d.press) / 0.18f);
-            GearDraw.Draw(_startM, _startBtn, T(d.TT(48.5f, 26.5f, 2f - 3f * press)));
-            GearDraw.Draw(_speedM, _alu, T(d.TT(117f, 18f, 1.5f)));
-            GearDraw.Draw(_speedM, _alu, T(d.TT(173f, 18f, 1.5f)));
+            GearDraw.Draw(_startM, _startBtn, T(d.TT(34.5f, 26.5f, 2f - 3f * press)));
+            GearDraw.Draw(_speedM, _alu, T(d.TT(72.5f, 15f, 1.5f)));
+            GearDraw.Draw(_speedM, _alu, T(d.TT(97.5f, 15f, 1.5f)));
             {
                 var pr = GearDraw.Props; pr.SetColor("_Emit", new Color(3f, 0.15f, 0.08f) * leds);
-                GearDraw.Draw(_ledSmall, _led, T(d.TT(138f, 18f, 4.2f)), pr);
+                GearDraw.Draw(_ledSmall, _led, T(d.TT(80f, 15f, 4.2f)), pr);
             }
             GearDraw.Draw(_target, _alu, T(d.TT(262f, 22f)));
             {
@@ -386,7 +386,7 @@ namespace TrippinStage
                 var pr = GearDraw.Props; pr.SetFloat("_Spin", 0.11f);
                 GearDraw.Draw(_knobM, _knob, TRS(d.TT(412f, 232f), Quaternion.Euler(0f, -30f, 0f)) * Matrix4x4.Scale(new Vector3(1.3f, 0.6f, 1.3f)), pr);
             }
-            GearDraw.Draw(_adapter, _alu, T(d.TT(45f, 318f)));
+            GearDraw.Draw(_adapter, _alu, T(d.TT(36f, 326f)));
             GearDraw.Draw(_hinge, _cap, T(d.TT(70f, 352f, 2f)));
             GearDraw.Draw(_hinge, _cap, T(d.TT(330f, 352f, 2f)));
         }
@@ -506,7 +506,7 @@ namespace TrippinStage
                 case 3:   // the strobe dots in the illuminator's light
                 {
                     var c = d.Centre;
-                    var sd = d.TT(32f, 82f) - c; sd.y = 0f; sd.Normalize();
+                    var sd = d.TT(26f, 72f) - c; sd.y = 0f; sd.Normalize();
                     var rim = c + sd * 1.66f;
                     look = rim + new Vector3(0.2f, 0f, 0.15f);
                     pos = rim + new Vector3(0.45f + 0.15f * sw, 0.38f, -1.15f);
@@ -523,7 +523,7 @@ namespace TrippinStage
                     break;
                 case 6:   // START-STOP and the speed buttons
                 {
-                    var b = d.TT(80f, 40f);
+                    var b = d.TT(60f, 30f);
                     look = b;
                     pos = b + new Vector3(0.35f + 0.2f * sw, 0.95f, -1.35f);
                     break;
