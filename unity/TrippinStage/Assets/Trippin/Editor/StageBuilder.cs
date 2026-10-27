@@ -320,6 +320,7 @@ namespace TrippinStage.EditorTools
                 ("unity_fireflies", typeof(FirefliesShow)),
                 ("unity_winter", typeof(WinterShow)),
                 ("unity_bubbles", typeof(BubblesShow)),
+                ("unity_halloween", typeof(HalloweenShow)),
             };
             // Extra materials for the ported scenes: instancing must be on the
             // material asset or the build strips the variant (AGENTS.md).
@@ -378,6 +379,15 @@ namespace TrippinStage.EditorTools
                     vx.skyMat.SetTexture("_MainTex", Tex("HqStormSky.png"));
                 }
                 if (ks is InkShow ink) ink.inkMat = Mat("Trippin/HqInk", "HqInk");
+                if (ks is HalloweenShow hw)
+                {
+                    hw.batMat = Mat("Trippin/HqBat", "HqBat");
+                    hw.fogMat = Mat("Trippin/HqFog", "HqFog");
+                    hw.sparkMat = Mat("Trippin/HqSpark", "HqSpark");
+                    hw.backMat = Mat("Trippin/HqBackdrop", "HqHaunted");
+                    hw.backMat.SetTexture("_MainTex", Tex("HqHaunted.png"));
+                    hw.particles = AssetDatabase.LoadAssetAtPath<ComputeShader>($"{Root}/Shaders/HqParticles.compute");
+                }
                 if (ks is BubblesShow bu)
                 {
                     bu.bubbleMat = Mat("Trippin/HqBubble", "HqBubble");
