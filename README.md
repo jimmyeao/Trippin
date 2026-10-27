@@ -432,7 +432,6 @@ and AI-generated backdrops:
 - `unity_rain`: raindrops running down a window over a blurred neon street.
 - `unity_pool`: swimming-pool caustics.
 - `unity_synthwave`: a neon terrain, sun and road.
-- `unity_bokeh`: strings of fairy lights with real lens blur.
 - `unity_neon_portals`: neon tube archways mirrored in a wet floor.
 - `unity_fire`: concert flame cannons with embers and smoke.
 - `unity_ink`: ink drops sinking and blooming through water.
@@ -446,6 +445,41 @@ and AI-generated backdrops:
 - `unity_lava`: three lava lamps on a glossy table.
 - `unity_jellyfish`: pulsing jellyfish with trailing tentacles, marine snow
   and light shafts.
+
+`unity_decks` (engine v20) is close-ups of a real DJ setup: two direct-drive
+turntables and a four-channel club mixer, modelled on the real layouts. It
+plays a 32-bar mix on loop: the incoming record is cued, the needle drops,
+START spins it up, the faders cross with a bass swap, and the outgoing deck
+brakes to a stop. The platters run at the pitch the tempo needs (the strobe
+dots freeze on the matching row), the LED meters follow the music, and the
+filter rides each build.
+`unity_cdj` (engine v20) is the same booth with two media players: the
+waveform scrolls on the screen at the tempo, the jog display's playhead
+turns, the next track loads and cues before PLAY, a hot cue fires on the
+drop and a beat loop holds through breakdowns.
+`unity_movingheads` is a stage rig of moving-head beam fixtures on a truss
+and the stage front: every 4 bars the heads pan and tilt into a new
+formation (fan, cross, focus, wave, circles, sweep), their beams cutting
+through the haze, the zoom breathing with the bass.
+`unity_groovebox` is a classic 16-step drum machine on the booth table: the
+running light chases the steps on the 16ths, keys dip as their steps fire,
+the instrument select moves on every 4 bars, the decays follow the music
+and the bass drum drops out in breakdowns.
+`unity_controller` is the streamer's setup: a two-deck DJ controller with a
+laptop on a stand behind it running the DJ software. The same mix plays
+on it: waveforms scroll on the laptop, pads fire hot cues on the drop,
+roll through builds and hold a loop in breakdowns.
+`unity_stylus` is an extreme macro of a diamond stylus riding a record
+groove: the groove walls swing with the music (bass the big slow swings,
+the highs the fine ones), the tip shakes along with them, and a rainbow
+sheen slides over the grooves as the record turns in slow motion.
+`unity_gold` is molten gold pouring into a glowing pool in a dark crucible:
+each kick drops a droplet that ripples out across the mirror-bright
+surface, the bass thickens the pour and a build swells the pool.
+`unity_lasers` is a laser show: thin saturated beams cutting through the
+haze from projectors on a truss and the stage, morphing into a new
+formation every 4 bars (fan, rotating tunnel, a sheet rolling over the
+crowd, crossing beams, a scan, a starburst).
 
 ### Video scenes
 

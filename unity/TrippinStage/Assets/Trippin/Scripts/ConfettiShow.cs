@@ -129,7 +129,9 @@ namespace TrippinStage
 
             rig.Orbit(cam, rx, 11f, 3.5f, 5.5f, dt, 0.7f, 0.12f);
             float dist = (new Vector3(0f, 5.5f, 0f) - cam.transform.position).magnitude;
-            HqPost.Focus(dist * 0.75f, Mathf.Lerp(8f, 1.4f, Mathf.Clamp01(blur * 0.5f)), 135f);
+            // Focus on the heart of the shower with a normal lens stopped down, so
+            // the confetti reads as paper; only the nearest pieces go soft.
+            HqPost.Focus(dist, Mathf.Lerp(11f, 4f, Mathf.Clamp01(blur * 0.5f)), 50f);
         }
     }
 }

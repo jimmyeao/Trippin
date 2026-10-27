@@ -1,4 +1,4 @@
-// Unity bokeh: strings of fairy lights at different depths through a real lens, the focus racking from string to string with the music, every other bulb a soft bokeh disc. A screen-content show from the external Unity engine (Spout sender "Trippin Stage", see
+// Unity stylus: an extreme macro of a diamond stylus riding a record groove whose walls swing with the music, rainbow sheen sliding along the grooves as the record turns in slow motion. A screen-content show from the external Unity engine (Spout sender "Trippin Stage", see
 // unity/README.md), driven live by Trippin's show-state feed. Only in rotation while frames
 // are arriving. The frame is already tonemapped, so this undoes present's exposure + ACES
 // to hand it through unchanged — dancer, text, strobe, FX and outputs still layer on top.

@@ -36,6 +36,20 @@ namespace TrippinStage.EditorTools
             return t;
         }
 
+        /// A gear print (faceplate, label): anisotropic filtering keeps the small
+        /// text legible at the grazing angles of the close-ups.
+        static Texture2D GearTex(string file)
+        {
+            var t = Tex(file);
+            if (AssetImporter.GetAtPath($"{Root}/Textures/{file}") is TextureImporter ti && ti.anisoLevel != 8)
+            {
+                ti.anisoLevel = 8;
+                ti.SaveAndReimport();
+                t = AssetDatabase.LoadAssetAtPath<Texture2D>($"{Root}/Textures/{file}");
+            }
+            return t;
+        }
+
         static Material Mat(string shader, string name)
         {
             Directory.CreateDirectory($"{Root}/Materials");
@@ -311,7 +325,6 @@ namespace TrippinStage.EditorTools
                 ("unity_rain", typeof(RainShow)),
                 ("unity_pool", typeof(PoolShow)),
                 ("unity_synthwave", typeof(SynthwaveShow)),
-                ("unity_bokeh", typeof(FairyLightsShow)),
                 ("unity_neon_portals", typeof(NeonPortalsShow)),
                 ("unity_fire", typeof(FireShow)),
                 ("unity_ink", typeof(InkShow)),
@@ -323,6 +336,14 @@ namespace TrippinStage.EditorTools
                 ("unity_meteors", typeof(MeteorsShow)),
                 ("unity_lava", typeof(LavaShow)),
                 ("unity_jellyfish", typeof(JellyfishShow)),
+                ("unity_decks", typeof(DecksShow)),
+                ("unity_lasers", typeof(LasersShow)),
+                ("unity_gold", typeof(GoldShow)),
+                ("unity_stylus", typeof(StylusShow)),
+                ("unity_controller", typeof(ControllerShow)),
+                ("unity_groovebox", typeof(GrooveboxShow)),
+                ("unity_movingheads", typeof(MovingHeadsShow)),
+                ("unity_cdj", typeof(CdjShow)),
             };
             // Extra materials for the ported scenes: instancing must be on the
             // material asset or the build strips the variant (AGENTS.md).
@@ -387,6 +408,53 @@ namespace TrippinStage.EditorTools
                     jf.waterMat = Mat("Trippin/HqDeep", "HqDeep");
                     jf.snowMat = Mat("Trippin/HqSnow", "HqSnow");
                 }
+                if (ks is CdjShow cj)
+                {
+                    cj.gearMat = Mat("Trippin/HqGear", "HqGear");
+                    cj.clubMat = Mat("Trippin/HqClub", "HqClub");
+                    cj.plateTex = GearTex("GearCdjPlate.png");
+                    cj.mixTex = GearTex("GearMixPanel.png"); cj.fxTex = GearTex("GearFxScreen.png");
+                    cj.screen0 = GearTex("GearCdjScreen0.png"); cj.screen1 = GearTex("GearCdjScreen1.png");
+                }
+                if (ks is MovingHeadsShow g_movingheads)
+                {
+                    g_movingheads.gearMat = Mat("Trippin/HqGear", "HqGear");
+                }
+                if (ks is GrooveboxShow g_groovebox)
+                {
+                    g_groovebox.gearMat = Mat("Trippin/HqGear", "HqGear");
+                    g_groovebox.clubMat = Mat("Trippin/HqClub", "HqClub");
+                    g_groovebox.plateTex = GearTex("GearDrumPlate.png");
+                }
+                if (ks is ControllerShow g_controller)
+                {
+                    g_controller.gearMat = Mat("Trippin/HqGear", "HqGear");
+                    g_controller.clubMat = Mat("Trippin/HqClub", "HqClub");
+                    g_controller.plateTex = GearTex("GearCtrlPlate.png");
+                    g_controller.uiTex = GearTex("GearLaptopUI.png");
+                }
+                if (ks is StylusShow g_stylus)
+                {
+                    g_stylus.grooveMat = Mat("Trippin/HqGroove", "HqGroove");
+                }
+                if (ks is GoldShow g_gold)
+                {
+                    g_gold.goldMat = Mat("Trippin/HqGold", "HqGold");
+                }
+                if (ks is LasersShow g_lasers)
+                {
+                    g_lasers.gearMat = Mat("Trippin/HqGear", "HqGear");
+                }
+                if (ks is DecksShow dk)
+                {
+                    dk.gearMat = Mat("Trippin/HqGear", "HqGear");
+                    dk.clubMat = Mat("Trippin/HqClub", "HqClub");
+                    dk.ttTex = GearTex("GearTTPlate.png"); dk.startTex = GearTex("GearStartBtn.png");
+                    dk.mixTex = GearTex("GearMixPanel.png"); dk.fxTex = GearTex("GearFxScreen.png");
+                    dk.slipTex = GearTex("GearSlipmat.png");
+                    dk.label0 = GearTex("GearLabel0.png"); dk.label1 = GearTex("GearLabel1.png");
+                    dk.label2 = GearTex("GearLabel2.png"); dk.label3 = GearTex("GearLabel3.png");
+                }
                 if (ks is LavaShow lavaShow) lavaShow.lavaMat = Mat("Trippin/HqLava", "HqLava");
                 if (ks is MeteorsShow mt)
                 {
@@ -432,7 +500,6 @@ namespace TrippinStage.EditorTools
                     fire.smokeMat = Mat("Trippin/HqSmoke", "HqSmoke");
                     fire.particles = AssetDatabase.LoadAssetAtPath<ComputeShader>($"{Root}/Shaders/HqParticles.compute");
                 }
-                if (ks is FairyLightsShow fl2) fl2.bulbMat = Mat("Trippin/HqBulb", "HqBulb");
                 if (ks is SynthwaveShow sw)
                 {
                     sw.synthMat = Mat("Trippin/HqSynth", "HqSynth");
