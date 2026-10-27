@@ -142,7 +142,6 @@
   "unity_controller": ["stage", "dark", "analyser"],
   "unity_groovebox": ["stage", "retro", "analyser"],
   "unity_movingheads": ["stage", "neon", "dark"],
-  "unity_speaker": ["stage", "dark"],
   "unity_cdj": ["stage", "dark", "analyser"],
   "unity_decks": ["stage", "dark", "analyser"],
   "unity_jellyfish": ["organic", "cold", "slow"],

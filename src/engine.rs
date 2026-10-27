@@ -159,23 +159,23 @@ pub fn sweep_stale_players() {
 /// installers stay small and CI needs no Unity licence. Rebuild + upload a
 /// new `unity-engine-vN` release when the Unity project changes, and bump
 /// these. An empty checksum means no build for this platform yet.
-const RELEASE_BASE: &str = "https://github.com/jimmyeao/Trippin/releases/download/unity-engine-v19";
+const RELEASE_BASE: &str = "https://github.com/jimmyeao/Trippin/releases/download/unity-engine-v20";
 #[cfg(target_os = "macos")]
 const ASSET: (&str, &str) = (
-    "TrippinEngine-macos-v19.zip",
-    "25edb3dc40bf3cfc27b3ac426da37a1d059c622bc6c4daa45c63b1df47603db1",
+    "TrippinEngine-macos-v20.zip",
+    "2c95c38e33db09a886904bc525fa68aefa83452c4766f6834d593a6c8e008703",
 );
 #[cfg(not(target_os = "macos"))]
 const ASSET: (&str, &str) = (
-    "TrippinEngine-windows-x64-v19.zip",
-    "c549a1f12042c7a647d29ce3c3727261b638571f55280435def591e4c72c8f4b",
+    "TrippinEngine-windows-x64-v20.zip",
+    "db0c2e5114c08d65d5331277aca2e5870acf191c72a6222edb7668241f0c7178",
 );
 /// Written into the unpacked folder; a download whose stamp isn't the
 /// current `ASSET` is stale and gets replaced.
 const STAMP: &str = "ENGINE_VERSION";
 
 /// The engine release the app downloads (`RELEASE_BASE`).
-pub const ENGINE_VERSION: u32 = 19;
+pub const ENGINE_VERSION: u32 = 20;
 
 /// Can the engine the app runs draw this `unity_*` show? A show added in a
 /// newer engine than the pinned one stays out of the scene list until that
@@ -187,7 +187,7 @@ pub fn scene_supported(name: &str) -> bool {
         "unity_murmuration" | "unity_ribbons" | "unity_bloom" => 17,
         "unity_marble" => 18,
         "unity_fireworks" | "unity_chrome" | "unity_kaleido" | "unity_confetti" | "unity_rain" | "unity_pool" | "unity_synthwave" | "unity_neon_portals" | "unity_fire" | "unity_ink" | "unity_vortex" | "unity_fireflies" | "unity_winter" | "unity_bubbles" | "unity_halloween" | "unity_meteors" | "unity_lava" | "unity_jellyfish" => 19,
-        "unity_decks" | "unity_cdj" | "unity_speaker" | "unity_movingheads" | "unity_groovebox" | "unity_controller" | "unity_stylus" | "unity_gold" | "unity_lasers" => 20,
+        "unity_decks" | "unity_cdj" | "unity_movingheads" | "unity_groovebox" | "unity_controller" | "unity_stylus" | "unity_gold" | "unity_lasers" => 20,
         _ => 0,
     };
     needs <= ENGINE_VERSION || std::env::var_os("TRIPPIN_ENGINE").is_some()

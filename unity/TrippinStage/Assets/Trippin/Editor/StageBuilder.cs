@@ -343,7 +343,6 @@ namespace TrippinStage.EditorTools
                 ("unity_controller", typeof(ControllerShow)),
                 ("unity_groovebox", typeof(GrooveboxShow)),
                 ("unity_movingheads", typeof(MovingHeadsShow)),
-                ("unity_speaker", typeof(SpeakerShow)),
                 ("unity_cdj", typeof(CdjShow)),
             };
             // Extra materials for the ported scenes: instancing must be on the
@@ -416,12 +415,6 @@ namespace TrippinStage.EditorTools
                     cj.plateTex = GearTex("GearCdjPlate.png");
                     cj.mixTex = GearTex("GearMixPanel.png"); cj.fxTex = GearTex("GearFxScreen.png");
                     cj.screen0 = GearTex("GearCdjScreen0.png"); cj.screen1 = GearTex("GearCdjScreen1.png");
-                }
-                if (ks is SpeakerShow g_speaker)
-                {
-                    g_speaker.gearMat = Mat("Trippin/HqGear", "HqGear");
-                    g_speaker.clubMat = Mat("Trippin/HqClub", "HqClub");
-                    g_speaker.motesMat = Mat("Trippin/HqMotes", "HqMotes");
                 }
                 if (ks is MovingHeadsShow g_movingheads)
                 {
