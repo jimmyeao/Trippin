@@ -33,9 +33,12 @@ Material:
     - _Intensity: 0.5
     - _Mode: 0
     - _Phase: 0
+    - _RipA: 0
+    - _RipR: 0
     - _Scroll: 0
     - _SizeX: 120
     - _SizeZ: 200
+    - _Vib: 1
     m_Colors:
     - _P0: {r: 14, g: 20, b: 0, a: 0}
   m_BuildTextureStacks: []

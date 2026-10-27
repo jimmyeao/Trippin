@@ -125,7 +125,7 @@ Shader "Trippin/HqRain"
             float4 frag(FsV i) : SV_Target
             {
                 float aspect = _ScreenParams.x / _ScreenParams.y;
-                float2 p = float2(i.ndc.x * aspect, i.ndc.y) * 0.5;          // screen, y up, height 1
+                float2 p = float2(i.ndc.x * aspect, -i.ndc.y) * 0.5;         // screen, y up, height 1 (ndc y runs down here)
                 // The street behind: cover the screen, drifting slowly.
                 float2 uv = i.ndc * 0.5 + 0.5;
                 uv = (uv - 0.5) * 0.86 + 0.5 + _Pan.xy;
@@ -142,7 +142,7 @@ Shader "Trippin/HqRain"
                 // toward the rim, pointing back across the drop.
                 float inDrop = smoothstep(0.02, 0.2, h);
                 float3 nrm = normalize(float3(-grad * 0.02, 1.0));
-                float2 duv = uv - nrm.xy * 0.07;
+                float2 duv = uv - float2(nrm.x, -nrm.y) * 0.07;   // back into uv's y-down space
                 // Condensation blurs the rest; trails and drops clear it.
                 float fog = _Fog * (1.0 - trail) * (1.0 - inDrop);
                 float lod = lerp(_Blur * 0.45, _Blur, fog);

@@ -143,7 +143,6 @@
   "unity_bubbles": ["abstract", "organic", "slow"],
   "unity_winter": ["seasonal", "warm", "slow"],
   "unity_fireflies": ["organic", "dark", "slow"],
-  "unity_sparks": ["warm", "dark", "urban"],
   "unity_vortex": ["abstract", "neon", "dark"],
   "unity_ink": ["organic", "abstract", "slow"],
   "unity_fire": ["stage", "warm", "bright"],

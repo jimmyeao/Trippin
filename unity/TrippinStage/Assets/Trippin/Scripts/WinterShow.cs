@@ -1,8 +1,8 @@
 // unity_winter: the HQ version of the 2D christmas scene: snow falling over
 // an alpine village at night (an Alice backdrop), strings of coloured bulbs
-// sagging across the foreground, all through a long lens whose depth of
-// field turns the near snow and the bulbs into bokeh, racking between the
-// lights and the village every 8 bars.
+// sagging across the foreground, through a 50 mm lens at f/5.6 that keeps
+// most of it sharp, racking between the lights and the village every 8
+// bars and opening up into bokeh in breakdowns.
 //  - Shape: the bass blows gusts that swirl the snow round them (each kick
 //    gives them a shove); the drop whirls it all up at once.
 //  - Motion: the snow falls on the eased energy, the wind carries it
@@ -31,7 +31,7 @@ namespace TrippinStage
         RenderParams _rp;
         readonly ClkAcc _fall = new ClkAcc(), _wind = new ClkAcc();
         readonly Vector4[] _gust = new Vector4[2];
-        float _kickPrev, _gustAmt, _shove, _chase, _chaseAmt, _focus = 25f, _windX;
+        float _kickPrev, _gustAmt, _shove, _chase, _chaseAmt, _focus = 25f, _ap = 5.6f, _windX;
 
         protected override void Build()
         {
@@ -91,11 +91,14 @@ namespace TrippinStage
             // Focus racks between the bulbs and the village every 8 bars; a
             // breakdown settles on the snow drifting nearby.
             int block = Mathf.FloorToInt(rx.beatS / 32f);
-            float want = ((block % 2) + 2) % 2 == 0 ? 4f : 30f;
+            float want = ((block % 2) + 2) % 2 == 0 ? 8f : 20f;
             want = Mathf.Lerp(12f, want, pull);
-            if (calm) want = Mathf.Lerp(12f, 2.5f, pull);
+            if (calm) want = Mathf.Lerp(12f, 5f, pull);
             _focus = Mathf.Lerp(_focus, want, 1f - Mathf.Exp(-dt * 1.2f));
-            HqPost.Focus(_focus, 2f, 135f);
+            // A 50 mm lens at f/5.6 keeps most of the scene sharp; only a breakdown
+            // opens it up to melt the far side into bokeh.
+            _ap = Mathf.Lerp(_ap, calm ? Mathf.Lerp(5.6f, 2.8f, pull) : 5.6f, 1f - Mathf.Exp(-dt * 1.2f));
+            HqPost.Focus(_focus, _ap, 50f);
 
             var camPos = new Vector3(Mathf.Sin(rx.phrase * 0.5f) * 1.2f, 1.7f, -2f);
             rig.Move(cam, camPos, camPos + new Vector3(0f, 0.6f, 20f), dt, 0.5f);

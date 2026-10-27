@@ -316,7 +316,6 @@ namespace TrippinStage.EditorTools
                 ("unity_fire", typeof(FireShow)),
                 ("unity_ink", typeof(InkShow)),
                 ("unity_vortex", typeof(VortexShow)),
-                ("unity_sparks", typeof(SparksShow)),
                 ("unity_fireflies", typeof(FirefliesShow)),
                 ("unity_winter", typeof(WinterShow)),
                 ("unity_bubbles", typeof(BubblesShow)),
@@ -425,14 +424,6 @@ namespace TrippinStage.EditorTools
                     ff.flyMat = Mat("Trippin/HqFirefly", "HqFirefly");
                     ff.backMat = Mat("Trippin/HqBackdrop", "HqForest");
                     ff.backMat.SetTexture("_MainTex", Tex("HqForest.png"));
-                }
-                if (ks is SparksShow sk)
-                {
-                    sk.sparkMat = Mat("Trippin/HqSpark", "HqSpark");
-                    sk.smokeMat = Mat("Trippin/HqSmoke", "HqSmoke");
-                    sk.backMat = Mat("Trippin/HqBackdrop", "HqFoundry");
-                    sk.backMat.SetTexture("_MainTex", Tex("HqFoundry.png"));
-                    sk.particles = AssetDatabase.LoadAssetAtPath<ComputeShader>($"{Root}/Shaders/HqParticles.compute");
                 }
                 if (ks is FireShow fire)
                 {

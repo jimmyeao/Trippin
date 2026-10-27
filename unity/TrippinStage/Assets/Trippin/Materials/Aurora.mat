@@ -33,6 +33,9 @@ Material:
     - _Mirror: 0
     - _Phase: 0
     - _Seed: 0
+    - _SpecAmt: 0
+    - _WaveA: 0
+    - _WaveR: 999
     - _Z: 0
     m_Colors: []
   m_BuildTextureStacks: []

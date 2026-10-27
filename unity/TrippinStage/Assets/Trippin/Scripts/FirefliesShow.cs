@@ -1,8 +1,8 @@
 // unity_fireflies: the HQ version of the 2D firefly forest: thousands of
 // fireflies (HqFirefly.shader, no stored state) drifting through a misty
-// moonlit forest (an Alice backdrop), each blurred by its true distance into
-// a bokeh disc by a long lens wide open, the focus racking between near and
-// far through the track.
+// moonlit forest (an Alice backdrop), seen through a 50 mm lens at f/5.6
+// that keeps most of it sharp, the focus racking between near and far
+// through the track and opening up into bokeh in breakdowns.
 //  - Shape: the bass draws the swarm together round three drifting centres
 //    (a calm passage lets it spread out and float); the mids lift it.
 //  - Motion: each kick sends a flash wave rippling out through the swarm
@@ -32,7 +32,7 @@ namespace TrippinStage
         RenderParams _rp;
         readonly ClkAcc _clk = new ClkAcc();
         readonly Vector4[] _swarm = new Vector4[3], _wave = new Vector4[4];
-        float _kickPrev, _breath, _lift, _focus = 10f;
+        float _kickPrev, _breath, _lift, _focus = 10f, _ap = 5.6f;
         int _nw;
 
         protected override void Build()
@@ -93,11 +93,14 @@ namespace TrippinStage
             // Focus racks between the near swarm and the far one every 8 bars;
             // a breakdown lets it all melt into bokeh.
             int block = Mathf.FloorToInt(rx.beatS / 32f);
-            float want = ((block % 2) + 2) % 2 == 0 ? 6f : 18f;
+            float want = ((block % 2) + 2) % 2 == 0 ? 7f : 14f;
             want = Mathf.Lerp(11f, want, pull);
-            if (calm) want = Mathf.Lerp(11f, 2.2f, pull);
+            if (calm) want = Mathf.Lerp(11f, 4f, pull);
             _focus = Mathf.Lerp(_focus, want, 1f - Mathf.Exp(-dt * 1.2f));
-            HqPost.Focus(_focus, 2f, 135f);
+            // A 50 mm lens at f/5.6 keeps most of the scene sharp; only a breakdown
+            // opens it up to melt the far side into bokeh.
+            _ap = Mathf.Lerp(_ap, calm ? Mathf.Lerp(5.6f, 2.8f, pull) : 5.6f, 1f - Mathf.Exp(-dt * 1.2f));
+            HqPost.Focus(_focus, _ap, 50f);
 
             var camPos = new Vector3(Mathf.Sin(rx.phrase * 0.5f) * 1.5f, 1.5f, -2f);
             rig.Move(cam, camPos, camPos + new Vector3(0f, 0.9f, 20f), dt, 0.5f);
