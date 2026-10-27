@@ -337,6 +337,7 @@ namespace TrippinStage.EditorTools
                 ("unity_lava", typeof(LavaShow)),
                 ("unity_jellyfish", typeof(JellyfishShow)),
                 ("unity_decks", typeof(DecksShow)),
+                ("unity_gold", typeof(GoldShow)),
                 ("unity_stylus", typeof(StylusShow)),
                 ("unity_controller", typeof(ControllerShow)),
                 ("unity_groovebox", typeof(GrooveboxShow)),
@@ -441,6 +442,10 @@ namespace TrippinStage.EditorTools
                 if (ks is StylusShow g_stylus)
                 {
                     g_stylus.grooveMat = Mat("Trippin/HqGroove", "HqGroove");
+                }
+                if (ks is GoldShow g_gold)
+                {
+                    g_gold.goldMat = Mat("Trippin/HqGold", "HqGold");
                 }
                 if (ks is DecksShow dk)
                 {

@@ -476,6 +476,9 @@ roll through builds and hold a loop in breakdowns.
 groove: the groove walls swing with the music (bass the big slow swings,
 the highs the fine ones), the tip shakes along with them, and a rainbow
 sheen slides over the grooves as the record turns in slow motion.
+`unity_gold` is molten gold pouring into a glowing pool in a dark crucible:
+each kick drops a droplet that ripples out across the mirror-bright
+surface, the bass thickens the pour and a build swells the pool.
 
 ### Video scenes
 
