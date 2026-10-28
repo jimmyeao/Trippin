@@ -118,7 +118,11 @@ overlays.
 - **Add scenes; don't replace them.** Removing or reworking a scene is the
   owner's call.
 - **Removed or disliked scenes; don't bring them back:** event_horizon,
-  volcano and wave_lines. cymatics was "meh" and got reworked, and
+  volcano and wave_lines; the Unity shows orbit_foundry, terrain, sparks,
+  bokeh, speaker ("does nothing"), stylus ("rubbish") and vortex.
+- **Unity shows the owner likes:** unity_spectrum and unity_basscore: one
+  big readable figure whose shape *is* the audio (bar heights are the
+  spectrum; kicks send rings across a plate), moving on the smooth clocks. cymatics was "meh" and got reworked, and
   chrome_spheres must not fly at the camera.
 - **Lasers read as beams cutting through fog-machine smoke:** thin
   saturated cores, and patchy visibility along the beam where the smoke is.
