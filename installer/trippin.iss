@@ -29,6 +29,13 @@ PrivilegesRequiredOverridesAllowed=dialog
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 Name: "startupagent"; Description: "Launch the now-playing agent when you sign in (pick this on the DJ machine)"; GroupDescription: "trippin-agent:"; Flags: unchecked
 
+[InstallDelete]
+; Shipped content only (user data lives in %APPDATA%\Trippin). Without this an
+; upgrade keeps scenes a newer version removed: unity_orbit_foundry and
+; unity_terrain lingered, and an engine without them kept the previous show.
+Type: filesandordirs; Name: "{app}\shaders"
+Type: filesandordirs; Name: "{app}\dancers"
+
 [Files]
 Source: "..\target\release\trippin.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\agent\target\release\trippin-agent.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
