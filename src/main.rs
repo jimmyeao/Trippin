@@ -894,6 +894,17 @@ fn render_loop(
                 Msg::Thumb(key) => {
                     // Editor keys thumbs "scene:<name>"; render by bare name.
                     let name = key.strip_prefix("scene:").unwrap_or(&key);
+                    // A Unity show is only a camera on the engine's frame:
+                    // its tile is the still shipped with the app.
+                    if name.starts_with("unity_") {
+                        match render::engine_thumb(name, 128, 72) {
+                            Some(px) => {
+                                lock(&shared.thumbs).insert(key.clone(), (128, 72, px));
+                            }
+                            None => eprintln!("Thumb: no still for {name}"),
+                        }
+                        continue;
+                    }
                     // A video scene's tile is a frame of its clip; without
                     // the clip it would cache black, so wait (the panel
                     // asks again).

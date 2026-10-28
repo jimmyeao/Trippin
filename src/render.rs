@@ -369,6 +369,14 @@ pub struct Renderer {
     pub transparent: bool,
 }
 
+/// The still shipped for a Unity show (`shaders/thumbs/<name>.png`, see
+/// tools/unity_thumbs.py), as RGBA at w x h.
+pub fn engine_thumb(name: &str, w: u32, h: u32) -> Option<Vec<u8>> {
+    let path = find_shader_dir().ok()?.join("thumbs").join(format!("{name}.png"));
+    let img = image::open(path).ok()?;
+    Some(img.resize_to_fill(w, h, image::imageops::FilterType::Triangle).to_rgba8().into_raw())
+}
+
 pub fn find_shader_dir() -> Result<PathBuf> {
     let mut candidates = vec![PathBuf::from("shaders")];
     if let Ok(exe) = std::env::current_exe() {

@@ -313,10 +313,6 @@ pub struct Panel {
     /// Thumbnails we've asked the render thread for (Instant = last request,
     /// for re-requesting a thumb that never came back).
     want_thumbs: HashMap<String, Instant>,
-    /// Fingerprint of the last image taken per live (engine) tile.
-    live_fp: HashMap<String, u64>,
-    /// When each engine tile last wrote its still to the disk cache.
-    live_saved: HashMap<String, Instant>,
     /// Dancer mid-frame thumbs, keyed by clip name — decoded straight from
     /// the clip's frames on disk (no render thread involved).
     clip_thumbs: HashMap<String, Option<egui::TextureHandle>>,
@@ -359,8 +355,6 @@ impl Panel {
             chip: LibChip::All,
             thumbs: HashMap::new(),
             want_thumbs: HashMap::new(),
-            live_fp: HashMap::new(),
-            live_saved: HashMap::new(),
             clip_thumbs: HashMap::new(),
             keys_filter: String::new(),
             look_name: String::new(),
@@ -395,15 +389,6 @@ impl Panel {
     ) -> (Vec<UiCommand>, bool, PanelFrame) {
         let mut commands = Vec::new();
         let mut changed = false;
-        // The engine renders one show at a time: only the unity_* scene on
-        // screen (with frames arriving) may take fresh thumbnails.
-        let on_air = scenes
-            .get(status.scene)
-            .filter(|_| crate::EXT_LIVE.load(std::sync::atomic::Ordering::Relaxed))
-            .map(|n| format!("scene:{n}"))
-            .unwrap_or_default();
-        ON_AIR.with(|c| *c.borrow_mut() = on_air.clone());
-        let mut save: Vec<String> = Vec::new();
 
         // Collect finished thumbs we asked the render thread for. The store
         // is shared with the editor window — we only take keys we requested.
@@ -412,31 +397,8 @@ impl Panel {
             let store = thumb_store.lock().unwrap_or_else(|e| e.into_inner());
             for k in self.want_thumbs.keys() {
                 let Some((w, h, px)) = store.get(k) else { continue };
-                // An engine tile's render shows whatever show is running —
-                // only trust it while that tile's own show is on air.
-                if live_thumb(k) && *k != on_air {
-                    continue;
-                }
-                if live_thumb(k)
-                    && self.live_saved.get(k).is_none_or(|t| t.elapsed() > Duration::from_secs(20))
-                {
-                    // Keep a still on disk so the tile has a real preview
-                    // while another show runs (and on the next launch).
-                    self.live_saved.insert(k.clone(), Instant::now());
-                    save.push(k.clone());
-                }
                 if self.thumbs.contains_key(k) {
-                    // Live engine tiles re-render: take a new image when
-                    // its (sparsely sampled) pixels changed.
-                    if !live_thumb(k) {
-                        continue;
-                    }
-                    let fp = px.iter().step_by(61).fold(px.len() as u64, |a, &b| {
-                        a.wrapping_mul(31).wrapping_add(b as u64)
-                    });
-                    if self.live_fp.insert(k.clone(), fp) == Some(fp) {
-                        continue;
-                    }
+                    continue;
                 }
                 got.push((k.clone(), *w, *h, px.clone()));
             }
@@ -460,18 +422,15 @@ impl Panel {
                     [*w as usize, *h as usize],
                     px,
                 );
-                if let Some(t) = thumbs.get_mut(key) {
-                    // A refresh (live engine tiles): update in place.
-                    t.set(img, egui::TextureOptions::LINEAR);
-                } else {
-                    let tex = ui.ctx().load_texture(
-                        format!("panel_thumb:{key}"),
-                        img,
-                        egui::TextureOptions::LINEAR,
-                    );
-                    thumbs.insert(key.clone(), tex);
-                }
-                if !live_thumb(key) || save.contains(key) {
+                let tex = ui.ctx().load_texture(
+                    format!("panel_thumb:{key}"),
+                    img,
+                    egui::TextureOptions::LINEAR,
+                );
+                thumbs.insert(key.clone(), tex);
+                // Unity tiles come from the shipped stills; caching them
+                // would pin an old still over a newer install's.
+                if !engine_thumb(key) {
                     cache_thumb_png(key, *w, *h, px);
                 }
             }
@@ -2546,20 +2505,10 @@ fn thumb_tex(
     key: &str,
     cmd: &mut Vec<UiCommand>,
 ) -> Option<egui::TextureId> {
-    let live = live_thumb(key);
-    let on_air = live && ON_AIR.with(|c| *c.borrow() == key);
     if let Some(t) = thumbs.get(key) {
-        let id = t.id();
-        // Engine scenes are only a camera on the external frame — keep
-        // re-rendering the one on air so its tile follows it (and never
-        // sticks on the black it showed before frames arrived).
-        if on_air && want.get(key).is_none_or(|t| t.elapsed() > Duration::from_millis(500)) {
-            want.insert(key.to_string(), Instant::now());
-            cmd.push(UiCommand::Thumb(key.to_string()));
-        }
-        return Some(id);
+        return Some(t.id());
     }
-    if !want.contains_key(key) {
+    if !want.contains_key(key) && !engine_thumb(key) {
         // First time we've seen this key this run — try the disk cache
         // before paying for a GPU render.
         if let Some(t) = cached_thumb(ui.ctx(), key) {
@@ -2567,13 +2516,6 @@ fn thumb_tex(
             thumbs.insert(key.to_string(), t);
             return Some(id);
         }
-    }
-    if live && !on_air {
-        // Rendering it now would show another show's frame: keep the
-        // placeholder until its own show plays. (Marked wanted so the disk
-        // cache isn't re-tried every frame.)
-        want.entry(key.to_string()).or_insert_with(Instant::now);
-        return None;
     }
     let stale = match want.get(key) {
         None => true,
@@ -2592,22 +2534,13 @@ fn thumbs_dir() -> PathBuf {
 }
 
 fn thumb_file(key: &str) -> PathBuf {
-    // Engine stills get their own names: 0.8.0 cached black unity_* tiles
-    // under the plain ones.
-    let pre = if live_thumb(key) { "engine-" } else { "" };
-    thumbs_dir().join(format!("{pre}{}.png", key.replace(':', "_")))
+    thumbs_dir().join(format!("{}.png", key.replace(':', "_")))
 }
 
-thread_local! {
-    /// Thumb key ("scene:<name>") of the unity_* show the engine is
-    /// rendering right now, or empty.
-    static ON_AIR: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
-}
-
-/// Unity engine scenes show whatever the engine is sending right now: only
-/// the one on air refreshes (about every 0.5 s); each keeps a still on
-/// disk, saved at most every 20 s while it plays.
-fn live_thumb(key: &str) -> bool {
+/// Unity engine tiles are stills shipped in `shaders/thumbs` (the render
+/// thread loads them). They used to be grabbed from the engine's live frame,
+/// which showed whatever show was running, or nothing before frames came.
+fn engine_thumb(key: &str) -> bool {
     key.starts_with("scene:unity_")
 }
 
