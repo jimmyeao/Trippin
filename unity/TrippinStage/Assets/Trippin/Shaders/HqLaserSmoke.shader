@@ -27,6 +27,7 @@ Shader "Trippin/HqLaserSmoke"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareDepthTexture.hlsl"
             #include "TrippinCommon.hlsl"
             #include "TrippinFull.hlsl"
+            #include "LaserSmoke.hlsl"
 
             TEXTURE3D(_Light); SAMPLER(sampler_Light);
             float4 _BoxMin, _BoxSize, _Amb;
@@ -59,7 +60,13 @@ Shader "Trippin/HqLaserSmoke"
                     float4 v = SAMPLE_TEXTURE3D_LOD(_Light, sampler_Light, (p - _BoxMin.xyz) / _BoxSize.xyz, 0);
                     float d = v.a * smoothstep(1.5, 6.0, tk);
                     if (d < 1e-3) continue;
-                    float3 L = min(v.rgb, 3.5) + _Amb.rgb;
+                    // Fine texture the low-res volume can't hold: wisps and holes inside a
+                    // bank, so it reads as smoke rather than a soft glow (one fetch a step,
+                    // only inside the smoke).
+                    float fine = _LSVol.SampleLevel(sampler_LSVol, (p - _LSWind.xyz * 1.6) * _LSShape.x * 3.0 + 0.53, 0).b;
+                    d *= saturate((fine - 0.28) * 2.2) * 1.5;
+                    // Faint palette fill so the clouds' shapes read between the beams.
+                    float3 L = min(v.rgb, 2.5) + _Amb.rgb * (0.6 + 1.6 * TPalette(0.62 + p.x * 0.012));
                     float s = 1.0 - exp(-d * _Sigma * dt);
                     col += T * s * L;
                     T *= 1.0 - s;

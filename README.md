@@ -430,7 +430,6 @@ and AI-generated backdrops:
 - `unity_kaleido`: glass shards in a mirror chamber.
 - `unity_confetti`: cannons firing paper confetti that flutters down.
 - `unity_rain`: raindrops running down a window over a blurred neon street.
-- `unity_pool`: swimming-pool caustics.
 - `unity_synthwave`: a neon terrain, sun and road.
 - `unity_neon_portals`: neon tube archways mirrored in a wet floor.
 - `unity_fire`: concert flame cannons with embers and smoke.
@@ -442,14 +441,13 @@ and AI-generated backdrops:
 - `unity_halloween`: a haunted mansion, a bat flock, wisps and mist.
 - `unity_meteors`: a meteor shower over a lake that mirrors it.
 - `unity_lava`: three lava lamps on a glossy table.
-- `unity_jellyfish`: pulsing jellyfish with trailing tentacles, marine snow
-  and light shafts.
+- `unity_jellyfish`: pulsing jellyfish with trailing tentacles and light
+  shafts (marine snow is off by default: the Snow control brings it back).
 
 `unity_decks` (engine v20) is close-ups of a real DJ setup: two direct-drive
 turntables and a four-channel club mixer, modelled on the real layouts. It
-plays a 32-bar mix on loop: the incoming record is cued, the needle drops,
-START spins it up, the faders cross with a bass swap, and the outgoing deck
-brakes to a stop. The platters run at the pitch the tempo needs (the strobe
+plays a 32-bar mix on loop: both records play throughout while the faders
+cross with a bass swap. The platters run at the pitch the tempo needs (the strobe
 dots freeze on the matching row), the LED meters follow the music, and the
 filter rides each build.
 `unity_cdj` (engine v20) is the same booth with two media players: the
@@ -464,22 +462,18 @@ through the haze, the zoom breathing with the bass.
 running light chases the steps on the 16ths, keys dip as their steps fire,
 the instrument select moves on every 4 bars, the decays follow the music
 and the bass drum drops out in breakdowns.
-`unity_controller` is the streamer's setup: a two-deck DJ controller with a
-laptop on a stand behind it running the DJ software. The same mix plays
-on it: waveforms scroll on the laptop, pads fire hot cues on the drop,
-roll through builds and hold a loop in breakdowns.
-`unity_gold` is molten gold pouring into a glowing pool in a dark crucible:
-each kick drops a droplet that ripples out across the mirror-bright
-surface, the bass thickens the pour and a build swells the pool.
 `unity_lasers` is a laser show: thin saturated beams cutting through
 fog-machine smoke from projectors on a truss and the stage, morphing into a
 new formation every 4 bars (fan, rotating tunnel, a sheet rolling over the
-crowd, crossing beams, a scan, a starburst). The smoke drifts over the
+crowd, crossing beams, a scan, a starburst). The fan, tunnel, sheet and
+scan also draw the solid surface a fast-scanning laser seems to paint in
+smoke: a flat plane of light, or a cone for the tunnel. Every shot is
+from the audience facing the stage. The smoke drifts over the
 crowd in banks lit only by the beams, so the clouds glow in the laser
 colours where a formation cuts them; a build thickens it and the drop
 blasts more in.
 
-Six more shows (engine v21):
+Four more shows (engine v21):
 
 - `unity_kinetic`: a kinetic light installation, a grid of glowing balls on
   winch cables moving as one surface: the spectrum across it, ripples, a
@@ -487,13 +481,8 @@ Six more shows (engine v21):
 - `unity_mirrors`: a wall of mirror panels tilting in waves with the music,
   two spotlights sweeping it, every panel throwing its own beam back into
   the haze and glinting as it turns toward you.
-- `unity_scope`: close-ups of an analogue oscilloscope drawing the music's
-  own waveform in green phosphor: a sweep, an XY figure, a wobbling ring
-  and a turning knot.
 - `unity_pixelbars`: a stage wall of LED pixel bars on tilt mounts with
   blinders above, running a VU wall, chases, waves, kick bursts and sparkle.
-- `unity_paint`: a macro of wet marbled paint on a woofer membrane, pumping
-  with the bass and thrown up in droplets on the kicks.
 - `unity_fibres`: a field of fibre-optic strands, gusts rolling across it
   with the bass and the tips glowing with the spectrum.
 

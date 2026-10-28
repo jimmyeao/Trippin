@@ -2,11 +2,9 @@
 // four-channel club mixer in a booth, built to the proportions and layout of
 // the real thing (see GearKit.cs, HqGear.shader). Nothing deforms: the music
 // plays through the gear the way a DJ uses it, as a 32-bar mix that repeats
-// with the decks swapping roles:
-//  - bar 20 the incoming deck is cued (its CUE lights), bar 22 needle drop
-//    (cue lever up, the arm swings to the lead-in and lowers), bar 24 START
-//    (the platter spins up), faders cross 24..32 with a bass swap at 28, and
-//    bar 32 STOP brakes the outgoing deck.
+// with the decks swapping roles: both records play throughout (owner: no
+// arm lifts or START/STOP presses, just records playing); the faders cross
+// 24..32 with a bass swap at 28.
 //  - Shape: the channel and master LED meters follow the eased band levels
 //    through each fader and EQ; the COLOR knob sweeps the filter up through a
 //    build and snaps back on the drop; BEAT FX fires for a bar on the drop.
@@ -70,6 +68,7 @@ namespace TrippinStage
         Vector3 MX(float x, float z, float y = 0f) => _mixer.MX(x, z, y);
         int _shot = -1;
         float _t;
+        Deck _offDeck;
 
         public override bool UsesCamera => true;
 
@@ -138,7 +137,9 @@ namespace TrippinStage
             _d[0].o = new Vector3(-DeckX, DeckY, DeckZ); _d[1].o = new Vector3(DeckX, DeckY, DeckZ);
             _d[0].recBpm = 124f; _d[1].recBpm = 126f;
             _d[0].label = 0; _d[1].label = 1;
-            _d[0].on = true; _d[0].speed = 0.5556f; _d[0].phi = 38f; _d[0].groove = 1.3f;
+            foreach (var d in _d) { d.on = true; d.speed = 0.5556f; }
+            _d[0].groove = 1.3f; _d[1].groove = 1.12f;
+            _d[0].phi = Phi(_d[0].groove); _d[1].phi = Phi(_d[1].groove);
         }
 
         static Matrix4x4 TRS(Vector3 p, Quaternion q) => GearDraw.TRS(p, q);
@@ -156,22 +157,18 @@ namespace TrippinStage
             var P = _d[p]; var N = _d[n];
             _mixer.Update(rx, mc, dt, rxBpm);
 
-            // Decks: START at 24 for the incoming deck, STOP at 32 (bar 0) for the outgoing one.
-            bool nOn = w >= 24f;
-            if (nOn != N.on) { N.on = nOn; N.press = _t; if (nOn) N.playBars = 0f; }
-            if (!P.on && w < 24f) { P.on = true; P.press = _t; }
-            // Needle drop on the incoming deck: lift 22.0, swing 22.25..23.25, lower 23.25..23.75.
-            float nd = w - 22f;
-            if (nd >= 0f && nd < 2f)
+            // Both records just play (owner: no arm lifts or START/STOP presses). A record
+            // nearing its run-out is put back to the lead-in, with a new label, while the
+            // camera is on the other deck.
+            foreach (var d in _d)
             {
-                N.lift = nd < 0.25f ? Ease(nd / 0.25f) : nd < 1.25f ? 1f : 1f - Ease((nd - 1.25f) / 0.5f);
-                if (nd >= 0.25f && nd < 1.25f) N.phi = Mathf.Lerp(N.phi, Phi(1.46f), 1f - Mathf.Exp(-dt * 6f));
-                if (nd >= 1.25f) { N.phi = Phi(1.46f); N.groove = 1.46f; }
+                d.on = true; d.lift = 0f;
+                if (d.groove < 0.8f && _offDeck == d)
+                {
+                    d.groove = 1.44f;
+                    d.label = (d.label + 2) % _labels.Length;
+                }
             }
-            else if (w < 22f) N.lift = 0f;
-            // The stopped deck gets a new record while nobody's looking.
-            if (w >= 10f && w < 11f && !N.on) N.label = (cyc * 2 + n + 2) % _labels.Length;
-            P.lift = 0f;
             foreach (var d in _d)
             {
                 float rpm0 = 33.333f / 60f;
@@ -326,20 +323,24 @@ namespace TrippinStage
         {
             float dr = drift;
             float sw = Mathf.Sin(u * Mathf.PI - Mathf.PI * 0.5f) * dr;   // -1..1 across the shot
-            fstop = 5.6f;
+            // The gear is modelled at 1 unit = 10 cm, so a 50 mm lens sees a giant set: depth
+            // of field is ten times thinner than a real lens at this size. Stop well down
+            // (owner: parts of the close-ups were out of focus).
+            fstop = 16f;
             switch (kind)
             {
                 default:
                 case 0:   // the whole booth
                     look = new Vector3(0f, 1.1f, 0.3f);
                     pos = new Vector3(sw * 0.7f, 5.8f, -10.2f + 0.5f * u * dr);
-                    fstop = 8f;
+                    fstop = 11f;
                     break;
                 case 1:   // low across the record to the stylus and the arm
                 {
                     var s = Stylus(d);
                     look = Vector3.Lerp(s, d.Pivot + Vector3.up * 0.3f, 0.35f);
                     pos = s + new Vector3(-1.75f - 0.25f * sw, 0.55f, -0.85f + 0.15f * sw);
+                    fstop = 22f;
                     break;
                 }
                 case 2:   // over the channel strips: EQs and meters
@@ -362,7 +363,7 @@ namespace TrippinStage
                 case 5:   // above the spinning record
                     look = d.Centre;
                     pos = d.Centre + new Vector3(0.6f + 0.3f * sw, 4.0f, -1.9f);
-                    fstop = 8f;
+                    fstop = 11f;
                     break;
                 case 6:   // START-STOP and the speed buttons
                 {
@@ -400,12 +401,13 @@ namespace TrippinStage
             else if (w < 16f) { kind = 5; deck = P; s0 = 12f; s1 = 16f; }
             else if (w < 20f) { kind = 2; deck = P; s0 = 16f; s1 = 20f; }
             else if (w < 24f) { kind = 1; deck = N; s0 = 20f; s1 = 24f; }
-            else if (w < 26f) { kind = 6; deck = N; s0 = 24f; s1 = 26f; }
+            else if (w < 26f) { kind = 5; deck = N; s0 = 24f; s1 = 26f; }
             else if (w < 28f) { kind = 3; deck = N; s0 = 26f; s1 = 28f; }
             else { kind = 4; deck = P; s0 = 28f; s1 = 32f; }
+            // Close-ups of one deck: the other may have its record reset.
+            _offDeck = kind == 1 || kind == 3 || kind == 5 ? (deck == P ? N : P) : null;
             int shotId = cyc * 16 + Mathf.FloorToInt(s0);
             if (shotId != _shot) { _shot = shotId; rig.Snap(); }
-            // START is pressed right on bar 24: open that shot half a beat early.
             float u = Mathf.Clamp01((w - s0) / (s1 - s0));
             Shot(kind, deck, u, out var pos, out var look, out float fstop);
             rig.Move(cam, pos, look, dt, 3f);

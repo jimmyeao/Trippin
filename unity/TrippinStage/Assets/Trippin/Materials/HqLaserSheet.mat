@@ -7,8 +7,8 @@ Material:
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_Name: HqGold
-  m_Shader: {fileID: 4800000, guid: 50f0f02076b02954280c0c8485e84847, type: 3}
+  m_Name: HqLaserSheet
+  m_Shader: {fileID: 4800000, guid: 07576b4853cb0a74d870a3e5d22cc420, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords: []

@@ -73,7 +73,7 @@ Shader "Trippin/Beam"
                 float3 q = i.wp * _SmokeScale + float3(0, -_TFlow * 0.08, _TFlow * 0.05);
                 float smoke;
                 // unity_lasers: the same clouds its smoke pass draws, a faint core still showing between them.
-                [branch] if (_SmokeVol > 0.5) smoke = lerp(1.0, 0.18 + 2.2 * saturate(LSDensity(i.wp) * 1.4), _Smoke);
+                [branch] if (_SmokeVol > 0.5) smoke = lerp(1.0, 0.06 + 2.3 * saturate(LSDensity(i.wp) * 1.4), _Smoke);
                 else smoke = lerp(1.0, smoothstep(_SmokeEdge.x, _SmokeEdge.y, TFbm3(q)) * 1.6, _Smoke);
                 float along = 1.0 - smoothstep(_Fade, 1.0, i.uv.y);
                 float near = smoothstep(0.0, 0.02, i.uv.y);
