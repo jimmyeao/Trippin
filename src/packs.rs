@@ -702,7 +702,7 @@ mod tests {
         for s in ["unity_fireworks", "unity_rain", "unity_lava", "unity_jellyfish"] {
             assert!(crate::engine::scene_supported(s), "engine v19 draws {s}");
         }
-        for s in ["unity_decks", "unity_cdj", "unity_movingheads", "unity_groovebox", "unity_controller", "unity_stylus", "unity_gold", "unity_lasers"] {
+        for s in ["unity_decks", "unity_cdj", "unity_movingheads", "unity_groovebox", "unity_controller", "unity_gold", "unity_lasers"] {
             assert!(crate::engine::scene_supported(s), "engine v20 draws {s}");
         }
     }

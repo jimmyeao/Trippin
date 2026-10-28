@@ -328,7 +328,6 @@ namespace TrippinStage.EditorTools
                 ("unity_neon_portals", typeof(NeonPortalsShow)),
                 ("unity_fire", typeof(FireShow)),
                 ("unity_ink", typeof(InkShow)),
-                ("unity_vortex", typeof(VortexShow)),
                 ("unity_fireflies", typeof(FirefliesShow)),
                 ("unity_winter", typeof(WinterShow)),
                 ("unity_bubbles", typeof(BubblesShow)),
@@ -339,7 +338,6 @@ namespace TrippinStage.EditorTools
                 ("unity_decks", typeof(DecksShow)),
                 ("unity_lasers", typeof(LasersShow)),
                 ("unity_gold", typeof(GoldShow)),
-                ("unity_stylus", typeof(StylusShow)),
                 ("unity_controller", typeof(ControllerShow)),
                 ("unity_groovebox", typeof(GrooveboxShow)),
                 ("unity_movingheads", typeof(MovingHeadsShow)),
@@ -395,12 +393,6 @@ namespace TrippinStage.EditorTools
                     fw.backdropMat.SetTexture("_MainTex", Tex("HqSkyline.png", TextureWrapMode.Mirror));
                     fw.skyMat = co.skyMat;
                 }
-                if (ks is VortexShow vx)
-                {
-                    vx.vortexMat = Mat("Trippin/HqVortex", "HqVortex");
-                    vx.skyMat = Mat("Trippin/HqBackdrop", "HqStormSky");
-                    vx.skyMat.SetTexture("_MainTex", Tex("HqStormSky.png"));
-                }
                 if (ks is InkShow ink) ink.inkMat = Mat("Trippin/HqInk", "HqInk");
                 if (ks is JellyfishShow jf)
                 {
@@ -432,10 +424,6 @@ namespace TrippinStage.EditorTools
                     g_controller.clubMat = Mat("Trippin/HqClub", "HqClub");
                     g_controller.plateTex = GearTex("GearCtrlPlate.png");
                     g_controller.uiTex = GearTex("GearLaptopUI.png");
-                }
-                if (ks is StylusShow g_stylus)
-                {
-                    g_stylus.grooveMat = Mat("Trippin/HqGroove", "HqGroove");
                 }
                 if (ks is GoldShow g_gold)
                 {
