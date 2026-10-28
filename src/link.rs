@@ -110,6 +110,9 @@ pub fn frame_json(
         "hue": u.hue, "flash": u.flash, "master": u.master,
         "lvl4": u.lvl4, "hits4": u.hits4, "pres4": u.pres4, "clock4": u.clock4,
         "spectrum": u.spectrum.to_vec(),
+        // The triggered waveform (64 samples, -1..1; unity_scope draws it).
+        // Older engines ignore it.
+        "wave": u.waveform.iter().flatten().collect::<Vec<_>>(),
         // Flat r,g,b x 8 — Unity's JsonUtility can't read nested arrays.
         "palette": palette.iter().flatten().collect::<Vec<_>>(),
         "scene": scene, "cut": cut, "drums": drums,

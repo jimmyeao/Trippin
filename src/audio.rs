@@ -2063,6 +2063,10 @@ pub fn dump_feed(path: &std::path::Path, out: &std::path::Path, palette: &str) -
             let beat_in_bar = ((pos.floor() as i64 - a.downbeat as i64).rem_euclid(4)) as f32;
             let mut spectrum = [0.0f32; SPECTRUM_BINS];
             spectrum.copy_from_slice(&f.spectrum);
+            let mut waveform = [[0.0f32; 4]; 16];
+            for (i, &v) in f.waveform.iter().enumerate() {
+                waveform[i / 4][i % 4] = v;
+            }
             let u = crate::render::Uniforms {
                 time: next_t,
                 dt,
@@ -2086,6 +2090,7 @@ pub fn dump_feed(path: &std::path::Path, out: &std::path::Path, palette: &str) -
                 hits4: f.hits4,
                 pres4: f.pres4,
                 clock4: clock4.map(|c| c as f32),
+                waveform,
                 ..Default::default()
             };
             writeln!(w, "{}", crate::link::frame_json(&u, "", &pal, false, f.calm < 0.5, &Default::default()))?;
