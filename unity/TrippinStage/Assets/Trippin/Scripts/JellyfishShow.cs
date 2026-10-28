@@ -23,7 +23,7 @@ namespace TrippinStage
         [TrippinParam("Pulse", 0.2f, 2f)] public float pulse = 1f;
         [TrippinParam("Tentacles", 0.3f, 2f)] public float tentacle = 1f;
         [TrippinParam("Glow", 0.3f, 2.5f)] public float glow = 1f;
-        [TrippinParam("Snow", 0f, 1f)] public float snow = 0.6f;
+        [TrippinParam("Snow", 0f, 1f)] public float snow = 0f;   // off: the specks read as stars (owner)
 
         public override bool UsesCamera => true;
 

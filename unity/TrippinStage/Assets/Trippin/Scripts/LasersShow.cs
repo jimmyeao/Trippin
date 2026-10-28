@@ -10,6 +10,10 @@
 //  - Motion: tunnels turn, sheets roll and scans sweep on the beat clock;
 //    the camera drifts, cutting every 8 bars. The beam count never changes:
 //    a breakdown fades the outer beams and the floor projectors.
+//  - Scanned light: the fan, tunnel, sheet and scan formations also draw the
+//    surface a fast-scanning beam sweeps (HqLaserSheet): a flat plane of
+//    light, or a cone for the tunnel, visible where the smoke is; the beams
+//    dim under the tunnel and the sheet, which are one beam scanned.
 //  - Smoke: fog-machine banks drift across the stage (HqLaserSmoke, the
 //    shared baked noise volume), lit only by the beams (LaserLight.compute
 //    splats them into a light volume each frame), so the clouds glow in the
@@ -22,7 +26,7 @@ namespace TrippinStage
 {
     public sealed class LasersShow : KitShow
     {
-        public Material gearMat, smokeMat;
+        public Material gearMat, smokeMat, sheetMat;
         public ComputeShader lightCs;
 
         [TrippinParam("Beams", 0.2f, 2f)] public float beams = 1f;
@@ -51,6 +55,19 @@ namespace TrippinStage
         int _kSplat;
         Vector3 _wind;
         readonly Vector4[] _bo = new Vector4[96], _bd = new Vector4[96], _bc = new Vector4[96];
+        // Scanned surfaces (HqLaserSheet): per formation, how much of the swept sheet
+        // shows, and how bright the separate beams stay. A real tunnel or liquid-sky
+        // sheet is one beam scanned too fast to see, so the beams fade under it.
+        static readonly float[] SheetW = { 0.45f, 0.6f, 1f, 0f, 0.7f, 0f }, BeamW = { 1f, 0.3f, 0.35f, 1f, 0.6f, 1f };
+        const int Sub = 4, MaxSeg = B * Sub;
+        Mesh _sheet;
+        RenderParams _sheetRp;
+        readonly Vector3[] _sv = new Vector3[P * MaxSeg * 4];
+        readonly Color[] _sc = new Color[P * MaxSeg * 4];
+        readonly Vector2[] _su = new Vector2[P * MaxSeg * 4];
+        readonly int[] _si = new int[P * MaxSeg * 6];
+        readonly Color[] _jc = new Color[B];
+        int _formPrev;
 
         protected override void Build()
         {
@@ -63,6 +80,7 @@ namespace TrippinStage
             laserMat.SetFloat("_SmokeScale", 0.6f);
             laserMat.SetVector("_SmokeEdge", new Vector4(0.42f, 0.58f, 0f, 0f));
             laserMat.SetFloat("_SmokeVol", 1f);
+            laserMat.SetFloat("_Smoke", 0.9f);   // a beam shows only where the smoke is (as laser_show)
             _beams = new BeamPool(transform, laserMat, P * B, "laser", false, 0.010f, 0.0015f, 70f, 0.95f, 0.9f, 0.55f);
             _boxM = GearMesh.RoundedBox(new Vector3(0.36f, 0.2f, 0.42f), 0.03f, 3, "laser projector");
             _finM = GearMesh.RoundedBox(new Vector3(0.01f, 0.16f, 0.30f), 0.004f, 1, "fin");
@@ -84,14 +102,32 @@ namespace TrippinStage
             lightCs.SetVector("_Res", new Vector4(Res.x, Res.y, Res.z, 0f));
             lightCs.SetFloat("_R1", 1f / (2f * 0.3f * 0.3f));
             lightCs.SetFloat("_R2", 1f / (2f * 1.1f * 1.1f));
-            lightCs.SetFloat("_Wide", 0.035f);
+            lightCs.SetFloat("_Wide", 0.022f);
             _smoke = Kit.Fullscreen(transform, smokeMat, "laser smoke");
             _smoke.SetTexture("_Light", _light);
             _smoke.SetVector("_BoxMin", BoxMin); _smoke.SetVector("_BoxSize", BoxSize);
             _smoke.SetFloat("_Sigma", 0.55f);
-            _smoke.SetVector("_Amb", new Vector4(0.010f, 0.012f, 0.018f, 0.55f));
+            _smoke.SetVector("_Amb", new Vector4(0.018f, 0.020f, 0.032f, 0.55f));
             Shader.SetGlobalTexture("_LSVol", HqNoise.Volume);
             lightCs.SetTexture(_kSplat, "_LSVol", HqNoise.Volume);
+            _sheet = new Mesh { name = "laser sheets", indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
+            _sheet.MarkDynamic();
+            _sheetRp = new RenderParams(new Material(sheetMat)) { worldBounds = new Bounds(new Vector3(0f, 4f, -14f), new Vector3(90f, 40f, 90f)) };
+        }
+
+        // `-laserForm <k>` pins one formation (for checking it in a recording).
+        static int _pinForm = -2;
+        static int PinForm
+        {
+            get
+            {
+                if (_pinForm != -2) return _pinForm;
+                _pinForm = -1;
+                var a = System.Environment.GetCommandLineArgs();
+                for (int i = 0; i + 1 < a.Length; i++)
+                    if (a[i] == "-laserForm" && int.TryParse(a[i + 1], out var n)) _pinForm = Mathf.Clamp(n, 0, 5);
+                return _pinForm;
+            }
         }
 
         void OnDestroy() { if (_light != null) _light.Release(); }
@@ -164,8 +200,10 @@ namespace TrippinStage
             int blk = Mathf.FloorToInt(b / 16f);
             int[] order = { 0, 1, 2, 4, 3, 1, 5, 2, 0, 4 };
             int form = order[((blk % order.Length) + order.Length) % order.Length];
+            if (PinForm >= 0) form = PinForm;
             if (form != _form)
             {
+                _formPrev = _form < 0 ? form : _form;
                 for (int i = 0; i < P * B; i++) _dir0[i] = _form < 0 ? Aim(form, i / B, i % B, b) : _dir[i];
                 _form = form;
             }
@@ -176,6 +214,9 @@ namespace TrippinStage
             var c2 = Color.HSVToRGB(Mathf.Repeat(h0 + 0.33f * colour + 0.1f, 1f), 1f, 1f);
             float gain = rx.Gain(0.85f, 1.2f) * beams;
             float calm = rx.calm;
+            float sheetW = Mathf.Lerp(SheetW[_formPrev], SheetW[form], into), beamW = Mathf.Lerp(BeamW[_formPrev], BeamW[form], into);
+            float closeW = (_formPrev == 1 ? 1f - into : 0f) + (form == 1 ? into : 0f);   // the tunnel's cone closes round
+            int nv = 0, ni = 0;
 
             // The projectors themselves, lit dimly.
             _lp[0] = new Vector4(0f, 5f, -9f, 14f); _lc[0] = (Vector4)(new Color(0.7f, 0.72f, 0.8f) * 0.5f);
@@ -213,18 +254,52 @@ namespace TrippinStage
                     float lens = Mathf.SmoothStep(0.1f, 1f, Mathf.InverseLerp(1f, 4f, near));
                     var col = (j % 2 == 0) ? c1 : c2;
                     col = Color.Lerp(col, Color.white, 0.12f * _imp);
-                    _beams.Set(i, ap, ap + _dir[i] * 40f, col, 1.7f * gain * fade * lens);
+                    _beams.Set(i, ap, ap + _dir[i] * 40f, col, 1.7f * gain * fade * lens * beamW);
+                    _jc[j] = col; _jc[j].a = gain * fade;
                     // The smoke takes the beam's light without the lens fade.
                     _bo[i] = ap; _bd[i] = new Vector4(_dir[i].x, _dir[i].y, _dir[i].z, 40f);
                     _bc[i] = new Vector4(col.r, col.g, col.b, 1.7f * gain * fade);
                 }
+                // The swept surface between neighbouring beams, subdivided so a tunnel is round.
+                if (sheetW > 0.01f)
+                {
+                    int segs = closeW > 0.01f ? B : B - 1;
+                    for (int j = 0; j < segs; j++)
+                    {
+                        int j1 = (j + 1) % B;
+                        float w = sheetW * (j == B - 1 ? closeW : 1f);
+                        for (int q = 0; q < Sub; q++)
+                        {
+                            float s0 = q / (float)Sub, s1 = (q + 1) / (float)Sub;
+                            var d0 = Vector3.Slerp(_dir[p * B + j], _dir[p * B + j1], s0);
+                            var d1 = Vector3.Slerp(_dir[p * B + j], _dir[p * B + j1], s1);
+                            var k0 = Color.Lerp(_jc[j], _jc[j1], s0); k0.a *= 0.22f * w;
+                            var k1 = Color.Lerp(_jc[j], _jc[j1], s1); k1.a *= 0.22f * w;
+                            _si[ni++] = nv; _si[ni++] = nv + 1; _si[ni++] = nv + 2;
+                            _si[ni++] = nv + 2; _si[ni++] = nv + 1; _si[ni++] = nv + 3;
+                            _sv[nv] = ap + d0 * 0.3f; _sc[nv] = k0; _su[nv++] = new Vector2(s0, 0.3f);
+                            _sv[nv] = ap + d0 * 40f; _sc[nv] = k0; _su[nv++] = new Vector2(s0, 40f);
+                            _sv[nv] = ap + d1 * 0.3f; _sc[nv] = k1; _su[nv++] = new Vector2(s1, 0.3f);
+                            _sv[nv] = ap + d1 * 40f; _sc[nv] = k1; _su[nv++] = new Vector2(s1, 40f);
+                        }
+                    }
+                }
+            }
+            if (ni > 0)
+            {
+                _sheet.Clear();
+                _sheet.SetVertices(_sv, 0, nv);
+                _sheet.SetColors(_sc, 0, nv);
+                _sheet.SetUVs(0, _su, 0, nv);
+                _sheet.SetTriangles(_si, 0, ni, 0, false);
+                Graphics.RenderMesh(_sheetRp, _sheet, 0, Matrix4x4.identity);
             }
             hazeScale = hazeAmt * 0.6f;
 
             // Smoke: drifting from the stage over the crowd, thickening through a build, blasted in on the drop.
             _dens = Mathf.Lerp(_dens, 0.75f + 0.6f * rx.tension + 0.5f * _imp, 1f - Mathf.Exp(-dt * 1.5f));
             _wind += new Vector3(0.15f * Mathf.Sin(rx.phrase * 0.3f), 0.05f, -0.3f - 0.25f * rx.tension) * dt;
-            Shader.SetGlobalVector("_LSShape", new Vector4(1f / 26f, 3.2f, 0.44f, 0.72f));
+            Shader.SetGlobalVector("_LSShape", new Vector4(1f / 26f, 3.2f, 0.47f, 0.64f));
             Shader.SetGlobalVector("_LSWind", new Vector4(_wind.x, _wind.y, _wind.z, _dens * hazeAmt));
             lightCs.SetVector("_LSShape", Shader.GetGlobalVector("_LSShape"));
             lightCs.SetVector("_LSWind", Shader.GetGlobalVector("_LSWind"));
@@ -234,7 +309,9 @@ namespace TrippinStage
             _smoke.SetFloat("_Frame", Time.frameCount % 64);
             _smoke.SetFloat("_Gain", 1f);
 
-            // Shots: one per 8 bars.
+            // Shots: one per 8 bars, every one from the audience facing the stage, so the
+            // formations fan toward the viewer (owner: side-on and behind-the-rig angles
+            // send the beams off one side of the screen, which looks unnatural).
             int sb = Mathf.FloorToInt(b / 32f);
             if (sb != _shot) { _shot = sb; rig.Snap(); }
             float u = Mathf.Repeat(b, 32f) / 32f;
@@ -244,9 +321,9 @@ namespace TrippinStage
             {
                 default:
                 case 0: pos = new Vector3(sw * 2.5f, 1.7f, -16f); look = new Vector3(0f, 3.8f, 0f); break;
-                case 1: pos = new Vector3(-13f, 3f, -9f + 2f * sw); look = new Vector3(0f, 3.5f, -3f); break;
+                case 1: pos = new Vector3(-4f + 1.5f * sw, 2.2f, -15f); look = new Vector3(0.5f, 4f, 0f); break;   // in the crowd, a little left of centre
                 case 2: pos = new Vector3(1f + sw, 0.9f, -10f); look = new Vector3(0f, 6.5f, -4f); break;
-                case 3: pos = _pos[1] + new Vector3(1.6f + 0.4f * sw, -0.6f, -2.2f); look = _pos[1] + new Vector3(0f, -0.2f, -0.5f); break;
+                case 3: pos = new Vector3(sw * 2f, 7.5f, -22f); look = new Vector3(0f, 3.2f, 0f); break;   // from the balcony, over the crowd
             }
             // No depth of field: the beams write no depth, so it would blur them by what's behind.
             rig.Move(cam, pos, look, dt, 3f);

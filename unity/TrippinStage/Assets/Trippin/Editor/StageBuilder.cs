@@ -311,7 +311,6 @@ namespace TrippinStage.EditorTools
                 ("unity_robot_club", typeof(RobotClubShow)),
                 ("unity_robot_band", typeof(RobotBandShow)),
                 ("unity_dj_battle", typeof(DjBattleShow)),
-                ("unity_highlands", typeof(HighlandsShow)),
                 ("unity_coaster", typeof(CoasterShow)),
                 ("unity_fluid", typeof(FluidShow)),
                 ("unity_murmuration", typeof(MurmurationShow)),
@@ -323,7 +322,6 @@ namespace TrippinStage.EditorTools
                 ("unity_kaleido", typeof(KaleidoShow)),
                 ("unity_confetti", typeof(ConfettiShow)),
                 ("unity_rain", typeof(RainShow)),
-                ("unity_pool", typeof(PoolShow)),
                 ("unity_synthwave", typeof(SynthwaveShow)),
                 ("unity_neon_portals", typeof(NeonPortalsShow)),
                 ("unity_fire", typeof(FireShow)),
@@ -337,21 +335,16 @@ namespace TrippinStage.EditorTools
                 ("unity_jellyfish", typeof(JellyfishShow)),
                 ("unity_decks", typeof(DecksShow)),
                 ("unity_fibres", typeof(FibreShow)),
-                ("unity_paint", typeof(PaintShow)),
                 ("unity_pixelbars", typeof(PixelBarsShow)),
-                ("unity_scope", typeof(ScopeShow)),
                 ("unity_mirrors", typeof(MirrorWallShow)),
                 ("unity_kinetic", typeof(KineticShow)),
                 ("unity_lasers", typeof(LasersShow)),
-                ("unity_gold", typeof(GoldShow)),
-                ("unity_controller", typeof(ControllerShow)),
                 ("unity_groovebox", typeof(GrooveboxShow)),
                 ("unity_movingheads", typeof(MovingHeadsShow)),
                 ("unity_cdj", typeof(CdjShow)),
             };
             // Extra materials for the ported scenes: instancing must be on the
             // material asset or the build strips the variant (AGENTS.md).
-            var highlandsMat = Mat("Trippin/Highlands", "Highlands");
             var coasterCityMat = Mat("Trippin/CoasterCity", "CoasterCity");
             coasterCityMat.enableInstancing = true;
             var coasterDeckMat = Mat("Trippin/CoasterDeck", "CoasterDeck");
@@ -382,7 +375,6 @@ namespace TrippinStage.EditorTools
                 ks.robotMat = kitRobot;
                 ks.screenMat = kitScreen;
                 ks.crowdMeshMat = dir.crowdMeshMat;
-                if (ks is HighlandsShow hs) hs.highlandsMat = highlandsMat;
                 if (ks is FluidShow fl)
                 {
                     fl.sim = AssetDatabase.LoadAssetAtPath<ComputeShader>($"{Root}/Shaders/Fluid.compute");
@@ -424,21 +416,11 @@ namespace TrippinStage.EditorTools
                     g_groovebox.clubMat = Mat("Trippin/HqClub", "HqClub");
                     g_groovebox.plateTex = GearTex("GearDrumPlate.png");
                 }
-                if (ks is ControllerShow g_controller)
-                {
-                    g_controller.gearMat = Mat("Trippin/HqGear", "HqGear");
-                    g_controller.clubMat = Mat("Trippin/HqClub", "HqClub");
-                    g_controller.plateTex = GearTex("GearCtrlPlate.png");
-                    g_controller.uiTex = GearTex("GearLaptopUI.png");
-                }
-                if (ks is GoldShow g_gold)
-                {
-                    g_gold.goldMat = Mat("Trippin/HqGold", "HqGold");
-                }
                 if (ks is LasersShow g_lasers)
                 {
                     g_lasers.gearMat = Mat("Trippin/HqGear", "HqGear");
                     g_lasers.smokeMat = Mat("Trippin/HqLaserSmoke", "HqLaserSmoke");
+                    g_lasers.sheetMat = Mat("Trippin/HqLaserSheet", "HqLaserSheet");
                     g_lasers.lightCs = AssetDatabase.LoadAssetAtPath<ComputeShader>($"{Root}/Shaders/LaserLight.compute");
                     if (g_lasers.lightCs == null) throw new System.Exception("LaserLight.compute not found");
                 }
@@ -450,23 +432,10 @@ namespace TrippinStage.EditorTools
                 {
                     g_mirrors.gearMat = Mat("Trippin/HqGear", "HqGear");
                 }
-                if (ks is ScopeShow g_scope)
-                {
-                    g_scope.gearMat = Mat("Trippin/HqGear", "HqGear");
-                    g_scope.clubMat = Mat("Trippin/HqClub", "HqClub");
-                    g_scope.crtMat = Mat("Trippin/HqScope", "HqScope");
-                    g_scope.traceCs = AssetDatabase.LoadAssetAtPath<ComputeShader>($"{Root}/Shaders/ScopeTrace.compute");
-                }
                 if (ks is PixelBarsShow g_pixelbars)
                 {
                     g_pixelbars.gearMat = Mat("Trippin/HqGear", "HqGear");
                     g_pixelbars.pixelMat = Mat("Trippin/HqPixelBar", "HqPixelBar");
-                }
-                if (ks is PaintShow g_paint)
-                {
-                    g_paint.gearMat = Mat("Trippin/HqGear", "HqGear");
-                    g_paint.clubMat = Mat("Trippin/HqClub", "HqClub");
-                    g_paint.paintMat = Mat("Trippin/HqPaint", "HqPaint");
                 }
                 if (ks is FibreShow g_fibres)
                 {
@@ -532,11 +501,6 @@ namespace TrippinStage.EditorTools
                     sw.synthMat = Mat("Trippin/HqSynth", "HqSynth");
                     sw.skyMat = Mat("Trippin/HqBackdrop", "HqSynthSky");
                     sw.skyMat.SetTexture("_MainTex", Tex("HqSynthSky.png"));
-                }
-                if (ks is PoolShow poolShow)
-                {
-                    poolShow.poolMat = Mat("Trippin/HqPool", "HqPool");
-                    poolShow.poolMat.SetTexture("_Tiles", Tex("HqPoolTiles.png", TextureWrapMode.Repeat));
                 }
                 if (ks is RainShow rn)
                 {
