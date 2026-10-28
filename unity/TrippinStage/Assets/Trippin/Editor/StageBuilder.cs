@@ -336,6 +336,12 @@ namespace TrippinStage.EditorTools
                 ("unity_lava", typeof(LavaShow)),
                 ("unity_jellyfish", typeof(JellyfishShow)),
                 ("unity_decks", typeof(DecksShow)),
+                ("unity_fibres", typeof(FibreShow)),
+                ("unity_paint", typeof(PaintShow)),
+                ("unity_pixelbars", typeof(PixelBarsShow)),
+                ("unity_scope", typeof(ScopeShow)),
+                ("unity_mirrors", typeof(MirrorWallShow)),
+                ("unity_kinetic", typeof(KineticShow)),
                 ("unity_lasers", typeof(LasersShow)),
                 ("unity_gold", typeof(GoldShow)),
                 ("unity_controller", typeof(ControllerShow)),
@@ -435,6 +441,36 @@ namespace TrippinStage.EditorTools
                     g_lasers.smokeMat = Mat("Trippin/HqLaserSmoke", "HqLaserSmoke");
                     g_lasers.lightCs = AssetDatabase.LoadAssetAtPath<ComputeShader>($"{Root}/Shaders/LaserLight.compute");
                     if (g_lasers.lightCs == null) throw new System.Exception("LaserLight.compute not found");
+                }
+                if (ks is KineticShow g_kinetic)
+                {
+                    g_kinetic.gearMat = Mat("Trippin/HqGear", "HqGear");
+                }
+                if (ks is MirrorWallShow g_mirrors)
+                {
+                    g_mirrors.gearMat = Mat("Trippin/HqGear", "HqGear");
+                }
+                if (ks is ScopeShow g_scope)
+                {
+                    g_scope.gearMat = Mat("Trippin/HqGear", "HqGear");
+                    g_scope.clubMat = Mat("Trippin/HqClub", "HqClub");
+                    g_scope.crtMat = Mat("Trippin/HqScope", "HqScope");
+                    g_scope.traceCs = AssetDatabase.LoadAssetAtPath<ComputeShader>($"{Root}/Shaders/ScopeTrace.compute");
+                }
+                if (ks is PixelBarsShow g_pixelbars)
+                {
+                    g_pixelbars.gearMat = Mat("Trippin/HqGear", "HqGear");
+                    g_pixelbars.pixelMat = Mat("Trippin/HqPixelBar", "HqPixelBar");
+                }
+                if (ks is PaintShow g_paint)
+                {
+                    g_paint.gearMat = Mat("Trippin/HqGear", "HqGear");
+                    g_paint.clubMat = Mat("Trippin/HqClub", "HqClub");
+                    g_paint.paintMat = Mat("Trippin/HqPaint", "HqPaint");
+                }
+                if (ks is FibreShow g_fibres)
+                {
+                    g_fibres.fibreMat = Mat("Trippin/HqFibre", "HqFibre");
                 }
                 if (ks is DecksShow dk)
                 {
