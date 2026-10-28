@@ -891,18 +891,18 @@ namespace TrippinStage
         static readonly Vector3[] ShotPos =
         {
             new Vector3(0, 4.2f, -34), // wide from the crowd
-            new Vector3(-8, 3.4f, -22), // over the crowd, looking up (at head height the heads filled the lens; at the front row the walls did)
-            new Vector3(19, 10, -19), // side, elevated (at 14, 9, -8 the wall filled the frame)
+            new Vector3(-9, 4, -28), // over the crowd, looking up (at head height the heads filled the lens; at the front row the walls did)
+            new Vector3(24, 12, -27), // side, elevated (at 14, 9, -8 the wall filled the frame)
             new Vector3(0, 30, -48), // drone, high and wide
-            new Vector3(5, 5, -15), // nearer the deck (at -6, pushed in by the drive, it was on the stage edge)
+            new Vector3(8, 9, -28), // toward the deck (at 5, 3.5, -6 low and looking up, the wall loomed) (at -6, pushed in by the drive, it was on the stage edge)
         };
         static readonly Vector3[] ShotLook =
         {
             new Vector3(0, 10.5f, 12),
-            new Vector3(2, 14, 10),
+            new Vector3(2, 11, 10),
             new Vector3(-3, 9, 10),
             new Vector3(0, 8, 8),
-            new Vector3(-2, 12, 12),
+            new Vector3(-2, 9.5f, 12),
         };
 
         // `-stageShot <i>` pins the camera to one shot (for checking a part
