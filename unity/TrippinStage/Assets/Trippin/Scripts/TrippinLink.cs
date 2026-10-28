@@ -21,6 +21,8 @@ namespace TrippinStage
         public float intensity = 0.7f, calm, flow, hue, flash, master = 1f;
         public float[] lvl4 = new float[4], hits4 = new float[4], pres4 = new float[4], clock4 = new float[4];
         public float[] spectrum = new float[32];
+        /// The triggered waveform, 64 samples in -1..1 (empty from a Trippin before 0.26).
+        public float[] wave = new float[64];
         public float[] palette = new float[24];
         public string scene = "";
         public bool cut, drums = true;
@@ -255,6 +257,12 @@ namespace TrippinStage
             }
             for (int i = 0; i < 32; i++)
                 s.spectrum[i] = Mathf.Clamp01(0.7f - i * 0.015f + 0.3f * Mathf.Sin(_synthBeat * 2f + i * 0.7f)) * (drums ? 1f : 0.6f);
+            if (s.wave == null || s.wave.Length != 64) s.wave = new float[64];
+            for (int i = 0; i < 64; i++)
+            {
+                float x = i / 64f * Mathf.PI * 2f;
+                s.wave[i] = (0.55f * Mathf.Sin(x * 2f) + 0.3f * Mathf.Sin(x * 3f + _synthBeat) + 0.12f * Mathf.Sin(x * 11f)) * (drums ? 1f : 0.5f);
+            }
             // Synthwave-ish palette until Trippin sends its own.
             Color[] p = { new Color(0.05f,0.0f,0.3f), new Color(0.3f,0.0f,0.8f), new Color(0.9f,0.0f,0.8f), new Color(1f,0.2f,0.4f),
                           new Color(1f,0.5f,0.1f), new Color(1f,0.9f,0.2f), new Color(0.2f,0.9f,1f), new Color(0.1f,0.4f,1f) };

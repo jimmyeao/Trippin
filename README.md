@@ -435,7 +435,6 @@ and AI-generated backdrops:
 - `unity_neon_portals`: neon tube archways mirrored in a wet floor.
 - `unity_fire`: concert flame cannons with embers and smoke.
 - `unity_ink`: ink drops sinking and blooming through water.
-- `unity_vortex`: a tornado of sparks under a storm sky.
 - `unity_fireflies`: a firefly swarm in a misty forest; kicks send flash
   waves through it.
 - `unity_winter`: snow and strings of lights over an alpine village.
@@ -469,17 +468,34 @@ and the bass drum drops out in breakdowns.
 laptop on a stand behind it running the DJ software. The same mix plays
 on it: waveforms scroll on the laptop, pads fire hot cues on the drop,
 roll through builds and hold a loop in breakdowns.
-`unity_stylus` is an extreme macro of a diamond stylus riding a record
-groove: the groove walls swing with the music (bass the big slow swings,
-the highs the fine ones), the tip shakes along with them, and a rainbow
-sheen slides over the grooves as the record turns in slow motion.
 `unity_gold` is molten gold pouring into a glowing pool in a dark crucible:
 each kick drops a droplet that ripples out across the mirror-bright
 surface, the bass thickens the pour and a build swells the pool.
-`unity_lasers` is a laser show: thin saturated beams cutting through the
-haze from projectors on a truss and the stage, morphing into a new
-formation every 4 bars (fan, rotating tunnel, a sheet rolling over the
-crowd, crossing beams, a scan, a starburst).
+`unity_lasers` is a laser show: thin saturated beams cutting through
+fog-machine smoke from projectors on a truss and the stage, morphing into a
+new formation every 4 bars (fan, rotating tunnel, a sheet rolling over the
+crowd, crossing beams, a scan, a starburst). The smoke drifts over the
+crowd in banks lit only by the beams, so the clouds glow in the laser
+colours where a formation cuts them; a build thickens it and the drop
+blasts more in.
+
+Six more shows (engine v21):
+
+- `unity_kinetic`: a kinetic light installation, a grid of glowing balls on
+  winch cables moving as one surface: the spectrum across it, ripples, a
+  turning plane, a dome the bass breathes, a ring through it on each kick.
+- `unity_mirrors`: a wall of mirror panels tilting in waves with the music,
+  two spotlights sweeping it, every panel throwing its own beam back into
+  the haze and glinting as it turns toward you.
+- `unity_scope`: close-ups of an analogue oscilloscope drawing the music's
+  own waveform in green phosphor: a sweep, an XY figure, a wobbling ring
+  and a turning knot.
+- `unity_pixelbars`: a stage wall of LED pixel bars on tilt mounts with
+  blinders above, running a VU wall, chases, waves, kick bursts and sparkle.
+- `unity_paint`: a macro of wet marbled paint on a woofer membrane, pumping
+  with the bass and thrown up in droplets on the kicks.
+- `unity_fibres`: a field of fibre-optic strands, gusts rolling across it
+  with the bass and the tips glowing with the spectrum.
 
 ### Video scenes
 

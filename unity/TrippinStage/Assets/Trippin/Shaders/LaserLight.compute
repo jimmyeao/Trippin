@@ -1,0 +1,30 @@
+// unity_lasers: bakes the smoke over the stage into a low-res volume that
+// HqLaserSmoke marches with one fetch a step: rgb is the light, the sum of
+// every beam's colour by its distance to the beam (a tight sheet of light
+// round the beam plus a wide faint glow, the smoke scattering it on), and a
+// is the smoke's density there (LaserSmoke.hlsl).
+#pragma kernel Splat
+#include "LaserSmoke.hlsl"
+
+RWTexture3D<float4> _Light;
+float4 _BoxMin, _BoxSize, _Res;
+float4 _BO[96], _BD[96], _BC[96];   // origin; direction + length; colour + strength
+int _N;
+float _R1, _R2, _Wide;
+
+[numthreads(4, 4, 4)]
+void Splat(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id >= (uint3)_Res.xyz)) return;
+    float3 p = _BoxMin.xyz + (id + 0.5) / _Res.xyz * _BoxSize.xyz;
+    float3 s = 0;
+    for (int i = 0; i < _N; i++)
+    {
+        float3 o = p - _BO[i].xyz;
+        float t = clamp(dot(o, _BD[i].xyz), 0.0, _BD[i].w);
+        float3 q = o - _BD[i].xyz * t;
+        float r2 = dot(q, q);
+        s += _BC[i].rgb * _BC[i].a * (exp(-r2 * _R1) + _Wide * exp(-r2 * _R2));
+    }
+    _Light[id] = float4(s, LSDensity(p));
+}
