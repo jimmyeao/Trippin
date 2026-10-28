@@ -6,7 +6,8 @@
 //    count never changes.
 //  - Motion: the folds travel on the smooth energy clock; each curtain also
 //    swings its travel direction on a phrase-length sine, and the
-//    searchlights sweep back and forth, reversing with the phrase.
+//    searchlights sweep across each other over 8 bars, sway on a 2-bar
+//    figure and dip and rise over 4, all on Trippin's beat.
 //  - Calm: brighter and slower in a breakdown (this is its show), subdued
 //    but alive when the drums play.
 //  - Drops (DropDirector): tension gathers the curtains (folds flatten,
@@ -234,12 +235,18 @@ namespace TrippinStage
                 _curMir[i].SetPropertyBlock(_mpb);
             }
 
-            // Searchlights: slow sweeps from the horizon, reversing with the phrase.
+            // Searchlights (owner: "the light shafts need to move more"; a 32-bar sweep
+            // barely moved): neighbours sweep in opposite directions over 8 bars so the
+            // shafts cross and part, sway on a 2-bar figure on Trippin's beat (smaller in
+            // a breakdown), and dip and rise over 4 bars.
+            float bS = _rx.beatS, tau = Mathf.PI * 2f;
             for (int i = 0; i < Lights; i++)
             {
                 var toCentre = new Vector3(-_lightPos[i].x, 0f, -_lightPos[i].z + 10f).normalized;
-                float sweep = Mathf.Sin(phrase * 0.5f + i * 1.05f) * 38f * sweepAmt * (0.85f + 0.4f * _highEase); // highs widen the sweep
-                float elev = (58f + 14f * Mathf.Sin(clk * 0.045f + i * 0.9f) + 14f * imp) * Mathf.Deg2Rad;
+                float dir = i % 2 == 0 ? 1f : -1f;
+                float sway = Mathf.Sin(bS / 8f * tau + i * 0.8f) * (10f + 8f * _midEase) * (1f - 0.5f * _calmSlow);
+                float sweep = (dir * Mathf.Sin(bS / 32f * tau + i * 0.5f) * 48f + sway) * sweepAmt * (0.85f + 0.4f * _highEase); // highs widen the sweep
+                float elev = (55f + 18f * Mathf.Sin(bS / 16f * tau + i * 1.1f) + 14f * imp) * Mathf.Deg2Rad;
                 var horiz = Quaternion.Euler(0f, sweep * (1f + 0.6f * imp), 0f) * toCentre;
                 var d = (horiz * Mathf.Cos(elev) + Vector3.up * Mathf.Sin(elev)).normalized;
                 var rot = Quaternion.FromToRotation(Vector3.up, d);

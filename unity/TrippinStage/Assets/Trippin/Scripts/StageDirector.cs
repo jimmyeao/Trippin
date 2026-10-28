@@ -891,10 +891,10 @@ namespace TrippinStage
         static readonly Vector3[] ShotPos =
         {
             new Vector3(0, 4.2f, -34), // wide from the crowd
-            new Vector3(-9, 1.9f, -16), // in the crowd, low, looking up
-            new Vector3(14, 9, -8), // side, elevated
+            new Vector3(-8, 3.4f, -22), // over the crowd, looking up (at head height the heads filled the lens; at the front row the walls did)
+            new Vector3(19, 10, -19), // side, elevated (at 14, 9, -8 the wall filled the frame)
             new Vector3(0, 30, -48), // drone, high and wide
-            new Vector3(5, 3.5f, -6), // close to the deck
+            new Vector3(5, 5, -15), // nearer the deck (at -6, pushed in by the drive, it was on the stage edge)
         };
         static readonly Vector3[] ShotLook =
         {
@@ -923,15 +923,19 @@ namespace TrippinStage
             int bar8 = Mathf.FloorToInt(beat / (4f * Mathf.Max(2, Mathf.RoundToInt(shotBars))));
             int shot = s.calm > 0.5f ? (bar8 % 2 == 0 ? 0 : 3) : (int)((bar8 * 3 + 1) % ShotPos.Length);
             if (_pinShot >= 0) shot = _pinShot % ShotPos.Length;
-            var want = ShotPos[shot] + new Vector3(Mathf.Sin(phrase) * 4f, Mathf.Sin(phrase * 0.5f) * 1.2f, 3f * s.intensity);
+            var want = ShotPos[shot] + new Vector3(Mathf.Sin(phrase) * 4f, Mathf.Sin(phrase * 0.5f) * 1.2f, 0f);
             var look = ShotLook[shot] + new Vector3(Mathf.Sin(phrase + 0.6f) * 2f, Mathf.Sin(phrase * 0.7f) * 1f, 0);
             float k = 1f - Mathf.Exp(-dt * 0.9f);
             // Creep towards the look point as tension builds; the lag in k
             // lets it spring back out over a few seconds after the drop.
-            want = Vector3.Lerp(want, look, 0.18f * DropDirector.Tension);
+            want = Vector3.Lerp(want, look, 0.1f * DropDirector.Tension);
             _camPos = Vector3.Lerp(_camPos, want, k);
             _camLook = Vector3.Lerp(_camLook, look, k);
-            cam.transform.position = _camLook + (_camPos - _camLook) * zoom;
+            // Owner: "the camera gets too close". Keep it off the stage front and above the heads.
+            var at = _camLook + (_camPos - _camLook) * zoom;
+            at.z = Mathf.Min(at.z, -6.5f);
+            at.y = Mathf.Max(at.y, 2.2f);
+            cam.transform.position = at;
             cam.transform.LookAt(_camLook);
         }
 
