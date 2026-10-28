@@ -10,6 +10,11 @@
 //  - Motion: tunnels turn, sheets roll and scans sweep on the beat clock;
 //    the camera drifts, cutting every 8 bars. The beam count never changes:
 //    a breakdown fades the outer beams and the floor projectors.
+//  - Smoke: fog-machine banks drift across the stage (HqLaserSmoke, the
+//    shared baked noise volume), lit only by the beams (LaserLight.compute
+//    splats them into a light volume each frame), so the clouds glow in the
+//    laser colours where a formation cuts them; the beams show brightest in
+//    the same clouds. A build thickens the smoke and the drop blasts more in.
 // Controls: beams, spread, haze, colour, drift.
 using UnityEngine;
 
@@ -17,7 +22,8 @@ namespace TrippinStage
 {
     public sealed class LasersShow : KitShow
     {
-        public Material gearMat;
+        public Material gearMat, smokeMat;
+        public ComputeShader lightCs;
 
         [TrippinParam("Beams", 0.2f, 2f)] public float beams = 1f;
         [TrippinParam("Spread", 0.4f, 1.6f)] public float spread = 1f;
@@ -36,7 +42,15 @@ namespace TrippinStage
         readonly Vector3[] _dir = new Vector3[P * B], _dir0 = new Vector3[P * B];
         readonly Vector4[] _lp = new Vector4[4], _lc = new Vector4[4];
         int _form = -1, _shot = -1;
-        float _bass, _mid, _high, _imp;
+        float _bass, _mid, _high, _imp, _dens = 1f;
+        // The smoke box (m) and its light volume.
+        static readonly Vector3 BoxMin = new Vector3(-14f, 0f, -32f), BoxSize = new Vector3(28f, 10f, 38f);
+        static readonly Vector3Int Res = new Vector3Int(96, 32, 120);
+        RenderTexture _light;
+        Material _smoke;
+        int _kSplat;
+        Vector3 _wind;
+        readonly Vector4[] _bo = new Vector4[96], _bd = new Vector4[96], _bc = new Vector4[96];
 
         protected override void Build()
         {
@@ -48,6 +62,7 @@ namespace TrippinStage
             var laserMat = new Material(beamMat);
             laserMat.SetFloat("_SmokeScale", 0.6f);
             laserMat.SetVector("_SmokeEdge", new Vector4(0.42f, 0.58f, 0f, 0f));
+            laserMat.SetFloat("_SmokeVol", 1f);
             _beams = new BeamPool(transform, laserMat, P * B, "laser", false, 0.010f, 0.0015f, 70f, 0.95f, 0.9f, 0.55f);
             _boxM = GearMesh.RoundedBox(new Vector3(0.36f, 0.2f, 0.42f), 0.03f, 3, "laser projector");
             _finM = GearMesh.RoundedBox(new Vector3(0.01f, 0.16f, 0.30f), 0.004f, 1, "fin");
@@ -56,7 +71,30 @@ namespace TrippinStage
             _legM = GearMesh.Truss(TrussY + 0.3f, 0.29f, "laser truss leg");
             for (int i = 0; i < 4; i++) _pos[i] = new Vector3(-4.5f + i * 3f, TrussY - 0.32f, TrussZ - 0.1f);
             _pos[4] = new Vector3(-3f, 0.12f, -0.8f); _pos[5] = new Vector3(3f, 0.12f, -0.8f);
+
+            _light = new RenderTexture(Res.x, Res.y, 0, RenderTextureFormat.ARGBHalf)
+            {
+                dimension = UnityEngine.Rendering.TextureDimension.Tex3D, volumeDepth = Res.z,
+                enableRandomWrite = true, wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Bilinear, name = "laser light",
+            };
+            _light.Create();
+            _kSplat = lightCs.FindKernel("Splat");
+            lightCs.SetTexture(_kSplat, "_Light", _light);
+            lightCs.SetVector("_BoxMin", BoxMin); lightCs.SetVector("_BoxSize", BoxSize);
+            lightCs.SetVector("_Res", new Vector4(Res.x, Res.y, Res.z, 0f));
+            lightCs.SetFloat("_R1", 1f / (2f * 0.3f * 0.3f));
+            lightCs.SetFloat("_R2", 1f / (2f * 1.1f * 1.1f));
+            lightCs.SetFloat("_Wide", 0.035f);
+            _smoke = Kit.Fullscreen(transform, smokeMat, "laser smoke");
+            _smoke.SetTexture("_Light", _light);
+            _smoke.SetVector("_BoxMin", BoxMin); _smoke.SetVector("_BoxSize", BoxSize);
+            _smoke.SetFloat("_Sigma", 0.55f);
+            _smoke.SetVector("_Amb", new Vector4(0.010f, 0.012f, 0.018f, 0.55f));
+            Shader.SetGlobalTexture("_LSVol", HqNoise.Volume);
+            lightCs.SetTexture(_kSplat, "_LSVol", HqNoise.Volume);
         }
+
+        void OnDestroy() { if (_light != null) _light.Release(); }
 
         /// Formation k's direction for beam j of projector p at beat b.
         Vector3 Aim(int k, int p, int j, float b)
@@ -172,13 +210,29 @@ namespace TrippinStage
                     var cp = camPos - ap;
                     float along = Mathf.Clamp(Vector3.Dot(cp, _dir[i]), 0f, 40f);
                     float near = (cp - _dir[i] * along).magnitude;
-                    fade *= Mathf.SmoothStep(0.1f, 1f, Mathf.InverseLerp(1f, 4f, near));
+                    float lens = Mathf.SmoothStep(0.1f, 1f, Mathf.InverseLerp(1f, 4f, near));
                     var col = (j % 2 == 0) ? c1 : c2;
                     col = Color.Lerp(col, Color.white, 0.12f * _imp);
-                    _beams.Set(i, ap, ap + _dir[i] * 40f, col, 1.7f * gain * fade);
+                    _beams.Set(i, ap, ap + _dir[i] * 40f, col, 1.7f * gain * fade * lens);
+                    // The smoke takes the beam's light without the lens fade.
+                    _bo[i] = ap; _bd[i] = new Vector4(_dir[i].x, _dir[i].y, _dir[i].z, 40f);
+                    _bc[i] = new Vector4(col.r, col.g, col.b, 1.7f * gain * fade);
                 }
             }
-            hazeScale = hazeAmt * 1.3f;
+            hazeScale = hazeAmt * 0.6f;
+
+            // Smoke: drifting from the stage over the crowd, thickening through a build, blasted in on the drop.
+            _dens = Mathf.Lerp(_dens, 0.75f + 0.6f * rx.tension + 0.5f * _imp, 1f - Mathf.Exp(-dt * 1.5f));
+            _wind += new Vector3(0.15f * Mathf.Sin(rx.phrase * 0.3f), 0.05f, -0.3f - 0.25f * rx.tension) * dt;
+            Shader.SetGlobalVector("_LSShape", new Vector4(1f / 26f, 3.2f, 0.44f, 0.72f));
+            Shader.SetGlobalVector("_LSWind", new Vector4(_wind.x, _wind.y, _wind.z, _dens * hazeAmt));
+            lightCs.SetVector("_LSShape", Shader.GetGlobalVector("_LSShape"));
+            lightCs.SetVector("_LSWind", Shader.GetGlobalVector("_LSWind"));
+            lightCs.SetVectorArray("_BO", _bo); lightCs.SetVectorArray("_BD", _bd); lightCs.SetVectorArray("_BC", _bc);
+            lightCs.SetInt("_N", P * B);
+            lightCs.Dispatch(_kSplat, Res.x / 4, Res.y / 4, Res.z / 4);
+            _smoke.SetFloat("_Frame", Time.frameCount % 64);
+            _smoke.SetFloat("_Gain", 1f);
 
             // Shots: one per 8 bars.
             int sb = Mathf.FloorToInt(b / 32f);

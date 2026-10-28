@@ -432,6 +432,9 @@ namespace TrippinStage.EditorTools
                 if (ks is LasersShow g_lasers)
                 {
                     g_lasers.gearMat = Mat("Trippin/HqGear", "HqGear");
+                    g_lasers.smokeMat = Mat("Trippin/HqLaserSmoke", "HqLaserSmoke");
+                    g_lasers.lightCs = AssetDatabase.LoadAssetAtPath<ComputeShader>($"{Root}/Shaders/LaserLight.compute");
+                    if (g_lasers.lightCs == null) throw new System.Exception("LaserLight.compute not found");
                 }
                 if (ks is DecksShow dk)
                 {

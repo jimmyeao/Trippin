@@ -17,6 +17,7 @@ Shader "Trippin/Beam"
         _Hot ("White-hot core", Float) = 0.6
         _SmokeScale ("Smoke patch scale (1/m)", Float) = 0.22
         _SmokeEdge ("Smoke threshold lo/hi", Vector) = (0.25, 0.85, 0, 0)
+        _SmokeVol ("Use the laser smoke (LaserSmoke.hlsl)", Float) = 0
     }
     SubShader
     {
@@ -31,10 +32,11 @@ Shader "Trippin/Beam"
             #pragma fragment frag
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "TrippinCommon.hlsl"
+            #include "LaserSmoke.hlsl"
 
             CBUFFER_START(UnityPerMaterial)
             float4 _Color;
-            float _Intensity, _Width, _Spread, _Core, _Smoke, _Fade, _Hot, _SmokeScale;
+            float _Intensity, _Width, _Spread, _Core, _Smoke, _Fade, _Hot, _SmokeScale, _SmokeVol;
             float4 _SmokeEdge;
             CBUFFER_END
 
@@ -69,7 +71,10 @@ Shader "Trippin/Beam"
                 float glow = exp(-x * x * 0.9) * 0.35 * saturate(_Hot * 2.0 + 0.3);
                 // Haze: the beam is only visible where smoke hangs.
                 float3 q = i.wp * _SmokeScale + float3(0, -_TFlow * 0.08, _TFlow * 0.05);
-                float smoke = lerp(1.0, smoothstep(_SmokeEdge.x, _SmokeEdge.y, TFbm3(q)) * 1.6, _Smoke);
+                float smoke;
+                // unity_lasers: the same clouds its smoke pass draws, a faint core still showing between them.
+                [branch] if (_SmokeVol > 0.5) smoke = lerp(1.0, 0.18 + 2.2 * saturate(LSDensity(i.wp) * 1.4), _Smoke);
+                else smoke = lerp(1.0, smoothstep(_SmokeEdge.x, _SmokeEdge.y, TFbm3(q)) * 1.6, _Smoke);
                 float along = 1.0 - smoothstep(_Fade, 1.0, i.uv.y);
                 float near = smoothstep(0.0, 0.02, i.uv.y);
                 // Lasers get a white-hot centre; shafts stay pure colour.
