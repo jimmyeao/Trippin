@@ -51,10 +51,12 @@ pub enum Action {
     Look8,
     /// Step through the Styles: off, then each one in turn (unbound by default).
     NextTheme,
+    /// Burst the dancer into particles; she re-forms over two bars.
+    Disintegrate,
 }
 
 impl Action {
-    pub const ALL: [Action; 39] = [
+    pub const ALL: [Action; 40] = [
         Action::NextScene,
         Action::PrevScene,
         Action::ModeAuto,
@@ -94,6 +96,7 @@ impl Action {
         Action::Look7,
         Action::Look8,
         Action::NextTheme,
+        Action::Disintegrate,
     ];
 
     pub fn label(self) -> &'static str {
@@ -137,6 +140,7 @@ impl Action {
             Action::Look7 => "Look 7 (the saved Look on slot 7)",
             Action::Look8 => "Look 8 (the saved Look on slot 8)",
             Action::NextTheme => "Next Style (off, Dance, House, Pop...)",
+            Action::Disintegrate => "Dancer bursts into particles (and re-forms)",
         }
     }
 
@@ -194,6 +198,7 @@ impl Action {
             Action::ToggleLogo => "L",
             Action::ToggleName => "Y",
             Action::ToggleTicker => "W",
+            Action::Disintegrate => "P",
             // Unbound: sixteen default keys would collide with the rest.
             Action::Look1
             | Action::Look2
@@ -392,6 +397,10 @@ pub struct Settings {
     pub dancer_size: f32,
     /// Ghost echoes of earlier frames trail the dancer's movement.
     pub dancer_trails: bool,
+    /// On a drop (drums back after a breakdown) the dancer bursts into
+    /// particles and re-forms (`dancer::Burst`). Not in Manual mode or
+    /// during timeline shows.
+    pub dancer_burst_drops: bool,
     /// Global colour palette — a WLED-style named gradient (see
     /// `palettes::PALETTES`) every scene's `palette()` samples.
     pub palette: String,
@@ -559,6 +568,7 @@ impl Default for Settings {
             disabled_clips: Vec::new(),
             dancer_size: 0.85,
             dancer_trails: false,
+            dancer_burst_drops: true,
             palette: "rainbow".into(),
             perform_pads: false,
             fx: Fx::Off,

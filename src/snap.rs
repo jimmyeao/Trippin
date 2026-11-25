@@ -11,7 +11,9 @@
 //! `snaps/`), `--snap-bench N` (frames timed, default 60; 0 = skip),
 //! `--gpu low`, `--snap-dancer <style>` (a dancer look by name or index,
 //! drawn over each scene with the real dancer shader) with `--snap-clip
-//! <name>` to pick the routine (default: the first clip).
+//! <name>` to pick the routine (default: the first clip), `--snap-burst
+//! <0..1>` (hold the dancer's Disintegrate at that level) or `--snap-burst-at
+//! <s>` (set one off at that time, for `--snap-at` sequences).
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -126,6 +128,8 @@ pub fn run(args: &[String]) -> Result<()> {
     let low = arg(args, "--gpu") == Some("low");
     // `--snap-calm 1` previews breakdown mode (no drums).
     let calm: f32 = arg(args, "--snap-calm").and_then(|s| s.parse().ok()).unwrap_or(0.0);
+    let burst_fixed: Option<f32> = arg(args, "--snap-burst").and_then(|s| s.parse().ok());
+    let burst_at: Option<f32> = arg(args, "--snap-burst-at").and_then(|s| s.parse().ok());
 
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -244,6 +248,7 @@ pub fn run(args: &[String]) -> Result<()> {
     // real dancer shader (same mask texture array + bind group as the app).
     struct DancerSnap {
         pipeline: wgpu::RenderPipeline,
+        particles: wgpu::RenderPipeline,
         bind_group: wgpu::BindGroup,
         buf: wgpu::Buffer,
         frames: f32,
@@ -302,7 +307,7 @@ pub fn run(args: &[String]) -> Result<()> {
             });
             let tex_entry = |binding: u32| wgpu::BindGroupLayoutEntry {
                 binding,
-                visibility: wgpu::ShaderStages::FRAGMENT,
+                visibility: render::VIS,
                 ty: wgpu::BindingType::Texture {
                     sample_type: wgpu::TextureSampleType::Float { filterable: true },
                     view_dimension: wgpu::TextureViewDimension::D2Array,
@@ -318,7 +323,7 @@ pub fn run(args: &[String]) -> Result<()> {
                     tex_entry(2),
                     wgpu::BindGroupLayoutEntry {
                         binding: 3,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        visibility: render::VIS,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Uniform,
                             has_dynamic_offset: false,
@@ -342,6 +347,16 @@ pub fn run(args: &[String]) -> Result<()> {
                 Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
             )
             .map_err(|e| anyhow!("dancer: {e}"))?;
+            let particles = render::compile_pipeline_entries(
+                &device,
+                &common,
+                &dir.join("dancer.wgsl"),
+                &dpl,
+                SCENE_FORMAT,
+                Some(render::GLOW_BLEND),
+                ("vs_particles", "fs_particles"),
+            )
+            .map_err(|e| anyhow!("dancer particles: {e}"))?;
             let buf = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("snap dancer uniforms"),
                 size: std::mem::size_of::<DancerUniforms>() as u64,
@@ -360,6 +375,7 @@ pub fn run(args: &[String]) -> Result<()> {
             });
             Some(DancerSnap {
                 pipeline,
+                particles,
                 bind_group,
                 buf,
                 frames: clip.frames.len() as f32,
@@ -472,6 +488,13 @@ pub fn run(args: &[String]) -> Result<()> {
                 pass.draw(0..3, 0..1);
             }
             if let Some(ds) = &dancer_snap {
+                // `--snap-burst <level>` holds Disintegrate at a level;
+                // `--snap-burst-at <s>` sets one off at that time (126 BPM).
+                let burst_level = match (burst_fixed, burst_at) {
+                    (Some(l), _) => l,
+                    (None, Some(t0)) => dancer::Burst::level_at((t - t0) * 126.0 / 60.0),
+                    _ => 0.0,
+                };
                 let frame_f = (t / ds.duration).rem_euclid(1.0) * ds.frames;
                 let mut slots = [SlotUniforms::default(); dancer::SLOTS];
                 slots[0] = SlotUniforms { frame: frame_f, frames: ds.frames, aspect: ds.aspect, _pad: 0.0 };
@@ -483,7 +506,8 @@ pub fn run(args: &[String]) -> Result<()> {
                     scale: 0.8,
                     trail: 0.0,
                     canon_fade: 0.0,
-                    _pad2: [0.0; 2],
+                    burst: burst_level,
+                    burst_seed: 0.3,
                 };
                 queue.write_buffer(&ds.buf, 0, bytemuck::bytes_of(&du));
                 let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -503,6 +527,10 @@ pub fn run(args: &[String]) -> Result<()> {
                 pass.set_bind_group(0, &bgs[*cur], &[]);
                 pass.set_bind_group(1, &ds.bind_group, &[]);
                 pass.draw(0..3, 0..1);
+                if burst_level > 0.0 {
+                    pass.set_pipeline(&ds.particles);
+                    pass.draw(0..6, 0..render::BURST_PARTICLES);
+                }
             }
             if bloom_amt > 0.0 {
                 bloom.encode(&device, &mut enc, &view);

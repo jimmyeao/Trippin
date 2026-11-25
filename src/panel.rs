@@ -3106,6 +3106,8 @@ fn dancer_fx_tab(
                 ui.add(egui::Slider::new(&mut s.dancer_size, 0.4..=1.0));
             });
             ui.checkbox(&mut s.dancer_trails, "Motion trails");
+            ui.checkbox(&mut s.dancer_burst_drops, "Burst into particles on drops")
+                .on_hover_text("The dancer turns to glowing dust when the drums come back after a breakdown, and re-forms over two bars. P does it by hand.");
         });
         r1.response.rect.height()
     };
@@ -3543,6 +3545,7 @@ fn keys_tab(
                 Action::NextClip,
                 Action::NextStyle,
                 Action::CycleCanon,
+                Action::Disintegrate,
             ],
         ),
         (

@@ -96,6 +96,9 @@ enum Kind {
     Scene,
     Present,
     Dancer,
+    /// The dancer's Disintegrate particles: dancer.wgsl's `vs_particles` /
+    /// `fs_particles`, instanced quads added into the scene target.
+    Particles,
     /// Text overlay — drawn over the surface in the present pass.
     Text,
     /// Stream overlays (now playing, branding, ticker) — same pass.
@@ -208,10 +211,29 @@ impl FrameRes<'_> {
     }
 }
 
+/// Group(0) and the dancer group are visible to vertex shaders too: the
+/// dancer's particle pass (`vs_particles`) samples the masks, palette and
+/// uniforms per particle.
+pub const VIS: wgpu::ShaderStages = wgpu::ShaderStages::VERTEX_FRAGMENT;
+
+/// Additive glow for the particle pass: colour adds, alpha composites over
+/// (transparent mode keeps a sane alpha).
+pub const GLOW_BLEND: wgpu::BlendState = wgpu::BlendState {
+    color: wgpu::BlendComponent {
+        src_factor: wgpu::BlendFactor::One,
+        dst_factor: wgpu::BlendFactor::One,
+        operation: wgpu::BlendOperation::Add,
+    },
+    alpha: wgpu::BlendComponent::OVER,
+};
+
+/// Particles per dancer slot (`P_W * P_H` in dancer.wgsl).
+pub const BURST_PARTICLES: u32 = 160 * 320;
+
 fn tex_entry(binding: u32, dim: wgpu::TextureViewDimension) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,
-        visibility: wgpu::ShaderStages::FRAGMENT,
+        visibility: VIS,
         ty: wgpu::BindingType::Texture {
             sample_type: wgpu::TextureSampleType::Float { filterable: true },
             view_dimension: dim,
@@ -226,7 +248,7 @@ pub fn frame_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     use wgpu::TextureViewDimension::{D2, D3};
     let sampler = |binding| wgpu::BindGroupLayoutEntry {
         binding,
-        visibility: wgpu::ShaderStages::FRAGMENT,
+        visibility: VIS,
         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
         count: None,
     };
@@ -235,7 +257,7 @@ pub fn frame_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
         entries: &[
             wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::FRAGMENT,
+                visibility: VIS,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -307,6 +329,7 @@ pub struct Renderer {
     scenes: Vec<Scene>,
     present: Scene,
     dancer: Scene,
+    particles: Scene,
     dancer_layout: wgpu::BindGroupLayout,
     dancer_pipeline_layout: wgpu::PipelineLayout,
     dancer_buf: wgpu::Buffer,
@@ -402,10 +425,10 @@ fn scaled(w: u32, h: u32, scale: f32) -> (u32, u32) {
     )
 }
 
-fn dancer_tex_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
+pub fn dancer_tex_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,
-        visibility: wgpu::ShaderStages::FRAGMENT,
+        visibility: VIS,
         ty: wgpu::BindingType::Texture {
             sample_type: wgpu::TextureSampleType::Float { filterable: true },
             view_dimension: wgpu::TextureViewDimension::D2Array,
@@ -541,7 +564,7 @@ impl Renderer {
                 dancer_tex_entry(2),
                 wgpu::BindGroupLayoutEntry {
                     binding: 3,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    visibility: VIS,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -726,6 +749,12 @@ impl Renderer {
             dancer: Scene {
                 kind: Kind::Dancer,
                 name: "dancer".into(),
+                path: dancer_path.clone(),
+                ..Default::default()
+            },
+            particles: Scene {
+                kind: Kind::Particles,
+                name: "particles".into(),
                 path: dancer_path,
                 ..Default::default()
             },
@@ -1092,11 +1121,12 @@ impl Renderer {
         let mut scenes = std::mem::take(&mut self.scenes);
         let mut present = std::mem::take(&mut self.present);
         let mut dancer = std::mem::take(&mut self.dancer);
+        let mut particles = std::mem::take(&mut self.particles);
         let mut text = std::mem::take(&mut self.text);
         let mut overlay = std::mem::take(&mut self.overlay);
         for s in scenes
             .iter_mut()
-            .chain([&mut present, &mut dancer, &mut text, &mut overlay])
+            .chain([&mut present, &mut dancer, &mut particles, &mut text, &mut overlay])
         {
             let m = mtime(&s.path);
             if !common_changed && m == s.mtime {
@@ -1147,12 +1177,25 @@ impl Renderer {
         self.scenes = scenes;
         self.present = present;
         self.dancer = dancer;
+        self.particles = particles;
         self.text = text;
         self.overlay = overlay;
     }
 
     fn compile(&self, common: &str, path: &Path, kind: Kind) -> Result<wgpu::RenderPipeline> {
+        if kind == Kind::Particles {
+            return compile_pipeline_entries(
+                &self.device,
+                common,
+                path,
+                &self.dancer_pipeline_layout,
+                SCENE_FORMAT,
+                Some(GLOW_BLEND),
+                ("vs_particles", "fs_particles"),
+            );
+        }
         let (format, layout, blend) = match kind {
+            Kind::Particles => unreachable!(),
             Kind::Scene => (SCENE_FORMAT, &self.pipeline_layout, None),
             Kind::Present => (self.config.format, &self.pipeline_layout, None),
             Kind::Dancer => (
@@ -1491,6 +1534,11 @@ impl Renderer {
         let mut enc = self.device.create_command_encoder(&Default::default());
 
         let scene_pipe = self.scenes.get(scene).and_then(|s| s.pipeline.as_ref());
+        // Dancer slots whose Disintegrate particles are out (main, or all
+        // three in the canon).
+        let burst_slots = dancer
+            .filter(|d| d.burst > 0.0)
+            .map(|d| if d.count > 1.5 && d.canon_fade > 0.001 { 3 } else { 1 });
         if scene_pipe.is_some() || self.transparent {
             let view = self.targets[next].create_view(&Default::default());
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1525,6 +1573,11 @@ impl Renderer {
                 pass.set_pipeline(dancer);
                 pass.set_bind_group(1, dancer_bg, &[]);
                 pass.draw(0..3, 0..1);
+                // Disintegrate: her particles, only while a burst is on.
+                if let (Some(n), Some(pp)) = (burst_slots, self.particles.pipeline.as_ref()) {
+                    pass.set_pipeline(pp);
+                    pass.draw(0..6, 0..BURST_PARTICLES * n);
+                }
             }
             drop(pass);
             self.current = next;
@@ -1967,12 +2020,25 @@ fn rgba_texture(
 
 /// Compile `common + path` into a fullscreen-triangle pipeline for `format`.
 pub fn compile_pipeline(
-device: &wgpu::Device,
+    device: &wgpu::Device,
     common: &str,
     path: &Path,
     layout: &wgpu::PipelineLayout,
     format: wgpu::TextureFormat,
     blend: Option<wgpu::BlendState>,
+) -> Result<wgpu::RenderPipeline> {
+    compile_pipeline_entries(device, common, path, layout, format, blend, ("vs_main", "fs_main"))
+}
+
+/// `compile_pipeline` with explicit (vertex, fragment) entry points.
+pub fn compile_pipeline_entries(
+    device: &wgpu::Device,
+    common: &str,
+    path: &Path,
+    layout: &wgpu::PipelineLayout,
+    format: wgpu::TextureFormat,
+    blend: Option<wgpu::BlendState>,
+    (vs, fs): (&str, &str),
 ) -> Result<wgpu::RenderPipeline> {
     let body = std::fs::read_to_string(path)?;
     let src = format!("{common}\n{body}");
@@ -1996,7 +2062,7 @@ device: &wgpu::Device,
             layout: Some(layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: Some("vs_main"),
+                entry_point: Some(vs),
                 compilation_options: Default::default(),
                 buffers: &[],
             },
@@ -2005,7 +2071,7 @@ device: &wgpu::Device,
             multisample: Default::default(),
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: Some("fs_main"),
+                entry_point: Some(fs),
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
                     format,

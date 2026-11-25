@@ -260,6 +260,16 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   `slow` from main while their calm pools require it. `styles::narrow(.., calm)`
   swaps pools; filtering one from the other finds nothing (the bug the Windows test
   caught). The render loop passes `style_calm` (0.7 in / 0.3 out) for the director's list.
+- **Disintegrate** (`dancer::Burst`, `vs_particles` in dancer.wgsl): the
+  dancer's particle burst is *stateless*: each of 160x320 particles per slot
+  is a function of its mask cell, the beat-timed envelope and `u.flow`, drawn
+  as instanced quads by a second entry point in dancer.wgsl
+  (`render::compile_pipeline_entries`, additive `GLOW_BLEND`), so group(0)
+  and the dancer group are `VERTEX_FRAGMENT` (`render::VIS`). The body hides
+  per cell with the same `burst_local` hash, so particles and body hand over
+  exactly. Push outward *proportional to the distance from her centre*: a
+  fixed-length radial push hollowed the cloud. `--snap-burst <level>` /
+  `--snap-burst-at <s>` render it; 0.02 ms at 1080p.
 - **Dancer looks** are `dancer::STYLES` (shadow, neon, strobe, comic, wire); the
   index is stored in settings, timeline cues, AI plans and the iOS remote, so
   only ever append. `--snap-dancer <look>` renders one over a scene, which is how

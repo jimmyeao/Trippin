@@ -1563,6 +1563,12 @@ fn render_loop(
                 &s.disabled_clips,
             );
         }
+        // Disintegrate on a drop: the payoff of the breakdown. Not in Manual
+        // (nothing moves by itself there) nor during a timeline show (a
+        // scrubbed or paused song fakes drops).
+        if ev.drop && s.dancer_burst_drops && s.mode != Mode::Manual && player.is_none() {
+            dancer.disintegrate();
+        }
         let dancer_u = dancer.uniforms(
             pos,
             f.downbeat,
@@ -2017,6 +2023,7 @@ fn apply_render(
         }
         Action::ReloadShaders => r.reload_shaders(true),
         Action::ShowNowPlaying => shared.np_replay.store(true, Ordering::Relaxed),
+        Action::Disintegrate => dancer.disintegrate(),
         // Looks are recalled on the event thread (App::apply); never sent here.
         Action::Look1
         | Action::Look2

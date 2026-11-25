@@ -18,6 +18,8 @@ struct D {
     scale: f32,    // main dancer height as a fraction of screen height
     trail: f32,    // 1 = ghost echoes of earlier frames trail her movement
     canon_fade: f32, // companions' fade 0..1 (eases with the canon toggle)
+    burst: f32,      // disintegrate envelope: 0 whole, 1 scattered into dust
+    burst_seed: f32, // 0..1, re-rolled per burst: the swirl's direction and field
 };
 
 @group(1) @binding(0) var masks0: texture_2d_array<f32>;
@@ -285,8 +287,8 @@ fn shaded_with_trails(
     } else {
         acc = shade(dancer_at(p, slot, x, size, flip), tint);
     }
+    let luv = dancer_luv(p, slot, x, size, flip);
     if d.trail > 0.5 {
-        let luv = dancer_luv(p, slot, x, size, flip);
         let frame = d.slots[slot].frame;
         for (var g = 1; g <= 3; g++) {
             let gm = mask_at_frame(slot, luv, frame - f32(g) * 5.0);
@@ -295,7 +297,31 @@ fn shaded_with_trails(
             acc = over(acc, vec4<f32>(col, a));
         }
     }
-    return acc;
+    // Disintegrate: each cell of the body hides as its particle leaves.
+    return acc * burst_keep(luv);
+}
+
+// Where a slot dances: centre x, size (fraction of the main dancer), mirrored,
+// palette tint and fade. Slot 0 is the main dancer; in the canon, slots 1 and
+// 2 dance either side, smaller, each with its own routine.
+struct Place {
+    x: f32,
+    size: f32,
+    flip: bool,
+    tint: f32,
+    fade: f32,
+};
+
+fn place(slot: i32) -> Place {
+    if slot == 0 {
+        return Place(0.0, 1.0, false, 0.0, 1.0);
+    }
+    let side = 0.8;
+    let w0 = 2.0 * d.scale * d.slots[0].aspect;
+    let wi = 2.0 * d.scale * side * d.slots[slot].aspect;
+    // Clear of the main dancer, but kept inside the screen edges.
+    let x = min((w0 * 0.5 + wi * 0.5) * 1.05, aspect() - wi * 0.5);
+    return Place(select(x, -x, slot == 1), side, slot == 1, f32(slot) * 0.33, d.canon_fade);
 }
 
 @fragment
@@ -303,23 +329,151 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = centred(in.uv);
     var out = vec4<f32>(0.0);
     if d.count > 1.5 && d.canon_fade > 0.001 {
-        // Canon: a companion either side, smaller, each with its own routine.
-        // canon_fade eases them in/out when the toggle flips.
-        let side = 0.8;
-        let w0 = 2.0 * d.scale * d.slots[0].aspect;
+        // canon_fade eases the companions in/out when the toggle flips.
         for (var i = 1; i < 3; i++) {
             if d.slots[i].frames < 0.5 {
                 continue;
             }
-            let wi = 2.0 * d.scale * side * d.slots[i].aspect;
-            // Clear of the main dancer, but kept inside the screen edges.
-            let x = min((w0 * 0.5 + wi * 0.5) * 1.05, aspect() - wi * 0.5);
-            let sx = select(x, -x, i == 1);
-            let c = shaded_with_trails(p, i, sx, side, i == 1, f32(i) * 0.33)
-                  * vec4<f32>(vec3<f32>(d.canon_fade), d.canon_fade);
+            let pl = place(i);
+            let c = shaded_with_trails(p, i, pl.x, pl.size, pl.flip, pl.tint)
+                  * vec4<f32>(vec3<f32>(pl.fade), pl.fade);
             out = over(c, out);
         }
     }
     out = over(shaded_with_trails(p, 0, 0.0, 1.0, false, 0.0), out);
     return out;
+}
+
+// ---- Disintegrate -----------------------------------------------------------
+// On a drop the silhouette breaks into glowing dust and then re-forms (after
+// the Disintegrate particle system in Imaginando's VS). One particle per cell
+// of a P_W x P_H grid over each slot's mask, drawn as instanced quads straight
+// from the mask (no particle state: every particle's position is a function
+// of its cell, the envelope and the flow clock, so nothing can drift or
+// accumulate). The head goes first and the feet last; on the way back the
+// feet land first, and the dust lands on the *live* pose, so she is dancing
+// again as she re-forms. Motion rides `u.flow` and a phrase-length swing,
+// never raw audio; the slow bass presence only widens the cloud (shape).
+
+const P_W: f32 = 160.0;
+const P_H: f32 = 320.0;
+
+fn burst_cell(luv: vec2<f32>) -> vec2<f32> {
+    return floor(luv * vec2<f32>(P_W, P_H));
+}
+
+// This cell's own progress 0..1 through the burst: a staggered smoothstep of
+// the envelope, head (luv.y 0) first, with jitter so the edge crumbles.
+fn burst_local(cell: vec2<f32>) -> f32 {
+    let y = clamp(cell.y / P_H, 0.0, 1.0);
+    let order = y * 0.6 + hash21(cell + vec2<f32>(d.burst_seed * 977.0, 3.0)) * 0.4;
+    let start = order * 0.55;
+    return smoothstep(start, start + 0.45, d.burst);
+}
+
+// 1 while this cell of the body is still there, 0 once its particle left.
+fn burst_keep(luv: vec2<f32>) -> f32 {
+    if d.burst <= 0.0 {
+        return 1.0;
+    }
+    return 1.0 - smoothstep(0.0, 0.12, burst_local(burst_cell(luv)));
+}
+
+// Two octaves of value noise, for the curl field.
+fn burst_field(q: vec2<f32>) -> f32 {
+    return noise(q) + 0.5 * noise(q * 2.3 + vec2<f32>(5.2, 1.3));
+}
+
+struct POut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) q: vec2<f32>,
+    @location(1) col: vec3<f32>,
+};
+
+@vertex
+fn vs_particles(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> POut {
+    var o: POut;
+    // Culled unless a particle is out: a degenerate quad off screen.
+    o.pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+    o.q = vec2<f32>(0.0);
+    o.col = vec3<f32>(0.0);
+    let per = u32(P_W) * u32(P_H);
+    let slot = i32(ii / per);
+    let k = ii % per;
+    if slot > 2 || d.slots[slot].frames < 0.5 {
+        return o;
+    }
+    let pl = place(slot);
+    if pl.fade < 0.001 {
+        return o;
+    }
+    let cell = vec2<f32>(f32(k % u32(P_W)), f32(k / u32(P_W)));
+    let e = burst_local(cell);
+    if e < 0.002 {
+        return o;
+    }
+    let j = hash22(cell + vec2<f32>(17.0, 41.0));
+    let luv = (cell + 0.15 + 0.7 * j) / vec2<f32>(P_W, P_H);
+    let m = mask_at(slot, luv);
+    if m < 0.2 {
+        return o;
+    }
+    // Home: where this cell sits on screen (dancer_luv inverted).
+    let h = 2.0 * d.scale * pl.size;
+    let w = h * d.slots[slot].aspect;
+    let lx = select(luv.x, 1.0 - luv.x, pl.flip);
+    let home = vec2<f32>(pl.x + (lx - 0.5) * w, 0.98 - h + luv.y * h);
+    let c = vec2<f32>(pl.x, 0.98 - h * 0.55);
+    let r = hash21(cell + vec2<f32>(3.1, 7.7));
+    // Curl of a noise field that drifts on the flow clock: a divergence-free
+    // swirl, so the dust eddies instead of clumping.
+    let t = u.flow * 0.09 + d.burst_seed * 40.0;
+    let qn = home / h * 1.8 + vec2<f32>(t, -0.7 * t);
+    let ep = 0.04;
+    let dx = burst_field(qn + vec2<f32>(ep, 0.0)) - burst_field(qn - vec2<f32>(ep, 0.0));
+    let dy = burst_field(qn + vec2<f32>(0.0, ep)) - burst_field(qn - vec2<f32>(0.0, ep));
+    let curl = vec2<f32>(dy, -dx) / (2.0 * ep);
+    let rel = home - c;
+    let reach = 0.85 + 0.5 * u.pres4.x;
+    // Reach stays within about half her height: a cloud in her shape that
+    // swirls, not confetti across the screen (first render filled the frame).
+    // The outward push scales with the distance from her centre, so the
+    // figure swells as a whole; a fixed-length push hollowed the middle out.
+    let drift = rel * (0.15 + 0.45 * r)
+              + curl * 0.05 * h
+              + vec2<f32>(0.0, -(0.04 + 0.14 * r) * h);
+    // The cloud turns as it flies out, one way or the other per burst, and
+    // swings back and forth over a four-bar phrase while it hangs.
+    let dir = select(1.0, -1.0, d.burst_seed < 0.5);
+    let swing = 0.12 * sin(TAU * u.flow / 16.0 + d.burst_seed * TAU);
+    let turn = e * (dir * (0.12 + 0.18 * r) + swing);
+    let pos = c + rot(turn) * (rel + drift * e * reach);
+    // A small round dot, a little larger once it is out.
+    let corners = array<vec2<f32>, 6>(
+        vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, -1.0), vec2<f32>(1.0, 1.0),
+        vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, 1.0), vec2<f32>(-1.0, 1.0),
+    );
+    let q = corners[vi % 6u];
+    let size = max(0.0032 + 0.0045 * e * r, 3.0 / u.res_y);
+    let p = pos + q * size;
+    o.pos = vec4<f32>(p.x / aspect(), -p.y, 0.0, 1.0);
+    o.q = q;
+    // Her own colour: the shadow look's rim hue (on the smooth clock), with
+    // a narrow spread, so it reads as her dust and not confetti.
+    let tone = palette(0.1 + u.flow * 0.05 + pl.tint + r * 0.08 + luv.y * 0.1);
+    let a = smoothstep(0.2, 0.6, m) * smoothstep(0.0, 0.15, e) * d.opacity * pl.fade;
+    o.col = tone * tone * 1.1 * a;
+    return o;
+}
+
+@fragment
+fn fs_particles(in: POut) -> @location(0) vec4<f32> {
+    let r2 = dot(in.q, in.q);
+    if r2 > 1.0 {
+        discard;
+    }
+    let g = 1.0 - r2;
+    let core = g * g;
+    let col = in.col * core;
+    return vec4<f32>(col, min(max(col.r, max(col.g, col.b)), 1.0) * 0.5);
 }

@@ -180,6 +180,7 @@ Default keys (all rebindable in the panel):
 | R | random ↔ sequential scene order |
 | D | dancer on / off |
 | C / S / V | next routine / next look / canon auto→on→off |
+| P | the dancer bursts into glowing dust and re-forms over two bars |
 | B | blackout (fade to black and back) |
 | Z | strobe on / off (flashes on the live drum hits) |
 | F | fullscreen on / off |
@@ -817,6 +818,13 @@ breakdowns), picks the look (mostly the classic black shadow and neon;
 sometimes a drawn look; strobe when the track is driving), goes to a three-dancer canon on
 high-energy sections, and swaps to a clip whose energy suits the track:
 graceful moves for breakdowns, salsa and grooves for drops.
+
+On a drop (the drums back after a breakdown) she **disintegrates**: her
+silhouette crumbles into glowing dust from the head down, the cloud swirls
+in her shape for a few beats while she keeps dancing inside it, and she
+re-forms from the feet up over two bars. Turn it off with "Burst into
+particles on drops" on the Dancer & FX tab; P (or a MIDI pad) does it by
+hand. It stays off in Manual mode and during timeline shows.
 
 The looks, by index (`dancer::STYLES`, which timeline cues, AI plans and the
 remote use):
