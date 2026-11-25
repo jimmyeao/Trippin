@@ -846,7 +846,9 @@ silhouette crumbles into glowing dust from the head down, the cloud swirls
 in her shape for a few beats while she keeps dancing inside it, and she
 re-forms from the feet up over two bars. Turn it off with "Burst into
 particles on drops" on the Dancer & FX tab; P (or a MIDI pad) does it by
-hand. It stays off in Manual mode and during timeline shows.
+hand. It stays off in Manual mode and during timeline shows. Your branding logo bursts and
+re-forms with her, in its own colours (turn that off under Branding on the
+Stream tab).
 
 The looks, by index (`dancer::STYLES`, which timeline cues, AI plans and the
 remote use):

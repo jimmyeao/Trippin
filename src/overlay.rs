@@ -34,6 +34,9 @@ pub struct OvLayerU {
 #[derive(Clone, Copy, Default, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct OvUniforms {
     pub layers: [OvLayerU; OV_LAYERS],
+    /// x: Disintegrate level, y: its seed (the logo bursts with the dancer,
+    /// `vs_logo` in overlay.wgsl); zw spare.
+    pub burst: [f32; 4],
 }
 
 /// Straight-alpha sRGB RGBA8 — the shader premultiplies after decode.

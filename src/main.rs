@@ -1860,12 +1860,16 @@ fn render_loop(
         if shared.np_replay.swap(false, Ordering::Relaxed) {
             overlays.replay_card(now_t);
         }
-        let ov_u = {
+        let mut ov_u = {
             let np = lock(&shared.np);
             overlays.update(&s, &np, now_t, w as f32 / h.max(1) as f32, &mut |i, img| {
                 r.set_overlay_image(i, img)
             })
         };
+        // The logo bursts with the dancer (the same envelope and seed).
+        if let (Some(o), true) = (ov_u.as_mut(), s.logo_burst) {
+            o.burst = [dancer.burst.level(), dancer.burst.seed, 0.0, 0.0];
+        }
         if let Err(e) = r.render(dir.scene, &u, dancer_u.as_ref(), text_arg, ov_u.as_ref()) {
             eprintln!("render error: {e}");
         }

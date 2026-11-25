@@ -103,6 +103,9 @@ enum Kind {
     AccentMix,
     /// The echo post effect's feedback pass (echo.wgsl).
     Echo,
+    /// The logo's Disintegrate particles: overlay.wgsl's `vs_logo` /
+    /// `fs_logo`, added over the finished frame in the present pass.
+    LogoParticles,
     /// Text overlay — drawn over the surface in the present pass.
     Text,
     /// Stream overlays (now playing, branding, ticker) — same pass.
@@ -248,6 +251,9 @@ pub const ADD_BLEND: wgpu::BlendState = wgpu::BlendState {
     },
 };
 
+/// Logo Disintegrate particles (`LG * LG` in overlay.wgsl).
+pub const LOGO_PARTICLES: u32 = 128 * 128;
+
 /// Particles per dancer slot (`P_W * P_H` in dancer.wgsl).
 pub const BURST_PARTICLES: u32 = 160 * 320;
 
@@ -392,6 +398,7 @@ pub struct Renderer {
     text_bg: Option<wgpu::BindGroup>,
     /// Stream overlays — one RGBA image per layer (see overlay.rs).
     overlay: Scene,
+    logo_particles: Scene,
     ov_layout: wgpu::BindGroupLayout,
     ov_pipeline_layout: wgpu::PipelineLayout,
     ov_buf: wgpu::Buffer,
@@ -435,6 +442,7 @@ pub struct Renderer {
     out_present: Option<wgpu::RenderPipeline>,
     out_text: Option<wgpu::RenderPipeline>,
     out_overlay: Option<wgpu::RenderPipeline>,
+    out_logo: Option<wgpu::RenderPipeline>,
     /// Transparent-background mode: no scene, alpha out (see Uniforms::misc4).
     pub transparent: bool,
 }
@@ -650,7 +658,7 @@ impl Renderer {
 
         let text_tex_entry = |binding: u32| wgpu::BindGroupLayoutEntry {
             binding,
-            visibility: wgpu::ShaderStages::FRAGMENT,
+            visibility: VIS,
             ty: wgpu::BindingType::Texture {
                 sample_type: wgpu::TextureSampleType::Float { filterable: true },
                 view_dimension: wgpu::TextureViewDimension::D2,
@@ -695,7 +703,7 @@ impl Renderer {
                 text_tex_entry(2),
                 wgpu::BindGroupLayoutEntry {
                     binding: 3,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    visibility: VIS,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -918,6 +926,12 @@ impl Renderer {
             overlay: Scene {
                 kind: Kind::Overlay,
                 name: "overlay".into(),
+                path: overlay_path.clone(),
+                ..Default::default()
+            },
+            logo_particles: Scene {
+                kind: Kind::LogoParticles,
+                name: "logo particles".into(),
                 path: overlay_path,
                 ..Default::default()
             },
@@ -947,6 +961,7 @@ impl Renderer {
             out_present: None,
             out_text: None,
             out_overlay: None,
+            out_logo: None,
             transparent: false,
         };
         r.reload_shaders(true);
@@ -1373,6 +1388,7 @@ impl Renderer {
         let mut echo_pass = std::mem::take(&mut self.echo_pass);
         let mut text = std::mem::take(&mut self.text);
         let mut overlay = std::mem::take(&mut self.overlay);
+        let mut logo_particles = std::mem::take(&mut self.logo_particles);
         for s in scenes
             .iter_mut()
             .chain(accents.iter_mut())
@@ -1384,6 +1400,7 @@ impl Renderer {
                 &mut echo_pass,
                 &mut text,
                 &mut overlay,
+                &mut logo_particles,
             ])
         {
             let m = mtime(&s.path);
@@ -1417,6 +1434,21 @@ impl Renderer {
                             &self.ov_pipeline_layout,
                             Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                         ),
+                        Kind::LogoParticles => {
+                            match compile_pipeline_entries(
+                                &self.device,
+                                &common,
+                                &s.path,
+                                &self.ov_pipeline_layout,
+                                OUT_FORMAT,
+                                Some(GLOW_BLEND),
+                                ("vs_logo", "fs_logo"),
+                            ) {
+                                Ok(p) => self.out_logo = Some(p),
+                                Err(e) => eprintln!("shader {} (output) failed:\n{e}", s.name),
+                            }
+                            continue;
+                        }
                         _ => continue,
                     };
                     match self.compile_into(&common, &s.path, layout, OUT_FORMAT, blend) {
@@ -1442,9 +1474,21 @@ impl Renderer {
         self.echo_pass = echo_pass;
         self.text = text;
         self.overlay = overlay;
+        self.logo_particles = logo_particles;
     }
 
     fn compile(&self, common: &str, path: &Path, kind: Kind) -> Result<wgpu::RenderPipeline> {
+        if kind == Kind::LogoParticles {
+            return compile_pipeline_entries(
+                &self.device,
+                common,
+                path,
+                &self.ov_pipeline_layout,
+                self.config.format,
+                Some(GLOW_BLEND),
+                ("vs_logo", "fs_logo"),
+            );
+        }
         if kind == Kind::Particles {
             return compile_pipeline_entries(
                 &self.device,
@@ -1457,7 +1501,7 @@ impl Renderer {
             );
         }
         let (format, layout, blend) = match kind {
-            Kind::Particles => unreachable!(),
+            Kind::Particles | Kind::LogoParticles => unreachable!(),
             Kind::AccentMix => (SCENE_FORMAT, &self.pipeline_layout, Some(ADD_BLEND)),
             Kind::Echo => (SCENE_FORMAT, &self.pipeline_layout, None),
             Kind::Scene => (SCENE_FORMAT, &self.pipeline_layout, None),
@@ -1972,6 +2016,11 @@ impl Renderer {
             None => &self.bind_groups[self.current],
         };
         let out_src = echo_src.map_or(self.current, |e| 2 + e);
+        // The logo's Disintegrate dust: only while a burst is on and the
+        // logo shows.
+        let logo_burst = overlay.is_some_and(|o| {
+            o.burst[0] > 0.0 && o.layers[crate::overlay::L_LOGO].uvx[2] > 0.004
+        });
 
         let view = frame.texture.create_view(&Default::default());
         {
@@ -1998,6 +2047,10 @@ impl Renderer {
                 pass.set_bind_group(0, present_bg, &[]);
                 pass.set_bind_group(1, obg, &[]);
                 pass.draw(0..3, 0..1);
+                if let (true, Some(lp)) = (logo_burst, self.logo_particles.pipeline.as_ref()) {
+                    pass.set_pipeline(lp);
+                    pass.draw(0..6, 0..LOGO_PARTICLES);
+                }
             }
             // Text rides on top of the finished frame — post FX can't distort it.
             if let (Some(_), Some(text), Some(text_bg)) =
@@ -2048,6 +2101,10 @@ impl Renderer {
                     pass.set_bind_group(0, &o.bind_groups[out_src], &[]);
                     pass.set_bind_group(1, obg, &[]);
                     pass.draw(0..3, 0..1);
+                    if let (true, Some(lp)) = (logo_burst, self.out_logo.as_ref()) {
+                        pass.set_pipeline(lp);
+                        pass.draw(0..6, 0..LOGO_PARTICLES);
+                    }
                 }
                 if let (Some(_), Some(tp), Some(tbg)) =
                     (text, self.out_text.as_ref(), self.text_bg.as_ref())
@@ -2368,7 +2425,7 @@ impl Renderer {
 }
 
 /// An sRGB RGBA8 texture filled with `px` (straight alpha).
-fn rgba_texture(
+pub fn rgba_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     w: u32,

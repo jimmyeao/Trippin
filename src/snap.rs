@@ -16,7 +16,8 @@
 //! <s>` (set one off at that time, for `--snap-at` sequences),
 //! `--snap-accent <scene>` (that scene as the accent layer over each one,
 //! at `--snap-accent-amt`, default 0.6), `--snap-echo <0..1>` (the echo
-//! post effect at that amount).
+//! post effect at that amount), `--snap-logo <png>` (the branding logo in
+//! the top-right corner, bursting with `--snap-burst`/`--snap-burst-at`).
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -491,6 +492,103 @@ pub fn run(args: &[String]) -> Result<()> {
     };
     let echo_cur = std::cell::Cell::new(0usize);
 
+    // `--snap-logo <png>`: the branding logo overlay (layer 1) as the app
+    // draws it in the present pass, plus its Disintegrate dust.
+    struct LogoSnap {
+        overlay: wgpu::RenderPipeline,
+        particles: wgpu::RenderPipeline,
+        bg: wgpu::BindGroup,
+        buf: wgpu::Buffer,
+        quad: [f32; 4],
+    }
+    let logo_snap: Option<LogoSnap> = match arg(args, "--snap-logo") {
+        None => None,
+        Some(path) => {
+            let img = image::open(path).map_err(|e| anyhow!("logo {path}: {e}"))?.to_rgba8();
+            let brand = crate::overlay::render_brand(Some(&img), "", "", [0.9, 0.3, 1.0])
+                .ok_or_else(|| anyhow!("logo {path}: nothing to draw"))?;
+            let (_t, view) = render::rgba_texture(&device, &queue, brand.w, brand.h, &brand.px);
+            let (_b, blank) = render::rgba_texture(&device, &queue, 1, 1, &[0, 0, 0, 0]);
+            let tex = |binding: u32| wgpu::BindGroupLayoutEntry {
+                binding,
+                visibility: render::VIS,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            };
+            let ol = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("snap overlay"),
+                entries: &[
+                    tex(0),
+                    tex(1),
+                    tex(2),
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: render::VIS,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    tex(4),
+                ],
+            });
+            let opl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("snap overlay"),
+                bind_group_layouts: &[Some(&layout), Some(&ol)],
+                immediate_size: 0,
+            });
+            let ovp = dir.join("overlay.wgsl");
+            let overlay = render::compile_pipeline(
+                &device,
+                &common,
+                &ovp,
+                &opl,
+                OUT,
+                Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+            )
+            .map_err(|e| anyhow!("overlay: {e}"))?;
+            let particles = render::compile_pipeline_entries(
+                &device,
+                &common,
+                &ovp,
+                &opl,
+                OUT,
+                Some(render::GLOW_BLEND),
+                ("vs_logo", "fs_logo"),
+            )
+            .map_err(|e| anyhow!("logo particles: {e}"))?;
+            let buf = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("snap overlay uniforms"),
+                size: std::mem::size_of::<crate::overlay::OvUniforms>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("snap overlay"),
+                layout: &ol,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&blank) },
+                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&view) },
+                    wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&blank) },
+                    wgpu::BindGroupEntry { binding: 3, resource: buf.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&blank) },
+                ],
+            });
+            // Top-right corner, 0.36 of the screen height tall.
+            let hh = 0.18;
+            let hw = hh * brand.w as f32 / brand.h.max(1) as f32;
+            let asp = w as f32 / h as f32;
+            let quad = [asp - hw - 0.08, -1.0 + hh + 0.08, hw, hh];
+            Some(LogoSnap { overlay, particles, bg, buf, quad })
+        }
+    };
+
     // Built in plus the effects packs' scenes (packs.rs).
     let mut scenes: Vec<PathBuf> = crate::packs::scene_files_all(&dir);
     if which != "all" {
@@ -625,14 +723,20 @@ pub fn run(args: &[String]) -> Result<()> {
                     pass.draw(0..3, 0..1);
                 }
             }
+            // `--snap-burst <level>` holds Disintegrate at a level;
+            // `--snap-burst-at <s>` sets one off at that time (126 BPM).
+            let burst_level = match (burst_fixed, burst_at) {
+                (Some(l), _) => l,
+                (None, Some(t0)) => dancer::Burst::level_at((t - t0) * 126.0 / 60.0),
+                _ => 0.0,
+            };
+            if let Some(ls) = &logo_snap {
+                let mut ou = crate::overlay::OvUniforms::default();
+                ou.layers[1] = crate::overlay::OvLayerU { quad: ls.quad, uvx: [1.0, 0.0, 1.0, 0.0] };
+                ou.burst = [burst_level, 0.3, 0.0, 0.0];
+                queue.write_buffer(&ls.buf, 0, bytemuck::bytes_of(&ou));
+            }
             if let Some(ds) = &dancer_snap {
-                // `--snap-burst <level>` holds Disintegrate at a level;
-                // `--snap-burst-at <s>` sets one off at that time (126 BPM).
-                let burst_level = match (burst_fixed, burst_at) {
-                    (Some(l), _) => l,
-                    (None, Some(t0)) => dancer::Burst::level_at((t - t0) * 126.0 / 60.0),
-                    _ => 0.0,
-                };
                 let frame_f = (t / ds.duration).rem_euclid(1.0) * ds.frames;
                 let mut slots = [SlotUniforms::default(); dancer::SLOTS];
                 slots[0] = SlotUniforms { frame: frame_f, frames: ds.frames, aspect: ds.aspect, _pad: 0.0 };
@@ -714,6 +818,15 @@ pub fn run(args: &[String]) -> Result<()> {
                 pass.set_pipeline(&present);
                 pass.set_bind_group(0, present_bg, &[]);
                 pass.draw(0..3, 0..1);
+                if let Some(ls) = &logo_snap {
+                    pass.set_pipeline(&ls.overlay);
+                    pass.set_bind_group(1, &ls.bg, &[]);
+                    pass.draw(0..3, 0..1);
+                    if burst_level > 0.0 {
+                        pass.set_pipeline(&ls.particles);
+                        pass.draw(0..6, 0..render::LOGO_PARTICLES);
+                    }
+                }
             }
             queue.submit([enc.finish()]);
             *cur = next;

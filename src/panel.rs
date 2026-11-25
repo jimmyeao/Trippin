@@ -2666,6 +2666,8 @@ fn stream_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<Ui
             ui.checkbox(&mut s.brand_logo_on, "logo");
             ui.checkbox(&mut s.brand_name_on, "name");
         });
+        ui.checkbox(&mut s.logo_burst, "Logo bursts into particles with the dancer")
+            .on_hover_text("On drops (and P), the logo turns to dust and re-forms with her.");
         egui::Grid::new("brand_grid")
             .num_columns(2)
             .min_col_width(96.0)

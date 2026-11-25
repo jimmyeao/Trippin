@@ -406,6 +406,8 @@ pub struct Settings {
     /// particles and re-forms (`dancer::Burst`). Not in Manual mode or
     /// during timeline shows.
     pub dancer_burst_drops: bool,
+    /// The branding logo bursts into particles with the dancer.
+    pub logo_burst: bool,
     /// Global colour palette — a WLED-style named gradient (see
     /// `palettes::PALETTES`) every scene's `palette()` samples.
     pub palette: String,
@@ -584,6 +586,7 @@ impl Default for Settings {
             dancer_size: 0.85,
             dancer_trails: false,
             dancer_burst_drops: true,
+            logo_burst: true,
             palette: "rainbow".into(),
             perform_pads: false,
             fx: Fx::Off,
