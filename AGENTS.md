@@ -277,9 +277,15 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   own (`make_mix_bind_groups`, `[accent][main]`); the scene pass keeps the
   real Unity frame. It is screen-like (`1 - base luminance`, read wide so the
   accent's own lights can't dim themselves): added flat, it washed plasma out
-  and vanished into glacier_cave. Pool = cheap lights on black only (comets,
-  helix, orbiters, <= 0.22 ms); centred objects (polar_bloom, eq_round)
-  looked pasted on as stickers.
+  and vanished into glacier_cave. Accents are purpose-built overlays in
+  `shaders/accents/` (`render::accent_files`, never in the rotation, no tags):
+  borrowed scenes read as odd (owner) and centred ones (polar_bloom,
+  eq_round) as stickers. Many tiny sparks read as noise and a full-frame grid
+  of motes as blue static: give overlays few, soft, big lights, or a shape
+  (the swarm's cloud). Off by default.
+- **Echo stretches radial strokes into spikes:** its outward drift turned the
+  comic look's action lines into long white spikes, so `comic_lines` fades
+  out with `u.misc4.w` (the echo amount, readable by any shader).
 - **Echo** (`echo.rs`, echo.wgsl, `Renderer::set_echo`): whole-frame
   feedback in its own pair (`echo_targets`), after scene + accent + dancer;
   present (and the output tap, whose `bind_groups` are now

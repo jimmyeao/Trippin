@@ -351,8 +351,10 @@ pub struct Renderer {
     present: Scene,
     dancer: Scene,
     particles: Scene,
-    /// Accent layer: a second, light scene with its own feedback pair,
-    /// added into the main target before the dancer (`set_accent`).
+    /// Accent layer: a light overlay scene from `shaders/accents/` (its own
+    /// list, never in the scene rotation) with its own feedback pair, added
+    /// into the main target before the dancer (`set_accent`).
+    accents: Vec<Scene>,
     accent_mix: Scene,
     acc_targets: [wgpu::Texture; 2],
     acc_bind_groups: [wgpu::BindGroup; 2],
@@ -461,6 +463,20 @@ pub fn find_shader_dir() -> Result<PathBuf> {
         .into_iter()
         .find(|p| p.join("common.wgsl").exists())
         .ok_or_else(|| anyhow!("could not find a shaders/ directory containing common.wgsl"))
+}
+
+/// The accent overlays: `shaders/accents/*.wgsl`, sorted.
+pub fn accent_files(shader_dir: &Path) -> Vec<PathBuf> {
+    let mut v: Vec<PathBuf> = std::fs::read_dir(shader_dir.join("accents"))
+        .map(|rd| {
+            rd.flatten()
+                .map(|e| e.path())
+                .filter(|p| p.extension().is_some_and(|x| x == "wgsl"))
+                .collect()
+        })
+        .unwrap_or_default();
+    v.sort();
+    v
 }
 
 fn scaled(w: u32, h: u32, scale: f32) -> (u32, u32) {
@@ -864,6 +880,7 @@ impl Renderer {
                 path: accent_path,
                 ..Default::default()
             },
+            accents: Vec::new(),
             acc_targets,
             acc_bind_groups,
             acc_mix_bind_groups,
@@ -1278,8 +1295,13 @@ impl Renderer {
         self.scenes.get(i).is_some_and(|s| s.feedback)
     }
 
-    /// Set (or clear) the accent layer: a scene index and its amount 0..1,
-    /// drawn from the next frame (see accent.wgsl).
+    /// How many accent overlays loaded (`shaders/accents/`).
+    pub fn accent_count(&self) -> usize {
+        self.accents.len()
+    }
+
+    /// Set (or clear) the accent layer: an accent index (`accent_count`)
+    /// and its amount 0..1, drawn from the next frame (see accent.wgsl).
     pub fn set_accent(&mut self, accent: Option<(usize, f32)>) {
         self.accent = accent;
     }
@@ -1330,7 +1352,20 @@ impl Renderer {
             }
         }
 
+        // Accent overlays (shaders/accents/*.wgsl).
+        for p in accent_files(&self.shader_dir) {
+            if !self.accents.iter().any(|s| s.path == p) {
+                let name = p.file_stem().unwrap().to_string_lossy().into_owned();
+                self.accents.push(Scene {
+                    name,
+                    path: p,
+                    ..Default::default()
+                });
+            }
+        }
+
         let mut scenes = std::mem::take(&mut self.scenes);
+        let mut accents = std::mem::take(&mut self.accents);
         let mut present = std::mem::take(&mut self.present);
         let mut dancer = std::mem::take(&mut self.dancer);
         let mut particles = std::mem::take(&mut self.particles);
@@ -1340,6 +1375,7 @@ impl Renderer {
         let mut overlay = std::mem::take(&mut self.overlay);
         for s in scenes
             .iter_mut()
+            .chain(accents.iter_mut())
             .chain([
                 &mut present,
                 &mut dancer,
@@ -1398,6 +1434,7 @@ impl Renderer {
             }
         }
         self.scenes = scenes;
+        self.accents = accents;
         self.present = present;
         self.dancer = dancer;
         self.particles = particles;
@@ -1696,7 +1733,7 @@ impl Renderer {
             amt > 0.004
                 && !self.transparent
                 && self.accent_mix.pipeline.is_some()
-                && self.scenes.get(i).is_some_and(|s| s.pipeline.is_some())
+                && self.accents.get(i).is_some_and(|s| s.pipeline.is_some())
         });
         uu.misc4[2] = acc.map_or(0.0, |(_, a)| a);
         let echo_on = self.echo > 0.004 && !self.transparent && self.echo_pass.pipeline.is_some();
@@ -1813,7 +1850,7 @@ impl Renderer {
                 })],
                 ..Default::default()
             });
-            if let Some(p) = self.scenes[ai].pipeline.as_ref() {
+            if let Some(p) = self.accents[ai].pipeline.as_ref() {
                 pass.set_pipeline(p);
                 pass.set_bind_group(0, &self.acc_bind_groups[self.acc_cur], &[]);
                 pass.draw(0..3, 0..1);

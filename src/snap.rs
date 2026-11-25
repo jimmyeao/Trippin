@@ -403,8 +403,10 @@ pub fn run(args: &[String]) -> Result<()> {
     let accent_snap: Option<AccentSnap> = match arg(args, "--snap-accent") {
         None => None,
         Some(name) => {
-            let path = crate::packs::scene_files_all(&dir)
+            // An accent overlay (shaders/accents/), or any scene.
+            let path = render::accent_files(&dir)
                 .into_iter()
+                .chain(crate::packs::scene_files_all(&dir))
                 .find(|p| p.file_stem().is_some_and(|s| s == name))
                 .ok_or_else(|| anyhow!("no accent scene {name}"))?;
             let pipeline = render::compile_pipeline(&device, &common, &path, &pl, SCENE_FORMAT, None)

@@ -182,7 +182,10 @@ fn comic_lines(p: vec2<f32>, x: f32, size: f32) -> vec4<f32> {
     // Each stroke starts fat and narrows to a point.
     let width_here = clamp(0.32 - (r - r0) * 1.2, 0.02, 0.32);
     let taper = 1.0 - smoothstep(width_here * 0.6, width_here, w);
-    let a = on * along * taper * 0.9 * (0.5 + 0.5 * (1.0 - u.calm));
+    // Off while the echo effect runs (u.misc4.w): its outward drift stretched
+    // these radial strokes into long white spikes (owner's live test).
+    let echo_off = 1.0 - smoothstep(0.0, 0.25, u.misc4.w);
+    let a = on * along * taper * 0.9 * (0.5 + 0.5 * (1.0 - u.calm)) * echo_off;
     return vec4<f32>(vec3<f32>(0.95, 0.92, 0.85) * a, a) * d.opacity;
 }
 

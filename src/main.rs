@@ -713,13 +713,6 @@ fn render_loop(
     // Accent layer: a light scene the auto-pilot sometimes adds on top.
     let mut accent_layer = accent::Accent::default();
     let mut echo_fx = echo::Echo::default();
-    let accent_pool: Vec<usize> = {
-        let names = r.scene_names();
-        accent::POOL
-            .iter()
-            .filter_map(|p| names.iter().position(|n| n == p))
-            .collect()
-    };
 
     // --- Timeline state ---------------------------------------------------
     // Decodes run on throwaway threads; results land in `song_rx` tagged with
@@ -1606,13 +1599,8 @@ fn render_loop(
                 && !base.starts_with("unity_")
                 && !base.starts_with("video_")
                 && !crate::ai::scene_meta(base).flight;
-            let pool: Vec<usize> = accent_pool
-                .iter()
-                .copied()
-                .filter(|i| allowed.contains(i))
-                .collect();
             let (roll, pick) = (dir.rand(), dir.rand());
-            accent_layer.on_cut(dir.scene, &pool, base_ok, f.calm < 0.3, roll, pick);
+            accent_layer.on_cut(r.accent_count(), base_ok, f.calm < 0.3, roll, pick);
         }
         r.set_accent(accent_layer.tick(dt, s.accent_amt.clamp(0.0, 1.0)));
         // Echo trails: Auto rolls on each cut and holds through breakdowns.
@@ -3478,6 +3466,7 @@ fn check_shaders() -> Result<()> {
     paths.push(dir.join("overlay.wgsl"));
     paths.push(dir.join("accent.wgsl"));
     paths.push(dir.join("echo.wgsl"));
+    paths.extend(render::accent_files(&dir));
     let mut bad = 0;
     for p in &paths {
         let body = std::fs::read_to_string(p)?;

@@ -589,7 +589,7 @@ impl Default for Settings {
             fx: Fx::Off,
             fx_auto: false,
             fx_amt: 1.0,
-            accent_auto: true,
+            accent_auto: false,
             accent_amt: 0.6,
             echo: Tristate::Auto,
             echo_amt: 0.8,
