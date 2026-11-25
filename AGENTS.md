@@ -390,6 +390,13 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   120k additive dots need ~0.1 per-dot brightness, and thin shells read as
   solid neon hoops (particle_orbits): spread them. Examples:
   particle_orbits, particle_nebula, particle_flow (~0.12 ms each at 1080p).
+- **The now-playing line is a texture** (`title_tex`, binding 10,
+  `gfx::Statics::title`, 2048x160 R8): main.rs rasterises "Artist - Title"
+  (else the DJ name, else TRIPPIN) when it changes; `u.look4.w` is the share
+  of the width it covers (look4 is the Unity look's xyz; w was spare).
+  Sample with `title_mask(uv)`. A new FrameRes field touches 12 bind-group
+  sites (render, snap, output). Layered text needs occlusion (near rows hide
+  far ones) or it's an unreadable wall (type_field's first render).
 - **Display names vs ids:** settings, timelines, remote commands and
   `disabled_scenes`/`favourite_scenes` all key on the id — never store or
   match a title. Dancer clips carry `"title"` in `clip.json` the same way

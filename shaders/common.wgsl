@@ -73,6 +73,19 @@ struct U {
 // Video clip frames for `video_*` scenes (src/video.rs): two frames stacked
 // (top/bottom halves). Sample through vid(), which blends them.
 @group(0) @binding(9) var vid_tex: texture_2d<f32>;
+// The track playing now ("Artist - Title", or the DJ name / TRIPPIN when
+// nothing is detected) as a coverage mask from the left edge; u.look4.w is
+// the fraction of the width it covers. Sample through title_mask().
+@group(0) @binding(10) var title_tex: texture_2d<f32>;
+
+// Coverage 0..1 of the title text at uv in 0..1 across the text's own box
+// (x along the line, y top to bottom); 0 outside it.
+fn title_mask(uv: vec2<f32>) -> f32 {
+    if any(uv < vec2<f32>(0.0)) || any(uv > vec2<f32>(1.0)) {
+        return 0.0;
+    }
+    return textureSampleLevel(title_tex, samp, vec2<f32>(uv.x * max(u.look4.w, 0.0005), uv.y), 0.0).r;
+}
 
 struct VsOut {
     @builtin(position) pos: vec4<f32>,

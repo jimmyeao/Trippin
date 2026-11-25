@@ -320,7 +320,7 @@ impl Output {
     ) -> [wgpu::BindGroup; 4] {
         let make = |t: &wgpu::Texture| {
             let view = t.create_view(&Default::default());
-            let [e3, e4, e5, e6, e7, e8, e9] = res.entries();
+            let [e3, e4, e5, e6, e7, e8, e9, e10] = res.entries();
             device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("ndi"),
                 layout,
@@ -344,6 +344,7 @@ impl Output {
                     e7,
                     e8,
                     e9,
+                    e10,
                 ],
             })
         };

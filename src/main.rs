@@ -713,6 +713,10 @@ fn render_loop(
     // Accent layer: a light scene the auto-pilot sometimes adds on top.
     let mut accent_layer = accent::Accent::default();
     let mut echo_fx = echo::Echo::default();
+    // Type scenes: the now-playing line in the title texture, and the share
+    // of its width the text covers (u.look4.w).
+    let mut title_line = String::new();
+    let mut title_frac = 0.0f32;
 
     // --- Timeline state ---------------------------------------------------
     // Decodes run on throwaway threads; results land in `song_rx` tagged with
@@ -1680,6 +1684,25 @@ fn render_loop(
             waveform[i / 4][i % 4] = v;
         }
         let beat_in_bar = f.beat_in_bar(pos);
+        // Type scenes (type_field): the track playing now, else the DJ name,
+        // else TRIPPIN, rasterised into title_tex when it changes.
+        {
+            let now_line = lock(&shared.np)
+                .track
+                .as_ref()
+                .map(|t| t.line())
+                .filter(|l| !l.trim().is_empty());
+            let line = now_line.unwrap_or_else(|| {
+                let n = s.brand_name.trim();
+                if n.is_empty() { "TRIPPIN".to_string() } else { n.to_string() }
+            });
+            if line != title_line {
+                title_line = line;
+                if let Some(b) = crate::gfx::title_bitmap(&title_line) {
+                    title_frac = r.upload_title(&b);
+                }
+            }
+        }
         let u = Uniforms {
             time: (now - started).as_secs_f32(),
             dt,
@@ -1720,7 +1743,11 @@ fn render_loop(
             clock4: clock4.map(|c| c as f32),
             // y: video frame blend (vid() in common.wgsl).
             misc4: [0.0, video.blend, 0.0, 0.0],
-            look4: showparams::look(&s.show_params, r.scene_name(dir.scene)),
+            look4: {
+                let mut l = showparams::look(&s.show_params, r.scene_name(dir.scene));
+                l[3] = title_frac;
+                l
+            },
         };
         // Lights follow the show (lights.rs). The palette LUT is rebuilt
         // only when the palette changes.

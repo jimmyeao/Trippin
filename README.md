@@ -831,6 +831,16 @@ boundaries and cue transitions land on the "one", not just on beats.
   `--analyze <file>`, or run the whole build without the editor with
   `--ai-build <file>` (prints every cue).
 
+## Type Field (now-playing scene)
+
+**Type Field** is a scene made of the track playing now: rows of "Artist -
+Title" scroll across the frame in three depths, the near rows big and
+readable, their baselines waving with the mids. It reads the same track as
+the now-playing card (any source), and shows your DJ name (or TRIPPIN) when
+nothing is detected. Scenes can use the line through `title_mask()` in
+`common.wgsl` (`title_tex`, binding 10); preview with `--snap type_field
+--snap-title "Artist - Title"`.
+
 ## Silhouette dancers
 
 Trippin ships with a library of female dancer silhouettes in the style of Bond

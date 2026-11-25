@@ -209,6 +209,9 @@ pub fn run(args: &[String]) -> Result<()> {
     );
     let pal_view = pal.create_view(&Default::default());
     let statics = gfx::Statics::new(&device, &queue);
+    // Type scenes: a sample now-playing line (`--snap-title` to change it).
+    let title_frac = gfx::title_bitmap(arg(args, "--snap-title").unwrap_or("Daft Punk - One More Time"))
+        .map_or(0.0, |b| statics.upload_title(&queue, &b));
     let bloom = gfx::Bloom::new(&device, w, h);
     let targets = Renderer::make_targets(&device, w, h);
     let bgs = Renderer::make_bind_groups(
@@ -225,6 +228,7 @@ pub fn run(args: &[String]) -> Result<()> {
             bloom: bloom.view(),
             ext: &statics.ext_view,
             vid: &statics.vid_view,
+            title: &statics.title_view,
         },
     );
     let out = device.create_texture(&wgpu::TextureDescriptor {
@@ -436,6 +440,7 @@ pub fn run(args: &[String]) -> Result<()> {
                     bloom: bloom.view(),
                     ext: &statics.ext_view,
                     vid: &statics.vid_view,
+                    title: &statics.title_view,
                 },
             );
             let mix_bgs = Renderer::make_mix_bind_groups(
@@ -453,6 +458,7 @@ pub fn run(args: &[String]) -> Result<()> {
                     bloom: bloom.view(),
                     ext: &statics.ext_view,
                     vid: &statics.vid_view,
+                    title: &statics.title_view,
                 },
             );
             let amt = arg(args, "--snap-accent-amt").and_then(|s| s.parse().ok()).unwrap_or(0.6);
@@ -484,6 +490,7 @@ pub fn run(args: &[String]) -> Result<()> {
                 bloom: bloom.view(),
                 ext: &statics.ext_view,
                 vid: &statics.vid_view,
+                title: &statics.title_view,
             };
             let bgs = Renderer::make_bind_groups(&device, &layout, &ubuf, &sampler, &etargets, &res);
             let pass_bgs = Renderer::make_mix_bind_groups(&device, &layout, &ubuf, &sampler, &etargets, targets_main, &res);
@@ -661,6 +668,7 @@ pub fn run(args: &[String]) -> Result<()> {
         // One full frame: scene → bloom → present.
         let step = |t: f32, frame: u32, cur: &mut usize| {
             let mut u = groove(t, w, h, frame, bloom_amt, tonemap, calm);
+            u.look4[3] = title_frac;
             if let Some(c) = &vclip {
                 let len = c.frames() as f64 / c.fps as f64;
                 let beat = t as f64 * 126.0 / 60.0;

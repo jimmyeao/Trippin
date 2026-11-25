@@ -123,6 +123,7 @@
   "tide_lines": ["abstract", "cold", "slow"],
   "torus_dance": ["geometric", "abstract", "slow"],
   "tunnel": ["geometric", "flight", "driving"],
+  "type_field": ["abstract", "neon", "driving"],
   "unity_assembly": ["character", "stage", "neon"],
   "unity_aurora": ["cold", "organic", "slow"],
   "unity_basscore": ["stage", "geometric", "neon", "driving"],

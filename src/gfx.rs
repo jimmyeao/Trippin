@@ -32,7 +32,16 @@ pub struct Statics {
     /// engine and a video scene never overwrite each other.
     pub vid: wgpu::Texture,
     pub vid_view: wgpu::TextureView,
+    /// The track playing now ("Artist - Title"), a coverage mask drawn
+    /// from the left edge (`upload_title`), for type scenes: `title_tex` /
+    /// `title_mask()` in common.wgsl. Fixed size, so bind groups never
+    /// need rebuilding.
+    pub title: wgpu::Texture,
+    pub title_view: wgpu::TextureView,
 }
+
+pub const TITLE_W: u32 = 2048;
+pub const TITLE_H: u32 = 160;
 
 pub const EXT_W: u32 = 1920;
 pub const EXT_H: u32 = 1080;
@@ -148,6 +157,20 @@ impl Statics {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
+        let title = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("title"),
+            size: wgpu::Extent3d {
+                width: TITLE_W,
+                height: TITLE_H,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
         Self {
             noise3_view: noise3.create_view(&Default::default()),
             _noise3: noise3,
@@ -158,8 +181,56 @@ impl Statics {
             ext,
             vid_view: vid.create_view(&Default::default()),
             vid,
+            title_view: title.create_view(&Default::default()),
+            title,
         }
     }
+
+    /// Draw a rasterised line into the title texture (left-aligned,
+    /// vertically centred; clipped to fit) and return the fraction of the
+    /// width it covers, which shaders get as `u.look4.w`.
+    pub fn upload_title(&self, queue: &wgpu::Queue, bmp: &crate::text::TextBitmap) -> f32 {
+        let (w, h) = (TITLE_W as usize, TITLE_H as usize);
+        let mut px = vec![0u8; w * h];
+        let bw = (bmp.width as usize).min(w);
+        let bh = (bmp.height as usize).min(h);
+        let y0 = (h - bh) / 2;
+        for y in 0..bh {
+            let src = &bmp.mask[y * bmp.width as usize..y * bmp.width as usize + bw];
+            px[(y0 + y) * w..(y0 + y) * w + bw].copy_from_slice(src);
+        }
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.title,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &px,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(TITLE_W),
+                rows_per_image: Some(TITLE_H),
+            },
+            wgpu::Extent3d {
+                width: TITLE_W,
+                height: TITLE_H,
+                depth_or_array_layers: 1,
+            },
+        );
+        (bw as f32 / w as f32).max(1.0 / w as f32)
+    }
+}
+
+/// Rasterise the title line to fit the title texture: 110 px cap height,
+/// smaller for a long line so it never clips.
+pub fn title_bitmap(text: &str) -> Option<crate::text::TextBitmap> {
+    let bmp = crate::text::rasterize(text, 110.0)?;
+    if bmp.width <= TITLE_W - 8 && bmp.height <= TITLE_H {
+        return Some(bmp);
+    }
+    let k = ((TITLE_W - 8) as f32 / bmp.width as f32).min(TITLE_H as f32 / bmp.height as f32);
+    crate::text::rasterize(text, 110.0 * k * 0.98)
 }
 
 // ---- 3D noise bake -------------------------------------------------------

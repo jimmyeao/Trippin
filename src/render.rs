@@ -211,11 +211,12 @@ pub struct FrameRes<'a> {
     pub bloom: &'a wgpu::TextureView,
     pub ext: &'a wgpu::TextureView,
     pub vid: &'a wgpu::TextureView,
+    pub title: &'a wgpu::TextureView,
 }
 
 impl FrameRes<'_> {
-    /// Bind group entries 3..=9 (after uniforms, feedback and sampler).
-    pub fn entries(&self) -> [wgpu::BindGroupEntry<'_>; 7] {
+    /// Bind group entries 3..=10 (after uniforms, feedback and sampler).
+    pub fn entries(&self) -> [wgpu::BindGroupEntry<'_>; 8] {
         [
             wgpu::BindGroupEntry {
                 binding: 3,
@@ -244,6 +245,10 @@ impl FrameRes<'_> {
             wgpu::BindGroupEntry {
                 binding: 9,
                 resource: wgpu::BindingResource::TextureView(self.vid),
+            },
+            wgpu::BindGroupEntry {
+                binding: 10,
+                resource: wgpu::BindingResource::TextureView(self.title),
             },
         ]
     }
@@ -334,6 +339,8 @@ pub fn frame_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
             tex_entry(8, D2),
             // Video clip frames (two stacked slots) — gfx::Statics::vid.
             tex_entry(9, D2),
+            // The track playing now, as a text mask — gfx::Statics::title.
+            tex_entry(10, D2),
         ],
     })
 }
@@ -809,6 +816,7 @@ impl Renderer {
                 bloom: bloom.view(),
                 ext: &statics.ext_view,
                 vid: &statics.vid_view,
+                title: &statics.title_view,
             },
         );
 
@@ -827,6 +835,7 @@ impl Renderer {
                 bloom: bloom.view(),
                 ext: &statics.ext_view,
                 vid: &statics.vid_view,
+                title: &statics.title_view,
             },
         );
 
@@ -845,6 +854,7 @@ impl Renderer {
                 bloom: bloom.view(),
                 ext: &statics.ext_view,
                 vid: &statics.vid_view,
+                title: &statics.title_view,
             },
         );
 
@@ -858,6 +868,7 @@ impl Renderer {
                 bloom: bloom.view(),
                 ext: &statics.ext_view,
                 vid: &statics.vid_view,
+                title: &statics.title_view,
             };
             (
                 Self::make_bind_groups(&device, &layout, &uniform_buf, &sampler, &echo_targets, &res),
@@ -1034,7 +1045,7 @@ impl Renderer {
     ) -> [wgpu::BindGroup; 2] {
         let make = |t: &wgpu::Texture| {
             let view = t.create_view(&Default::default());
-            let [e3, e4, e5, e6, e7, e8, e9] = res.entries();
+            let [e3, e4, e5, e6, e7, e8, e9, e10] = res.entries();
             device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: None,
                 layout,
@@ -1058,6 +1069,7 @@ impl Renderer {
                     e7,
                     e8,
                     e9,
+                    e10,
                 ],
             })
         };
@@ -1086,6 +1098,7 @@ impl Renderer {
                 bloom: res.bloom,
                 ext: &ext,
                 vid: res.vid,
+                title: res.title,
             };
             Self::make_bind_groups(device, layout, uniform_buf, sampler, targets, &r)
         };
@@ -1115,6 +1128,7 @@ impl Renderer {
             bloom: self.bloom.view(),
             ext: &self.statics.ext_view,
                 vid: &self.statics.vid_view,
+                title: &self.statics.title_view,
         };
         self.bind_groups = Self::make_bind_groups(
             &self.device,
@@ -1287,6 +1301,12 @@ impl Renderer {
     }
 
     /// Upload an external frame (RGBA8, EXT_W x EXT_H) for `ext_tex`.
+    /// Draw the now-playing line into the title texture; returns the width
+    /// fraction for `u.look4.w` (gfx::Statics::upload_title).
+    pub fn upload_title(&self, bmp: &crate::text::TextBitmap) -> f32 {
+        self.statics.upload_title(&self.queue, bmp)
+    }
+
     pub fn upload_external(&self, rgba: &[u8]) {
         use crate::gfx::{EXT_H, EXT_W};
         if rgba.len() != (EXT_W * EXT_H * 4) as usize {
@@ -2243,6 +2263,7 @@ impl Renderer {
                 bloom: self.bloom.view(),
                 ext: &self.statics.ext_view,
                 vid: &self.statics.vid_view,
+                title: &self.statics.title_view,
             },
             c.clone(),
         ) {
@@ -2370,6 +2391,7 @@ impl Renderer {
                 bloom: self.bloom.view(),
                 ext: &self.statics.ext_view,
                 vid: &self.statics.vid_view,
+                title: &self.statics.title_view,
             },
         );
         // The present pipeline is built for the surface format (usually
