@@ -55,10 +55,14 @@ pub enum Action {
     Disintegrate,
     /// Echo trails: auto -> on -> off.
     CycleEcho,
+    /// Echo on only while the key or pad is held.
+    HoldEcho,
+    /// The dancer (and logo) burst out while held; re-form on release.
+    HoldBurst,
 }
 
 impl Action {
-    pub const ALL: [Action; 41] = [
+    pub const ALL: [Action; 43] = [
         Action::NextScene,
         Action::PrevScene,
         Action::ModeAuto,
@@ -100,6 +104,8 @@ impl Action {
         Action::NextTheme,
         Action::Disintegrate,
         Action::CycleEcho,
+        Action::HoldEcho,
+        Action::HoldBurst,
     ];
 
     pub fn label(self) -> &'static str {
@@ -145,7 +151,14 @@ impl Action {
             Action::NextTheme => "Next Style (off, Dance, House, Pop...)",
             Action::Disintegrate => "Dancer bursts into particles (and re-forms)",
             Action::CycleEcho => "Echo trails: auto / on / off",
+            Action::HoldEcho => "Echo trails while held",
+            Action::HoldBurst => "Dancer bursts while held, re-forms on release",
         }
+    }
+
+    /// A hold action: on while its key or pad is down, off on release.
+    pub fn is_hold(self) -> bool {
+        matches!(self, Action::HoldEcho | Action::HoldBurst)
     }
 
     /// The Look slot (1..=8) this action recalls, if it is one of `Look1..8`.
@@ -204,6 +217,8 @@ impl Action {
             Action::ToggleTicker => "W",
             Action::Disintegrate => "P",
             Action::CycleEcho => "E",
+            // Unbound: hold effects are for pads; bind a key on the Keys page.
+            Action::HoldEcho | Action::HoldBurst => "",
             // Unbound: sixteen default keys would collide with the rest.
             Action::Look1
             | Action::Look2

@@ -3578,6 +3578,7 @@ fn keys_tab(
                 Action::NextStyle,
                 Action::CycleCanon,
                 Action::Disintegrate,
+                Action::HoldBurst,
             ],
         ),
         (
@@ -3594,6 +3595,7 @@ fn keys_tab(
             &[
                 Action::CycleFx,
                 Action::CycleEcho,
+                Action::HoldEcho,
                 Action::Blackout,
                 Action::Fullscreen,
                 Action::LeaveFullscreen,

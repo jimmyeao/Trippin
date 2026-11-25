@@ -670,6 +670,12 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   <dump-feed.jsonl> unity_<x>` (it also deletes stills of removed shows).
 - The pointer over the visuals is hidden while fullscreen (synced in
   `about_to_wait`); the panel/editor windows keep theirs.
+- **Hold actions** (`Action::is_hold`: HoldEcho, HoldBurst) act on the
+  press *and* the release: MIDI now passes note-offs (`MidiNote(note, false)`,
+  `App::midi_release`), the visuals and panel windows pass key releases
+  (`App::key_release`), both as `Msg::Release`. Every other action still
+  ignores releases. A press with no release (remote, OSC) lets go after 16
+  beats (`Burst::MAX_HOLD`, `HOLD_ECHO_BEATS`).
 - **MIDI** (`midi.rs`): midir's callback thread posts `AppEvent::MidiNote`
   through an `EventLoopProxy` — the event loop type is
   `EventLoop<AppEvent>`, so `ApplicationHandler<AppEvent>::user_event`

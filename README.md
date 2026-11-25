@@ -196,6 +196,7 @@ Default keys (all rebindable in the panel):
 | J | record the whole set: start / stop |
 | F1 | show / hide the control panel |
 | Esc | leave fullscreen (it never quits; close the window to quit) |
+| (unbound) | **hold** effects, best on a MIDI pad: echo trails while held; the dancer (and logo) burst out while held and re-form when you let go |
 | (unbound) | Look 1 to 8: recall the saved Look on that slot (bind keys or pads on the Keys page) |
 
 **MIDI controllers:** every action above can also sit on a MIDI pad or key.

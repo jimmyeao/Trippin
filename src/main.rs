@@ -77,6 +77,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// through every cue path: it only lives inside a show, and
 /// `apply_playhead` resets it on play / seek / stop.
 static STROBE: AtomicBool = AtomicBool::new(false);
+/// Echo (hold) is down, and for how long (milli-beats; a lost release lets
+/// go after 16 beats).
+static HOLD_ECHO: AtomicBool = AtomicBool::new(false);
+static HOLD_ECHO_BEATS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 /// Whether the visuals window is fullscreen. The event thread owns the
 /// window and publishes this every `about_to_wait`; the render thread copies
@@ -175,7 +179,8 @@ struct Shared {
 /// Keys page can capture it for MIDI-learn. Remote commands (the iOS app's
 /// WebSocket clients, OSC controllers) arrive the same way.
 enum AppEvent {
-    MidiNote(u8),
+    /// A MIDI note: number, and true for note-on (false = the release).
+    MidiNote(u8, bool),
     Remote(remote::RemoteCmd),
 }
 
@@ -183,6 +188,8 @@ enum AppEvent {
 enum Msg {
     Resize(u32, u32),
     Act(Action),
+    /// A hold action's key or pad came up.
+    Release(Action),
     GoToScene(usize),
     /// Queue a scene as the next cut ("play next" — panel right-click).
     QueueNext(usize),
@@ -793,6 +800,9 @@ fn render_loop(
                     dancer.pin(i);
                     dancer.showing = true;
                 }
+                Msg::Release(Action::HoldEcho) => HOLD_ECHO.store(false, Ordering::Relaxed),
+                Msg::Release(Action::HoldBurst) => dancer.burst.release(),
+                Msg::Release(_) => {}
                 Msg::Act(a) => apply_render(
                     &mut r,
                     &mut dir,
@@ -1614,7 +1624,17 @@ fn render_loop(
         let echo_ok = !r.scene_feedback(dir.scene)
             && !crate::ai::scene_meta(r.scene_name(dir.scene)).flight;
         // A timeline show's look is the show's: Auto stays out of it.
-        let echo_mode = if player.is_some() && s.echo == Tristate::Auto { Tristate::Off } else { s.echo };
+        let mut echo_mode = if player.is_some() && s.echo == Tristate::Auto { Tristate::Off } else { s.echo };
+        // Echo (hold): on while the key/pad is down; a hold whose release
+        // never comes (remote, OSC) lets go after 16 beats.
+        if HOLD_ECHO.load(Ordering::Relaxed) {
+            let held = HOLD_ECHO_BEATS.fetch_add((dt * f.bpm / 60.0 * 1000.0) as u32, Ordering::Relaxed);
+            if held > 16_000 {
+                HOLD_ECHO.store(false, Ordering::Relaxed);
+            } else {
+                echo_mode = Tristate::On;
+            }
+        }
         let echo_now = echo_fx.tick(dt, echo_mode, s.echo_amt.clamp(0.0, 1.0), echo_ok, f.calm);
         r.set_echo(echo_now);
 
@@ -2085,6 +2105,11 @@ fn apply_render(
         Action::ReloadShaders => r.reload_shaders(true),
         Action::ShowNowPlaying => shared.np_replay.store(true, Ordering::Relaxed),
         Action::Disintegrate => dancer.disintegrate(),
+        Action::HoldBurst => dancer.hold_burst(),
+        Action::HoldEcho => {
+            HOLD_ECHO.store(true, Ordering::Relaxed);
+            HOLD_ECHO_BEATS.store(0, Ordering::Relaxed);
+        }
         Action::CycleEcho => {
             s.echo = match s.echo {
                 Tristate::Auto => Tristate::On,
@@ -2440,6 +2465,29 @@ impl App {
             .and_then(|sh| lock(&sh.settings).midi_action_for(note));
         if let Some(a) = action {
             self.apply(a, event_loop);
+        }
+    }
+
+    /// A pad came up: ends a hold action bound to it (others ignore it).
+    fn midi_release(&mut self, note: u8) {
+        let action = self
+            .shared
+            .as_ref()
+            .and_then(|sh| lock(&sh.settings).midi_action_for(note));
+        if let Some(a) = action.filter(|a| a.is_hold()) {
+            self.send(Msg::Release(a));
+        }
+    }
+
+    /// A key came up: ends a hold action bound to it.
+    fn key_release(&mut self, key: &Key) {
+        let Some(name) = key_name(key) else { return };
+        let action = self
+            .shared
+            .as_ref()
+            .and_then(|sh| lock(&sh.settings).action_for(&name));
+        if let Some(a) = action.filter(|a| a.is_hold()) {
+            self.send(Msg::Release(a));
         }
     }
 
@@ -2922,7 +2970,8 @@ fn remote_line(srv: &remote::Server) -> String {
 impl ApplicationHandler<AppEvent> for App {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
         match event {
-            AppEvent::MidiNote(note) => self.midi_note(event_loop, note),
+            AppEvent::MidiNote(note, true) => self.midi_note(event_loop, note),
+            AppEvent::MidiNote(note, false) => self.midi_release(note),
             AppEvent::Remote(cmd) => self.remote_cmd(event_loop, cmd),
         }
     }
@@ -3252,6 +3301,11 @@ impl ApplicationHandler<AppEvent> for App {
                             self.key(event_loop, &key);
                             return;
                         }
+                    } else if event.state == ElementState::Released {
+                        // Ends a hold action (Echo / Burst while held);
+                        // harmless for every other key.
+                        let key = event.logical_key.clone();
+                        self.key_release(&key);
                     }
                 }
                 _ => {}
@@ -3281,6 +3335,8 @@ impl ApplicationHandler<AppEvent> for App {
             WindowEvent::KeyboardInput { event, .. } => {
                 if event.state == ElementState::Pressed && !event.repeat {
                     self.key(event_loop, &event.logical_key);
+                } else if event.state == ElementState::Released {
+                    self.key_release(&event.logical_key);
                 }
             }
             // The render thread draws continuously; nothing to do here.
@@ -3354,8 +3410,8 @@ impl ApplicationHandler<AppEvent> for App {
                     (false, "off".to_string())
                 } else {
                     let proxy = self.midi_proxy.clone();
-                    match midi::connect(&want, move |note| {
-                        let _ = proxy.send_event(AppEvent::MidiNote(note));
+                    match midi::connect(&want, move |note, on| {
+                        let _ = proxy.send_event(AppEvent::MidiNote(note, on));
                     }) {
                         Ok(m) => {
                             let status = (true, m.name.clone());

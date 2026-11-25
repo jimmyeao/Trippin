@@ -108,6 +108,13 @@ pub struct Burst {
     /// Beats since the burst began; None while she is whole.
     at: Option<f32>,
     pub seed: f32,
+    /// Held (Burst (hold) on a key or pad): she stays out until released.
+    held: bool,
+    /// Beats held so far — a hold that never sees its release (a remote or
+    /// OSC press) lets go after `MAX_HOLD`.
+    held_beats: f32,
+    /// Released: re-form as soon as she is fully out.
+    cut: bool,
 }
 
 impl Burst {
@@ -132,11 +139,47 @@ impl Burst {
         }
     }
 
+    /// The longest a hold lasts without a release (beats).
+    pub const MAX_HOLD: f32 = 16.0;
+
+    /// Burst (hold): out on the press, and she stays out until `release`.
+    pub fn hold(&mut self, seed: f32) {
+        self.trigger(seed);
+        self.held = true;
+        self.held_beats = 0.0;
+        self.cut = false;
+    }
+
+    /// The hold's key or pad came up: re-form now (once fully out).
+    pub fn release(&mut self) {
+        if self.held {
+            self.held = false;
+            self.cut = true;
+        }
+    }
+
     pub fn advance(&mut self, dt: f32, bpm: f32) {
+        let beats = dt * bpm.clamp(60.0, 200.0) / 60.0;
+        if self.held {
+            self.held_beats += beats;
+            if self.held_beats > Self::MAX_HOLD {
+                self.release();
+            }
+        }
         if let Some(t) = self.at.as_mut() {
-            *t += dt * bpm.clamp(60.0, 200.0) / 60.0;
+            // Released and fully out: skip the rest of the hang, then step.
+            if !self.held && self.cut && *t >= Self::RISE && *t < Self::RISE + Self::HOLD {
+                *t = Self::RISE + Self::HOLD;
+                self.cut = false;
+            }
+            *t += beats;
+            if self.held {
+                // Out and hanging: the swirl keeps moving on the flow clock.
+                *t = t.min(Self::RISE + 0.5 * Self::HOLD);
+            }
             if *t >= Self::RISE + Self::HOLD + Self::FALL {
                 self.at = None;
+                self.cut = false;
             }
         }
     }
@@ -407,6 +450,12 @@ impl DancerLayer {
     pub fn disintegrate(&mut self) {
         let seed = self.rand();
         self.burst.trigger(seed);
+    }
+
+    /// Burst (hold): out while the key or pad is down.
+    pub fn hold_burst(&mut self) {
+        let seed = self.rand();
+        self.burst.hold(seed);
     }
 
     fn rand(&mut self) -> f32 {
@@ -804,6 +853,26 @@ mod tests {
         }
         assert_eq!(peak, 1.0);
         assert_eq!(b.level(), 0.0, "8 beats at 120 BPM = 4 s: whole again");
+    }
+
+    /// Held, she stays out however long the hold; released, she re-forms
+    /// straight away; a hold with no release lets go after MAX_HOLD.
+    #[test]
+    fn burst_hold_and_release() {
+        let mut b = Burst::default();
+        b.hold(0.4);
+        b.advance(10.0, 60.0); // 10 beats held
+        assert_eq!(b.level(), 1.0, "still out while held");
+        b.release();
+        b.advance(0.5, 60.0);
+        assert!(b.level() < 1.0, "re-forming right after the release");
+        b.advance(4.0, 60.0);
+        assert_eq!(b.level(), 0.0);
+        let mut c = Burst::default();
+        c.hold(0.4);
+        c.advance(Burst::MAX_HOLD + 1.0, 60.0);
+        c.advance(0.5, 60.0);
+        assert!(c.level() < 1.0, "a lost release lets go");
     }
 
     /// A drop while she is re-forming turns her round from where she is; a
