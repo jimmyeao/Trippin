@@ -380,6 +380,16 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   `character` (robots, androids) automatically (`Renderer::scene_no_dancer`). `@title` is the scene's
   human name in pickers/remotes — the file stem stays the id; without it
   the id is title-cased (`config::titleize`, acronym-aware).
+- **Particle scenes** (`// @particles <count>` in the header, max 400k):
+  the scene also defines `vs_particles` / `fs_particles`; the renderer draws
+  `count` instances of 3 vertices (one triangle round a unit disc) with
+  additive `GLOW_BLEND` over its `fs_main` in the same pass, in the app,
+  thumbnails and snaps (`render::header_particles`, `compile_particles`).
+  Stateless: every position is a function of the instance hash and the
+  clocks. `fs_main` paints the background and fades `prev()` for trails.
+  120k additive dots need ~0.1 per-dot brightness, and thin shells read as
+  solid neon hoops (particle_orbits): spread them. Examples:
+  particle_orbits, particle_nebula, particle_flow (~0.12 ms each at 1080p).
 - **Display names vs ids:** settings, timelines, remote commands and
   `disabled_scenes`/`favourite_scenes` all key on the id — never store or
   match a title. Dancer clips carry `"title"` in `clip.json` the same way

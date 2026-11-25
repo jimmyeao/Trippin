@@ -135,6 +135,34 @@ struct Scene {
     /// The scene reads its last frame (`prev(`): it leaves its own trails,
     /// so the echo effect stays off it.
     feedback: bool,
+    /// `// @particles <count>`: a particle scene. Its `vs_particles` /
+    /// `fs_particles` draw `count` instanced dots (3 vertices each, one
+    /// triangle round the dot) added over its `fs_main` in the same pass.
+    parts: Option<(wgpu::RenderPipeline, u32)>,
+}
+
+/// `// @particles <count>` in the header: how many particles the scene's
+/// `vs_particles` draws (0 = not a particle scene). Capped at 400k.
+pub fn header_particles(body: &str) -> u32 {
+    body.lines()
+        .take(8)
+        .find_map(|l| {
+            let i = l.find("@particles")?;
+            l[i + "@particles".len()..].split_whitespace().next()?.parse::<u32>().ok()
+        })
+        .unwrap_or(0)
+        .min(400_000)
+}
+
+/// Compile a particle scene's instanced pass (`vs_particles`/`fs_particles`,
+/// additive glow) for the scene target.
+pub fn compile_particles(
+    device: &wgpu::Device,
+    common: &str,
+    path: &Path,
+    layout: &wgpu::PipelineLayout,
+) -> Result<wgpu::RenderPipeline> {
+    compile_pipeline_entries(device, common, path, layout, SCENE_FORMAT, Some(GLOW_BLEND), ("vs_particles", "fs_particles"))
 }
 
 /// Parse `// @title <rest of line>` — the display-name header directive.
@@ -1410,11 +1438,13 @@ impl Renderer {
             s.mtime = m;
             // `// @heavy` in the file header gates the scene to stronger GPUs;
             // `@bloom` / `@tonemap` pick its post settings.
+            let mut npart = 0;
             if let Ok(body) = std::fs::read_to_string(&s.path) {
                 (s.heavy, s.bloom, s.tonemap) = header_tags(&body);
                 s.title = header_title(&body);
                 s.no_dancer = header_no_dancer(&body);
                 s.feedback = body.contains("prev(");
+                npart = header_particles(&body);
             }
             match self.compile(&common, &s.path, s.kind) {
                 Ok(p) => {
@@ -1422,6 +1452,19 @@ impl Renderer {
                         println!("reloaded {}", s.name);
                     }
                     s.pipeline = Some(p);
+                    if s.kind == Kind::Scene {
+                        s.parts = if npart > 0 {
+                            match compile_particles(&self.device, &common, &s.path, &self.pipeline_layout) {
+                                Ok(pp) => Some((pp, npart)),
+                                Err(e) => {
+                                    eprintln!("shader {} (particles) failed:\n{e}", s.name);
+                                    None
+                                }
+                            }
+                        } else {
+                            None
+                        };
+                    }
                     // The output tap re-runs present/text into a BGRA target —
                     // keep sibling pipelines at OUT_FORMAT alongside.
                     let (layout, blend) = match s.kind {
@@ -1934,6 +1977,11 @@ impl Renderer {
             if let (Some(pipeline), false) = (scene_pipe, self.transparent) {
                 pass.set_pipeline(pipeline);
                 pass.draw(0..3, 0..1);
+                // Particle scenes: their dots over their own background.
+                if let Some((pp, n)) = self.scenes.get(scene).and_then(|s| s.parts.as_ref()) {
+                    pass.set_pipeline(pp);
+                    pass.draw(0..3, 0..*n);
+                }
             }
             // The accent's newest frame, added under the dancer.
             if let (Some(_), Some(mix)) = (acc, self.accent_mix.pipeline.as_ref()) {
@@ -2234,6 +2282,7 @@ impl Renderer {
     /// controls, so its live tile matches the output).
     pub fn thumbnail(&mut self, scene: usize, w: u32, h: u32, look: [f32; 4]) -> Option<Vec<u8>> {
         let pipeline = self.scenes.get(scene)?.pipeline.clone()?;
+        let parts = self.scenes.get(scene)?.parts.clone();
         let present = self.present.pipeline.clone()?;
         let mut spectrum = [0.35f32; SPECTRUM_BINS];
         for (i, v) in spectrum.iter_mut().enumerate() {
@@ -2347,6 +2396,10 @@ impl Renderer {
             pass.set_pipeline(&pipeline);
             pass.set_bind_group(0, &bgs[0], &[]);
             pass.draw(0..3, 0..1);
+            if let Some((pp, n)) = &parts {
+                pass.set_pipeline(pp);
+                pass.draw(0..3, 0..*n);
+            }
         }
         {
             let view = out.create_view(&Default::default());

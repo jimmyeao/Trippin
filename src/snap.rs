@@ -613,6 +613,19 @@ pub fn run(args: &[String]) -> Result<()> {
                 continue;
             }
         };
+        // Particle scenes (`// @particles N`): their instanced dots too.
+        let npart = render::header_particles(&body);
+        let parts = if npart > 0 {
+            match render::compile_particles(&device, &common, path, &pl) {
+                Ok(p) => Some(p),
+                Err(e) => {
+                    eprintln!("FAIL {name} (particles):\n{e}");
+                    continue;
+                }
+            }
+        } else {
+            None
+        };
         // Clear both feedback targets so scenes start from black.
         {
             let mut enc = device.create_command_encoder(&Default::default());
@@ -717,6 +730,10 @@ pub fn run(args: &[String]) -> Result<()> {
                 pass.set_pipeline(&pipe);
                 pass.set_bind_group(0, &bgs[*cur], &[]);
                 pass.draw(0..3, 0..1);
+                if let Some(pp) = &parts {
+                    pass.set_pipeline(pp);
+                    pass.draw(0..3, 0..npart);
+                }
                 if let Some(a) = &accent_snap {
                     pass.set_pipeline(&a.mix);
                     pass.set_bind_group(0, &a.mix_bgs[acc_cur.get()][*cur], &[]);
