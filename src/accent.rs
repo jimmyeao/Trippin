@@ -1,6 +1,7 @@
 //! Accent layer: Auto sometimes lays a light overlay over the main scene
 //! (after the blendable layers of Imaginando's VS). The overlays are their
-//! own shaders in `shaders/accents/` (embers, streaks, swarm), built to sit
+//! own shaders in `shaders/accents/` (embers, streaks, swarm,
+//! bokeh, shafts, ripples), built to sit
 //! on top of a scene: borrowing regular scenes (comets, helix, orbiters)
 //! read as odd. The renderer gives the accent its own feedback pair and
 //! screen-adds its lights into the scene target under the dancer

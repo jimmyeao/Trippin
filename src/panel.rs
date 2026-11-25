@@ -3158,7 +3158,7 @@ fn dancer_fx_tab(
             }
             ui.add_space(4.0);
             ui.checkbox(&mut s.accent_auto, "Accent layer — Auto adds a light scene on top")
-                .on_hover_text("On some cuts while the track drives, rising embers, gliding light streaks or a swarm of motes play over the main scene. Never in breakdowns or over 3D, Unity, video or flight scenes.");
+                .on_hover_text("On some cuts while the track drives, rising embers, light streaks, a swarm of motes, bokeh, light shafts or ripples play over the main scene. Never in breakdowns or over 3D, Unity, video or flight scenes.");
             ctl_row(ui, "Accent", |ui| {
                 ui.add_enabled(s.accent_auto, egui::Slider::new(&mut s.accent_amt, 0.0..=1.0));
             });
