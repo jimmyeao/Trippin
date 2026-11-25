@@ -1623,7 +1623,8 @@ fn render_loop(
             && !crate::ai::scene_meta(r.scene_name(dir.scene)).flight;
         // A timeline show's look is the show's: Auto stays out of it.
         let echo_mode = if player.is_some() && s.echo == Tristate::Auto { Tristate::Off } else { s.echo };
-        r.set_echo(echo_fx.tick(dt, echo_mode, s.echo_amt.clamp(0.0, 1.0), echo_ok, f.calm));
+        let echo_now = echo_fx.tick(dt, echo_mode, s.echo_amt.clamp(0.0, 1.0), echo_ok, f.calm);
+        r.set_echo(echo_now);
 
         // Tempo changes ease in; position only ever moves forward smoothly.
         flow_bpm += (f.bpm - flow_bpm) * (dt * 1.5).min(1.0);
@@ -1924,6 +1925,7 @@ fn render_loop(
                 // Published by the event thread — it owns the window state.
                 fullscreen: FULLSCREEN.load(Ordering::Relaxed),
                 fx: if s.fx_auto { fx_current } else { s.fx },
+                echo_now,
                 output: r.output_status(),
                 groove: f.groove,
                 calm: f.calm,

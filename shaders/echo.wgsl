@@ -15,13 +15,15 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // The echo drifts outward a touch faster with the slow bass presence
     // (shape, smoothed), and its turn swings direction over eight bars on
     // the smooth clock, never with raw audio.
-    let zoom = 1.0 - (0.004 + 0.008 * u.pres4.x) * k;
-    let turn = 0.0025 * k * sin(TAU * u.flow / 32.0);
+    let zoom = 1.0 - (0.006 + 0.010 * u.pres4.x) * k;
+    let turn = 0.004 * k * sin(TAU * u.flow / 32.0);
     let asp = vec2<f32>(aspect(), 1.0);
     let d = rot(turn) * ((in.uv - 0.5) * asp) * zoom;
     let puv = d / asp + 0.5;
-    // Short trails while the beat drives, long and dreamy in a breakdown.
-    let decay = pow(mix(0.86, 0.93, u.calm), k);
+    // Trails of ~half a second while the beat drives, long and dreamy in a
+    // breakdown. (0.86 per frame faded in a sixth of a second: live, it read
+    // as doing nothing.)
+    let decay = pow(mix(0.92, 0.96, u.calm), k);
     let old = prev(puv) * decay;
     let echo = max(finite(cur.rgb), old);
     return vec4<f32>(mix(finite(cur.rgb), echo, u.misc4.w), cur.a);

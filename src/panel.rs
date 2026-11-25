@@ -219,6 +219,8 @@ pub struct Status {
     pub fullscreen: bool,
     /// The post effect actually on screen (the auto-pilot's pick in auto mode).
     pub fx: Fx,
+    /// The echo amount on screen now (0 = off).
+    pub echo_now: f32,
     /// The palette actually on screen — the mood pick when `palette = "auto"`.
     pub palette_now: String,
     /// External output status line (NDI receiver count / error) — Some while
@@ -3170,7 +3172,13 @@ fn dancer_fx_tab(
                     ],
                 );
             });
-            ui.small("Echo: light trails of the whole frame. Auto runs it through breakdowns and on some cuts (never on flight scenes or ones with their own trails). E cycles it.");
+            ui.small(if st.echo_now > 0.01 {
+                "Echo is on screen now: moving lights and the dancer leave trails."
+            } else if s.echo == Tristate::Auto {
+                "Echo is off right now. Auto runs it through breakdowns and on some cuts (not on flight scenes or ones with their own trails). E cycles it."
+            } else {
+                "Echo: light trails of the whole frame. E cycles auto / on / off."
+            });
             ctl_row(ui, "Echo amount", |ui| {
                 ui.add_enabled(s.echo != Tristate::Off, egui::Slider::new(&mut s.echo_amt, 0.0..=1.0));
             });

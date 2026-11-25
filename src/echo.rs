@@ -29,15 +29,15 @@ impl Echo {
     }
 
     /// Ease toward the wanted amount and return it (0 = off). `scene_ok` is
-    /// false on flight scenes and scenes with their own feedback; `calm` is
-    /// the breakdown state 0..1.
+    /// false on flight scenes and scenes with their own feedback: Auto skips
+    /// those, On does not (On means on: the first build kept it off there
+    /// too, and it "didn't do anything"). `calm` is the breakdown state 0..1.
     pub fn tick(&mut self, dt: f32, mode: Tristate, amount: f32, scene_ok: bool, calm: f32) -> f32 {
-        let on = scene_ok
-            && match mode {
-                Tristate::Off => false,
-                Tristate::On => true,
-                Tristate::Auto => self.picked || calm > 0.6,
-            };
+        let on = match mode {
+            Tristate::Off => false,
+            Tristate::On => true,
+            Tristate::Auto => scene_ok && (self.picked || calm > 0.6),
+        };
         let target = if on { amount } else { 0.0 };
         self.amt += (target - self.amt) * (dt * 1.5).min(1.0);
         if !on && self.amt < 0.004 {
@@ -82,5 +82,7 @@ mod tests {
             },
             0.0
         );
+        let mut on = Echo::default();
+        assert!(on.tick(1.0, Tristate::On, 0.8, false, 0.0) > 0.79, "On means on, even on a flight scene");
     }
 }
