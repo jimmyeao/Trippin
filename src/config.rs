@@ -53,10 +53,12 @@ pub enum Action {
     NextTheme,
     /// Burst the dancer into particles; she re-forms over two bars.
     Disintegrate,
+    /// Echo trails: auto -> on -> off.
+    CycleEcho,
 }
 
 impl Action {
-    pub const ALL: [Action; 40] = [
+    pub const ALL: [Action; 41] = [
         Action::NextScene,
         Action::PrevScene,
         Action::ModeAuto,
@@ -97,6 +99,7 @@ impl Action {
         Action::Look8,
         Action::NextTheme,
         Action::Disintegrate,
+        Action::CycleEcho,
     ];
 
     pub fn label(self) -> &'static str {
@@ -141,6 +144,7 @@ impl Action {
             Action::Look8 => "Look 8 (the saved Look on slot 8)",
             Action::NextTheme => "Next Style (off, Dance, House, Pop...)",
             Action::Disintegrate => "Dancer bursts into particles (and re-forms)",
+            Action::CycleEcho => "Echo trails: auto / on / off",
         }
     }
 
@@ -199,6 +203,7 @@ impl Action {
             Action::ToggleName => "Y",
             Action::ToggleTicker => "W",
             Action::Disintegrate => "P",
+            Action::CycleEcho => "E",
             // Unbound: sixteen default keys would collide with the rest.
             Action::Look1
             | Action::Look2
@@ -417,6 +422,11 @@ pub struct Settings {
     pub accent_auto: bool,
     /// How strongly the accent layer adds in, 0..1.
     pub accent_amt: f32,
+    /// Echo post effect (light trails of the whole frame, `echo.rs`): Auto
+    /// runs it through breakdowns and on some cuts.
+    pub echo: Tristate,
+    /// Echo strength 0..1.
+    pub echo_amt: f32,
     /// Raymarched `// @heavy` scenes: Auto follows the detected GPU tier.
     pub heavy_scenes: Tristate,
     /// 2D (non-`@heavy`) scenes in rotation — off leaves only the 3D ones.
@@ -581,6 +591,8 @@ impl Default for Settings {
             fx_amt: 1.0,
             accent_auto: true,
             accent_amt: 0.6,
+            echo: Tristate::Auto,
+            echo_amt: 0.8,
             heavy_scenes: Tristate::Auto,
             flat_scenes: true,
             breakdown_mode: true,

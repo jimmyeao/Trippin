@@ -3158,6 +3158,22 @@ fn dancer_fx_tab(
             ctl_row(ui, "Accent", |ui| {
                 ui.add_enabled(s.accent_auto, egui::Slider::new(&mut s.accent_amt, 0.0..=1.0));
             });
+            ui.add_space(4.0);
+            ctl_row(ui, "Echo", |ui| {
+                segmented(
+                    ui,
+                    &mut s.echo,
+                    &[
+                        (Tristate::Auto, "auto"),
+                        (Tristate::On, "on"),
+                        (Tristate::Off, "off"),
+                    ],
+                );
+            });
+            ui.small("Echo: light trails of the whole frame. Auto runs it through breakdowns and on some cuts (never on flight scenes or ones with their own trails). E cycles it.");
+            ctl_row(ui, "Echo amount", |ui| {
+                ui.add_enabled(s.echo != Tristate::Off, egui::Slider::new(&mut s.echo_amt, 0.0..=1.0));
+            });
         });
         r2.response.rect.height()
     };
@@ -3567,6 +3583,7 @@ fn keys_tab(
             "output",
             &[
                 Action::CycleFx,
+                Action::CycleEcho,
                 Action::Blackout,
                 Action::Fullscreen,
                 Action::LeaveFullscreen,

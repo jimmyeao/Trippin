@@ -187,6 +187,7 @@ Default keys (all rebindable in the panel):
 | Space | mark this beat as the downbeat |
 | [ / ] | latency −/+ 5 ms |
 | X | cycle the post effect (off → mirrors → kaleido) |
+| E | echo trails: auto → on → off |
 | F5 | reload shaders |
 | T | timeline play / pause |
 | G | timeline record on / off |
@@ -621,6 +622,16 @@ the scene is bright, so it never washes a bright scene out. It fades away in
 breakdowns, and never plays over 3D (`@heavy`), Unity, video or flight scenes,
 in Manual mode or during timeline shows. The **Accent** slider sets how
 strongly it adds in. Preview one with `--snap <scene> --snap-accent orbiters`.
+
+**Echo** (Dancer & FX tab, or `E`): light trails of the whole frame. Each
+frame is blended with its own last echo, which drifts outward and turns
+slowly (the turn swings direction every eight bars), so the dancer's arms and
+moving lights leave trails that follow the motion. It keeps the brighter of
+the two, so it can't build up or blow out. Trails are short while the beat
+drives and long in breakdowns. **Auto** runs it through breakdowns and on
+about a third of the cuts; it stays off flight scenes and scenes that leave
+their own trails. It combines with the mirror and kaleido effects. Preview
+with `--snap <scene> --snap-echo 0.8`.
 
 ## Lights: WLED and Philips Hue
 

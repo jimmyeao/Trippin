@@ -29,6 +29,7 @@
 
 mod accent;
 mod ai;
+mod echo;
 mod audio;
 mod beats;
 mod engine;
@@ -711,6 +712,7 @@ fn render_loop(
     let mut fx_current = lock(&shared.settings).fx;
     // Accent layer: a light scene the auto-pilot sometimes adds on top.
     let mut accent_layer = accent::Accent::default();
+    let mut echo_fx = echo::Echo::default();
     let accent_pool: Vec<usize> = {
         let names = r.scene_names();
         accent::POOL
@@ -1613,6 +1615,15 @@ fn render_loop(
             accent_layer.on_cut(dir.scene, &pool, base_ok, f.calm < 0.3, roll, pick);
         }
         r.set_accent(accent_layer.tick(dt, s.accent_amt.clamp(0.0, 1.0)));
+        // Echo trails: Auto rolls on each cut and holds through breakdowns.
+        if ev.cut {
+            echo_fx.on_cut(dir.rand());
+        }
+        let echo_ok = !r.scene_feedback(dir.scene)
+            && !crate::ai::scene_meta(r.scene_name(dir.scene)).flight;
+        // A timeline show's look is the show's: Auto stays out of it.
+        let echo_mode = if player.is_some() && s.echo == Tristate::Auto { Tristate::Off } else { s.echo };
+        r.set_echo(echo_fx.tick(dt, echo_mode, s.echo_amt.clamp(0.0, 1.0), echo_ok, f.calm));
 
         // Tempo changes ease in; position only ever moves forward smoothly.
         flow_bpm += (f.bpm - flow_bpm) * (dt * 1.5).min(1.0);
@@ -2053,6 +2064,13 @@ fn apply_render(
         Action::ReloadShaders => r.reload_shaders(true),
         Action::ShowNowPlaying => shared.np_replay.store(true, Ordering::Relaxed),
         Action::Disintegrate => dancer.disintegrate(),
+        Action::CycleEcho => {
+            s.echo = match s.echo {
+                Tristate::Auto => Tristate::On,
+                Tristate::On => Tristate::Off,
+                Tristate::Off => Tristate::Auto,
+            }
+        }
         // Looks are recalled on the event thread (App::apply); never sent here.
         Action::Look1
         | Action::Look2
@@ -3457,6 +3475,7 @@ fn check_shaders() -> Result<()> {
     paths.push(dir.join("text.wgsl"));
     paths.push(dir.join("overlay.wgsl"));
     paths.push(dir.join("accent.wgsl"));
+    paths.push(dir.join("echo.wgsl"));
     let mut bad = 0;
     for p in &paths {
         let body = std::fs::read_to_string(p)?;

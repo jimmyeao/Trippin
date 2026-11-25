@@ -15,7 +15,8 @@
 //! <0..1>` (hold the dancer's Disintegrate at that level) or `--snap-burst-at
 //! <s>` (set one off at that time, for `--snap-at` sequences),
 //! `--snap-accent <scene>` (that scene as the accent layer over each one,
-//! at `--snap-accent-amt`, default 0.6).
+//! at `--snap-accent-amt`, default 0.6), `--snap-echo <0..1>` (the echo
+//! post effect at that amount).
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -457,6 +458,37 @@ pub fn run(args: &[String]) -> Result<()> {
     };
     let acc_cur = std::cell::Cell::new(0usize);
 
+    // `--snap-echo <amount>`: the echo post effect, as the app runs it — its
+    // own feedback pair; present reads the echo.
+    struct EchoSnap {
+        pipeline: wgpu::RenderPipeline,
+        targets: [wgpu::Texture; 2],
+        bgs: [wgpu::BindGroup; 2],
+        pass_bgs: [[wgpu::BindGroup; 2]; 2],
+        amt: f32,
+    }
+    let echo_snap: Option<EchoSnap> = match arg(args, "--snap-echo").and_then(|s| s.parse::<f32>().ok()) {
+        None => None,
+        Some(amt) => {
+            let pipeline = render::compile_pipeline(&device, &common, &dir.join("echo.wgsl"), &pl, SCENE_FORMAT, None)
+                .map_err(|e| anyhow!("echo: {e}"))?;
+            let etargets = Renderer::make_targets(&device, w, h);
+            let res = FrameRes {
+                pal: &pal_view,
+                noise3: &statics.noise3_view,
+                blue: &statics.blue_view,
+                repeat: &statics.repeat,
+                bloom: bloom.view(),
+                ext: &statics.ext_view,
+                vid: &statics.vid_view,
+            };
+            let bgs = Renderer::make_bind_groups(&device, &layout, &ubuf, &sampler, &etargets, &res);
+            let pass_bgs = Renderer::make_mix_bind_groups(&device, &layout, &ubuf, &sampler, &etargets, targets_main, &res);
+            Some(EchoSnap { pipeline, targets: etargets, bgs, pass_bgs, amt })
+        }
+    };
+    let echo_cur = std::cell::Cell::new(0usize);
+
     // Built in plus the effects packs' scenes (packs.rs).
     let mut scenes: Vec<PathBuf> = crate::packs::scene_files_all(&dir);
     if which != "all" {
@@ -538,6 +570,9 @@ pub fn run(args: &[String]) -> Result<()> {
             }
             if let Some(a) = &accent_snap {
                 u.misc4[2] = a.amt;
+            }
+            if let Some(e) = &echo_snap {
+                u.misc4[3] = e.amt;
             }
             queue.write_buffer(&ubuf, 0, bytemuck::bytes_of(&u));
             let next = 1 - *cur;
@@ -636,6 +671,30 @@ pub fn run(args: &[String]) -> Result<()> {
             if bloom_amt > 0.0 {
                 bloom.encode(&device, &mut enc, &view);
             }
+            let mut present_bg = &bgs[next];
+            if let Some(e) = &echo_snap {
+                let en = 1 - echo_cur.get();
+                let v = e.targets[en].create_view(&Default::default());
+                let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("echo"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &v,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    ..Default::default()
+                });
+                pass.set_pipeline(&e.pipeline);
+                pass.set_bind_group(0, &e.pass_bgs[next][echo_cur.get()], &[]);
+                pass.draw(0..3, 0..1);
+                drop(pass);
+                echo_cur.set(en);
+                present_bg = &e.bgs[en];
+            }
             {
                 let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("present"),
@@ -651,7 +710,7 @@ pub fn run(args: &[String]) -> Result<()> {
                     ..Default::default()
                 });
                 pass.set_pipeline(&present);
-                pass.set_bind_group(0, &bgs[next], &[]);
+                pass.set_bind_group(0, present_bg, &[]);
                 pass.draw(0..3, 0..1);
             }
             queue.submit([enc.finish()]);

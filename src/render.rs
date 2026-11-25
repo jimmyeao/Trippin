@@ -101,6 +101,8 @@ enum Kind {
     Particles,
     /// Adds the accent layer's frame into the scene target (accent.wgsl).
     AccentMix,
+    /// The echo post effect's feedback pass (echo.wgsl).
+    Echo,
     /// Text overlay — drawn over the surface in the present pass.
     Text,
     /// Stream overlays (now playing, branding, ticker) — same pass.
@@ -127,6 +129,9 @@ struct Scene {
     /// `// @no-dancer` in the header: the scene draws its own people (a
     /// crowd), so the dancer overlay stays off it.
     no_dancer: bool,
+    /// The scene reads its last frame (`prev(`): it leaves its own trails,
+    /// so the echo effect stays off it.
+    feedback: bool,
 }
 
 /// Parse `// @title <rest of line>` — the display-name header directive.
@@ -357,6 +362,19 @@ pub struct Renderer {
     accent: Option<(usize, f32)>,
     /// The accent scene whose frames are in `acc_targets` (cleared on change).
     acc_scene: Option<usize>,
+    /// Echo post effect: its own feedback pair. `echo_bgs[i]` samples
+    /// `echo_targets[i]` (present reads it when echo is on);
+    /// `echo_pass_bgs[main][echo]` binds that main target as ext_tex and that
+    /// echo target as prev_tex for the echo pass.
+    echo_pass: Scene,
+    echo_targets: [wgpu::Texture; 2],
+    echo_bgs: [wgpu::BindGroup; 2],
+    echo_pass_bgs: [[wgpu::BindGroup; 2]; 2],
+    echo_cur: usize,
+    /// Echo amount 0..1 wanted this frame (`set_echo`).
+    echo: f32,
+    /// Echo ran last frame (its pair holds a live echo).
+    echo_live: bool,
     dancer_layout: wgpu::BindGroupLayout,
     dancer_pipeline_layout: wgpu::PipelineLayout,
     dancer_buf: wgpu::Buffer,
@@ -778,8 +796,26 @@ impl Renderer {
             },
         );
 
+        let echo_targets = Self::make_targets(&device, tw, th);
+        let (echo_bgs, echo_pass_bgs) = {
+            let res = FrameRes {
+                pal: &pal_view,
+                noise3: &statics.noise3_view,
+                blue: &statics.blue_view,
+                repeat: &statics.repeat,
+                bloom: bloom.view(),
+                ext: &statics.ext_view,
+                vid: &statics.vid_view,
+            };
+            (
+                Self::make_bind_groups(&device, &layout, &uniform_buf, &sampler, &echo_targets, &res),
+                Self::make_mix_bind_groups(&device, &layout, &uniform_buf, &sampler, &echo_targets, &targets, &res),
+            )
+        };
+
         let shader_dir = find_shader_dir()?;
         println!("Shaders: {}", shader_dir.display());
+        let echo_path = shader_dir.join("echo.wgsl");
         let accent_path = shader_dir.join("accent.wgsl");
         let present_path = shader_dir.join("present.wgsl");
         let dancer_path = shader_dir.join("dancer.wgsl");
@@ -834,6 +870,18 @@ impl Renderer {
             acc_cur: 0,
             accent: None,
             acc_scene: None,
+            echo_pass: Scene {
+                kind: Kind::Echo,
+                name: "echo".into(),
+                path: echo_path,
+                ..Default::default()
+            },
+            echo_targets,
+            echo_bgs,
+            echo_pass_bgs,
+            echo_cur: 0,
+            echo: 0.0,
+            echo_live: false,
             dancer_layout,
             dancer_pipeline_layout,
             dancer_buf,
@@ -1035,8 +1083,33 @@ impl Renderer {
             &res,
         );
         self.acc_scene = None;
+        self.echo_targets = Self::make_targets(&self.device, tw, th);
+        self.echo_bgs = Self::make_bind_groups(
+            &self.device,
+            &self.layout,
+            &self.uniform_buf,
+            &self.sampler,
+            &self.echo_targets,
+            &res,
+        );
+        self.echo_pass_bgs = Self::make_mix_bind_groups(
+            &self.device,
+            &self.layout,
+            &self.uniform_buf,
+            &self.sampler,
+            &self.echo_targets,
+            &self.targets,
+            &res,
+        );
+        self.echo_live = false;
         if let Some(o) = self.out.as_mut() {
-            o.rebind(&self.device, &self.layout, &self.sampler, &self.targets, &res);
+            let t = [
+                &self.targets[0],
+                &self.targets[1],
+                &self.echo_targets[0],
+                &self.echo_targets[1],
+            ];
+            o.rebind(&self.device, &self.layout, &self.sampler, t, &res);
         }
     }
 
@@ -1195,6 +1268,16 @@ impl Renderer {
 
     /// The dancer overlay stays off this scene: it has its own figures —
     /// robots and androids (tagged `character`) or a crowd (`@no-dancer`).
+    /// The echo post effect's amount 0..1 (0 = off), from the next frame.
+    pub fn set_echo(&mut self, amt: f32) {
+        self.echo = amt;
+    }
+
+    /// The scene leaves its own trails (reads `prev()`).
+    pub fn scene_feedback(&self, i: usize) -> bool {
+        self.scenes.get(i).is_some_and(|s| s.feedback)
+    }
+
     /// Set (or clear) the accent layer: a scene index and its amount 0..1,
     /// drawn from the next frame (see accent.wgsl).
     pub fn set_accent(&mut self, accent: Option<(usize, f32)>) {
@@ -1252,11 +1335,20 @@ impl Renderer {
         let mut dancer = std::mem::take(&mut self.dancer);
         let mut particles = std::mem::take(&mut self.particles);
         let mut accent_mix = std::mem::take(&mut self.accent_mix);
+        let mut echo_pass = std::mem::take(&mut self.echo_pass);
         let mut text = std::mem::take(&mut self.text);
         let mut overlay = std::mem::take(&mut self.overlay);
         for s in scenes
             .iter_mut()
-            .chain([&mut present, &mut dancer, &mut particles, &mut accent_mix, &mut text, &mut overlay])
+            .chain([
+                &mut present,
+                &mut dancer,
+                &mut particles,
+                &mut accent_mix,
+                &mut echo_pass,
+                &mut text,
+                &mut overlay,
+            ])
         {
             let m = mtime(&s.path);
             if !common_changed && m == s.mtime {
@@ -1269,6 +1361,7 @@ impl Renderer {
                 (s.heavy, s.bloom, s.tonemap) = header_tags(&body);
                 s.title = header_title(&body);
                 s.no_dancer = header_no_dancer(&body);
+                s.feedback = body.contains("prev(");
             }
             match self.compile(&common, &s.path, s.kind) {
                 Ok(p) => {
@@ -1309,6 +1402,7 @@ impl Renderer {
         self.dancer = dancer;
         self.particles = particles;
         self.accent_mix = accent_mix;
+        self.echo_pass = echo_pass;
         self.text = text;
         self.overlay = overlay;
     }
@@ -1328,6 +1422,7 @@ impl Renderer {
         let (format, layout, blend) = match kind {
             Kind::Particles => unreachable!(),
             Kind::AccentMix => (SCENE_FORMAT, &self.pipeline_layout, Some(ADD_BLEND)),
+            Kind::Echo => (SCENE_FORMAT, &self.pipeline_layout, None),
             Kind::Scene => (SCENE_FORMAT, &self.pipeline_layout, None),
             Kind::Present => (self.config.format, &self.pipeline_layout, None),
             Kind::Dancer => (
@@ -1604,6 +1699,8 @@ impl Renderer {
                 && self.scenes.get(i).is_some_and(|s| s.pipeline.is_some())
         });
         uu.misc4[2] = acc.map_or(0.0, |(_, a)| a);
+        let echo_on = self.echo > 0.004 && !self.transparent && self.echo_pass.pipeline.is_some();
+        uu.misc4[3] = if echo_on { self.echo } else { 0.0 };
         if acc.is_none() {
             self.acc_scene = None;
         }
@@ -1786,6 +1883,59 @@ impl Renderer {
             }
         }
 
+        // Echo: this frame max-blended with the last echo into the echo
+        // pair; present then reads the echo. A fresh echo starts from black
+        // (max-blend: that is just this frame).
+        let echo_src = if let (true, Some(ep)) = (echo_on, self.echo_pass.pipeline.as_ref()) {
+            let en = 1 - self.echo_cur;
+            if !self.echo_live {
+                let v = self.echo_targets[self.echo_cur].create_view(&Default::default());
+                enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("echo clear"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &v,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    ..Default::default()
+                });
+            }
+            let v = self.echo_targets[en].create_view(&Default::default());
+            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("echo"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &v,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+            pass.set_pipeline(ep);
+            pass.set_bind_group(0, &self.echo_pass_bgs[self.current][self.echo_cur], &[]);
+            pass.draw(0..3, 0..1);
+            drop(pass);
+            self.echo_cur = en;
+            self.echo_live = true;
+            Some(en)
+        } else {
+            self.echo_live = false;
+            None
+        };
+        // What present reads: the echo when it ran, else the scene target.
+        let present_bg = match echo_src {
+            Some(e) => &self.echo_bgs[e],
+            None => &self.bind_groups[self.current],
+        };
+        let out_src = echo_src.map_or(self.current, |e| 2 + e);
+
         let view = frame.texture.create_view(&Default::default());
         {
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1802,13 +1952,13 @@ impl Renderer {
                 ..Default::default()
             });
             pass.set_pipeline(self.present.pipeline.as_ref().unwrap());
-            pass.set_bind_group(0, &self.bind_groups[self.current], &[]);
+            pass.set_bind_group(0, present_bg, &[]);
             pass.draw(0..3, 0..1);
             if let (Some(_), Some(op), Some(obg)) =
                 (overlay, self.overlay.pipeline.as_ref(), self.ov_bg.as_ref())
             {
                 pass.set_pipeline(op);
-                pass.set_bind_group(0, &self.bind_groups[self.current], &[]);
+                pass.set_bind_group(0, present_bg, &[]);
                 pass.set_bind_group(1, obg, &[]);
                 pass.draw(0..3, 0..1);
             }
@@ -1817,7 +1967,7 @@ impl Renderer {
                 (text, self.text.pipeline.as_ref(), self.text_bg.as_ref())
             {
                 pass.set_pipeline(text);
-                pass.set_bind_group(0, &self.bind_groups[self.current], &[]);
+                pass.set_bind_group(0, present_bg, &[]);
                 pass.set_bind_group(1, text_bg, &[]);
                 pass.draw(0..3, 0..1);
             }
@@ -1852,13 +2002,13 @@ impl Renderer {
                     ..Default::default()
                 });
                 pass.set_pipeline(pipe);
-                pass.set_bind_group(0, &o.bind_groups[self.current], &[]);
+                pass.set_bind_group(0, &o.bind_groups[out_src], &[]);
                 pass.draw(0..3, 0..1);
                 if let (Some(_), Some(op), Some(obg)) =
                     (overlay, self.out_overlay.as_ref(), self.ov_bg.as_ref())
                 {
                     pass.set_pipeline(op);
-                    pass.set_bind_group(0, &o.bind_groups[self.current], &[]);
+                    pass.set_bind_group(0, &o.bind_groups[out_src], &[]);
                     pass.set_bind_group(1, obg, &[]);
                     pass.draw(0..3, 0..1);
                 }
@@ -1866,7 +2016,7 @@ impl Renderer {
                     (text, self.out_text.as_ref(), self.text_bg.as_ref())
                 {
                     pass.set_pipeline(tp);
-                    pass.set_bind_group(0, &o.bind_groups[self.current], &[]);
+                    pass.set_bind_group(0, &o.bind_groups[out_src], &[]);
                     pass.set_bind_group(1, tbg, &[]);
                     pass.draw(0..3, 0..1);
                 }
@@ -1937,7 +2087,12 @@ impl Renderer {
             &self.device,
             &self.layout,
             &self.sampler,
-            &self.targets,
+            [
+                &self.targets[0],
+                &self.targets[1],
+                &self.echo_targets[0],
+                &self.echo_targets[1],
+            ],
             &FrameRes {
                 pal: &self.pal_view,
                 noise3: &self.statics.noise3_view,

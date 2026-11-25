@@ -272,14 +272,21 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   `--snap-burst-at <s>` render it; 0.02 ms at 1080p.
 - **Accent layer** (`accent.rs`, `Renderer::set_accent`, accent.wgsl): a
   second scene in its own feedback pair (`acc_targets`), added into the main
-  target before the dancer. The mix pass borrows `ext_tex` (binding 8) for
-  the accent and reads the base through `prev()` (`make_mix_bind_groups`,
-  `[accent][main]`), which is only safe because accents never run over
-  `unity_*` shows. It is screen-like (`1 - base luminance`, read wide so the
+  target before the dancer. The mix pass binds the accent as `ext_tex`
+  (binding 8) and the base's last frame as `prev_tex` in bind groups of its
+  own (`make_mix_bind_groups`, `[accent][main]`); the scene pass keeps the
+  real Unity frame. It is screen-like (`1 - base luminance`, read wide so the
   accent's own lights can't dim themselves): added flat, it washed plasma out
   and vanished into glacier_cave. Pool = cheap lights on black only (comets,
   helix, orbiters, <= 0.22 ms); centred objects (polar_bloom, eq_round)
   looked pasted on as stickers.
+- **Echo** (`echo.rs`, echo.wgsl, `Renderer::set_echo`): whole-frame
+  feedback in its own pair (`echo_targets`), after scene + accent + dancer;
+  present (and the output tap, whose `bind_groups` are now
+  `[main0, main1, echo0, echo1]`) reads the echo when it ran. Max-blend,
+  not additive, so it can't accumulate. Per-frame zoom/turn/decay are
+  scaled by `u.dt`. Off on flight scenes and on scenes whose source reads
+  `prev(` (`Scene::feedback`): trails of trails smear.
 - **Dancer looks** are `dancer::STYLES` (shadow, neon, strobe, comic, wire); the
   index is stored in settings, timeline cues, AI plans and the iOS remote, so
   only ever append. `--snap-dancer <look>` renders one over a scene, which is how
