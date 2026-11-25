@@ -412,6 +412,11 @@ pub struct Settings {
     pub fx_auto: bool,
     /// Post effect strength 0..1 — blends the transform in `present.wgsl`.
     pub fx_amt: f32,
+    /// Auto lays a light accent scene (comets, orbiters...) over some
+    /// scenes while the track drives (`accent.rs`).
+    pub accent_auto: bool,
+    /// How strongly the accent layer adds in, 0..1.
+    pub accent_amt: f32,
     /// Raymarched `// @heavy` scenes: Auto follows the detected GPU tier.
     pub heavy_scenes: Tristate,
     /// 2D (non-`@heavy`) scenes in rotation — off leaves only the 3D ones.
@@ -574,6 +579,8 @@ impl Default for Settings {
             fx: Fx::Off,
             fx_auto: false,
             fx_amt: 1.0,
+            accent_auto: true,
+            accent_amt: 0.6,
             heavy_scenes: Tristate::Auto,
             flat_scenes: true,
             breakdown_mode: true,

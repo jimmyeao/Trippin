@@ -99,6 +99,8 @@ enum Kind {
     /// The dancer's Disintegrate particles: dancer.wgsl's `vs_particles` /
     /// `fs_particles`, instanced quads added into the scene target.
     Particles,
+    /// Adds the accent layer's frame into the scene target (accent.wgsl).
+    AccentMix,
     /// Text overlay — drawn over the surface in the present pass.
     Text,
     /// Stream overlays (now playing, branding, ticker) — same pass.
@@ -227,6 +229,20 @@ pub const GLOW_BLEND: wgpu::BlendState = wgpu::BlendState {
     alpha: wgpu::BlendComponent::OVER,
 };
 
+/// Plain additive colour, destination alpha kept: the accent layer mix.
+pub const ADD_BLEND: wgpu::BlendState = wgpu::BlendState {
+    color: wgpu::BlendComponent {
+        src_factor: wgpu::BlendFactor::One,
+        dst_factor: wgpu::BlendFactor::One,
+        operation: wgpu::BlendOperation::Add,
+    },
+    alpha: wgpu::BlendComponent {
+        src_factor: wgpu::BlendFactor::Zero,
+        dst_factor: wgpu::BlendFactor::One,
+        operation: wgpu::BlendOperation::Add,
+    },
+};
+
 /// Particles per dancer slot (`P_W * P_H` in dancer.wgsl).
 pub const BURST_PARTICLES: u32 = 160 * 320;
 
@@ -330,6 +346,17 @@ pub struct Renderer {
     present: Scene,
     dancer: Scene,
     particles: Scene,
+    /// Accent layer: a second, light scene with its own feedback pair,
+    /// added into the main target before the dancer (`set_accent`).
+    accent_mix: Scene,
+    acc_targets: [wgpu::Texture; 2],
+    acc_bind_groups: [wgpu::BindGroup; 2],
+    acc_mix_bind_groups: [[wgpu::BindGroup; 2]; 2],
+    acc_cur: usize,
+    /// The accent scene and its amount wanted this frame.
+    accent: Option<(usize, f32)>,
+    /// The accent scene whose frames are in `acc_targets` (cleared on change).
+    acc_scene: Option<usize>,
     dancer_layout: wgpu::BindGroupLayout,
     dancer_pipeline_layout: wgpu::PipelineLayout,
     dancer_buf: wgpu::Buffer,
@@ -715,8 +742,45 @@ impl Renderer {
             },
         );
 
+        let acc_targets = Self::make_targets(&device, tw, th);
+        let acc_bind_groups = Self::make_bind_groups(
+            &device,
+            &layout,
+            &uniform_buf,
+            &sampler,
+            &acc_targets,
+            &FrameRes {
+                pal: &pal_view,
+                noise3: &statics.noise3_view,
+                blue: &statics.blue_view,
+                repeat: &statics.repeat,
+                bloom: bloom.view(),
+                ext: &statics.ext_view,
+                vid: &statics.vid_view,
+            },
+        );
+
+        let acc_mix_bind_groups = Self::make_mix_bind_groups(
+            &device,
+            &layout,
+            &uniform_buf,
+            &sampler,
+            &targets,
+            &acc_targets,
+            &FrameRes {
+                pal: &pal_view,
+                noise3: &statics.noise3_view,
+                blue: &statics.blue_view,
+                repeat: &statics.repeat,
+                bloom: bloom.view(),
+                ext: &statics.ext_view,
+                vid: &statics.vid_view,
+            },
+        );
+
         let shader_dir = find_shader_dir()?;
         println!("Shaders: {}", shader_dir.display());
+        let accent_path = shader_dir.join("accent.wgsl");
         let present_path = shader_dir.join("present.wgsl");
         let dancer_path = shader_dir.join("dancer.wgsl");
         let text_path = shader_dir.join("text.wgsl");
@@ -758,6 +822,18 @@ impl Renderer {
                 path: dancer_path,
                 ..Default::default()
             },
+            accent_mix: Scene {
+                kind: Kind::AccentMix,
+                name: "accent".into(),
+                path: accent_path,
+                ..Default::default()
+            },
+            acc_targets,
+            acc_bind_groups,
+            acc_mix_bind_groups,
+            acc_cur: 0,
+            accent: None,
+            acc_scene: None,
             dancer_layout,
             dancer_pipeline_layout,
             dancer_buf,
@@ -880,6 +956,34 @@ impl Renderer {
         [make(&targets[0]), make(&targets[1])]
     }
 
+    /// The accent mix pass's bind groups, `[accent][main]`: prev_tex is that
+    /// main target (the base's last frame) and ext_tex that accent target
+    /// (accent.wgsl).
+    pub fn make_mix_bind_groups(
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+        uniform_buf: &wgpu::Buffer,
+        sampler: &wgpu::Sampler,
+        targets: &[wgpu::Texture; 2],
+        acc_targets: &[wgpu::Texture; 2],
+        res: &FrameRes,
+    ) -> [[wgpu::BindGroup; 2]; 2] {
+        let make = |t: &wgpu::Texture| {
+            let ext = t.create_view(&Default::default());
+            let r = FrameRes {
+                pal: res.pal,
+                noise3: res.noise3,
+                blue: res.blue,
+                repeat: res.repeat,
+                bloom: res.bloom,
+                ext: &ext,
+                vid: res.vid,
+            };
+            Self::make_bind_groups(device, layout, uniform_buf, sampler, targets, &r)
+        };
+        [make(&acc_targets[0]), make(&acc_targets[1])]
+    }
+
     pub fn resize(&mut self, w: u32, h: u32) {
         if w == 0 || h == 0 {
             return;
@@ -912,6 +1016,25 @@ impl Renderer {
             &self.targets,
             &res,
         );
+        self.acc_targets = Self::make_targets(&self.device, tw, th);
+        self.acc_bind_groups = Self::make_bind_groups(
+            &self.device,
+            &self.layout,
+            &self.uniform_buf,
+            &self.sampler,
+            &self.acc_targets,
+            &res,
+        );
+        self.acc_mix_bind_groups = Self::make_mix_bind_groups(
+            &self.device,
+            &self.layout,
+            &self.uniform_buf,
+            &self.sampler,
+            &self.targets,
+            &self.acc_targets,
+            &res,
+        );
+        self.acc_scene = None;
         if let Some(o) = self.out.as_mut() {
             o.rebind(&self.device, &self.layout, &self.sampler, &self.targets, &res);
         }
@@ -1072,6 +1195,12 @@ impl Renderer {
 
     /// The dancer overlay stays off this scene: it has its own figures —
     /// robots and androids (tagged `character`) or a crowd (`@no-dancer`).
+    /// Set (or clear) the accent layer: a scene index and its amount 0..1,
+    /// drawn from the next frame (see accent.wgsl).
+    pub fn set_accent(&mut self, accent: Option<(usize, f32)>) {
+        self.accent = accent;
+    }
+
     pub fn scene_no_dancer(&self, i: usize) -> bool {
         self.scenes.get(i).is_some_and(|s| {
             s.no_dancer || crate::styles::catalog().tags.has(&s.name, "character")
@@ -1122,11 +1251,12 @@ impl Renderer {
         let mut present = std::mem::take(&mut self.present);
         let mut dancer = std::mem::take(&mut self.dancer);
         let mut particles = std::mem::take(&mut self.particles);
+        let mut accent_mix = std::mem::take(&mut self.accent_mix);
         let mut text = std::mem::take(&mut self.text);
         let mut overlay = std::mem::take(&mut self.overlay);
         for s in scenes
             .iter_mut()
-            .chain([&mut present, &mut dancer, &mut particles, &mut text, &mut overlay])
+            .chain([&mut present, &mut dancer, &mut particles, &mut accent_mix, &mut text, &mut overlay])
         {
             let m = mtime(&s.path);
             if !common_changed && m == s.mtime {
@@ -1178,6 +1308,7 @@ impl Renderer {
         self.present = present;
         self.dancer = dancer;
         self.particles = particles;
+        self.accent_mix = accent_mix;
         self.text = text;
         self.overlay = overlay;
     }
@@ -1196,6 +1327,7 @@ impl Renderer {
         }
         let (format, layout, blend) = match kind {
             Kind::Particles => unreachable!(),
+            Kind::AccentMix => (SCENE_FORMAT, &self.pipeline_layout, Some(ADD_BLEND)),
             Kind::Scene => (SCENE_FORMAT, &self.pipeline_layout, None),
             Kind::Present => (self.config.format, &self.pipeline_layout, None),
             Kind::Dancer => (
@@ -1464,6 +1596,17 @@ impl Renderer {
         uu.tonemap = tonemap;
         uu.frame = (self.frame % 4096) as f32;
         uu.misc4[0] = if self.transparent { 1.0 } else { 0.0 };
+        // The accent layer to draw this frame: a compiled scene, faded in.
+        let acc = self.accent.filter(|&(i, amt)| {
+            amt > 0.004
+                && !self.transparent
+                && self.accent_mix.pipeline.is_some()
+                && self.scenes.get(i).is_some_and(|s| s.pipeline.is_some())
+        });
+        uu.misc4[2] = acc.map_or(0.0, |(_, a)| a);
+        if acc.is_none() {
+            self.acc_scene = None;
+        }
         let u = &uu;
         self.queue
             .write_buffer(&self.uniform_buf, 0, bytemuck::bytes_of(u));
@@ -1533,6 +1676,55 @@ impl Renderer {
         let next = 1 - prev;
         let mut enc = self.device.create_command_encoder(&Default::default());
 
+        // Accent layer: its scene into its own feedback pair first. A new
+        // accent starts from black (the last one's trails would ghost in).
+        if let Some((ai, _)) = acc {
+            let fresh = self.acc_scene != Some(ai);
+            self.acc_scene = Some(ai);
+            let an = 1 - self.acc_cur;
+            if fresh {
+                let v = self.acc_targets[self.acc_cur].create_view(&Default::default());
+                enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("accent clear"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &v,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    ..Default::default()
+                });
+            }
+            let v = self.acc_targets[an].create_view(&Default::default());
+            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("accent"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &v,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: if fresh {
+                            wgpu::LoadOp::Clear(wgpu::Color::BLACK)
+                        } else {
+                            wgpu::LoadOp::Load
+                        },
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+            if let Some(p) = self.scenes[ai].pipeline.as_ref() {
+                pass.set_pipeline(p);
+                pass.set_bind_group(0, &self.acc_bind_groups[self.acc_cur], &[]);
+                pass.draw(0..3, 0..1);
+            }
+            drop(pass);
+            self.acc_cur = an;
+        }
+
         let scene_pipe = self.scenes.get(scene).and_then(|s| s.pipeline.as_ref());
         // Dancer slots whose Disintegrate particles are out (main, or all
         // three in the canon).
@@ -1564,6 +1756,13 @@ impl Renderer {
             if let (Some(pipeline), false) = (scene_pipe, self.transparent) {
                 pass.set_pipeline(pipeline);
                 pass.draw(0..3, 0..1);
+            }
+            // The accent's newest frame, added under the dancer.
+            if let (Some(_), Some(mix)) = (acc, self.accent_mix.pipeline.as_ref()) {
+                pass.set_pipeline(mix);
+                pass.set_bind_group(0, &self.acc_mix_bind_groups[self.acc_cur][prev], &[]);
+                pass.draw(0..3, 0..1);
+                pass.set_bind_group(0, &self.bind_groups[prev], &[]);
             }
             if let (Some(_), Some(dancer), Some(dancer_bg)) = (
                 dancer,

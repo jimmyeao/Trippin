@@ -27,6 +27,7 @@
 // the default macro recursion limit (128).
 #![recursion_limit = "256"]
 
+mod accent;
 mod ai;
 mod audio;
 mod beats;
@@ -708,6 +709,15 @@ fn render_loop(
     let mut audio_retry = Duration::from_secs(15);
     // The post effect showing now — the auto-pilot's pick when `fx_auto` is on.
     let mut fx_current = lock(&shared.settings).fx;
+    // Accent layer: a light scene the auto-pilot sometimes adds on top.
+    let mut accent_layer = accent::Accent::default();
+    let accent_pool: Vec<usize> = {
+        let names = r.scene_names();
+        accent::POOL
+            .iter()
+            .filter_map(|p| names.iter().position(|n| n == p))
+            .collect()
+    };
 
     // --- Timeline state ---------------------------------------------------
     // Decodes run on throwaway threads; results land in `song_rx` tagged with
@@ -1584,6 +1594,25 @@ fn render_loop(
             let seed = dir.rand();
             fx_current = Fx::random(seed, fx_current);
         }
+        // Accent layer: decided on each cut; fades out in breakdowns, and
+        // is off in Manual, during timeline shows and with the setting off.
+        if !s.accent_auto || s.mode == Mode::Manual || player.is_some() || f.calm > 0.7 {
+            accent_layer.clear();
+        } else if ev.cut {
+            let base = r.scene_name(dir.scene);
+            let base_ok = !r.scene_heavy().get(dir.scene).copied().unwrap_or(true)
+                && !base.starts_with("unity_")
+                && !base.starts_with("video_")
+                && !crate::ai::scene_meta(base).flight;
+            let pool: Vec<usize> = accent_pool
+                .iter()
+                .copied()
+                .filter(|i| allowed.contains(i))
+                .collect();
+            let (roll, pick) = (dir.rand(), dir.rand());
+            accent_layer.on_cut(dir.scene, &pool, base_ok, f.calm < 0.3, roll, pick);
+        }
+        r.set_accent(accent_layer.tick(dt, s.accent_amt.clamp(0.0, 1.0)));
 
         // Tempo changes ease in; position only ever moves forward smoothly.
         flow_bpm += (f.bpm - flow_bpm) * (dt * 1.5).min(1.0);
@@ -3427,6 +3456,7 @@ fn check_shaders() -> Result<()> {
     paths.push(dir.join("dancer.wgsl"));
     paths.push(dir.join("text.wgsl"));
     paths.push(dir.join("overlay.wgsl"));
+    paths.push(dir.join("accent.wgsl"));
     let mut bad = 0;
     for p in &paths {
         let body = std::fs::read_to_string(p)?;

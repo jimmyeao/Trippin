@@ -613,6 +613,15 @@ sits over the plain frame). **Auto** picks a fresh effect on every scene cut
 It's applied in `present.wgsl` from `u.fx`, so it needs no scene support and
 combines with everything (a mirrored dancer in canon is five dancers).
 
+**Accent layer** (Dancer & FX tab, on by default): on some scene cuts while
+the track drives, Auto lays a second, light scene over the main one —
+comets, orbiters or a helix of lights moving through the world. It's
+screen-blended: it shows over the dark parts of the scene and fades where
+the scene is bright, so it never washes a bright scene out. It fades away in
+breakdowns, and never plays over 3D (`@heavy`), Unity, video or flight scenes,
+in Manual mode or during timeline shows. The **Accent** slider sets how
+strongly it adds in. Preview one with `--snap <scene> --snap-accent orbiters`.
+
 ## Lights: WLED and Philips Hue
 
 Settings → **Lights** makes room lights follow the show.

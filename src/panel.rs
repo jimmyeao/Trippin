@@ -3152,6 +3152,12 @@ fn dancer_fx_tab(
             if s.fx_auto {
                 ui.small(format!("On screen now: {}", st.fx.label()));
             }
+            ui.add_space(4.0);
+            ui.checkbox(&mut s.accent_auto, "Accent layer — Auto adds a light scene on top")
+                .on_hover_text("On some cuts while the track drives, comets, orbiters or a spectrum flower play over the main scene. Never in breakdowns or over 3D, Unity, video or flight scenes.");
+            ctl_row(ui, "Accent", |ui| {
+                ui.add_enabled(s.accent_auto, egui::Slider::new(&mut s.accent_amt, 0.0..=1.0));
+            });
         });
         r2.response.rect.height()
     };

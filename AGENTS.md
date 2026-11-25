@@ -270,6 +270,16 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   exactly. Push outward *proportional to the distance from her centre*: a
   fixed-length radial push hollowed the cloud. `--snap-burst <level>` /
   `--snap-burst-at <s>` render it; 0.02 ms at 1080p.
+- **Accent layer** (`accent.rs`, `Renderer::set_accent`, accent.wgsl): a
+  second scene in its own feedback pair (`acc_targets`), added into the main
+  target before the dancer. The mix pass borrows `ext_tex` (binding 8) for
+  the accent and reads the base through `prev()` (`make_mix_bind_groups`,
+  `[accent][main]`), which is only safe because accents never run over
+  `unity_*` shows. It is screen-like (`1 - base luminance`, read wide so the
+  accent's own lights can't dim themselves): added flat, it washed plasma out
+  and vanished into glacier_cave. Pool = cheap lights on black only (comets,
+  helix, orbiters, <= 0.22 ms); centred objects (polar_bloom, eq_round)
+  looked pasted on as stickers.
 - **Dancer looks** are `dancer::STYLES` (shadow, neon, strobe, comic, wire); the
   index is stored in settings, timeline cues, AI plans and the iOS remote, so
   only ever append. `--snap-dancer <look>` renders one over a scene, which is how

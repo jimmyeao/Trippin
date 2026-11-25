@@ -13,7 +13,9 @@
 //! drawn over each scene with the real dancer shader) with `--snap-clip
 //! <name>` to pick the routine (default: the first clip), `--snap-burst
 //! <0..1>` (hold the dancer's Disintegrate at that level) or `--snap-burst-at
-//! <s>` (set one off at that time, for `--snap-at` sequences).
+//! <s>` (set one off at that time, for `--snap-at` sequences),
+//! `--snap-accent <scene>` (that scene as the accent layer over each one,
+//! at `--snap-accent-amt`, default 0.6).
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -386,6 +388,75 @@ pub fn run(args: &[String]) -> Result<()> {
         }
     };
 
+    // `--snap-accent <scene>`: the accent layer, as the app draws it — its
+    // own feedback pair, added into the scene target by accent.wgsl.
+    struct AccentSnap {
+        pipeline: wgpu::RenderPipeline,
+        mix: wgpu::RenderPipeline,
+        bgs: [wgpu::BindGroup; 2],
+        mix_bgs: [[wgpu::BindGroup; 2]; 2],
+        targets: [wgpu::Texture; 2],
+        amt: f32,
+    }
+    let targets_main = &targets;
+    let accent_snap: Option<AccentSnap> = match arg(args, "--snap-accent") {
+        None => None,
+        Some(name) => {
+            let path = crate::packs::scene_files_all(&dir)
+                .into_iter()
+                .find(|p| p.file_stem().is_some_and(|s| s == name))
+                .ok_or_else(|| anyhow!("no accent scene {name}"))?;
+            let pipeline = render::compile_pipeline(&device, &common, &path, &pl, SCENE_FORMAT, None)
+                .map_err(|e| anyhow!("accent {name}: {e}"))?;
+            let mix = render::compile_pipeline(
+                &device,
+                &common,
+                &dir.join("accent.wgsl"),
+                &pl,
+                SCENE_FORMAT,
+                Some(render::ADD_BLEND),
+            )
+            .map_err(|e| anyhow!("accent mix: {e}"))?;
+            let targets = Renderer::make_targets(&device, w, h);
+            let bgs = Renderer::make_bind_groups(
+                &device,
+                &layout,
+                &ubuf,
+                &sampler,
+                &targets,
+                &FrameRes {
+                    pal: &pal_view,
+                    noise3: &statics.noise3_view,
+                    blue: &statics.blue_view,
+                    repeat: &statics.repeat,
+                    bloom: bloom.view(),
+                    ext: &statics.ext_view,
+                    vid: &statics.vid_view,
+                },
+            );
+            let mix_bgs = Renderer::make_mix_bind_groups(
+                &device,
+                &layout,
+                &ubuf,
+                &sampler,
+                &targets_main,
+                &targets,
+                &FrameRes {
+                    pal: &pal_view,
+                    noise3: &statics.noise3_view,
+                    blue: &statics.blue_view,
+                    repeat: &statics.repeat,
+                    bloom: bloom.view(),
+                    ext: &statics.ext_view,
+                    vid: &statics.vid_view,
+                },
+            );
+            let amt = arg(args, "--snap-accent-amt").and_then(|s| s.parse().ok()).unwrap_or(0.6);
+            Some(AccentSnap { pipeline, mix, targets, bgs, mix_bgs, amt })
+        }
+    };
+    let acc_cur = std::cell::Cell::new(0usize);
+
     // Built in plus the effects packs' scenes (packs.rs).
     let mut scenes: Vec<PathBuf> = crate::packs::scene_files_all(&dir);
     if which != "all" {
@@ -465,9 +536,34 @@ pub fn run(args: &[String]) -> Result<()> {
                 }
                 u.misc4[1] = fpos.fract() as f32;
             }
+            if let Some(a) = &accent_snap {
+                u.misc4[2] = a.amt;
+            }
             queue.write_buffer(&ubuf, 0, bytemuck::bytes_of(&u));
             let next = 1 - *cur;
             let mut enc = device.create_command_encoder(&Default::default());
+            if let Some(a) = &accent_snap {
+                let an = 1 - acc_cur.get();
+                let v = a.targets[an].create_view(&Default::default());
+                let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("accent"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &v,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    ..Default::default()
+                });
+                pass.set_pipeline(&a.pipeline);
+                pass.set_bind_group(0, &a.bgs[acc_cur.get()], &[]);
+                pass.draw(0..3, 0..1);
+                drop(pass);
+                acc_cur.set(an);
+            }
             let view = targets[next].create_view(&Default::default());
             {
                 let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -486,6 +582,11 @@ pub fn run(args: &[String]) -> Result<()> {
                 pass.set_pipeline(&pipe);
                 pass.set_bind_group(0, &bgs[*cur], &[]);
                 pass.draw(0..3, 0..1);
+                if let Some(a) = &accent_snap {
+                    pass.set_pipeline(&a.mix);
+                    pass.set_bind_group(0, &a.mix_bgs[acc_cur.get()][*cur], &[]);
+                    pass.draw(0..3, 0..1);
+                }
             }
             if let Some(ds) = &dancer_snap {
                 // `--snap-burst <level>` holds Disintegrate at a level;
