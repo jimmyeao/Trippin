@@ -507,6 +507,11 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   pack scene whose name is taken is skipped. Bump `packs::API` when
   common.wgsl changes a helper packs call. `--snap-energy` writes each pack's
   scenes into that pack's `scene_energy.json`.
+- **A pack found twice** (the repo's dev folder ahead of the installed copy)
+  loads its scenes from the first copy but its clips from every copy
+  (`Pack::also`, `clip_dirs`): the repo's packs carry no clips (git-ignored),
+  so a dev build hid every video scene of the install. Settings > Effects
+  packs flags missing clips (`missing_clips`) with a Re-download button.
 - **Tempo-matched video** (owner: the best video scenes are the ones whose
   footage moves *to the beat*). **Never vary the footage's speed within a
   beat**: a per-beat surge (tried as `video::pump`) read as unnatural. The

@@ -4039,6 +4039,23 @@ fn effects_packs(ui: &mut egui::Ui, s: &mut Settings) {
         if let Some(why) = &p.problem {
             ui.small(format!("  not loaded: {why}"));
         }
+        // Clips gone missing (a download cut short, files deleted): say so,
+        // and offer to fetch the pack again.
+        let missing = p.missing_clips();
+        if !missing.is_empty() && p.active() {
+            ui.horizontal(|ui| {
+                ui.small(format!("  {} video clip(s) missing", missing.len()))
+                    .on_hover_text(missing.join(", "));
+                if packs::in_catalog(&p.id)
+                    && ui
+                        .add_enabled(!packs::busy(), egui::Button::new("Re-download").small())
+                        .on_hover_text("Download the pack again and reinstall it (after a restart)")
+                        .clicked()
+                {
+                    packs::install_catalog_bg(&p.id);
+                }
+            });
+        }
     }
     // Where packs install: they're big, so it can be another drive. A move
     // finishes in the background, then the setting follows.

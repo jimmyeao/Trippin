@@ -108,11 +108,33 @@ pub struct Pack {
     pub disabled: bool,
     /// Why it isn't loaded, when it isn't (`api` too new).
     pub problem: Option<String>,
+    /// Other copies of the same pack later in the search order (an
+    /// installed copy behind a dev folder in the repo). Their scenes are
+    /// shadowed, but their clips count: the repo's packs carry no clips
+    /// (git-ignored), so a dev build hid every video scene of an install.
+    pub also: Vec<PathBuf>,
 }
 
 impl Pack {
     pub fn active(&self) -> bool {
         !self.disabled && self.problem.is_none()
+    }
+
+    /// Every folder this pack's clips may be in.
+    pub fn clip_dirs(&self) -> impl Iterator<Item = PathBuf> + '_ {
+        std::iter::once(&self.dir).chain(self.also.iter()).map(|d| d.join("videos"))
+    }
+
+    /// The clips its `video_*` scenes need that aren't on disk in any copy
+    /// (a download cut short, a moved folder, files deleted by hand).
+    pub fn missing_clips(&self) -> Vec<String> {
+        let mut v: Vec<String> = wgsl_in(&self.dir.join("scenes"))
+            .iter()
+            .filter_map(|p| stem(p).strip_prefix("video_").map(str::to_string))
+            .filter(|clip| !self.clip_dirs().any(|d| d.join(format!("{clip}.tvid")).is_file()))
+            .collect();
+        v.sort();
+        v
     }
 }
 
@@ -256,7 +278,8 @@ fn scan() -> Vec<Pack> {
                     continue;
                 }
             };
-            if out.iter().any(|p| p.id == m.id) {
+            if let Some(first) = out.iter_mut().find(|p| p.id == m.id) {
+                first.also.push(dir);
                 continue;
             }
             let problem = (m.api > API).then(|| "needs a newer Trippin".to_string());
@@ -269,6 +292,7 @@ fn scan() -> Vec<Pack> {
                 dir,
                 installed,
                 problem,
+                also: Vec::new(),
             });
         }
     }
@@ -379,7 +403,12 @@ pub fn merged_json(shader_dir: &Path, file: &str) -> serde_json::Map<String, ser
 
 /// Clip folders of the loaded packs (video.rs).
 pub fn video_dirs() -> Vec<PathBuf> {
-    active().map(|p| p.dir.join("videos")).collect()
+    active().flat_map(|p| p.clip_dirs()).collect()
+}
+
+/// Is this pack in the download catalog (so it can be fetched again)?
+pub fn in_catalog(id: &str) -> bool {
+    CATALOG.iter().any(|c| c.id == id && !c.asset.1.is_empty())
 }
 
 // ---- installing -------------------------------------------------------------
@@ -675,6 +704,39 @@ pub fn tidy() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A dev copy in the repo carries no clips; the installed copy behind it
+    /// does. Its clips count, and only clips missing from every copy are
+    /// reported.
+    #[test]
+    fn clips_come_from_any_copy_of_a_pack() {
+        let base = std::env::temp_dir().join(format!("packs-clips-{}", std::process::id()));
+        let (dev, inst) = (base.join("dev"), base.join("inst"));
+        for d in [&dev, &inst] {
+            std::fs::create_dir_all(d.join("scenes")).unwrap();
+            std::fs::create_dir_all(d.join("videos")).unwrap();
+            for c in ["a", "b"] {
+                std::fs::write(d.join("scenes").join(format!("video_{c}.wgsl")), "").unwrap();
+            }
+        }
+        std::fs::write(inst.join("videos").join("a.tvid"), "x").unwrap();
+        let mut p = Pack {
+            id: "t".into(),
+            name: "T".into(),
+            version: "1".into(),
+            about: String::new(),
+            dir: dev.clone(),
+            installed: false,
+            disabled: false,
+            problem: None,
+            also: Vec::new(),
+        };
+        assert_eq!(p.missing_clips(), vec!["a".to_string(), "b".to_string()]);
+        p.also.push(inst.clone());
+        assert_eq!(p.missing_clips(), vec!["b".to_string()]);
+        assert!(p.clip_dirs().any(|d| d == inst.join("videos")));
+        let _ = std::fs::remove_dir_all(&base);
+    }
 
     #[test]
     fn only_pack_files_are_unpacked() {
