@@ -514,6 +514,9 @@ pub struct Settings {
     /// Action → MIDI note number, same shape as `keys`. Bound on the Keys
     /// page by learning: click "midi", then hit the pad.
     pub midi_notes: BTreeMap<Action, u8>,
+    /// The MIDI page's mappings: notes, CCs and program changes to actions,
+    /// scenes, effects, palettes, routines, Looks and sliders (midimap.rs).
+    pub midi_map: Vec<crate::midimap::Binding>,
     pub mode: Mode,
     pub random_order: bool,
     /// Bars per scene in auto mode.
@@ -746,6 +749,7 @@ impl Default for Settings {
                 .collect(),
             midi_in: String::new(),
             midi_notes: BTreeMap::new(),
+            midi_map: Vec::new(),
             mode: Mode::Auto,
             random_order: true,
             phrase_bars: 16,

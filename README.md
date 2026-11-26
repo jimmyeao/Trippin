@@ -142,8 +142,9 @@ effect and palette; the Pads toggle swaps in big performance pads),
 post effect + strength, which effects Auto picks, the accent and echo
 layers and the camera layer — picks apply live to the output, so the panel
 doubles as a preview), **Stream** (OBS output, now playing, branding,
-ticker, clips — see below), **Timeline** (saved shows), **Keys** (MIDI
-input and rebindable hotkeys: click Rebind, then press a key) and
+ticker, clips — see below), **Timeline** (saved shows), **MIDI** (map
+pads, knobs and faders to anything), **Keys** (rebindable hotkeys: click
+Rebind, then press a key) and
 **Settings** (audio input, latency, mark-downbeat, neural beat tracking,
 what the auto-pilot may do — breakdowns, drop cuts, random order — and the
 AI show builder's provider, model and API key).
@@ -200,12 +201,28 @@ Default keys (all rebindable in the panel):
 | (unbound) | **hold** effects, best on a MIDI pad: echo trails while held; the dancer (and logo) burst out while held and re-form when you let go |
 | (unbound) | Look 1 to 8: recall the saved Look on that slot (bind keys or pads on the Keys page) |
 
-**MIDI controllers:** every action above can also sit on a MIDI pad or key.
-Pick the input at the top of the Keys tab (`--list-midi` shows the names),
-then click a row's **midi** button and hit the pad — the note is bound.
-Pressing the pad fires the action exactly like the hotkey, including while
-the timeline is recording. Right-click a bound note to clear it. Unplugging
-and replugging the controller is picked up automatically.
+**MIDI controllers** (the **MIDI** page): map anything to a pad, key,
+knob, fader, button or program change. Pick the controller at the top
+(`--list-midi` shows the names; the page shows the last message it heard,
+to check it's talking). Under **Add a mapping**, choose what it should do:
+
+- an **Action** (anything in the key table above: next scene, blackout,
+  strobe, Look slots...),
+- a **Scene** to cut to, or one to **queue** next,
+- an **Effect**, a **Palette**, a dancer **Routine** or a saved **Look**,
+- a **Control**: effect strength, accent and echo amounts, dancer size,
+  the camera layer and rotoscope sliders, branding opacity, the
+  now-playing card size, or **Scene control 1-5**, which move the sliders
+  of whatever scene is on air.
+
+Press **Learn**, then move the knob or press the pad. Knobs and faders move
+controls across their range; pads, keys, buttons (including CC buttons) and
+program changes fire everything else. Mappings are listed below with
+**relearn** and **remove**; one MIDI control drives one thing, so learning
+it again replaces what it had. Everything fires exactly as from the panel,
+including while the timeline is recording. The Keys tab's per-action
+**midi** buttons still work too (any channel). Unplugging and replugging
+the controller is picked up automatically.
 
 ## Styles
 

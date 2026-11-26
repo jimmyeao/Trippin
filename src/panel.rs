@@ -259,6 +259,8 @@ enum Tab {
     Dancer,
     /// Whole-frame effects, the accent and echo layers, and the camera layer.
     Fx,
+    /// MIDI mapping: anything to a pad, key, knob, fader or program change.
+    Midi,
     Stream,
     Timeline,
     Keys,
@@ -281,12 +283,13 @@ enum LibChip {
 }
 
 impl Tab {
-    const ALL: [Tab; 7] = [
+    const ALL: [Tab; 8] = [
         Tab::Perform,
         Tab::Dancer,
         Tab::Fx,
         Tab::Stream,
         Tab::Timeline,
+        Tab::Midi,
         Tab::Keys,
         Tab::Settings,
     ];
@@ -296,6 +299,7 @@ impl Tab {
             Tab::Perform => "Perform",
             Tab::Dancer => "Dancer",
             Tab::Fx => "FX",
+            Tab::Midi => "MIDI",
             Tab::Stream => "Stream",
             Tab::Timeline => "Timeline",
             Tab::Keys => "Keys",
@@ -313,6 +317,9 @@ pub struct Panel {
     /// Waiting for a MIDI pad press (note-on) to bind to this action —
     /// captured globally by `App::midi_note`, whichever window is focused.
     pub midi_learn: Option<Action>,
+    /// The MIDI page: what it's learning, the last message heard, and the
+    /// "add a mapping" picker.
+    pub midi_ui: MidiUi,
     tab: Tab,
     /// Text filter for the scene list.
     scene_filter: String,
@@ -360,7 +367,13 @@ impl Panel {
             win,
             rebinding: None,
             midi_learn: None,
-            tab: Tab::Perform,
+            midi_ui: MidiUi::default(),
+            // Dev aid: TRIPPIN_PANEL_TAB=<page label> opens on that page
+            // (screenshots of a page without clicking).
+            tab: std::env::var("TRIPPIN_PANEL_TAB")
+                .ok()
+                .and_then(|t| Tab::ALL.into_iter().find(|x| x.label().eq_ignore_ascii_case(t.trim())))
+                .unwrap_or(Tab::Perform),
             scene_filter: String::new(),
             chip: LibChip::All,
             thumbs: HashMap::new(),
@@ -416,6 +429,7 @@ impl Panel {
 
         let rebinding = &mut self.rebinding;
         let midi_learn = &mut self.midi_learn;
+        let midi_ui = &mut self.midi_ui;
         let tab = &mut self.tab;
         let scene_filter = &mut self.scene_filter;
         let chip = &mut self.chip;
@@ -456,6 +470,7 @@ impl Panel {
                 rebinding,
                 midi_learn,
                 midi_status,
+                midi_ui,
                 remote_status,
                 tab,
                 scene_filter,
@@ -492,6 +507,7 @@ fn build_ui(
     rebinding: &mut Option<Action>,
     midi_learn: &mut Option<Action>,
     midi_status: &(bool, String),
+    midi_ui: &mut MidiUi,
     remote_status: &(bool, String),
     tab: &mut Tab,
     scene_filter: &mut String,
@@ -570,6 +586,7 @@ fn build_ui(
                     .show(ui, |ui| match *tab {
                         Tab::Dancer => dancer_tab(ui, s, st, clips, clip_thumbs, cmd),
                         Tab::Fx => fx_tab(ui, s, st),
+                        Tab::Midi => midi_tab(ui, s, st, scenes, clips, midi_status, midi_ui),
                         Tab::Stream => stream_tab(ui, s, st, cmd),
                         Tab::Timeline => timeline_tab(ui, tl_shared, saved, cmd),
                         Tab::Keys => keys_tab(ui, s, rebinding, midi_learn, midi_status, keys_filter),
@@ -5100,4 +5117,189 @@ fn mode_str(m: PlayMode, following: bool) -> &'static str {
         PlayMode::Stopped if following => "following",
         PlayMode::Stopped => "stopped",
     }
+}
+
+
+/// The MIDI page's state (kept on the panel between frames).
+#[derive(Default)]
+pub struct MidiUi {
+    /// Learning: the next note, CC or program change maps to this
+    /// (taken by `App::midi_msg`).
+    pub learn: Option<crate::midimap::Target>,
+    /// The last message heard, and when.
+    pub last: Option<(crate::midimap::Msg, Instant)>,
+    /// The picker: which kind of target, and the one chosen.
+    kind: usize,
+    pick: Option<crate::midimap::Target>,
+    filter: String,
+}
+
+const MIDI_KINDS: [&str; 8] = ["Action", "Scene", "Queue scene", "Effect", "Palette", "Routine", "Look", "Control"];
+
+/// MIDI page: the input port, "add a mapping" (pick what it does, press
+/// Learn, move the control), and the list of mappings.
+fn midi_tab(
+    ui: &mut egui::Ui,
+    s: &mut Settings,
+    st: &Status,
+    scenes: &[String],
+    clips: &[String],
+    midi_status: &(bool, String),
+    mu: &mut MidiUi,
+) {
+    use crate::midimap::{Control, Target};
+    use crate::ui_theme::*;
+    let title = |id: &str| -> String {
+        scenes
+            .iter()
+            .position(|n| n == id)
+            .and_then(|i| st.scene_titles.get(i).cloned())
+            .unwrap_or_else(|| id.to_string())
+    };
+
+    // ---- input -----------------------------------------------------------
+    section_label(ui, "midi input");
+    card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("Controller").size(12.0).color(MUTED));
+            egui::ComboBox::from_id_salt("midi_in_page")
+                .width(240.0)
+                .selected_text(if s.midi_in.is_empty() { "off".to_string() } else { s.midi_in.clone() })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut s.midi_in, String::new(), "off");
+                    for name in crate::midi::ports() {
+                        ui.selectable_value(&mut s.midi_in, name.clone(), name);
+                    }
+                });
+            status_dot(ui, midi_status.0, if s.midi_in.is_empty() { "off" } else { midi_status.1.as_str() });
+        });
+        let last = match &mu.last {
+            Some((m, at)) => format!("Last heard: {} ({:.0} s ago)", m.label(), at.elapsed().as_secs_f32()),
+            None => "Nothing heard yet: move a knob or press a pad to check the controller.".to_string(),
+        };
+        ui.label(egui::RichText::new(last).size(11.5).color(FAINT));
+    });
+    ui.add_space(8.0);
+
+    // ---- add a mapping ----------------------------------------------------
+    section_label(ui, "add a mapping");
+    card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.small("Pick what it should do, press Learn, then press the pad or move the knob, fader or button. Knobs and faders move sliders; pads, keys, buttons and program changes fire everything else.");
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(|ui| {
+            for (i, k) in MIDI_KINDS.iter().enumerate() {
+                if ui.selectable_label(mu.kind == i, *k).clicked() && mu.kind != i {
+                    mu.kind = i;
+                    mu.pick = None;
+                    mu.filter.clear();
+                }
+            }
+        });
+        ui.add_space(4.0);
+        // The items of the chosen kind, as (target, label).
+        let items: Vec<(Target, String)> = match mu.kind {
+            0 => Action::ALL.iter().map(|a| (Target::Action(*a), a.label().to_string())).collect(),
+            1 | 2 => scenes
+                .iter()
+                .filter(|n| *n != "void")
+                .map(|n| {
+                    let t = if mu.kind == 1 { Target::Scene(n.clone()) } else { Target::QueueScene(n.clone()) };
+                    (t, title(n))
+                })
+                .collect(),
+            3 => Fx::ALL.iter().map(|f| (Target::Fx(*f), f.label().to_string())).collect(),
+            4 => crate::palettes::all_names().map(|p| (Target::Palette(p.to_string()), p.to_string())).collect(),
+            5 => clips.iter().map(|c| (Target::Routine(c.clone()), c.clone())).collect(),
+            6 => st.looks.iter().map(|l| (Target::Look(l.id.clone()), l.name.clone())).collect(),
+            _ => Control::ALL.iter().map(|c| (Target::Control(*c), c.label())).collect(),
+        };
+        let q = mu.filter.to_lowercase();
+        ui.horizontal(|ui| {
+            if items.len() > 12 {
+                ui.add(egui::TextEdit::singleline(&mut mu.filter).desired_width(140.0).hint_text("filter…"));
+            }
+            let shown = mu
+                .pick
+                .as_ref()
+                .and_then(|p| items.iter().find(|(t, _)| t == p))
+                .map(|(_, l)| l.clone())
+                .unwrap_or_else(|| "choose…".into());
+            egui::ComboBox::from_id_salt("midi_pick")
+                .width(260.0)
+                .height(360.0)
+                .selected_text(shown)
+                .show_ui(ui, |ui| {
+                    for (t, l) in items.iter().filter(|(_, l)| q.is_empty() || l.to_lowercase().contains(&q)) {
+                        if ui.selectable_label(mu.pick.as_ref() == Some(t), l).clicked() {
+                            mu.pick = Some(t.clone());
+                        }
+                    }
+                });
+            if mu.learn.is_some() {
+                ui.label(egui::RichText::new("move a knob or press a pad…").size(12.0).color(WARN));
+                if ui.small_button("cancel").clicked() {
+                    mu.learn = None;
+                }
+            } else if ui.add_enabled(mu.pick.is_some(), egui::Button::new("Learn")).clicked() {
+                mu.learn = mu.pick.clone();
+            }
+        });
+        if mu.kind == 7 {
+            ui.small("Scene controls 1-5 move the sliders of whatever scene is on air (its scene controls card).");
+        }
+    });
+    ui.add_space(8.0);
+
+    // ---- mappings ---------------------------------------------------------------
+    section_label(ui, "mappings");
+    card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        if s.midi_map.is_empty() && s.midi_notes.is_empty() {
+            ui.small("None yet.");
+            return;
+        }
+        let mut remove: Option<usize> = None;
+        let mut remove_note: Option<Action> = None;
+        let mut relearn: Option<Target> = None;
+        egui::Grid::new("midi_map_grid").num_columns(4).spacing(egui::vec2(12.0, 6.0)).striped(true).show(ui, |ui| {
+            ui.label(egui::RichText::new("control").size(11.0).color(MUTED));
+            ui.label(egui::RichText::new("does").size(11.0).color(MUTED));
+            ui.label("");
+            ui.label("");
+            ui.end_row();
+            for (i, b) in s.midi_map.iter().enumerate() {
+                ui.label(egui::RichText::new(b.src.label()).monospace().size(11.5));
+                ui.label(egui::RichText::new(b.target.label(&title)).size(12.0));
+                if ui.small_button("relearn").on_hover_text("Map this to a different control").clicked() {
+                    relearn = Some(b.target.clone());
+                    remove = Some(i);
+                }
+                if ui.small_button("remove").clicked() {
+                    remove = Some(i);
+                }
+                ui.end_row();
+            }
+            // The Keys page's pad bindings (any channel) belong here too.
+            for (a, n) in &s.midi_notes {
+                ui.label(egui::RichText::new(format!("Note {} ({n}) · any ch", crate::midi::note_name(*n))).monospace().size(11.5));
+                ui.label(egui::RichText::new(format!("Action: {} (Keys page)", a.label())).size(12.0));
+                ui.label("");
+                if ui.small_button("remove").clicked() {
+                    remove_note = Some(*a);
+                }
+                ui.end_row();
+            }
+        });
+        if let Some(i) = remove {
+            s.midi_map.remove(i);
+        }
+        if let Some(a) = remove_note {
+            s.midi_notes.remove(&a);
+        }
+        if let Some(t) = relearn {
+            mu.learn = Some(t);
+        }
+    });
 }

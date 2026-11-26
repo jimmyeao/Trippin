@@ -771,12 +771,23 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   (`App::key_release`), both as `Msg::Release`. Every other action still
   ignores releases. A press with no release (remote, OSC) lets go after 16
   beats (`Burst::MAX_HOLD`, `HOLD_ECHO_BEATS`).
-- **MIDI** (`midi.rs`): midir's callback thread posts `AppEvent::MidiNote`
-  through an `EventLoopProxy` — the event loop type is
-  `EventLoop<AppEvent>`, so `ApplicationHandler<AppEvent>::user_event`
-  dispatches. `App::midi_note` is the single entry point: it serves
-  MIDI-learn (Keys page `midi_learn`) or runs `apply` like a hotkey, so
-  pad presses record as timeline cues too. Only note-on with velocity > 0
+- **MIDI** (`midi.rs`, `midimap.rs`): midir's callback thread posts
+  `AppEvent::Midi(midimap::Msg)` (note on/off, CC, program change) through
+  an `EventLoopProxy` — the event loop type is `EventLoop<AppEvent>`, so
+  `ApplicationHandler<AppEvent>::user_event` dispatches. `App::midi_msg`
+  is the single entry point: the MIDI page's learn (`Panel::midi_ui`),
+  then the Keys page's (`midi_learn`, notes only) and its `midi_notes`
+  actions (`midi_note`), then the MIDI page's `Settings::midi_map`
+  through `midimap::Router`. **Every mapping target becomes a
+  `remote::RemoteCmd`** run by `remote_cmd`, the same path as the LAN
+  remote and OSC, so a new thing to map is a new `RemoteCmd`/`SetKey`
+  (and the remote and OSC get it too); `SetKey::SceneCtl(k, 0..1)` moves
+  the on-air scene's k-th control (camera scene, rotoscope look or Unity
+  show). CC buttons fire on crossing up through 64; controls take the CC
+  value across their range. `TRIPPIN_MIDI_TEST='b0 15 7f;500;c0 02'`
+  injects messages at startup (no controller needed);
+  `TRIPPIN_PANEL_TAB=midi` opens the panel on a page. Pad presses record
+  as timeline cues too. Only note-on with velocity > 0
   counts (note-off / vel-0 is the pad release — acting on it doubles
   toggles). Bindings are `Settings::midi_notes` (action → note, any
   channel; one note = one action, learning steals it). WinMM has no

@@ -47,6 +47,7 @@ mod editor;
 mod gfx;
 mod egui_win;
 mod midi;
+mod midimap;
 mod ndi;
 mod nowplaying;
 mod osc;
@@ -191,8 +192,8 @@ struct Shared {
 /// Keys page can capture it for MIDI-learn. Remote commands (the iOS app's
 /// WebSocket clients, OSC controllers) arrive the same way.
 enum AppEvent {
-    /// A MIDI note: number, and true for note-on (false = the release).
-    MidiNote(u8, bool),
+    /// A MIDI message (note on/off, CC, program change).
+    Midi(midimap::Msg),
     Remote(remote::RemoteCmd),
 }
 
@@ -2377,6 +2378,8 @@ struct App {
     /// scan that notices an unplugged device (WinMM has no disconnect event).
     midi_retry: Instant,
     midi_scan: Instant,
+    /// MIDI page mappings: remembers CC values (midimap::Router).
+    midi_router: midimap::Router,
     /// The LAN remote (WebSocket server for the iOS app) and the OSC
     /// listener — respawned when their settings change, like `midi`.
     remote: Option<remote::Server>,
@@ -2669,6 +2672,42 @@ impl App {
         }
     }
 
+    /// Any MIDI message: the MIDI page's learn and last-message readout,
+    /// the Keys page's pad bindings, then the MIDI page's mappings.
+    fn midi_msg(&mut self, event_loop: &ActiveEventLoop, m: midimap::Msg) {
+        let Some(sh) = self.shared.clone() else { return };
+        if let Some(p) = self.panel.as_mut() {
+            p.midi_ui.last = Some((m, Instant::now()));
+            p.window.request_redraw();
+            // The MIDI page waiting to learn: this message's source.
+            if let (Some(src), true) = (m.src(), p.midi_ui.learn.is_some()) {
+                let target = p.midi_ui.learn.take().unwrap();
+                midimap::learn(&mut lock(&sh.settings).midi_map, src, target);
+                self.mark_dirty();
+                return;
+            }
+        }
+        match m {
+            midimap::Msg::NoteOn { num, .. } => {
+                // The Keys page learning a pad takes the press whole.
+                if self.panel.as_ref().is_some_and(|p| p.midi_learn.is_some()) {
+                    self.midi_note(event_loop, num);
+                    return;
+                }
+                self.midi_note(event_loop, num);
+            }
+            midimap::Msg::NoteOff { num, .. } => self.midi_release(num),
+            _ => {}
+        }
+        let cmds = {
+            let s = lock(&sh.settings);
+            self.midi_router.route(&s.midi_map, m)
+        };
+        for c in cmds {
+            self.remote_cmd(event_loop, c);
+        }
+    }
+
     /// A pad came up: ends a hold action bound to it (others ignore it).
     fn midi_release(&mut self, note: u8) {
         let action = self
@@ -2808,6 +2847,43 @@ impl App {
                         }
                         SetKey::ShowParamsReset => {
                             s.show_params.remove(&on_air);
+                        }
+                        SetKey::AccentAmt(v) => s.accent_amt = v,
+                        SetKey::EchoAmt(v) => s.echo_amt = v,
+                        SetKey::CameraAmt(v) => s.camera_amt = v,
+                        SetKey::CameraTol(v) => s.camera_tol = v,
+                        SetKey::RotoAmt(v) => s.roto_amt = v,
+                        SetKey::RotoDetail(v) => s.roto_detail = v,
+                        SetKey::RotoInk(v) => s.roto_ink = v,
+                        SetKey::RotoBands(n) => s.roto_bands = n.clamp(2, 8),
+                        SetKey::RotoPal(v) => s.roto_pal = v,
+                        SetKey::SceneCtl(k, v) => {
+                            let k = k as usize;
+                            let cam = camera::scene_params(&on_air);
+                            if let Some(p) = cam.get(k) {
+                                let mut x = p.min + (p.max - p.min) * v;
+                                if p.whole {
+                                    x = x.round();
+                                }
+                                s.show_params.entry(on_air).or_default().insert(p.id.to_string(), x);
+                            } else if on_air == "camera_roto" || (s.camera_roto && s.camera_layer != config::CamLayer::Off) {
+                                // The rotoscope look's five, in card order.
+                                match k {
+                                    0 => s.roto_amt = v,
+                                    1 => s.roto_detail = v,
+                                    2 => s.roto_ink = v,
+                                    3 => s.roto_bands = (2.0 + 6.0 * v).round() as u32,
+                                    4 => s.roto_pal = v,
+                                    _ => return,
+                                }
+                            } else if showparams::has_controls(&on_air) {
+                                let defs: Vec<_> = showparams::builtin().into_iter().chain(showparams::show_defs(&on_air)).collect();
+                                let Some(d) = defs.get(k) else { return };
+                                let x = d.min + (d.max - d.min) * v;
+                                s.show_params.entry(on_air).or_default().insert(d.id.clone(), x);
+                            } else {
+                                return;
+                            }
                         }
                     }
                 }
@@ -3175,8 +3251,7 @@ fn remote_line(srv: &remote::Server) -> String {
 impl ApplicationHandler<AppEvent> for App {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
         match event {
-            AppEvent::MidiNote(note, true) => self.midi_note(event_loop, note),
-            AppEvent::MidiNote(note, false) => self.midi_release(note),
+            AppEvent::Midi(m) => self.midi_msg(event_loop, m),
             AppEvent::Remote(cmd) => self.remote_cmd(event_loop, cmd),
         }
     }
@@ -3322,6 +3397,29 @@ impl ApplicationHandler<AppEvent> for App {
             }))
             .unwrap();
             self.send(Msg::FireCue(timeline::CueKind::Text(spec)));
+        }
+        // Dev aid: inject MIDI messages ~3 s after startup, as a controller
+        // would send them: hex bytes, messages split by ';', a bare number
+        // pauses that many ms, e.g. TRIPPIN_MIDI_TEST='b0 15 7f;500;c0 02'.
+        if let Ok(v) = std::env::var("TRIPPIN_MIDI_TEST") {
+            let proxy = self.midi_proxy.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(3));
+                for part in v.split(';').map(str::trim) {
+                    if let Ok(ms) = part.parse::<u64>() {
+                        std::thread::sleep(std::time::Duration::from_millis(ms));
+                        continue;
+                    }
+                    let bytes: Vec<u8> = part.split_whitespace().filter_map(|b| u8::from_str_radix(b, 16).ok()).collect();
+                    match midimap::Msg::parse(&bytes) {
+                        Some(m) => {
+                            let _ = proxy.send_event(AppEvent::Midi(m));
+                        }
+                        None => eprintln!("TRIPPIN_MIDI_TEST: can't read {part:?}"),
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(80));
+                }
+            });
         }
         // Dev aid: fire any cue ~3 s after startup (once the render loop has
         // settled), e.g. TRIPPIN_CUE_TEST='{"Strobe":true}'.
@@ -3620,8 +3718,8 @@ impl ApplicationHandler<AppEvent> for App {
                     (false, "off".to_string())
                 } else {
                     let proxy = self.midi_proxy.clone();
-                    match midi::connect(&want, move |note, on| {
-                        let _ = proxy.send_event(AppEvent::MidiNote(note, on));
+                    match midi::connect(&want, move |m| {
+                        let _ = proxy.send_event(AppEvent::Midi(m));
                     }) {
                         Ok(m) => {
                             let status = (true, m.name.clone());
@@ -4152,6 +4250,7 @@ fn main() -> Result<()> {
             .checked_sub(Duration::from_secs(4))
             .unwrap_or_else(Instant::now),
         midi_scan: Instant::now(),
+        midi_router: midimap::Router::default(),
         remote: None,
         osc: None,
         // Backdated like midi_retry so a saved `remote_on` starts the
