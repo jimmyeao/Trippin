@@ -728,6 +728,9 @@ rotation, all mirrored like a selfie:
   the bass and turning with the track.
 - **Camera Slit-Scan**: you live on the right, every move smeared away to
   the left in ribbons that run faster when the track is loud.
+- **Camera Rotoscope**: you as a living cartoon: flat cel-shaded bands in
+  the palette's colours and bold ink outlines that boil gently like
+  hand-traced frames. The ink thickens with the bass and on the kick.
 
 **Camera layer** (Dancer & FX, under Echo) puts the camera into *every*
 scene:
@@ -739,6 +742,9 @@ scene:
   blue screen, or dark background (for a dark room), or no key for the
   whole frame. **Key tolerance** sets how much of the screen colour goes;
   green or blue spill on your edges is pulled out.
+- **Rotoscope** (a tick under the layer): the layer drawn as a cartoon,
+  cel bands and ink outlines in your camera's own colours, behind or in
+  front of any scene.
 
 Nothing is opened until you pick a camera, the camera scenes stay out of
 rotation until it sends frames, and a red **camera on** marker shows at the

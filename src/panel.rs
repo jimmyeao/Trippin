@@ -3339,6 +3339,10 @@ fn dancer_fx_tab(
                 ctl_row(ui, "Camera amount", |ui| {
                     ui.add_enabled(s.camera_layer != CamLayer::Off, egui::Slider::new(&mut s.camera_amt, 0.0..=1.0));
                 });
+                ui.add_enabled(
+                    s.camera_layer != CamLayer::Off,
+                    egui::Checkbox::new(&mut s.camera_roto, "Rotoscope: cartoon bands and ink outlines"),
+                );
             }
         });
         r2.response.rect.height()

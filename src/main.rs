@@ -1919,7 +1919,12 @@ fn render_loop(
                 l
             },
             cam4: if cam_layer {
-                [s.camera_layer.index(), s.camera_amt.clamp(0.0, 1.0), s.camera_key.index(), s.camera_tol.clamp(0.0, 1.0)]
+                [
+                    s.camera_layer.index() + if s.camera_roto { 4.0 } else { 0.0 },
+                    s.camera_amt.clamp(0.0, 1.0),
+                    s.camera_key.index(),
+                    s.camera_tol.clamp(0.0, 1.0),
+                ]
             } else {
                 [0.0; 4]
             },

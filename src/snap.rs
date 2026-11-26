@@ -868,6 +868,7 @@ pub fn run(args: &[String]) -> Result<()> {
                 }
             }
             if snap_cam_layer > 0.0 && !name.starts_with("camera_") {
+                // `--snap-cam-layer 5|6`: behind/in front, rotoscoped.
                 u.cam4 = [snap_cam_layer, 1.0, snap_cam_key, 0.4];
             }
             if let Some(a) = &accent_snap {

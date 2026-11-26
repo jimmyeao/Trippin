@@ -87,6 +87,7 @@
   "logo_trip": ["abstract", "bright", "retro"],
   "camera_kaleido": ["bright", "geometric", "abstract"],
   "camera_outline": ["neon", "abstract", "dark"],
+  "camera_roto": ["bright", "retro", "abstract"],
   "camera_slitscan": ["abstract", "retro"],
   "particle_flow": ["abstract", "organic", "neon"],
   "particle_nebula": ["space", "abstract", "slow"],

@@ -87,6 +87,7 @@
   "logo_trip": 0.5,
   "camera_kaleido": 0.5,
   "camera_outline": 0.55,
+  "camera_roto": 0.5,
   "camera_slitscan": 0.45,
   "particle_flow": 0.62,
   "particle_nebula": 0.3,

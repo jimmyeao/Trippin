@@ -94,6 +94,39 @@ fn cam(uv: vec2<f32>) -> vec3<f32> {
     return textureSampleLevel(cam_tex, samp, clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).rgb;
 }
 
+// The webcam rotoscoped (display-referred, like cam()): smoothed, its
+// shading flattened into five cel bands, with ink outlines on its edges.
+// `ink` thickens the lines (0 thin), `pal` 0..1 tints the bands toward the
+// palette (0 keeps the camera's own colours). Nine taps: they smooth and
+// feed the edge filter both.
+fn cam_roto(uv: vec2<f32>, ink: f32, pal: f32) -> vec3<f32> {
+    let d = vec2<f32>(1.5 / 1280.0, 1.5 / 720.0) * (1.0 + ink);
+    let w = vec3<f32>(0.299, 0.587, 0.114);
+    let c00 = cam(uv + d * vec2<f32>(-1.0, -1.0));
+    let c10 = cam(uv + d * vec2<f32>(0.0, -1.0));
+    let c20 = cam(uv + d * vec2<f32>(1.0, -1.0));
+    let c01 = cam(uv + d * vec2<f32>(-1.0, 0.0));
+    let c11 = cam(uv);
+    let c21 = cam(uv + d * vec2<f32>(1.0, 0.0));
+    let c02 = cam(uv + d * vec2<f32>(-1.0, 1.0));
+    let c12 = cam(uv + d * vec2<f32>(0.0, 1.0));
+    let c22 = cam(uv + d * vec2<f32>(1.0, 1.0));
+    let c = (c00 + c20 + c02 + c22 + 2.0 * (c10 + c01 + c21 + c12) + 4.0 * c11) / 16.0;
+    // Ink: edges of the luminance (Sobel).
+    let gx = dot(c20 + 2.0 * c21 + c22 - c00 - 2.0 * c01 - c02, w);
+    let gy = dot(c02 + 2.0 * c12 + c22 - c00 - 2.0 * c10 - c20, w);
+    let edge = smoothstep(0.1, 0.28, length(vec2<f32>(gx, gy)));
+    // Cel bands: the luminance stepped (with soft steps, so no stairs
+    // shimmer), the colour kept but its shading flattened.
+    let l = dot(c, w);
+    let x = l * 5.0;
+    let lq = (floor(x) + smoothstep(0.4, 0.6, fract(x))) / 5.0;
+    var col = c * (lq + 0.06) / (l + 0.06);
+    let p = palette(fract(lq * 0.7 + u.clock4.x * 0.01));
+    col = mix(col, p * p * (0.02 + 1.4 * lq * lq + 0.2 * lq), clamp(pal, 0.0, 1.0));
+    return col * (1.0 - 0.92 * edge);
+}
+
 // The logo at uv in 0..1 across its square (y top to bottom): rgb and
 // coverage, 0 outside the square.
 fn logo(uv: vec2<f32>) -> vec4<f32> {

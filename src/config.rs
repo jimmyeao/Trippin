@@ -633,6 +633,8 @@ pub struct Settings {
     pub camera_amt: f32,
     /// Key tolerance 0..1 (how much of the screen colour/darkness goes).
     pub camera_tol: f32,
+    /// The camera layer rotoscoped: cel-shaded bands and ink outlines.
+    pub camera_roto: bool,
     pub show_panel: bool,
     /// NDI network output — sends the composited frame (FX + text included)
     /// to OBS/another display. Needs the free NDI runtime installed; a
@@ -792,6 +794,7 @@ impl Default for Settings {
             camera_key: CamKey::Green,
             camera_amt: 0.8,
             camera_tol: 0.4,
+            camera_roto: false,
             show_panel: true,
             ndi_enabled: false,
             ndi_name: "Trippin".into(),

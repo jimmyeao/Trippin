@@ -256,10 +256,17 @@ fn graded(scr_uv: vec2<f32>) -> vec4<f32> {
     // The camera layer, in display space after tone mapping so the camera
     // looks like itself on every scene (ACES or AgX): behind the scene (it
     // shows through the scene's dark parts) or keyed in front of it.
-    let cmode = i32(u.cam4.x + 0.5);
+    // cam4.x: the mode (1 behind, 2 in front), plus 4 for the rotoscope look.
+    let cm_all = i32(u.cam4.x + 0.5);
+    let cmode = cm_all % 4;
     if cmode > 0 && !clear_bg {
-        var c = cam(vec2<f32>(1.0 - uv.x, uv.y));
+        let cuv = vec2<f32>(1.0 - uv.x, uv.y);
+        var c = cam(cuv);
+        // The key reads the camera as it is; the rotoscope only restyles.
         let a = cam_key(c);
+        if cm_all >= 4 {
+            c = cam_roto(cuv, 0.6, 0.0);
+        }
         // Green / blue screen: pull the screen's colour out of the edges.
         let key = i32(u.cam4.z + 0.5);
         if key == 1 {

@@ -518,7 +518,10 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   composited in present.wgsl *after* tone mapping, so the camera looks like
   itself under ACES and AgX: behind (shows through the scene's dark parts)
   or in front, keyed (`cam_key`: green/blue chroma with spill pulled out,
-  dark = luma, none). Snaps: `--snap-cam-layer 1|2`, `--snap-cam-key
+  dark = luma, none); cam4.x + 4 rotoscopes it (`cam_roto` in
+  common.wgsl: nine taps smooth and feed a Sobel ink line, the luminance
+  stepped into five soft cel bands; the key still reads the raw camera, and
+  the camera_roto scene uses the same function). Snaps: `--snap-cam-layer 1|2`, `--snap-cam-key
   0..3`, `--snap-camera-image <png>` for a still. `camera::LIVE` gates those scenes into rotation and shows
   the panel's "camera on" pill; the AI builder never plans them. Snaps never
   open a camera: `--snap-camera <clip>` stands a pack clip in (default
