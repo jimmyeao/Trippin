@@ -891,9 +891,23 @@ fn looks_strip(ui: &mut egui::Ui, s: &mut Settings, st: &Status, look_name: &mut
                             }
                         })
                         .response
-                        .on_hover_text("Steers which scenes and colours Auto picks, and how fast it cuts. Choosing one puts the palette on Auto.");
+                        .on_hover_text("Steers which scenes and colours Auto picks, and how fast it cuts. Choosing one puts the palette on Auto, unless Follow artwork is ticked.");
                 });
             });
+            // Follow artwork: the `art` palette (the now-playing cover's
+            // colours). It is the palette setting itself, so the popover,
+            // Looks and the remote all agree with it.
+            let mut art = s.palette == crate::palettes::ART;
+            if ui
+                .checkbox(&mut art, egui::RichText::new("Follow artwork").size(11.5))
+                .on_hover_text(
+                    "Colours from the cover of the track now playing, fading to each new cover over a bar. \
+                     With no cover, the Style's colours (or Auto) are used. Unticking goes back to Auto.",
+                )
+                .changed()
+            {
+                s.palette = if art { crate::palettes::ART } else { crate::palettes::AUTO }.to_string();
+            }
         }
         if let Some(n) = &st.look_notice {
             ui.label(egui::RichText::new(n).size(10.5).color(egui::Color32::from_rgb(230, 170, 70)));

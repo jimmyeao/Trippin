@@ -213,7 +213,9 @@ and a lounge set doesn't get strobes. Choose one from the **Style** menu in the
 Looks row on the Perform page (or `Next Style` on a key, OSC `/trippin/style`, the
 remote). **Off** is the default and leaves Auto exactly as it was. Choosing a Style puts
 the palette on **Auto** (its colour families only steer Auto); pick a fixed palette
-afterwards to override the colours and keep the rest.
+afterwards to override the colours and keep the rest. Tick **Follow artwork** next to
+the menu to take the colours from the playing track's cover instead (the **art**
+palette); a Style keeps it, and uses its own colours while there's no cover.
 
 | Style | What you get |
 |---|---|
