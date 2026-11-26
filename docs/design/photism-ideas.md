@@ -6,7 +6,7 @@ audience (streamers, home and mobile DJs). Build order is the order below.
 
 | # | Feature | Size | Status |
 |---|---|---|---|
-| 1 | Palette from album art (and art on the now-playing card) | Medium | Built (0a406c7e); LAN agent covers to do |
+| 1 | Palette from album art (and art on the now-playing card) | Medium | Built (0a406c7e), LAN agent covers too |
 | 2 | Photosensitivity safe mode | Small | Built |
 | 3 | Lens effects | Medium | Built |
 | 4 | Glide between Looks | Small | Built |

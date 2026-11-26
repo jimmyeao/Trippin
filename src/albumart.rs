@@ -98,7 +98,7 @@ fn resolve(
         ArtHint::None => None,
         ArtHint::Bytes(b) => Some((b.to_vec(), format!("{} thumbnail", t.source))),
         ArtHint::Url(u) => fetch(u).map(|b| (b, "artwork URL".to_string())),
-        ArtHint::Files(fs) => fs.iter().find_map(|f| from_file(f)),
+        ArtHint::Files(fs) => crate::artfind::from_files(fs),
     };
     if found.is_some() || !online || t.title.trim().is_empty() {
         return found;
@@ -124,52 +124,7 @@ fn resolve(
     }
 }
 
-fn is_image(p: &Path) -> bool {
-    p.extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| ["jpg", "jpeg", "png"].contains(&e.to_ascii_lowercase().as_str()))
-}
-
-/// An image file as it is; an audio file's embedded cover, else a cover
-/// image in its folder.
-fn from_file(p: &Path) -> Option<(Vec<u8>, String)> {
-    if !p.is_file() {
-        return None;
-    }
-    if is_image(p) {
-        return std::fs::read(p).ok().map(|b| (b, format!("image {}", p.display())));
-    }
-    if let Some(b) = embedded(p) {
-        return Some((b, format!("embedded in {}", p.display())));
-    }
-    let dir = p.parent()?;
-    for stem in ["cover", "folder", "front", "Cover", "Folder", "Front"] {
-        for ext in ["jpg", "jpeg", "png"] {
-            let f = dir.join(format!("{stem}.{ext}"));
-            if let Ok(b) = std::fs::read(&f) {
-                return Some((b, format!("image {}", f.display())));
-            }
-        }
-    }
-    None
-}
-
-/// The embedded front cover (any picture if none is marked front).
-pub fn embedded(p: &Path) -> Option<Vec<u8>> {
-    use lofty::file::TaggedFileExt;
-    use lofty::picture::PictureType;
-    let tf = lofty::read_from_path(p).ok()?;
-    let mut best: Option<&lofty::picture::Picture> = None;
-    for tag in tf.tags() {
-        for pic in tag.pictures() {
-            if pic.pic_type() == PictureType::CoverFront {
-                return Some(pic.data().to_vec());
-            }
-            best = best.or(Some(pic));
-        }
-    }
-    best.map(|p| p.data().to_vec())
-}
+pub use crate::artfind::embedded;
 
 fn agent() -> ureq::Agent {
     ureq::Agent::config_builder()

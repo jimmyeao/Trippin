@@ -808,7 +808,10 @@ the **art** palette. Each source finds it its own way:
   iTunes Search API by artist and title. This sends the track name to Apple.
   Found covers are cached in `artcache` next to `trippin.json`.
 
-The LAN agent doesn't send covers yet.
+- **LAN agent**: the agent finds the cover on the DJ machine the same way
+  (embedded in the file, a cover image beside it, the media session's
+  thumbnail) and sends it to the rig with the track, shrunk to 256 px. The
+  rig can't read the DJ machine's files, so it couldn't find them itself.
 
 The agent is a tray app: it finds rigs advertised over Bonjour (or takes a
 `host:port`), pairs with the same PIN as the iOS remote, and its window shows

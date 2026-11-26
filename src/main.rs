@@ -29,6 +29,7 @@
 
 mod accent;
 mod albumart;
+mod artfind;
 mod ai;
 mod echo;
 mod audio;

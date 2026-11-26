@@ -13,6 +13,8 @@ mod link;
 #[allow(dead_code)] // the shared module has more than the agent needs
 #[path = "../../src/nowplaying.rs"]
 mod np;
+#[path = "../../src/artfind.rs"]
+mod artfind;
 
 use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;

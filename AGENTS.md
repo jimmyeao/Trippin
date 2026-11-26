@@ -340,7 +340,7 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
 | `src/text.rs`, `shaders/text.wgsl` | Timeline text cues (ab_glyph masks). |
 | `src/overlay.rs`, `shaders/overlay.wgsl` | Stream overlays: the now-playing card, branding and the ticker. They're drawn on the CPU into RGBA images when their content changes, and composited in the present pass. |
 | `src/nowplaying.rs` | Track detection, with a worker thread polling every 1 s. The `Remote` source reads a track pushed by the LAN agent over the remote protocol (id-tagged `RemoteNp` inbox in `Shared`). |
-| `agent/` | `trippin-agent`: standalone tray app (own Cargo.toml — build with `--manifest-path`) that runs `src/nowplaying.rs` via `#[path]` on the DJ machine and pushes tracks to a rig over the WS remote. Tray + egui settings window; Bonjour discovery + PIN. |
+| `agent/` | `trippin-agent`: standalone tray app (own Cargo.toml — build with `--manifest-path`) that runs `src/nowplaying.rs` and `src/artfind.rs` via `#[path]` on the DJ machine and pushes tracks to a rig over the WS remote, each track's cover following as a second push (`art`: base64 JPEG <= 256 px, or `art_url`), since the rig can't read the DJ machine's files. Keep `artfind.rs` free of app modules. Tray + egui settings window; Bonjour discovery + PIN. |
 | `src/output.rs` | The output tap. It re-runs present at the output size, reads it back asynchronously, and feeds the sinks (NDI, Spout, recorder). |
 | `src/ndi.rs`, `src/spout.rs` | NDI (runtime loaded dynamically), and a native Spout2 sender (D3D11 shared texture plus the Spout shared-memory registry). |
 | `src/rec.rs` | Clip recording: the ffmpeg replay buffer and set recording. |

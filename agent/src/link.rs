@@ -178,10 +178,25 @@ fn session(
         if Instant::now() >= next_poll {
             next_poll = Instant::now() + Duration::from_millis(300);
             let heard = np.lock().unwrap_or_else(|e| e.into_inner()).track.clone();
+            // A new track goes at once; its cover follows (a second push of
+            // the same track) once found, or when it turns up a poll later.
+            let art_new = match (&heard, &sent) {
+                (Some(h), Some(s)) => h == s && h.art != s.art && !h.art.is_none(),
+                _ => false,
+            };
             if heard != sent || sent_stale {
-                push(&mut ws, heard.as_ref())?;
+                push(&mut ws, heard.as_ref(), None)?;
+                let cover = heard.as_ref().and_then(cover);
+                if cover.is_some() {
+                    push(&mut ws, heard.as_ref(), cover)?;
+                }
                 sent = heard;
                 sent_stale = false;
+            } else if art_new {
+                if let Some(c) = heard.as_ref().and_then(cover) {
+                    push(&mut ws, heard.as_ref(), Some(c))?;
+                }
+                sent = heard;
             }
         }
         match ws.read() {
@@ -195,20 +210,77 @@ fn session(
     }
 }
 
-/// One `now_playing` frame. `None` / empty retracts the track.
+/// A track's cover for the rig: ("art", base64 JPEG at most 256 px) from a
+/// file or the media session's thumbnail here, or ("art_url", the URL) when
+/// the source only gives a link. None without one.
+fn cover(t: &np::Track) -> Option<(&'static str, String)> {
+    use base64::Engine;
+    let bytes = match &t.art {
+        np::ArtHint::None => return None,
+        np::ArtHint::Url(u) => return Some(("art_url", u.clone())),
+        np::ArtHint::Bytes(b) => b.to_vec(),
+        np::ArtHint::Files(fs) => crate::artfind::from_files(fs)?.0,
+    };
+    let img = image::load_from_memory(&bytes).ok()?.thumbnail(256, 256).to_rgb8();
+    let mut jpg = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpg, 85).encode_image(&img).ok()?;
+    Some(("art", base64::engine::general_purpose::STANDARD.encode(jpg)))
+}
+
+/// One `now_playing` frame, with its cover if given. `None` / empty
+/// retracts the track.
 fn push(
     ws: &mut WebSocket<tungstenite::stream::MaybeTlsStream<std::net::TcpStream>>,
     track: Option<&np::Track>,
+    cover: Option<(&'static str, String)>,
 ) -> Result<()> {
     let msg = match track {
-        Some(t) => json!({
-            "cmd": "now_playing",
-            "artist": t.artist,
-            "title": t.title,
-            "source": t.source,
-        }),
+        Some(t) => {
+            let mut m = json!({
+                "cmd": "now_playing",
+                "artist": t.artist,
+                "title": t.title,
+                "source": t.source,
+            });
+            if let Some((k, v)) = cover {
+                m[k] = json!(v);
+            }
+            m
+        }
         None => json!({"cmd": "now_playing"}),
     };
     ws.send(Message::Text(msg.to_string().into()))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use base64::Engine;
+
+    /// A big cover from the media session goes out as a JPEG of at most
+    /// 256 px; a URL goes as itself; no art sends nothing.
+    #[test]
+    fn cover_is_a_small_jpeg_or_the_url() {
+        let big = image::RgbImage::from_pixel(1200, 800, image::Rgb([200, 30, 90]));
+        let mut png = Vec::new();
+        image::DynamicImage::ImageRgb8(big)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        let t = np::Track {
+            artist: "A".into(),
+            title: "T".into(),
+            source: "Spotify".into(),
+            art: np::ArtHint::Bytes(Arc::new(png)),
+        };
+        let (k, v) = cover(&t).unwrap();
+        assert_eq!(k, "art");
+        let jpg = base64::engine::general_purpose::STANDARD.decode(v).unwrap();
+        let img = image::load_from_memory(&jpg).unwrap();
+        assert!(img.width() <= 256 && img.height() <= 256, "{}x{}", img.width(), img.height());
+        let t2 = np::Track { art: np::ArtHint::Url("https://i.scdn.co/x".into()), ..t.clone() };
+        assert_eq!(cover(&t2).unwrap(), ("art_url", "https://i.scdn.co/x".to_string()));
+        let t3 = np::Track { art: np::ArtHint::None, ..t };
+        assert!(cover(&t3).is_none());
+    }
 }
