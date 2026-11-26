@@ -635,6 +635,14 @@ pub struct Settings {
     pub camera_tol: f32,
     /// The camera layer rotoscoped: cel-shaded bands and ink outlines.
     pub camera_roto: bool,
+    /// The rotoscope look (camera layer and the camera_roto scene): how
+    /// much of it over the plain camera, ink weight, detail (low = only big
+    /// outlines and flat shapes), colour bands (2..8), palette colour.
+    pub roto_amt: f32,
+    pub roto_ink: f32,
+    pub roto_detail: f32,
+    pub roto_bands: u32,
+    pub roto_pal: f32,
     pub show_panel: bool,
     /// NDI network output — sends the composited frame (FX + text included)
     /// to OBS/another display. Needs the free NDI runtime installed; a
@@ -795,6 +803,11 @@ impl Default for Settings {
             camera_amt: 0.8,
             camera_tol: 0.4,
             camera_roto: false,
+            roto_amt: 1.0,
+            roto_ink: 0.5,
+            roto_detail: 0.35,
+            roto_bands: 4,
+            roto_pal: 0.4,
             show_panel: true,
             ndi_enabled: false,
             ndi_name: "Trippin".into(),

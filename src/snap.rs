@@ -112,6 +112,8 @@ fn groove(t: f32, w: u32, h: u32, frame: u32, bloom: f32, tonemap: f32, calm: f3
         misc4: [0.0; 4],
         look4: [1.0, 1.0, 0.0, 0.0],
         cam4: [0.0; 4],
+        roto4: [1.0, 0.5, 0.35, 4.0],
+        roto5: [0.4, 0.0, 0.0, 0.0],
     }
 }
 
@@ -323,6 +325,11 @@ pub fn run(args: &[String]) -> Result<()> {
     // 1 green | 2 blue | 3 dark>`: the camera layer over every snapped scene.
     let snap_cam_layer: f32 = arg(args, "--snap-cam-layer").and_then(|s| s.parse().ok()).unwrap_or(0.0);
     let snap_cam_key: f32 = arg(args, "--snap-cam-key").and_then(|s| s.parse().ok()).unwrap_or(1.0);
+    // `--snap-roto amount,ink,detail,bands,palette`: the rotoscope controls.
+    let snap_roto: Option<[f32; 5]> = arg(args, "--snap-roto").and_then(|s| {
+        let v: Vec<f32> = s.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+        (v.len() == 5).then(|| [v[0], v[1], v[2], v[3], v[4]])
+    });
     if let Some(p) = &snap_logo {
         statics.upload_logo(&queue, &image::open(p)?.to_rgba8());
     }
@@ -835,6 +842,7 @@ pub fn run(args: &[String]) -> Result<()> {
                 (u.bloom, u.tonemap, u.scene_time, u.hue, u.seed) = (g.bloom, g.tonemap, g.scene_time, g.hue, g.seed);
                 (u.misc4, u.look4, u.fx, u.fx_amt) = (g.misc4, g.look4, g.fx, g.fx_amt);
                 u.cam4 = g.cam4;
+                (u.roto4, u.roto5) = (g.roto4, g.roto5);
                 u.intensity = g.intensity.max(u.intensity);
             }
             u.look4[3] = title_frac;
@@ -866,6 +874,10 @@ pub fn run(args: &[String]) -> Result<()> {
                 if let Ok(px) = c.decode(f) {
                     statics.upload_cam(&queue, &px);
                 }
+            }
+            if let Some(r) = snap_roto {
+                u.roto4 = [r[0], r[1], r[2], r[3]];
+                u.roto5[0] = r[4];
             }
             if snap_cam_layer > 0.0 && !name.starts_with("camera_") {
                 // `--snap-cam-layer 5|6`: behind/in front, rotoscoped.

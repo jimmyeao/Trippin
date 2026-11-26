@@ -71,6 +71,45 @@ pub const SAFE_RISE_PER_S: f32 = 0.3;
 pub const TITLE_W: u32 = 2048;
 /// The logo texture's side (`Statics::logo`).
 pub const LOGO_N: u32 = 512;
+/// Mip levels on the camera texture (1280x720 down to 160x90): the
+/// rotoscope finds its outlines on a blurred copy, so only the big shapes
+/// get ink (traced at full size, hair and skin texture scribbled the face).
+pub const CAM_MIPS: u32 = 4;
+
+/// Bytes in the camera texture's whole mip chain.
+pub fn cam_chain_len() -> usize {
+    (0..CAM_MIPS).map(|i| ((VID_W >> i) * (VID_H >> i) * 4) as usize).sum()
+}
+
+/// A VID_W x VID_H RGBA frame and its smaller levels (2x2 box filter),
+/// concatenated: what `Statics::upload_cam` takes. Built on the camera
+/// thread, off the render loop.
+pub fn cam_mips(level0: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(cam_chain_len());
+    out.extend_from_slice(level0);
+    let (mut w, mut h) = (VID_W as usize, VID_H as usize);
+    let mut start = 0usize;
+    for _ in 1..CAM_MIPS {
+        let (nw, nh) = (w / 2, h / 2);
+        let mut next = vec![0u8; nw * nh * 4];
+        {
+            let src = &out[start..start + w * h * 4];
+            for y in 0..nh {
+                for x in 0..nw {
+                    for c in 0..4 {
+                        let i = |xx: usize, yy: usize| src[(yy * w + xx) * 4 + c] as u32;
+                        let v = i(2 * x, 2 * y) + i(2 * x + 1, 2 * y) + i(2 * x, 2 * y + 1) + i(2 * x + 1, 2 * y + 1);
+                        next[(y * nw + x) * 4 + c] = ((v + 2) / 4) as u8;
+                    }
+                }
+            }
+        }
+        start = out.len();
+        out.extend_from_slice(&next);
+        (w, h) = (nw, nh);
+    }
+    out
+}
 
 /// The Trippin logo (the app icon), for the logo scene with no image set.
 pub fn app_logo() -> image::RgbaImage {
@@ -242,7 +281,7 @@ impl Statics {
                 height: VID_H,
                 depth_or_array_layers: 1,
             },
-            mip_level_count: 1,
+            mip_level_count: CAM_MIPS,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8UnormSrgb,
@@ -280,30 +319,43 @@ impl Statics {
         me
     }
 
-    /// Put a webcam frame (VID_W x VID_H RGBA) into the camera texture.
+    /// Put a webcam frame into the camera texture: its whole mip chain
+    /// (`cam_mips`), or just VID_W x VID_H RGBA (the chain is built here).
     pub fn upload_cam(&self, queue: &wgpu::Queue, rgba: &[u8]) {
-        if rgba.len() != (VID_W * VID_H * 4) as usize {
+        let built;
+        let chain = if rgba.len() == cam_chain_len() {
+            rgba
+        } else if rgba.len() == (VID_W * VID_H * 4) as usize {
+            built = cam_mips(rgba);
+            &built
+        } else {
             return;
+        };
+        let mut start = 0usize;
+        for i in 0..CAM_MIPS {
+            let (w, h) = (VID_W >> i, VID_H >> i);
+            let n = (w * h * 4) as usize;
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &self.cam,
+                    mip_level: i,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &chain[start..start + n],
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(w * 4),
+                    rows_per_image: Some(h),
+                },
+                wgpu::Extent3d {
+                    width: w,
+                    height: h,
+                    depth_or_array_layers: 1,
+                },
+            );
+            start += n;
         }
-        queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &self.cam,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            rgba,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(VID_W * 4),
-                rows_per_image: Some(VID_H),
-            },
-            wgpu::Extent3d {
-                width: VID_W,
-                height: VID_H,
-                depth_or_array_layers: 1,
-            },
-        );
     }
 
     /// Put an image into the logo texture (fitted, see `logo_pixels`).

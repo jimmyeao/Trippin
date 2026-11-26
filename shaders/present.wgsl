@@ -265,7 +265,7 @@ fn graded(scr_uv: vec2<f32>) -> vec4<f32> {
         // The key reads the camera as it is; the rotoscope only restyles.
         let a = cam_key(c);
         if cm_all >= 4 {
-            c = cam_roto(cuv, 0.6, 0.0);
+            c = cam_roto(cuv, 0.0);
         }
         // Green / blue screen: pull the screen's colour out of the edges.
         let key = i32(u.cam4.z + 0.5);

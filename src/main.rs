@@ -1918,6 +1918,13 @@ fn render_loop(
                 l[3] = title_frac;
                 l
             },
+            roto4: [
+                s.roto_amt.clamp(0.0, 1.0),
+                s.roto_ink.clamp(0.0, 1.0),
+                s.roto_detail.clamp(0.0, 1.0),
+                s.roto_bands.clamp(2, 8) as f32,
+            ],
+            roto5: [s.roto_pal.clamp(0.0, 1.0), 0.0, 0.0, 0.0],
             cam4: if cam_layer {
                 [
                     s.camera_layer.index() + if s.camera_roto { 4.0 } else { 0.0 },

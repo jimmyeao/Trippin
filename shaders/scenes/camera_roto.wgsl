@@ -15,7 +15,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // Line boil: a small wander of the trace, quicker with the mids.
     let t = u.clock4.z * (0.06 + 0.1 * u.lvl4.y);
     let boil = vec2<f32>(noise(uv * 7.0 + vec2<f32>(t, 1.3)) - 0.5, noise(uv * 7.0 + vec2<f32>(4.1, t)) - 0.5) * 0.003;
-    let ink = 0.5 + 1.6 * u.pres4.x + 1.2 * kick_swell();
-    let col = cam_roto(uv + boil, ink, 0.6);
+    // The ink thickens with the bass presence and on the kick, on top of
+    // the Rotoscope controls (Dancer & FX).
+    let col = cam_roto(uv + boil, 0.5 * u.pres4.x + 0.5 * kick_swell());
     return vec4<f32>(finite(untonemap(col)), 1.0);
 }

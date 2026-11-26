@@ -51,6 +51,10 @@ struct U {
     // The camera layer (present.wgsl): mode (0 off, 1 behind, 2 in front),
     // strength, key (0 none, 1 green, 2 blue, 3 dark), key tolerance.
     cam4: vec4<f32>,
+    // The rotoscope look (cam_roto): amount, ink, detail, colour bands; then
+    // x: palette colour, yzw spare.
+    roto4: vec4<f32>,
+    roto5: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> u: U;
@@ -94,37 +98,54 @@ fn cam(uv: vec2<f32>) -> vec3<f32> {
     return textureSampleLevel(cam_tex, samp, clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).rgb;
 }
 
-// The webcam rotoscoped (display-referred, like cam()): smoothed, its
-// shading flattened into five cel bands, with ink outlines on its edges.
-// `ink` thickens the lines (0 thin), `pal` 0..1 tints the bands toward the
-// palette (0 keeps the camera's own colours). Nine taps: they smooth and
-// feed the edge filter both.
-fn cam_roto(uv: vec2<f32>, ink: f32, pal: f32) -> vec3<f32> {
-    let d = vec2<f32>(1.5 / 1280.0, 1.5 / 720.0) * (1.0 + ink);
+// The webcam at a blur level (`lod` 0 = sharp, 1 = half size, ... up to
+// CAM_MIPS - 1), blended between levels so a slider glides.
+fn cam_lod(uv: vec2<f32>, lod: f32) -> vec3<f32> {
+    let q = clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0));
+    let l = clamp(lod, 0.0, 2.999);
+    let l0 = floor(l);
+    let a = textureSampleLevel(cam_tex, samp, q, l0).rgb;
+    let b = textureSampleLevel(cam_tex, samp, q, l0 + 1.0).rgb;
+    return mix(a, b, l - l0);
+}
+
+// The webcam rotoscoped (display-referred, like cam()), set by the
+// Rotoscope controls (u.roto4/roto5): the colour flattened into cel bands
+// from a smoothed copy, ink outlines found on a blurred copy (so only the
+// big shapes are traced), mixed over the plain camera by the amount.
+// `ink_boost` thickens the ink on top of the setting (scenes put the music
+// there).
+fn cam_roto(uv: vec2<f32>, ink_boost: f32) -> vec3<f32> {
+    let amt = clamp(u.roto4.x, 0.0, 1.0);
+    let ink = clamp(u.roto4.y + ink_boost, 0.0, 2.0);
+    let detail = clamp(u.roto4.z, 0.0, 1.0);
+    let bands = clamp(u.roto4.w, 2.0, 8.0);
     let w = vec3<f32>(0.299, 0.587, 0.114);
-    let c00 = cam(uv + d * vec2<f32>(-1.0, -1.0));
-    let c10 = cam(uv + d * vec2<f32>(0.0, -1.0));
-    let c20 = cam(uv + d * vec2<f32>(1.0, -1.0));
-    let c01 = cam(uv + d * vec2<f32>(-1.0, 0.0));
-    let c11 = cam(uv);
-    let c21 = cam(uv + d * vec2<f32>(1.0, 0.0));
-    let c02 = cam(uv + d * vec2<f32>(-1.0, 1.0));
-    let c12 = cam(uv + d * vec2<f32>(0.0, 1.0));
-    let c22 = cam(uv + d * vec2<f32>(1.0, 1.0));
-    let c = (c00 + c20 + c02 + c22 + 2.0 * (c10 + c01 + c21 + c12) + 4.0 * c11) / 16.0;
-    // Ink: edges of the luminance (Sobel).
-    let gx = dot(c20 + 2.0 * c21 + c22 - c00 - 2.0 * c01 - c02, w);
-    let gy = dot(c02 + 2.0 * c12 + c22 - c00 - 2.0 * c10 - c20, w);
-    let edge = smoothstep(0.1, 0.28, length(vec2<f32>(gx, gy)));
-    // Cel bands: the luminance stepped (with soft steps, so no stairs
-    // shimmer), the colour kept but its shading flattened.
+    // Outlines: Sobel on a blurred copy; low detail = blurrier, fewer lines.
+    let lod_e = mix(2.4, 0.4, detail);
+    let d = exp2(lod_e) / vec2<f32>(1280.0, 720.0) * (0.8 + 1.4 * ink);
+    let s00 = dot(cam_lod(uv + d * vec2<f32>(-1.0, -1.0), lod_e), w);
+    let s10 = dot(cam_lod(uv + d * vec2<f32>(0.0, -1.0), lod_e), w);
+    let s20 = dot(cam_lod(uv + d * vec2<f32>(1.0, -1.0), lod_e), w);
+    let s01 = dot(cam_lod(uv + d * vec2<f32>(-1.0, 0.0), lod_e), w);
+    let s21 = dot(cam_lod(uv + d * vec2<f32>(1.0, 0.0), lod_e), w);
+    let s02 = dot(cam_lod(uv + d * vec2<f32>(-1.0, 1.0), lod_e), w);
+    let s12 = dot(cam_lod(uv + d * vec2<f32>(0.0, 1.0), lod_e), w);
+    let s22 = dot(cam_lod(uv + d * vec2<f32>(1.0, 1.0), lod_e), w);
+    let gx = s20 + 2.0 * s21 + s22 - s00 - 2.0 * s01 - s02;
+    let gy = s02 + 2.0 * s12 + s22 - s00 - 2.0 * s10 - s20;
+    let thr = mix(0.2, 0.07, detail);
+    let edge = smoothstep(thr, thr * 2.0, length(vec2<f32>(gx, gy)));
+    // Cel bands on a smoothed copy, the colour kept, its shading flattened.
+    let c = cam_lod(uv, mix(1.8, 0.4, detail));
     let l = dot(c, w);
-    let x = l * 5.0;
-    let lq = (floor(x) + smoothstep(0.4, 0.6, fract(x))) / 5.0;
+    let x = l * bands;
+    let lq = (floor(x) + smoothstep(0.4, 0.6, fract(x))) / bands;
     var col = c * (lq + 0.06) / (l + 0.06);
     let p = palette(fract(lq * 0.7 + u.clock4.x * 0.01));
-    col = mix(col, p * p * (0.02 + 1.4 * lq * lq + 0.2 * lq), clamp(pal, 0.0, 1.0));
-    return col * (1.0 - 0.92 * edge);
+    col = mix(col, p * p * (0.02 + 1.4 * lq * lq + 0.2 * lq), clamp(u.roto5.x, 0.0, 1.0));
+    col *= 1.0 - min(0.4 + 0.6 * ink, 1.0) * edge;
+    return mix(cam(uv), col, amt);
 }
 
 // The logo at uv in 0..1 across its square (y top to bottom): rgb and

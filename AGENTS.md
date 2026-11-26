@@ -520,8 +520,13 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   or in front, keyed (`cam_key`: green/blue chroma with spill pulled out,
   dark = luma, none); cam4.x + 4 rotoscopes it (`cam_roto` in
   common.wgsl: nine taps smooth and feed a Sobel ink line, the luminance
-  stepped into five soft cel bands; the key still reads the raw camera, and
-  the camera_roto scene uses the same function). Snaps: `--snap-cam-layer 1|2`, `--snap-cam-key
+  stepped into soft cel bands; the key still reads the raw camera, and
+  the camera_roto scene uses the same function). Its outlines come from a
+  blurred copy: the camera texture carries a 4-level mip chain
+  (`gfx::cam_mips`, built on the camera thread) and `cam_lod` blends
+  levels. Traced at full size, hair, skin and sensor noise scribbled the
+  owner's face. The Rotoscope look controls ride `Uniforms::roto4/roto5`;
+  `--snap-roto amt,ink,detail,bands,pal` in snaps. Snaps: `--snap-cam-layer 1|2`, `--snap-cam-key
   0..3`, `--snap-camera-image <png>` for a still. `camera::LIVE` gates those scenes into rotation and shows
   the panel's "camera on" pill; the AI builder never plans them. Snaps never
   open a camera: `--snap-camera <clip>` stands a pack clip in (default

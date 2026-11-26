@@ -23,7 +23,8 @@ pub static LIVE: AtomicBool = AtomicBool::new(false);
 static NAMES: Mutex<Vec<String>> = Mutex::new(Vec::new());
 static LISTING: AtomicBool = AtomicBool::new(false);
 
-/// The newest frame: a serial (bumped per frame) and VID_W x VID_H RGBA.
+/// The newest frame: a serial (bumped per frame) and its RGBA mip chain
+/// (`gfx::cam_mips`).
 pub type Frame = Option<(u64, Arc<Vec<u8>>)>;
 
 pub struct Capture {
@@ -186,7 +187,8 @@ fn run(want: Arc<Mutex<String>>, frame: Arc<Mutex<Frame>>) {
             match got {
                 Some(img) => {
                     serial = serial.wrapping_add(1);
-                    *frame.lock().unwrap_or_else(|e| e.into_inner()) = Some((serial, Arc::new(fit(&img))));
+                    let chain = crate::gfx::cam_mips(&fit(&img));
+                    *frame.lock().unwrap_or_else(|e| e.into_inner()) = Some((serial, Arc::new(chain)));
                     last_ok = Instant::now();
                     LIVE.store(true, Ordering::Relaxed);
                 }
@@ -224,5 +226,20 @@ mod tests {
             assert_eq!(px.len(), (VID_W * VID_H * 4) as usize, "{w}x{h}");
             assert_eq!(&px[..4], &[10, 200, 30, 255]);
         }
+    }
+
+    /// The mip chain is the full length and each level averages the last.
+    #[test]
+    fn mips_halve_and_average() {
+        use crate::gfx::{cam_chain_len, cam_mips, VID_H, VID_W};
+        let mut l0 = vec![0u8; (VID_W * VID_H * 4) as usize];
+        for (i, p) in l0.chunks_mut(4).enumerate() {
+            let v = if (i % VID_W as usize) % 2 == 0 { 200 } else { 100 };
+            p.copy_from_slice(&[v, v, v, 255]);
+        }
+        let chain = cam_mips(&l0);
+        assert_eq!(chain.len(), cam_chain_len());
+        let l1 = &chain[l0.len()..];
+        assert_eq!(&l1[..4], &[150, 150, 150, 255]);
     }
 }

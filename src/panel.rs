@@ -3343,6 +3343,38 @@ fn dancer_fx_tab(
                     s.camera_layer != CamLayer::Off,
                     egui::Checkbox::new(&mut s.camera_roto, "Rotoscope: cartoon bands and ink outlines"),
                 );
+                // The rotoscope look: the layer's tick and the Camera
+                // Rotoscope scene both use it.
+                egui::CollapsingHeader::new(egui::RichText::new("Rotoscope look").size(12.0))
+                    .id_salt("roto_look")
+                    .show(ui, |ui| {
+                        ui.small("For the camera layer's rotoscope and the Camera Rotoscope scene.");
+                        ctl_row(ui, "Amount", |ui| {
+                            ui.add(egui::Slider::new(&mut s.roto_amt, 0.0..=1.0))
+                                .on_hover_text("How much of the cartoon look over the plain camera");
+                        });
+                        ctl_row(ui, "Detail", |ui| {
+                            ui.add(egui::Slider::new(&mut s.roto_detail, 0.0..=1.0))
+                                .on_hover_text("Low: only the big outlines and flat shapes. High: finer lines and shading");
+                        });
+                        ctl_row(ui, "Ink", |ui| {
+                            ui.add(egui::Slider::new(&mut s.roto_ink, 0.0..=1.0))
+                                .on_hover_text("How thick and dark the outlines are");
+                        });
+                        ctl_row(ui, "Bands", |ui| {
+                            ui.add(egui::Slider::new(&mut s.roto_bands, 2..=8))
+                                .on_hover_text("How many flat shades the colours are stepped into");
+                        });
+                        ctl_row(ui, "Palette colour", |ui| {
+                            ui.add(egui::Slider::new(&mut s.roto_pal, 0.0..=1.0))
+                                .on_hover_text("0: the camera's own colours. 1: the show's palette");
+                        });
+                        if ui.small_button("Reset").clicked() {
+                            let d = crate::config::Settings::default();
+                            (s.roto_amt, s.roto_ink, s.roto_detail, s.roto_bands, s.roto_pal) =
+                                (d.roto_amt, d.roto_ink, d.roto_detail, d.roto_bands, d.roto_pal);
+                        }
+                    });
             }
         });
         r2.response.rect.height()

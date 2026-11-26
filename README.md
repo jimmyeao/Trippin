@@ -743,8 +743,12 @@ scene:
   whole frame. **Key tolerance** sets how much of the screen colour goes;
   green or blue spill on your edges is pulled out.
 - **Rotoscope** (a tick under the layer): the layer drawn as a cartoon,
-  cel bands and ink outlines in your camera's own colours, behind or in
-  front of any scene.
+  cel bands and ink outlines, behind or in front of any scene.
+- **Rotoscope look** (under the camera layer; also sets the Camera
+  Rotoscope scene): **Amount** (how much cartoon over the plain camera),
+  **Detail** (low: only the big outlines and flat shapes; high: finer
+  lines), **Ink** (outline weight), **Bands** (2-8 flat shades) and
+  **Palette colour** (your own colours to the show's palette).
 
 Nothing is opened until you pick a camera, the camera scenes stay out of
 rotation until it sends frames, and a red **camera on** marker shows at the

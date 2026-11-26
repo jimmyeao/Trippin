@@ -92,6 +92,10 @@ pub struct Uniforms {
     /// 2 in front, keyed), strength, key (0 none, 1 green, 2 blue, 3 dark
     /// background), key tolerance.
     pub cam4: [f32; 4],
+    /// The rotoscope look (`cam_roto`): amount, ink, detail, colour bands.
+    pub roto4: [f32; 4],
+    /// x: palette colour 0..1; yzw spare.
+    pub roto5: [f32; 4],
 }
 
 #[derive(Default, Clone, Copy, PartialEq)]
@@ -2584,6 +2588,8 @@ impl Renderer {
             misc4: [0.0; 4],
             look4: look,
             cam4: [0.0; 4],
+            roto4: [1.0, 0.5, 0.35, 4.0],
+            roto5: [0.4, 0.0, 0.0, 0.0],
         };
         self.queue
             .write_buffer(&self.uniform_buf, 0, bytemuck::bytes_of(&u));
