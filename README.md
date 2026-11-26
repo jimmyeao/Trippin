@@ -687,6 +687,24 @@ test groove on one strip.
 
 Everything for streamers lives on the **Stream** tab.
 
+### Photosensitive-safe mode
+
+Tick **Photosensitive-safe** (Stream tab, video output; or Settings, director)
+and nothing on screen flashes more than three times a second, the WCAG 2.3.1
+limit streaming platforms point to:
+
+- strobe cues, drum-fill strobes and the timeline's flash fills are off (fills
+  still stutter video scenes), as are the white flash on a cut, the text
+  **strobe** effect and the lights' white flashes;
+- the picture's average brightness may fall as fast as it likes but rise only
+  0.3 a second (of full white), which tames scenes' own beat flashes too. A
+  steady picture looks the same; a hit that would flash the whole screen
+  comes up gently instead.
+
+It applies to the window and to Spout/NDI alike. `--snap all --snap-flash 8
+--snap-size 320x180` counts each scene's flashes per second (`flash.tsv`);
+add `--snap-safe` to measure with the switch on.
+
 ### Video output: Spout and NDI
 
 The finished frame goes out as a video source: scene, dancer, post FX,

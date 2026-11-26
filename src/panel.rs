@@ -2654,6 +2654,14 @@ fn status_dot(ui: &mut egui::Ui, ok: bool, text: &str) {
     });
 }
 
+/// The Photosensitive-safe switch (Settings > director and Stream > video
+/// output share it).
+fn photo_safe_check(ui: &mut egui::Ui, s: &mut Settings) {
+    ui.checkbox(&mut s.photo_safe, "Photosensitive-safe").on_hover_text(
+        "Nothing flashes more than three times a second: strobes, cut flashes and the text strobe are off,          and the picture's brightness can only rise so fast, which also tames scenes' own flashes          (WCAG 2.3.1, the limit streaming platforms point to).",
+    );
+}
+
 fn stream_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<UiCommand>) {
     use crate::nowplaying::NpSource;
     use crate::ui_theme::*;
@@ -3042,6 +3050,7 @@ fn stream_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<Ui
             st.output.is_some(),
             st.output.as_deref().unwrap_or("off — enable Spout or NDI"),
         );
+        photo_safe_check(ui, s);
         egui::Grid::new("out_grid")
             .num_columns(2)
             .min_col_width(96.0)
@@ -4389,6 +4398,7 @@ fn settings_tab(
                 .on_hover_text("Quiet sections switch the show into calm mode");
             ui.checkbox(&mut s.cut_on_drops, "Cut early on a drop")
                 .on_hover_text("A drop lands early — cut to the next scene with it");
+            photo_safe_check(ui, s);
             if let Some(n) = style_override_note(s) {
                 ui.small(n);
             }

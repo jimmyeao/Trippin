@@ -1698,7 +1698,10 @@ fn render_loop(
         // tunnel/flight scenes, where it reads as jerky (AGENTS.md).
         let fill_strobe = dir.fill_strobe
             && !crate::ai::scene_meta(r.scene_name(dir.scene)).flight;
-        let strobe_live = STROBE.load(Ordering::Relaxed) || fill_strobe;
+        // Photosensitive-safe turns every strobe off; fills still stutter
+        // video scenes (`vbeat.fill`), which is motion, not light.
+        let strobe_live = !s.photo_safe && (STROBE.load(Ordering::Relaxed) || fill_strobe);
+        r.set_safe(s.photo_safe);
         let strobe_gate = if strobe_live && f.onset < 0.45 {
             0.0
         } else {
@@ -1770,7 +1773,8 @@ fn render_loop(
             intensity: dir.intensity,
             hue: dir.hue,
             seed: dir.seed,
-            flash: dir.flash,
+            // The cut flash is a full-frame white: off in safe mode.
+            flash: if s.photo_safe { 0.0 } else { dir.flash },
             flow: flow as f32,
             master: master * strobe_gate,
             fx: if s.fx_auto { fx_current } else { s.fx }.index(),
@@ -1923,7 +1927,12 @@ fn render_loop(
                 life: 0.0,
                 hue: (slot as f32) * 0.37 + ts.spec.style.index() * 0.11,
                 anim: ts.spec.anim.index(),
-                fx: ts.spec.fx.index(),
+                // Safe mode: the text strobe (on/off on the eighths) holds still.
+                fx: if s.photo_safe && ts.spec.fx == text::TextFx::Strobe {
+                    text::TextFx::None.index()
+                } else {
+                    ts.spec.fx.index()
+                },
             };
             any_text = true;
         }

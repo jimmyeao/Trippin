@@ -65,10 +65,23 @@ fn agx(x: vec3<f32>) -> vec3<f32> {
     return pow(clamp(v, vec3<f32>(0.0), vec3<f32>(1.0)), vec3<f32>(2.2));
 }
 
-@fragment
-fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+// Photosensitive-safe limiter state (gfx::Statics::lum): the average
+// luminance the frame may show, the gain that holds it there, on, and the
+// rise allowed per second.
+struct Lum {
+    ref_l: f32,
+    gain: f32,
+    on: f32,
+    rate: f32,
+};
+@group(0) @binding(11) var<storage, read_write> lum: Lum;
+
+// The finished frame before grain: FX, bloom, tone map, vignette, cut flash
+// and master. rgb = colour, a = the dancer's coverage (transparent mode).
+// Shared by fs_main and the limiter's measure (fs_lum).
+fn graded(scr_uv: vec2<f32>) -> vec4<f32> {
     let fxm = i32(u.fx + 0.5);
-    let uv = mix(in.uv, fx_uv(in.uv, fxm), clamp(u.fx_amt, 0.0, 1.0));
+    let uv = mix(scr_uv, fx_uv(scr_uv, fxm), clamp(u.fx_amt, 0.0, 1.0));
     let dir = uv - 0.5;
     let ca = 0.004 + 0.012 * u.kick * u.intensity;
     var col = vec3<f32>(
@@ -95,17 +108,53 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         col = aces(col * expo);
     }
     // Vignette and grain use screen-space uv so edges darken the same under FX.
-    let scr = in.uv - 0.5;
+    let scr = scr_uv - 0.5;
     col *= 1.0 - 0.9 * dot(scr, scr) * 1.6;
     if !clear_bg {
         col += u.flash * u.flash * 0.35;
     }
-    col *= u.master;
+    return vec4<f32>(col * u.master, cover);
+}
+
+// Photosensitive-safe measure, one pixel, run just before present while the
+// switch is on: the frame's average displayed luminance on a 16x9 grid.
+// Darkening passes freely; brightening may rise only `rate` a second, and
+// the gain present applies holds the frame to that (WCAG 2.3.1: no more than
+// three flashes a second). It catches every scene's own flashes, not only
+// the strobe and flash cues the render loop turns off.
+@fragment
+fn fs_lum(in: VsOut) -> @location(0) vec4<f32> {
+    var sum = 0.0;
+    for (var j = 0; j < 9; j++) {
+        for (var i = 0; i < 16; i++) {
+            let p = (vec2<f32>(f32(i), f32(j)) + 0.5) / vec2<f32>(16.0, 9.0);
+            let c = clamp(graded(p).rgb, vec3<f32>(0.0), vec3<f32>(1.0));
+            sum += dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
+        }
+    }
+    let l = sum / 144.0;
+    var r = lum.ref_l;
+    if r < 0.0 || r != r {
+        r = l;
+    }
+    r = min(l, r + lum.rate * clamp(u.dt, 0.0, 0.1));
+    lum.ref_l = r;
+    lum.gain = select(1.0, clamp(r / l, 0.0, 1.0), l > r + 1e-4);
+    return vec4<f32>(l, r, 0.0, 1.0);
+}
+
+@fragment
+fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+    let g = graded(in.uv);
+    let gain = select(1.0, lum.gain, lum.on > 0.5);
+    var col = g.rgb * gain;
+    let cover = g.a * gain;
+    let clear_bg = u.misc4.x > 0.5;
     // Grain fades out in the blacks — flat noise there shimmers as a dirty
     // texture, speckles a blacked-out screen, and costs encoders bits on
     // pure noise. Real film grain vanishes in deep shadow anyway.
-    let lum = max(col.r, max(col.g, col.b));
-    col += (hash21(in.uv * vec2<f32>(u.res_x, u.res_y) + floor(fract(u.time * 7.0) * 997.0)) - 0.5) * 0.012 * smoothstep(0.0, 0.08, lum);
+    let peak = max(col.r, max(col.g, col.b));
+    col += (hash21(in.uv * vec2<f32>(u.res_x, u.res_y) + floor(fract(u.time * 7.0) * 997.0)) - 0.5) * 0.012 * smoothstep(0.0, 0.08, peak);
     if clear_bg {
         // Premultiplied out: anything lit (glow, bloom) earns alpha too, so
         // additive light reads over a camera feed instead of going grey.

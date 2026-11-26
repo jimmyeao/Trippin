@@ -867,6 +867,14 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   - Dancer routines re-anchor their loop to the bar they were requested in
     (`Slot::pending_anchor`), so a routine switched in on a phrase starts
     from its first frame there.
+- **Photosensitive-safe** (`Settings::photo_safe`): the render loop turns
+  off strobes, the cut flash and the text strobe; present.wgsl's `fs_lum`
+  (a one-pixel pass just before present, `Renderer::set_safe`) measures the
+  graded frame on a 16x9 grid and rate-limits rises in its average
+  luminance through a gain present applies. Its state is a storage buffer at
+  group(0) **binding 11** (`gfx::Statics::lum`, FRAGMENT only), in every
+  bind group but declared only by present.wgsl: a new group(0) bind group
+  must pass `FrameRes::lum`. Measure with `--snap-flash` (`--snap-safe`).
 - **Text effects** (`TextFx`, `text.wgsl`): punch/shake/strobe/bounce/
   shatter use the slot's former padding float (`TextSlotU::fx`), so the
   uniform layout didn't change. `TRIPPIN_TEXT_TEST="WORDS|fx"` fires one

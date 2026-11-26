@@ -38,7 +38,24 @@ pub struct Statics {
     /// need rebuilding.
     pub title: wgpu::Texture,
     pub title_view: wgpu::TextureView,
+    /// Photosensitive-safe limiter state (`Lum` in present.wgsl): the
+    /// allowed average luminance, the gain present applies, on, rise rate.
+    /// Written by `fs_lum` each frame while on; `set_safe` writes it from
+    /// the CPU when the switch changes.
+    pub lum: wgpu::Buffer,
 }
+
+/// `Lum` in present.wgsl: `[ref, gain, on, rate]`. `ref` < 0 makes the
+/// next `fs_lum` start from the frame it sees.
+pub fn lum_init(on: bool) -> [f32; 4] {
+    [-1.0, 1.0, if on { 1.0 } else { 0.0 }, SAFE_RISE_PER_S]
+}
+
+/// Photosensitive-safe: the frame's average luminance (linear, 0..1) may
+/// rise at most this much a second. WCAG 2.3.1 counts a flash as a swing
+/// of 0.1 or more; at 0.3/s that takes a third of a second, so even an
+/// instant fall and a capped rise make at most three flashes a second.
+pub const SAFE_RISE_PER_S: f32 = 0.3;
 
 pub const TITLE_W: u32 = 2048;
 pub const TITLE_H: u32 = 160;
@@ -183,6 +200,16 @@ impl Statics {
             vid,
             title_view: title.create_view(&Default::default()),
             title,
+            lum: {
+                let b = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("safe lum"),
+                    size: 16,
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+                queue.write_buffer(&b, 0, bytemuck::cast_slice(&lum_init(false)));
+                b
+            },
         }
     }
 

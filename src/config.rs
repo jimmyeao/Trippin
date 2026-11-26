@@ -541,6 +541,10 @@ pub struct Settings {
     pub np_card: bool,
     /// Put the track's cover art on the card (when one is found).
     pub np_card_art: bool,
+    /// Photosensitive-safe: no strobes, cut flashes or text strobe, and the
+    /// frame's brightness may rise only so fast (present.wgsl `fs_lum`), so
+    /// nothing flashes more than three times a second (WCAG 2.3.1).
+    pub photo_safe: bool,
     /// Ask the iTunes Search API for covers no local source has. Sends the
     /// artist and title to Apple, so it's off until the user turns it on.
     pub np_art_online: bool,
@@ -661,6 +665,7 @@ impl Default for Settings {
             np_file: String::new(),
             np_card: true,
             np_card_art: true,
+            photo_safe: false,
             np_art_online: false,
             np_hold_s: 12.0,
             np_size: 1.0,

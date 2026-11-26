@@ -18,6 +18,11 @@
 //! at `--snap-accent-amt`, default 0.6), `--snap-echo <0..1>` (the echo
 //! post effect at that amount), `--snap-logo <png>` (the branding logo in
 //! the top-right corner, bursting with `--snap-burst`/`--snap-burst-at`).
+//! `--snap-safe` turns the photosensitive-safe limiter on (present.wgsl
+//! `fs_lum`). `--snap-flash <s>` renders that many seconds of each scene,
+//! reads every frame back and prints the most flashes in any one second
+//! (WCAG 2.3.1 general flashes: opposing luminance swings of 0.1 or more
+//! with the darker side under 0.8); over 3 fails. Writes `flash.tsv`.
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -251,6 +256,7 @@ pub fn run(args: &[String]) -> Result<()> {
             ext: &statics.ext_view,
             vid: &statics.vid_view,
             title: &statics.title_view,
+            lum: &statics.lum,
         },
     );
     let out = device.create_texture(&wgpu::TextureDescriptor {
@@ -273,6 +279,38 @@ pub fn run(args: &[String]) -> Result<()> {
     let common = std::fs::read_to_string(dir.join("common.wgsl"))?;
     let present = render::compile_pipeline(&device, &common, &dir.join("present.wgsl"), &pl, OUT, None)
         .map_err(|e| anyhow!("present: {e}"))?;
+    // `--snap-safe`: the photosensitive-safe limiter, as the app runs it.
+    let safe = args.iter().any(|a| a == "--snap-safe");
+    let flash_s: f32 = arg(args, "--snap-flash").and_then(|s| s.parse().ok()).unwrap_or(0.0);
+    let mut flash_rows: Vec<(String, u32)> = Vec::new();
+    let lum_pipe = if safe {
+        Some(
+            render::compile_pipeline_entries(
+                &device,
+                &common,
+                &dir.join("present.wgsl"),
+                &pl,
+                wgpu::TextureFormat::Rgba8Unorm,
+                None,
+                ("vs_main", "fs_lum"),
+            )
+            .map_err(|e| anyhow!("fs_lum: {e}"))?,
+        )
+    } else {
+        None
+    };
+    let lum_view = device
+        .create_texture(&wgpu::TextureDescriptor {
+            label: Some("safe lum"),
+            size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        })
+        .create_view(&Default::default());
 
     // `--snap-dancer <style>`: draw a dancer clip over every scene with the
     // real dancer shader (same mask texture array + bind group as the app).
@@ -463,6 +501,7 @@ pub fn run(args: &[String]) -> Result<()> {
                     ext: &statics.ext_view,
                     vid: &statics.vid_view,
                     title: &statics.title_view,
+                    lum: &statics.lum,
                 },
             );
             let mix_bgs = Renderer::make_mix_bind_groups(
@@ -481,6 +520,7 @@ pub fn run(args: &[String]) -> Result<()> {
                     ext: &statics.ext_view,
                     vid: &statics.vid_view,
                     title: &statics.title_view,
+                    lum: &statics.lum,
                 },
             );
             let amt = arg(args, "--snap-accent-amt").and_then(|s| s.parse().ok()).unwrap_or(0.6);
@@ -513,6 +553,7 @@ pub fn run(args: &[String]) -> Result<()> {
                 ext: &statics.ext_view,
                 vid: &statics.vid_view,
                 title: &statics.title_view,
+                lum: &statics.lum,
             };
             let bgs = Renderer::make_bind_groups(&device, &layout, &ubuf, &sampler, &etargets, &res);
             let pass_bgs = Renderer::make_mix_bind_groups(&device, &layout, &ubuf, &sampler, &etargets, targets_main, &res);
@@ -678,6 +719,8 @@ pub fn run(args: &[String]) -> Result<()> {
         }
         let mut cur = 0usize;
         let mut frame = 0u32;
+        // Each scene starts the limiter afresh, as switching it on does.
+        queue.write_buffer(&statics.lum, 0, bytemuck::cast_slice(&gfx::lum_init(safe)));
         // video_* scenes: the clip plays at 1x on the snapshot clock, or on
         // the groove's beat grid for bar-locked scenes (video::snap_time).
         let vclip = name
@@ -848,6 +891,24 @@ pub fn run(args: &[String]) -> Result<()> {
                 echo_cur.set(en);
                 present_bg = &e.bgs[en];
             }
+            if let Some(lp) = &lum_pipe {
+                let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("safe lum"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &lum_view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Discard,
+                        },
+                    })],
+                    ..Default::default()
+                });
+                pass.set_pipeline(lp);
+                pass.set_bind_group(0, present_bg, &[]);
+                pass.draw(0..3, 0..1);
+            }
             {
                 let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("present"),
@@ -879,6 +940,31 @@ pub fn run(args: &[String]) -> Result<()> {
             *cur = next;
         };
         let mut t = 0.0f32;
+        if flash_s > 0.0 {
+            // Every frame's mean displayed luminance (the target is sRGB:
+            // decode before averaging).
+            let lin = |v: u8| {
+                let c = v as f32 / 255.0;
+                if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+            };
+            let mut series = Vec::new();
+            while t < flash_s {
+                step(t, frame, &mut cur);
+                frame += 1;
+                t += 1.0 / 60.0;
+                let px = read_pixels(&device, &queue, &out, w, h)?;
+                let n = (px.len() / 4).max(1) as f32;
+                let sum: f32 = px
+                    .chunks(4)
+                    .map(|p| 0.2126 * lin(p[0]) + 0.7152 * lin(p[1]) + 0.0722 * lin(p[2]))
+                    .sum();
+                series.push(sum / n);
+            }
+            let worst = max_flashes_per_s(&series, 60);
+            println!("{name:<22} {worst} flashes/s{}", if worst > 3 { "  FAIL" } else { "" });
+            flash_rows.push((name, worst));
+            continue;
+        }
         let mut shots = times.clone();
         shots.sort_by(f32::total_cmp);
         let mut grabs: Vec<Vec<u8>> = Vec::new();
@@ -952,6 +1038,13 @@ pub fn run(args: &[String]) -> Result<()> {
             println!("wrote {}", file.display());
         }
     }
+    if !flash_rows.is_empty() {
+        flash_rows.sort_by(|a, b| b.1.cmp(&a.1));
+        let lines: Vec<String> = flash_rows.iter().map(|(n, f)| format!("{n}\t{f}")).collect();
+        std::fs::write(out_dir.join("flash.tsv"), lines.join("\n") + "\n")?;
+        let fails = flash_rows.iter().filter(|r| r.1 > 3).count();
+        println!("{fails} of {} scenes over 3 flashes/s", flash_rows.len());
+    }
     if !report.is_empty() {
         report.sort_by(|a, b| b.1.total_cmp(&a.1));
         let lines: Vec<String> = report.iter().map(|(n, ms)| format!("{n}\t{ms:.3}")).collect();
@@ -1004,6 +1097,37 @@ fn save(
 }
 
 /// Read the output texture back as tightly packed RGBA8.
+/// WCAG 2.3.1 general flashes: a flash is a pair of opposing changes in
+/// relative luminance of 0.1 or more, where the darker side is under 0.8.
+/// Returns the most flashes in any window of `fps` frames (one second).
+pub fn max_flashes_per_s(series: &[f32], fps: usize) -> u32 {
+    let mut trans = Vec::new();
+    let (mut lo, mut hi) = match series.first() {
+        Some(&l) => (l, l),
+        None => return 0,
+    };
+    let mut dir = 0i8;
+    for (i, &l) in series.iter().enumerate() {
+        lo = lo.min(l);
+        hi = hi.max(l);
+        if dir != 1 && l - lo >= 0.1 && lo < 0.8 {
+            trans.push(i);
+            dir = 1;
+            (lo, hi) = (l, l);
+        } else if dir != -1 && hi - l >= 0.1 && l < 0.8 {
+            trans.push(i);
+            dir = -1;
+            (lo, hi) = (l, l);
+        }
+    }
+    let mut worst = 0;
+    for (a, &start) in trans.iter().enumerate() {
+        let n = trans[a..].iter().take_while(|&&j| j < start + fps).count();
+        worst = worst.max(n as u32 / 2);
+    }
+    worst
+}
+
 fn read_pixels(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -1055,4 +1179,24 @@ fn read_pixels(
         px.extend_from_slice(&data[s..s + (w * 4) as usize]);
     }
     Ok(px)
+}
+
+#[cfg(test)]
+mod flash_tests {
+    use super::max_flashes_per_s;
+
+    #[test]
+    fn counts_wcag_flashes() {
+        // A 6 Hz full swing at 60 fps: 6 flashes a second.
+        let strobe: Vec<f32> = (0..120).map(|i| if (i / 5) % 2 == 0 { 0.05 } else { 0.6 }).collect();
+        assert_eq!(max_flashes_per_s(&strobe, 60), 6);
+        // A beat pulse at 2 Hz passes; so does a small flicker under 0.1.
+        let beat: Vec<f32> = (0..120).map(|i| if i % 30 < 4 { 0.5 } else { 0.2 }).collect();
+        assert_eq!(max_flashes_per_s(&beat, 60), 2);
+        let flicker: Vec<f32> = (0..120).map(|i| 0.3 + 0.04 * (i % 2) as f32).collect();
+        assert_eq!(max_flashes_per_s(&flicker, 60), 0);
+        // Both sides brighter than 0.8 don't count.
+        let bright: Vec<f32> = (0..120).map(|i| if (i / 5) % 2 == 0 { 0.82 } else { 0.98 }).collect();
+        assert_eq!(max_flashes_per_s(&bright, 60), 0);
+    }
 }

@@ -212,11 +212,13 @@ pub struct FrameRes<'a> {
     pub ext: &'a wgpu::TextureView,
     pub vid: &'a wgpu::TextureView,
     pub title: &'a wgpu::TextureView,
+    /// Photosensitive-safe limiter state (gfx::Statics::lum).
+    pub lum: &'a wgpu::Buffer,
 }
 
 impl FrameRes<'_> {
-    /// Bind group entries 3..=10 (after uniforms, feedback and sampler).
-    pub fn entries(&self) -> [wgpu::BindGroupEntry<'_>; 8] {
+    /// Bind group entries 3..=11 (after uniforms, feedback and sampler).
+    pub fn entries(&self) -> [wgpu::BindGroupEntry<'_>; 9] {
         [
             wgpu::BindGroupEntry {
                 binding: 3,
@@ -249,6 +251,10 @@ impl FrameRes<'_> {
             wgpu::BindGroupEntry {
                 binding: 10,
                 resource: wgpu::BindingResource::TextureView(self.title),
+            },
+            wgpu::BindGroupEntry {
+                binding: 11,
+                resource: self.lum.as_entire_binding(),
             },
         ]
     }
@@ -303,6 +309,9 @@ fn tex_entry(binding: u32, dim: wgpu::TextureViewDimension) -> wgpu::BindGroupLa
     }
 }
 
+/// The photosensitive-safe measure's 1x1 target (its output is unused).
+const LUM_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+
 /// The group(0) layout every scene / present / dancer / text shader shares.
 pub fn frame_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     use wgpu::TextureViewDimension::{D2, D3};
@@ -341,6 +350,18 @@ pub fn frame_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
             tex_entry(9, D2),
             // The track playing now, as a text mask — gfx::Statics::title.
             tex_entry(10, D2),
+            // Photosensitive-safe limiter state — gfx::Statics::lum. Only
+            // present.wgsl declares it (fs_lum writes, fs_main reads).
+            wgpu::BindGroupLayoutEntry {
+                binding: 11,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
         ],
     })
 }
@@ -475,6 +496,12 @@ pub struct Renderer {
     out_err: Option<(output::Conf, Instant, String)>,
     /// present/text recompiled for the output texture format.
     out_present: Option<wgpu::RenderPipeline>,
+    /// Photosensitive-safe: present.wgsl's `fs_lum` (measures the frame and
+    /// updates the limiter just before present), its 1x1 target, and the
+    /// switch as last written to `statics.lum`.
+    lum_pipe: Option<wgpu::RenderPipeline>,
+    lum_view: wgpu::TextureView,
+    safe: bool,
     out_text: Option<wgpu::RenderPipeline>,
     out_overlay: Option<wgpu::RenderPipeline>,
     out_logo: Option<wgpu::RenderPipeline>,
@@ -817,6 +844,7 @@ impl Renderer {
                 ext: &statics.ext_view,
                 vid: &statics.vid_view,
                 title: &statics.title_view,
+                lum: &statics.lum,
             },
         );
 
@@ -836,6 +864,7 @@ impl Renderer {
                 ext: &statics.ext_view,
                 vid: &statics.vid_view,
                 title: &statics.title_view,
+                lum: &statics.lum,
             },
         );
 
@@ -855,6 +884,7 @@ impl Renderer {
                 ext: &statics.ext_view,
                 vid: &statics.vid_view,
                 title: &statics.title_view,
+                lum: &statics.lum,
             },
         );
 
@@ -869,6 +899,7 @@ impl Renderer {
                 ext: &statics.ext_view,
                 vid: &statics.vid_view,
                 title: &statics.title_view,
+                lum: &statics.lum,
             };
             (
                 Self::make_bind_groups(&device, &layout, &uniform_buf, &sampler, &echo_targets, &res),
@@ -876,6 +907,18 @@ impl Renderer {
             )
         };
 
+        let lum_view = device
+                .create_texture(&wgpu::TextureDescriptor {
+                    label: Some("safe lum"),
+                    size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: LUM_FORMAT,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    view_formats: &[],
+                })
+                .create_view(&Default::default());
         let shader_dir = find_shader_dir()?;
         println!("Shaders: {}", shader_dir.display());
         let echo_path = shader_dir.join("echo.wgsl");
@@ -998,6 +1041,9 @@ impl Renderer {
             out: None,
             out_err: None,
             out_present: None,
+            lum_pipe: None,
+            lum_view,
+            safe: false,
             out_text: None,
             out_overlay: None,
             out_logo: None,
@@ -1045,7 +1091,7 @@ impl Renderer {
     ) -> [wgpu::BindGroup; 2] {
         let make = |t: &wgpu::Texture| {
             let view = t.create_view(&Default::default());
-            let [e3, e4, e5, e6, e7, e8, e9, e10] = res.entries();
+            let [e3, e4, e5, e6, e7, e8, e9, e10, e11] = res.entries();
             device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: None,
                 layout,
@@ -1070,6 +1116,7 @@ impl Renderer {
                     e8,
                     e9,
                     e10,
+                    e11,
                 ],
             })
         };
@@ -1099,6 +1146,7 @@ impl Renderer {
                 ext: &ext,
                 vid: res.vid,
                 title: res.title,
+                lum: res.lum,
             };
             Self::make_bind_groups(device, layout, uniform_buf, sampler, targets, &r)
         };
@@ -1129,6 +1177,7 @@ impl Renderer {
             ext: &self.statics.ext_view,
                 vid: &self.statics.vid_view,
                 title: &self.statics.title_view,
+                lum: &self.statics.lum,
         };
         self.bind_groups = Self::make_bind_groups(
             &self.device,
@@ -1222,6 +1271,16 @@ impl Renderer {
 
     /// Upload a LUT built elsewhere (the `ART` palette's fade) under `id`;
     /// `set_palette` with any other name replaces it.
+    /// Photosensitive-safe on or off. Turning it on restarts the limiter
+    /// from the next frame's level; off sets the gain back to 1.
+    pub fn set_safe(&mut self, on: bool) {
+        if on != self.safe {
+            self.safe = on;
+            self.queue
+                .write_buffer(&self.statics.lum, 0, bytemuck::cast_slice(&gfx::lum_init(on)));
+        }
+    }
+
     pub fn set_palette_lut(&mut self, id: &str, lut: &palettes::Lut) {
         self.queue.write_texture(
             wgpu::TexelCopyTextureInfo {
@@ -1514,6 +1573,20 @@ impl Renderer {
                         } else {
                             None
                         };
+                    }
+                    if s.kind == Kind::Present {
+                        match compile_pipeline_entries(
+                            &self.device,
+                            &common,
+                            &s.path,
+                            &self.pipeline_layout,
+                            LUM_FORMAT,
+                            None,
+                            ("vs_main", "fs_lum"),
+                        ) {
+                            Ok(p) => self.lum_pipe = Some(p),
+                            Err(e) => eprintln!("shader {} (fs_lum) failed:\n{e}", s.name),
+                        }
                     }
                     // The output tap re-runs present/text into a BGRA target —
                     // keep sibling pipelines at OUT_FORMAT alongside.
@@ -2120,6 +2193,27 @@ impl Renderer {
             o.burst[0] > 0.0 && o.layers[crate::overlay::L_LOGO].uvx[2] > 0.004
         });
 
+        // Photosensitive-safe: measure the frame present is about to draw
+        // and update the limiter's gain (present.wgsl fs_lum).
+        if let (true, Some(lp)) = (self.safe, self.lum_pipe.as_ref()) {
+            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("safe lum"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.lum_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Discard,
+                    },
+                })],
+                ..Default::default()
+            });
+            pass.set_pipeline(lp);
+            pass.set_bind_group(0, present_bg, &[]);
+            pass.draw(0..3, 0..1);
+        }
+
         let view = frame.texture.create_view(&Default::default());
         {
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -2294,6 +2388,7 @@ impl Renderer {
                 ext: &self.statics.ext_view,
                 vid: &self.statics.vid_view,
                 title: &self.statics.title_view,
+                lum: &self.statics.lum,
             },
             c.clone(),
         ) {
@@ -2422,6 +2517,7 @@ impl Renderer {
                 ext: &self.statics.ext_view,
                 vid: &self.statics.vid_view,
                 title: &self.statics.title_view,
+                lum: &self.statics.lum,
             },
         );
         // The present pipeline is built for the surface format (usually
