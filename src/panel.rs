@@ -858,6 +858,28 @@ fn looks_strip(ui: &mut egui::Ui, s: &mut Settings, st: &Status, look_name: &mut
         if can && (save || enter) {
             cmd.push(UiCommand::SaveLook(std::mem::take(look_name)));
         }
+        // Glide: how a recalled Look arrives. One wrap-aware allocation for
+        // the label and combo (see the Style picker below).
+        ui.add_space(6.0);
+        ui.allocate_ui(egui::vec2(130.0, 22.0), |ui| {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Glide").size(11.5).color(MUTED));
+                egui::ComboBox::from_id_salt("look_glide")
+                    .selected_text(egui::RichText::new(s.look_glide.label()).size(11.5))
+                    .width(72.0)
+                    .show_ui(ui, |ui| {
+                        for g in crate::looks::Glide::ALL {
+                            ui.selectable_value(&mut s.look_glide, g, g.label());
+                        }
+                    })
+                    .response
+                    .on_hover_text(
+                        "How a Look arrives: Cut changes everything at once. A glide blends the palette \
+                         and effect amount over a beat or bar(s), swaps the dancer halfway, and changes \
+                         the scene on the closing beat.",
+                    );
+            });
+        });
         // Style: steers the auto-pilot's scene pool, palettes and pacing.
         let cat = crate::styles::catalog();
         if !cat.themes.is_empty() {

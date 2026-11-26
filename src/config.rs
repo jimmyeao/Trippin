@@ -545,6 +545,9 @@ pub struct Settings {
     /// frame's brightness may rise only so fast (present.wgsl `fs_lum`), so
     /// nothing flashes more than three times a second (WCAG 2.3.1).
     pub photo_safe: bool,
+    /// How a recalled Look arrives: cut, or eased over a beat/bar/2 bars
+    /// with the scene changing on the closing beat (`looks::Glide`).
+    pub look_glide: crate::looks::Glide,
     /// Ask the iTunes Search API for covers no local source has. Sends the
     /// artist and title to Apple, so it's off until the user turns it on.
     pub np_art_online: bool,
@@ -666,6 +669,7 @@ impl Default for Settings {
             np_card: true,
             np_card_art: true,
             photo_safe: false,
+            look_glide: crate::looks::Glide::default(),
             np_art_online: false,
             np_hold_s: 12.0,
             np_size: 1.0,

@@ -867,6 +867,15 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   - Dancer routines re-anchor their loop to the bar they were requested in
     (`Slot::pending_anchor`), so a routine switched in on a phrase starts
     from its first frame there.
+- **Look glide** (`Settings::look_glide`, `looks::Glide`): `apply_look` still
+  writes the Look's settings at once, and under the same settings lock puts a
+  `GlideReq` (the old values, the scene/routine indices) in `Shared::glide`;
+  the render loop takes it with its settings clone, so no frame sees the new
+  settings without the glide. `looks::glide_overlay` writes the in-between
+  values on the per-frame clone only (never saved); the palette blends
+  through `pal_fade` (the art palette's `Fade`); the routine switches at the
+  midpoint and the scene on `glide_end`'s beat. Keep new Look fields in
+  `GlideFrom` if they should ease.
 - **Photosensitive-safe** (`Settings::photo_safe`): the render loop turns
   off strobes, the cut flash and the text strobe; present.wgsl's `fs_lum`
   (a one-pixel pass just before present, `Renderer::set_safe`) measures the

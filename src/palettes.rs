@@ -379,6 +379,11 @@ impl Fade {
         Self { from: on_screen, to: on_screen, cur: on_screen, key: String::new(), start: 0.0, len: 1.0, done: false }
     }
 
+    /// The fade has reached its target.
+    pub fn done(&self) -> bool {
+        self.done
+    }
+
     /// Aim at `key` (a new key starts a fade from what's showing, over
     /// `len` seconds). Returns the LUT to show when it changed since the
     /// last call.

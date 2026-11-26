@@ -154,6 +154,10 @@ struct Shared {
     /// toggle (mirrors `Settings::np_art_online`).
     art: albumart::SharedArt,
     art_online: Arc<AtomicBool>,
+    /// A Look recall waiting to glide (`looks::GlideReq`). Written while
+    /// the settings lock is held, and taken by the render loop under the
+    /// same lock, so a frame never sees the Look's settings without it.
+    glide: Mutex<Option<looks::GlideReq>>,
     /// Track pushed by a LAN agent over the remote protocol; the
     /// now-playing worker's `Remote` source polls it.
     np_remote: nowplaying::RemoteNp,
@@ -709,7 +713,22 @@ fn render_loop(
     let mut fade_p = -1.0f32;
     // `palette = "auto"` mood matcher (palettes::Auto).
     let mut auto_pal = palettes::Auto::default();
-    let mut art_fade: Option<palettes::Fade> = None;
+    // A LUT fade in progress: the `art` palette's cover changes, and Look
+    // glides. While it runs the palette goes through `set_palette_lut`.
+    let mut pal_fade: Option<palettes::Fade> = None;
+    // Look glide (looks::glide_overlay): a request taken with the settings
+    // this frame, then the running glide with its beat window.
+    struct GlideRun {
+        req: looks::GlideReq,
+        start: f64,
+        end: f64,
+        t0: Instant,
+        secs: f32,
+        p: f32,
+        mid_done: bool,
+    }
+    let mut glide_req: Option<looks::GlideReq> = None;
+    let mut glide: Option<GlideRun> = None;
     // The selected Style's auto-palette families, cached by Style id.
     let mut style_pals: Option<(String, [Vec<&'static str>; 4])> = None;
     // The track is in a breakdown, as far as a Style's calm pool is concerned
@@ -1077,7 +1096,28 @@ fn render_loop(
         if dt > 0.0 {
             fps += (1.0 / dt - fps) * 0.05;
         }
-        let mut s = lock(&shared.settings).clone();
+        let mut s = {
+            let g = lock(&shared.settings);
+            if let Some(mut q) = lock(&shared.glide).take() {
+                // A newer Look supersedes a glide in flight; its scene
+                // still lands if the new one names none.
+                if let Some(old) = glide.take() {
+                    q.scene = q.scene.or(old.req.scene);
+                    q.clip = q.clip.or(old.req.clip);
+                }
+                glide_req = Some(q);
+            }
+            g.clone()
+        };
+        // Look glide: in-between values on this per-frame clone (last
+        // frame's progress; a new request starts at 0).
+        if let Some((from, p)) = glide_req
+            .as_ref()
+            .map(|q| (&q.from, 0.0))
+            .or(glide.as_ref().map(|g| (&g.req.from, g.p)))
+        {
+            looks::glide_overlay(&mut s, from, p);
+        }
         // The Style's pacing overlays this per-frame clone; nothing is saved.
         styles::overlay(&mut s, styles::catalog());
         // While the GPU check is on a `unity_*` scene the engine link is
@@ -1121,7 +1161,8 @@ fn render_loop(
         }
         // Global palette — a no-op while the name is unchanged. `auto` is
         // resolved against the live features below (they don't exist yet).
-        if s.palette != palettes::AUTO && s.palette != palettes::ART {
+        let gliding = glide.is_some() || glide_req.is_some();
+        if s.palette != palettes::AUTO && s.palette != palettes::ART && !gliding && pal_fade.is_none() {
             r.set_palette(&s.palette);
         }
         // NDI output — a conf change rebuilds it; otherwise a cheap no-op.
@@ -1500,6 +1541,34 @@ fn render_loop(
         }
         // Positive latency shows the beat earlier (compensating capture delay).
         let pos = f.beat_position(now) + s.latency_ms as f64 / 1000.0 * f.bpm as f64 / 60.0;
+        // Look glide: fix its beat window, then advance it. The routine
+        // changes at the midpoint and the scene on the closing beat; a
+        // wall clock backs up the beat in case the tempo stalls.
+        if let Some(q) = glide_req.take() {
+            let end = looks::glide_end(pos, f.beat_in_bar(pos) as f64, q.glide);
+            let secs = ((end - pos) * 60.0 / f.bpm.max(60.0) as f64) as f32;
+            glide = Some(GlideRun { req: q, start: pos, end, t0: now, secs, p: 0.0, mid_done: false });
+        }
+        if let Some(g) = glide.as_mut() {
+            let by_beat = ((pos - g.start) / (g.end - g.start).max(1e-3)) as f32;
+            let by_clock = now.duration_since(g.t0).as_secs_f32() / (g.secs * 2.0 + 0.5);
+            g.p = by_beat.max(by_clock).clamp(0.0, 1.0);
+            if g.p >= 0.5 && !g.mid_done {
+                g.mid_done = true;
+                if let Some(i) = g.req.clip {
+                    dancer.pin(i);
+                    dancer.showing = true;
+                }
+            }
+            if g.p >= 1.0 {
+                // Already on it: a cut would re-seed the scene, a jump at
+                // the very end of a smooth glide.
+                if let Some(i) = g.req.scene.filter(|&i| i != dir.scene) {
+                    dir.cut_to(i);
+                }
+                glide = None;
+            }
+        }
         let ev = dir.update(&f, pos, dt, &usable, &s);
         // A drop schedules a clip once its payoff has played. Not while a
         // timeline show plays (a paused or scrubbed song fakes drops), nor
@@ -1565,14 +1634,16 @@ fn render_loop(
         } else {
             s.palette.clone()
         };
-        if is_art {
-            let fade = art_fade.get_or_insert_with(|| palettes::Fade::new(palettes::lut(r.palette_name())));
-            let len = (240.0 / f.bpm.max(60.0)).clamp(1.5, 4.0);
+        // A Look glide blends to its palette over what's left of the glide.
+        let glide_left = glide.as_ref().map(|g| ((g.end - pos).max(0.0) * 60.0 / f.bpm.max(60.0) as f64) as f32);
+        if is_art || glide_left.is_some() || pal_fade.as_ref().is_some_and(|f| !f.done()) {
+            let fade = pal_fade.get_or_insert_with(|| palettes::Fade::new(palettes::lut(r.palette_name())));
+            let len = glide_left.unwrap_or_else(|| (240.0 / f.bpm.max(60.0)).clamp(1.5, 4.0));
             if let Some(l) = fade.step(&pal_key, || palettes::lut(&pal_key), (now - started).as_secs_f32(), len) {
                 r.set_palette_lut("~art", l);
             }
         } else {
-            art_fade = None;
+            pal_fade = None;
             r.set_palette(&pal_key);
         }
         let pal = pal_key.as_str();
@@ -2386,10 +2457,32 @@ impl App {
     /// with a log line and the rest of the Look still applies.
     fn apply_look(&mut self, look: &looks::SavedLook) {
         let Some(sh) = self.shared.clone() else { return };
+        let mut glided_cues = Vec::new();
         let applied = {
             let mut s = self.settings_mut();
-            looks::apply(look, &mut s, &sh.scene_names, &sh.clip_names)
+            let from = looks::GlideFrom::of(&s);
+            let glide = s.look_glide;
+            let mut applied = looks::apply(look, &mut s, &sh.scene_names, &sh.clip_names);
+            if glide != looks::Glide::Cut {
+                // Hand the scene and routine to the render loop's glide
+                // (still under the settings lock: see `Shared::glide`).
+                let scene = applied.scene.as_ref().and_then(|n| sh.scene_names.iter().position(|x| x == n));
+                let clip = applied.clip.as_ref().and_then(|n| sh.clip_names.iter().position(|x| x == n));
+                *lock(&sh.glide) = Some(looks::GlideReq { glide, from, scene, clip });
+                for (name, cue) in [
+                    (applied.scene.take(), CueKind::Scene as fn(String) -> CueKind),
+                    (applied.clip.take(), CueKind::Clip as fn(String) -> CueKind),
+                ] {
+                    if let Some(n) = name {
+                        glided_cues.push(cue(n));
+                    }
+                }
+            }
+            applied
         };
+        for c in glided_cues {
+            self.record_cue(c);
+        }
         // The settings guard is gone before record_cue takes the timeline lock.
         if applied.changed {
             self.mark_dirty();
@@ -3088,6 +3181,7 @@ impl ApplicationHandler<AppEvent> for App {
             np_cfg,
             art,
             art_online,
+            glide: Mutex::new(None),
             np_remote,
             np_replay: AtomicBool::new(false),
             rec_clip: AtomicBool::new(false),

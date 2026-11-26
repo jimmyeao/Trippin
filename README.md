@@ -248,6 +248,11 @@ dancer, as they are on screen right now. One tap recalls it.
 - **Recall:** click it. Right-click a Look to put it on **slot 1 to 8** (then a
   hotkey, a MIDI pad, OSC `/trippin/look 3` or the remote can recall it) or to
   delete it.
+- **Glide** (next to Save look): how a recalled Look arrives. **Cut** changes
+  everything at once. **1 beat**, **1 bar** (the default) or **2 bars** blend the
+  palette and the effect amount over that time on the live beat (a new effect fades
+  the old one out and itself in), switch the dancer halfway, and change the scene on
+  the beat or downbeat that ends the glide.
 - **Partial Looks:** anything a Look leaves out stays as it is, so a Look can be
   "just this palette". Edit the file if you want that; the button saves everything.
 - **A scene you don't have:** a Look made on another machine, or one that uses a
