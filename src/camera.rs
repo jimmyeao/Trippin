@@ -109,6 +109,77 @@ fn permit() {
     }
 }
 
+/// One control of a camera scene (Perform > scene controls). Values are
+/// kept per scene in `Settings::show_params` (as the Unity show knobs are)
+/// and reach the shader in `Uniforms::roto4`/`roto5.x`, in table order.
+pub struct SceneParam {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub tip: &'static str,
+    pub min: f32,
+    pub max: f32,
+    pub default: f32,
+    /// Shown as whole numbers.
+    pub whole: bool,
+}
+
+const fn p(id: &'static str, label: &'static str, tip: &'static str, min: f32, max: f32, default: f32) -> SceneParam {
+    SceneParam { id, label, tip, min, max, default, whole: false }
+}
+
+const OUTLINE: [SceneParam; 5] = [
+    p("cam_glow", "Glow", "How bright the traced lines are", 0.0, 2.0, 1.0),
+    p("cam_detail", "Detail", "Low: only the big outlines. High: finer lines (and more camera noise)", 0.0, 1.0, 0.35),
+    p("cam_trails", "Trails", "How long the lines' trails last", 0.0, 0.95, 0.82),
+    p("cam_ripple", "Ripple", "How much the lines ripple with the mids", 0.0, 2.0, 1.0),
+    p("cam_stream", "Stream", "How fast the trails stream out from the centre", 0.0, 2.0, 1.0),
+];
+
+const KALEIDO: [SceneParam; 4] = [
+    SceneParam { whole: true, ..p("cam_segments", "Segments", "How many mirrored segments", 3.0, 12.0, 8.0) },
+    p("cam_zoom", "Zoom", "How far into the camera the mandala looks", 0.5, 2.0, 1.0),
+    p("cam_spin", "Spin", "How fast it turns", 0.0, 2.0, 1.0),
+    p("cam_palette", "Palette", "0: the camera's own colours. 1: the show's palette", 0.0, 1.0, 0.3),
+];
+
+const SLITSCAN: [SceneParam; 4] = [
+    p("cam_speed", "Speed", "How fast the smear runs to the left", 0.0, 2.0, 1.0),
+    p("cam_wave", "Wave", "How much the ribbons wave with the bass", 0.0, 2.0, 1.0),
+    p("cam_fade", "Fade", "How quickly old ribbons fade", 0.0, 1.0, 0.3),
+    p("cam_palette", "Palette", "How much ageing ribbons take the show's palette", 0.0, 1.0, 0.4),
+];
+
+/// The controls of a camera scene (none for others; camera_roto has the
+/// rotoscope look, `Settings::roto_*`).
+pub fn scene_params(scene: &str) -> &'static [SceneParam] {
+    match scene {
+        "camera_outline" => &OUTLINE,
+        "camera_kaleido" => &KALEIDO,
+        "camera_slitscan" => &SLITSCAN,
+        _ => &[],
+    }
+}
+
+/// A camera scene's saved value for `p` (its default when unset).
+pub fn param_value(saved: &std::collections::BTreeMap<String, std::collections::BTreeMap<String, f32>>, scene: &str, p: &SceneParam) -> f32 {
+    saved
+        .get(scene)
+        .and_then(|m| m.get(p.id))
+        .copied()
+        .filter(|v| v.is_finite())
+        .unwrap_or(p.default)
+        .clamp(p.min, p.max)
+}
+
+/// A camera scene's controls as (roto4, roto5) for the shader.
+pub fn scene_uniforms(saved: &std::collections::BTreeMap<String, std::collections::BTreeMap<String, f32>>, scene: &str) -> ([f32; 4], [f32; 4]) {
+    let mut v = [0.0f32; 8];
+    for (i, p) in scene_params(scene).iter().enumerate().take(5) {
+        v[i] = param_value(saved, scene, p);
+    }
+    ([v[0], v[1], v[2], v[3]], [v[4], 0.0, 0.0, 0.0])
+}
+
 /// Fit an RGB frame into VID_W x VID_H (cover: fill, crop the overflow),
 /// as RGBA.
 pub fn fit(img: &image::RgbImage) -> Vec<u8> {

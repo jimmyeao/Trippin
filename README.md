@@ -744,11 +744,18 @@ scene:
   green or blue spill on your edges is pulled out.
 - **Rotoscope** (a tick under the layer): the layer drawn as a cartoon,
   cel bands and ink outlines, behind or in front of any scene.
-- **Rotoscope look** (under the camera layer; also sets the Camera
-  Rotoscope scene): **Amount** (how much cartoon over the plain camera),
-  **Detail** (low: only the big outlines and flat shapes; high: finer
-  lines), **Ink** (outline weight), **Bands** (2-8 flat shades) and
-  **Palette colour** (your own colours to the show's palette).
+
+Each camera scene has its own **scene controls** on the Perform page, under
+the scene name while it's on air (kept per scene, with Reset):
+
+- **Camera Outline**: Glow, Detail (low traces only the big outlines),
+  Trails, Ripple, Stream.
+- **Camera Kaleidoscope**: Segments (3-12), Zoom, Spin, Palette.
+- **Camera Slit-Scan**: Speed, Wave, Fade, Palette.
+- **Camera Rotoscope** (also while the camera layer is rotoscoped):
+  Amount (how much cartoon over the plain camera), Detail (low: only the
+  big outlines and flat shapes), Ink, Bands (2-8 flat shades) and Palette
+  (your own colours to the show's palette).
 
 Nothing is opened until you pick a camera, the camera scenes stay out of
 rotation until it sends frames, and a red **camera on** marker shows at the

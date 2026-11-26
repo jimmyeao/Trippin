@@ -93,8 +93,10 @@ pub struct Uniforms {
     /// background), key tolerance.
     pub cam4: [f32; 4],
     /// The rotoscope look (`cam_roto`): amount, ink, detail, colour bands.
+    /// On the other camera_* scenes: their own controls
+    /// (camera::scene_params, in order).
     pub roto4: [f32; 4],
-    /// x: palette colour 0..1; yzw spare.
+    /// x: palette colour 0..1 (or a camera scene's fifth control); yzw spare.
     pub roto5: [f32; 4],
 }
 

@@ -875,6 +875,10 @@ pub fn run(args: &[String]) -> Result<()> {
                     statics.upload_cam(&queue, &px);
                 }
             }
+            // Camera scenes' own controls at their defaults (or --snap-roto).
+            if !crate::camera::scene_params(&name).is_empty() && snap_roto.is_none() {
+                (u.roto4, u.roto5) = crate::camera::scene_uniforms(&Default::default(), &name);
+            }
             if let Some(r) = snap_roto {
                 u.roto4 = [r[0], r[1], r[2], r[3]];
                 u.roto5[0] = r[4];

@@ -1872,6 +1872,14 @@ fn render_loop(
                 r.upload_logo(&img);
             }
         }
+        let cam_ctl = if camera_scene && !camera::scene_params(r.scene_name(dir.scene)).is_empty() {
+            camera::scene_uniforms(&s.show_params, r.scene_name(dir.scene))
+        } else {
+            (
+                [s.roto_amt.clamp(0.0, 1.0), s.roto_ink.clamp(0.0, 1.0), s.roto_detail.clamp(0.0, 1.0), s.roto_bands.clamp(2, 8) as f32],
+                [s.roto_pal.clamp(0.0, 1.0), 0.0, 0.0, 0.0],
+            )
+        };
         let u = Uniforms {
             time: (now - started).as_secs_f32(),
             dt,
@@ -1918,13 +1926,9 @@ fn render_loop(
                 l[3] = title_frac;
                 l
             },
-            roto4: [
-                s.roto_amt.clamp(0.0, 1.0),
-                s.roto_ink.clamp(0.0, 1.0),
-                s.roto_detail.clamp(0.0, 1.0),
-                s.roto_bands.clamp(2, 8) as f32,
-            ],
-            roto5: [s.roto_pal.clamp(0.0, 1.0), 0.0, 0.0, 0.0],
+            // The rotoscope look, or on camera_* scenes their own controls.
+            roto4: cam_ctl.0,
+            roto5: cam_ctl.1,
             cam4: if cam_layer {
                 [
                     s.camera_layer.index() + if s.camera_roto { 4.0 } else { 0.0 },

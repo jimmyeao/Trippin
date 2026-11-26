@@ -1742,6 +1742,18 @@ fn inspector_body(
     });
 
     ui.add_space(8.0);
+    // The rotoscope look, on the scene: while Camera Rotoscope is on air,
+    // or the camera layer is rotoscoped over whatever is.
+    let on_air = scenes.get(st.scene).map(String::as_str).unwrap_or("");
+    let layer_roto = s.camera_roto && s.camera_layer != crate::config::CamLayer::Off && !s.camera.is_empty();
+    if on_air == "camera_roto" || layer_roto {
+        roto_controls(ui, s, if on_air == "camera_roto" { "Camera Rotoscope" } else { "camera layer · rotoscope" });
+        ui.add_space(8.0);
+    } else if !crate::camera::scene_params(on_air).is_empty() {
+        let title = st.scene_titles.get(st.scene).map(String::as_str).unwrap_or(on_air);
+        camera_scene_controls(ui, s, on_air, title);
+        ui.add_space(8.0);
+    }
     section_label(ui, "controls");
     card().show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = 8.0;
@@ -1864,7 +1876,71 @@ fn inspector_body(
         let title = st.scene_titles.get(st.scene).map(String::as_str).unwrap_or(name);
         ui.add_space(8.0);
         show_controls(ui, s, name, title);
-    }
+    }}
+
+/// A camera scene's own controls (camera::scene_params), saved per scene.
+fn camera_scene_controls(ui: &mut egui::Ui, s: &mut Settings, scene: &str, title: &str) {
+    use crate::ui_theme::*;
+    section_label(ui, "scene controls");
+    card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        let slider_w = (ui.available_width() - 60.0 - 70.0).max(60.0);
+        ui.label(egui::RichText::new(title).size(12.0).color(MUTED));
+        for p in crate::camera::scene_params(scene) {
+            let mut v = crate::camera::param_value(&s.show_params, scene, p);
+            ctl_row(ui, p.label, |ui| {
+                ui.spacing_mut().slider_width = slider_w;
+                let sl = egui::Slider::new(&mut v, p.min..=p.max);
+                let sl = if p.whole { sl.step_by(1.0).max_decimals(0) } else { sl.max_decimals(2) };
+                if ui.add(sl).on_hover_text(p.tip).changed() {
+                    s.show_params.entry(scene.to_string()).or_default().insert(p.id.to_string(), v);
+                }
+            });
+        }
+        let custom = s.show_params.get(scene).is_some_and(|m| !m.is_empty());
+        if ui.add_enabled(custom, egui::Button::new("Reset")).clicked() {
+            s.show_params.remove(scene);
+        }
+    });
+}
+
+/// The rotoscope look (`cam_roto`): one set for the Camera Rotoscope scene
+/// and the rotoscoped camera layer, shown under the Perform preview.
+fn roto_controls(ui: &mut egui::Ui, s: &mut Settings, title: &str) {
+    use crate::ui_theme::*;
+    section_label(ui, "scene controls");
+    card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        // Width captured here, not inside the rows (layout rule, AGENTS.md).
+        let slider_w = (ui.available_width() - 60.0 - 70.0).max(60.0);
+        ui.label(egui::RichText::new(title).size(12.0).color(MUTED));
+        let row = |ui: &mut egui::Ui, label: &str, tip: &str, body: &mut dyn FnMut(&mut egui::Ui) -> egui::Response| {
+            ctl_row(ui, label, |ui| {
+                ui.spacing_mut().slider_width = slider_w;
+                body(ui).on_hover_text(tip);
+            });
+        };
+        row(ui, "Amount", "How much of the cartoon look over the plain camera", &mut |ui| {
+            ui.add(egui::Slider::new(&mut s.roto_amt, 0.0..=1.0))
+        });
+        row(ui, "Detail", "Low: only the big outlines and flat shapes. High: finer lines and shading", &mut |ui| {
+            ui.add(egui::Slider::new(&mut s.roto_detail, 0.0..=1.0))
+        });
+        row(ui, "Ink", "How thick and dark the outlines are", &mut |ui| {
+            ui.add(egui::Slider::new(&mut s.roto_ink, 0.0..=1.0))
+        });
+        row(ui, "Bands", "How many flat shades the colours are stepped into", &mut |ui| {
+            ui.add(egui::Slider::new(&mut s.roto_bands, 2..=8))
+        });
+        row(ui, "Palette", "0: the camera's own colours. 1: the show's palette", &mut |ui| {
+            ui.add(egui::Slider::new(&mut s.roto_pal, 0.0..=1.0))
+        });
+        if ui.button("Reset").clicked() {
+            let d = Settings::default();
+            (s.roto_amt, s.roto_ink, s.roto_detail, s.roto_bands, s.roto_pal) =
+                (d.roto_amt, d.roto_ink, d.roto_detail, d.roto_bands, d.roto_pal);
+        }
+    });
 }
 
 /// A summary row — label left, monospaced value right, chevron — that
@@ -3343,38 +3419,9 @@ fn dancer_fx_tab(
                     s.camera_layer != CamLayer::Off,
                     egui::Checkbox::new(&mut s.camera_roto, "Rotoscope: cartoon bands and ink outlines"),
                 );
-                // The rotoscope look: the layer's tick and the Camera
-                // Rotoscope scene both use it.
-                egui::CollapsingHeader::new(egui::RichText::new("Rotoscope look").size(12.0))
-                    .id_salt("roto_look")
-                    .show(ui, |ui| {
-                        ui.small("For the camera layer's rotoscope and the Camera Rotoscope scene.");
-                        ctl_row(ui, "Amount", |ui| {
-                            ui.add(egui::Slider::new(&mut s.roto_amt, 0.0..=1.0))
-                                .on_hover_text("How much of the cartoon look over the plain camera");
-                        });
-                        ctl_row(ui, "Detail", |ui| {
-                            ui.add(egui::Slider::new(&mut s.roto_detail, 0.0..=1.0))
-                                .on_hover_text("Low: only the big outlines and flat shapes. High: finer lines and shading");
-                        });
-                        ctl_row(ui, "Ink", |ui| {
-                            ui.add(egui::Slider::new(&mut s.roto_ink, 0.0..=1.0))
-                                .on_hover_text("How thick and dark the outlines are");
-                        });
-                        ctl_row(ui, "Bands", |ui| {
-                            ui.add(egui::Slider::new(&mut s.roto_bands, 2..=8))
-                                .on_hover_text("How many flat shades the colours are stepped into");
-                        });
-                        ctl_row(ui, "Palette colour", |ui| {
-                            ui.add(egui::Slider::new(&mut s.roto_pal, 0.0..=1.0))
-                                .on_hover_text("0: the camera's own colours. 1: the show's palette");
-                        });
-                        if ui.small_button("Reset").clicked() {
-                            let d = crate::config::Settings::default();
-                            (s.roto_amt, s.roto_ink, s.roto_detail, s.roto_bands, s.roto_pal) =
-                                (d.roto_amt, d.roto_ink, d.roto_detail, d.roto_bands, d.roto_pal);
-                        }
-                    });
+                if s.camera_roto {
+                    ui.small("The rotoscope look's controls are on the Perform page, under the scene name.");
+                }
             }
         });
         r2.response.rect.height()
