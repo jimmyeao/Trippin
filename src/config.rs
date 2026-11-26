@@ -626,7 +626,7 @@ pub struct Settings {
     /// The webcam for the `camera_*` scenes (a device name; camera.rs).
     /// "" = no camera: nothing is opened and no camera scene plays.
     pub camera: String,
-    /// The camera layer over every scene (Dancer & FX; present.wgsl).
+    /// The camera layer over every scene (FX page; present.wgsl).
     pub camera_layer: CamLayer,
     pub camera_key: CamKey,
     /// Camera layer strength 0..1.

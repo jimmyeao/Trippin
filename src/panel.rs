@@ -5,7 +5,7 @@
 //! status (1b arrangement — the 1a console is styling reference only), then
 //! one page at a time. Perform is the default: a thumbnail scene library
 //! with a live inspector on the right (1b), or the Pads perform view (1c).
-//! Dancer & FX, Stream, Timeline and Keys are the settings pages.
+//! Dancer, FX, Stream, Timeline, MIDI and Keys are the settings pages.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -255,8 +255,10 @@ enum Tab {
     /// Scene library + inspector — the old Show and Scenes tabs merged
     /// (mockup 1b).
     Perform,
-    /// Dancer routines and whole-frame FX on one page.
-    DancerFx,
+    /// The dancer layer and its routines.
+    Dancer,
+    /// Whole-frame effects, the accent and echo layers, and the camera layer.
+    Fx,
     Stream,
     Timeline,
     Keys,
@@ -279,9 +281,10 @@ enum LibChip {
 }
 
 impl Tab {
-    const ALL: [Tab; 6] = [
+    const ALL: [Tab; 7] = [
         Tab::Perform,
-        Tab::DancerFx,
+        Tab::Dancer,
+        Tab::Fx,
         Tab::Stream,
         Tab::Timeline,
         Tab::Keys,
@@ -291,7 +294,8 @@ impl Tab {
     fn label(self) -> &'static str {
         match self {
             Tab::Perform => "Perform",
-            Tab::DancerFx => "Dancer & FX",
+            Tab::Dancer => "Dancer",
+            Tab::Fx => "FX",
             Tab::Stream => "Stream",
             Tab::Timeline => "Timeline",
             Tab::Keys => "Keys",
@@ -564,9 +568,8 @@ fn build_ui(
                     .auto_shrink([false, true])
                     .horizontal_scroll_offset(0.0)
                     .show(ui, |ui| match *tab {
-                        Tab::DancerFx => {
-                            dancer_fx_tab(ui, s, st, clips, clip_thumbs, cmd)
-                        }
+                        Tab::Dancer => dancer_tab(ui, s, st, clips, clip_thumbs, cmd),
+                        Tab::Fx => fx_tab(ui, s, st),
                         Tab::Stream => stream_tab(ui, s, st, cmd),
                         Tab::Timeline => timeline_tab(ui, tl_shared, saved, cmd),
                         Tab::Keys => keys_tab(ui, s, rebinding, midi_learn, midi_status, keys_filter),
@@ -1769,10 +1772,10 @@ fn inspector_body(
         ui.allocate_ui_with_layout(egui::vec2(qw, 20.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
             ui.checkbox(&mut s.accent_auto, egui::RichText::new("Accents").size(12.0)).on_hover_text(
                 "Auto lays a light scene (embers, streaks, notes, comets...) over some scenes while the \
-                 track drives. Strength on Dancer & FX; timeline shows have their own toggle in the editor.",
+                 track drives. Strength on the FX page; timeline shows have their own toggle in the editor.",
             );
             ui.checkbox(&mut s.fx_auto, egui::RichText::new("Auto effects").size(12.0))
-                .on_hover_text("A fresh post effect on every scene cut. Which ones: Dancer & FX.");
+                .on_hover_text("A fresh post effect on every scene cut. Which ones: the FX page.");
         });
         ui.label(egui::RichText::new("Mode").size(12.0).color(MUTED));
         segmented_wide(
@@ -1831,7 +1834,7 @@ fn inspector_body(
             "Dancer look",
             s.dancer_style.map(|i| STYLES[i]).unwrap_or("auto").to_string(),
             || {
-                *tab = Tab::DancerFx;
+                *tab = Tab::Dancer;
             },
         );
         nav_row(
@@ -1843,7 +1846,7 @@ fn inspector_body(
                 s.fx.label().to_string()
             },
             || {
-                *tab = Tab::DancerFx;
+                *tab = Tab::Fx;
             },
         );
         // Palette row: a clickable gradient strip opening a swatch popover.
@@ -3231,9 +3234,9 @@ fn stream_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<Ui
 }
 
 
-/// Dancer & FX page (mockup 1a styling): two control cards side by side,
+/// Dancer page (mockup 1a styling): the dancer card,
 /// then the routine thumbnail library underneath.
-fn dancer_fx_tab(
+fn dancer_tab(
     ui: &mut egui::Ui,
     s: &mut Settings,
     st: &Status,
@@ -3245,7 +3248,7 @@ fn dancer_fx_tab(
     // Bounded column uis — `ui.columns` lets card content bleed under the
     // neighbour card inside a ScrollArea at narrow widths (A1).
     let row_w = ui.available_width();
-    let col_w = ((row_w - 12.0) / 2.0).max(220.0);
+    let col_w = row_w.min(560.0).max(220.0);
     let top = ui.cursor().min;
     let mut mk_col = |x: f32| {
         ui.new_child(
@@ -3297,12 +3300,54 @@ fn dancer_fx_tab(
         });
         r1.response.rect.height()
     };
-    let h2 = {
-        // Equal heights: the FX card stretches to the Dancer card's height.
-        let ui = &mut mk_col(col_w + 12.0);
-        let r2 = card().show(ui, |ui| {
+    ui.add_space(h1);
+    ui.add_space(6.0);
+
+    // Routine library: one tile per routine — `_mir` twins ride on their
+    // base tile as a "mir" badge, tick to keep in rotation, click to preview.
+    card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        section_label(ui, "routines");
+        ui.small("Auto-pilot picks among the ticked routines — click a tile to preview it live.");
+        ui.add_space(4.0);
+        let avail = ui.available_width();
+        let cols = ((avail + 8.0) / 108.0).floor().max(3.0) as usize;
+        let bases: Vec<usize> = (0..clips.len())
+            .filter(|&i| !clips[i].ends_with("_mir"))
+            .collect();
+        for chunk in bases.chunks(cols) {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+                for &i in chunk {
+                    let name = &clips[i];
+                    let has_mir = clips.iter().any(|c| c == &format!("{name}_mir"));
+                    let title = st.clip_titles.get(i).map(String::as_str).unwrap_or(name);
+                    clip_tile(ui, s, st, i, name, title, has_mir, clip_thumbs, cmd);
+                }
+            });
+        }
+    });
+}
+
+/// The FX page: whole-frame effects (left); the accent and echo layers and
+/// the camera layer (right).
+fn fx_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status) {
+    use crate::ui_theme::*;
+    // Bounded column uis, as on the Dancer page (A1).
+    let row_w = ui.available_width();
+    let col_w = ((row_w - 12.0) / 2.0).max(220.0);
+    let top = ui.cursor().min;
+    let mut mk_col = |x: f32| {
+        ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(egui::Rect::from_min_size(egui::pos2(top.x + x, top.y), egui::vec2(col_w, 4000.0)))
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+        )
+    };
+    let h1 = {
+        let ui = &mut mk_col(0.0);
+        let r = card().show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.set_min_height((h1 - 26.0).max(60.0));
             section_label(ui, "fx");
             ui.small("Whole-frame transforms — your pick is the live preview.");
             ui.add_space(4.0);
@@ -3356,6 +3401,14 @@ fn dancer_fx_tab(
                         }
                     });
             }
+        });
+        r.response.rect.height()
+    };
+    let h2 = {
+        let ui = &mut mk_col(col_w + 12.0);
+        let r1 = card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            section_label(ui, "layers");
             ui.add_space(4.0);
             ui.checkbox(&mut s.accent_auto, "Accent layer — Auto adds a light scene on top")
                 .on_hover_text("On some cuts while the track drives, rising embers, light streaks, a swarm of motes, bokeh, light shafts, ripples, musical notes, sparkles, bubbles, fireflies, petals, comets, floor fog, a spectrum, the waveform or a halo of sparks play over the main scene. Never in breakdowns or over 3D, Unity, video or flight scenes.");
@@ -3384,6 +3437,11 @@ fn dancer_fx_tab(
             ctl_row(ui, "Echo amount", |ui| {
                 ui.add_enabled(s.echo != Tristate::Off, egui::Slider::new(&mut s.echo_amt, 0.0..=1.0));
             });
+        });
+        ui.add_space(8.0);
+        let r2 = card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            section_label(ui, "camera layer");
             // The webcam over every scene: behind it, or keyed in front.
             ui.add_space(6.0);
             {
@@ -3428,39 +3486,13 @@ fn dancer_fx_tab(
                 }
             }
         });
-        r2.response.rect.height()
+        r1.response.rect.height() + 8.0 + r2.response.rect.height()
     };
     // The child uis didn't move the parent cursor — claim the row height.
     ui.add_space(h1.max(h2));
-    ui.add_space(6.0);
-
-    // Routine library: one tile per routine — `_mir` twins ride on their
-    // base tile as a "mir" badge, tick to keep in rotation, click to preview.
-    card().show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        section_label(ui, "routines");
-        ui.small("Auto-pilot picks among the ticked routines — click a tile to preview it live.");
-        ui.add_space(4.0);
-        let avail = ui.available_width();
-        let cols = ((avail + 8.0) / 108.0).floor().max(3.0) as usize;
-        let bases: Vec<usize> = (0..clips.len())
-            .filter(|&i| !clips[i].ends_with("_mir"))
-            .collect();
-        for chunk in bases.chunks(cols) {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
-                for &i in chunk {
-                    let name = &clips[i];
-                    let has_mir = clips.iter().any(|c| c == &format!("{name}_mir"));
-                    let title = st.clip_titles.get(i).map(String::as_str).unwrap_or(name);
-                    clip_tile(ui, s, st, i, name, title, has_mir, clip_thumbs, cmd);
-                }
-            });
-        }
-    });
 }
 
-/// One routine tile in the Dancer & FX library. `_mir` twins are folded
+/// One routine tile in the Dancer page library. `_mir` twins are folded
 /// into their base clip: a small "mir" badge toggles the twin's rotation
 /// membership (review — 22 tiles, not 44).
 fn clip_tile(
