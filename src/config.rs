@@ -567,6 +567,9 @@ pub struct Settings {
     /// `--device`. "" = the platform default tap (ScreenCaptureKit output
     /// mix on macOS, output loopback on Windows).
     pub audio_in: String,
+    /// The webcam for the `camera_*` scenes (a device name; camera.rs).
+    /// "" = no camera: nothing is opened and no camera scene plays.
+    pub camera: String,
     pub show_panel: bool,
     /// NDI network output — sends the composited frame (FX + text included)
     /// to OBS/another display. Needs the free NDI runtime installed; a
@@ -721,6 +724,7 @@ impl Default for Settings {
             link_port: 9137,
             latency_ms: 30.0,
             audio_in: String::new(),
+            camera: String::new(),
             show_panel: true,
             ndi_enabled: false,
             ndi_name: "Trippin".into(),

@@ -716,6 +716,25 @@ Settings → **Lights** makes room lights follow the show.
 From the command line: `trippin --lights-demo <wled-ip> [seconds]` runs a
 test groove on one strip.
 
+### Camera scenes
+
+Pick a webcam under **Settings > Camera** and three scenes join the
+rotation, all mirrored like a selfie:
+
+- **Camera Outline**: you, traced in lines of light with trails streaming
+  out from the centre. The lines thicken with the bass and ripple with the
+  mids.
+- **Camera Kaleidoscope**: an eight-way mandala made of you, zooming with
+  the bass and turning with the track.
+- **Camera Slit-Scan**: you live on the right, every move smeared away to
+  the left in ribbons that run faster when the track is loud.
+
+Nothing is opened until you pick a camera, the camera scenes stay out of
+rotation until it sends frames, and a red **camera on** marker shows at the
+top of the panel while it's capturing. `trippin --list-cameras` lists the
+cameras without opening one. On macOS the first pick asks for camera
+permission.
+
 ## Streaming: OBS, overlays, now playing, clips
 
 Everything for streamers lives on the **Stream** tab.

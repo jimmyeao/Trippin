@@ -662,6 +662,11 @@ fn topbar(ui: &mut egui::Ui, tab: &mut Tab, s: &mut Settings, st: &Status) {
             }
             if st.silent && pill_room > 88.0 {
                 pill(ui, "no signal", WARN, WARN_BG);
+                pill_room -= 88.0;
+            }
+            // Privacy: always say when the webcam is capturing.
+            if crate::camera::LIVE.load(std::sync::atomic::Ordering::Relaxed) && pill_room > 88.0 {
+                pill(ui, "camera on", DANGER, DANGER_BG);
             }
         });
     });
@@ -4395,6 +4400,33 @@ fn settings_tab(
                                     ui.selectable_value(&mut s.audio_in, n.clone(), n);
                                 }
                             });
+                    });
+                    // Webcam for the camera scenes: off until one is picked.
+                    grow(ui, "Camera", |ui| {
+                        let sel = if s.camera.is_empty() { "Off" } else { s.camera.as_str() };
+                        let shown = ellipsize(ui.painter(), sel, &egui::FontId::proportional(12.0), combo_w - 24.0);
+                        let r = egui::ComboBox::from_id_salt("camera")
+                            .width(combo_w)
+                            .selected_text(shown)
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut s.camera, String::new(), "Off");
+                                let names = crate::camera::names();
+                                if names.is_empty() {
+                                    ui.label(egui::RichText::new("looking for cameras…").size(11.0));
+                                }
+                                for n in names {
+                                    ui.selectable_value(&mut s.camera, n.clone(), n);
+                                }
+                            });
+                        // List the cameras when the picker opens (on a thread).
+                        if r.response.clicked() {
+                            crate::camera::refresh_names();
+                        }
+                        r.response.on_hover_text(
+                            "A webcam for the camera scenes (your outline traced in light, a \
+                             kaleidoscope, a slit-scan smear). Nothing is opened until you pick one; \
+                             \"camera on\" shows at the top while it's capturing.",
+                        );
                     });
                     grow(ui, "Latency", |ui| {
                         ui.add(

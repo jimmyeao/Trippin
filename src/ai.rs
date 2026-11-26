@@ -751,7 +751,7 @@ pub fn build_show(
     // Video scenes likewise only once their clip is downloaded.
     let scenes: Vec<String> = scenes
         .iter()
-        .filter(|s| !s.starts_with("unity_") && crate::video::scene_ready(s))
+        .filter(|s| !s.starts_with("unity_") && !s.starts_with("camera_") && crate::video::scene_ready(s))
         .cloned()
         .collect();
     let scenes = scenes.as_slice();

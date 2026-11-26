@@ -241,6 +241,7 @@ cargo run --release -- --snap x --snap-calm 1        # preview breakdown (no dru
 cargo run --release -- --snap aurora --snap-dancer comic --snap-clip stock_disco   # a dancer look over a scene (name or index; default clip = first)
 cargo run --release -- --nowplaying       # prints what each now-playing source sees
 cargo run --release -- --list-devices     # capture devices (names for --device / the Audio in picker)
+cargo run --release -- --list-cameras     # webcams (names for Settings > Camera); opens none
 cargo run --release -- --probe-audio [name]   # capture ~6 s, print band peaks + BPM; exits nonzero on silence
 cargo run --release -- --beats track.flac     # onset grid vs Beat This! grid + timings (TRIPPIN_BEATS_DEBUG=1: per-30 s tempo)
 cargo run --release -- --beat-eval track.flac [from-to]   # score the live beat tracker + phrasing on a file (see §7 "Live beat tracking")
@@ -507,6 +508,16 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   pack scene whose name is taken is skipped. Bump `packs::API` when
   common.wgsl changes a helper packs call. `--snap-energy` writes each pack's
   scenes into that pack's `scene_energy.json`.
+- **Webcam** (`camera.rs`, `Settings::camera`, nokhwa: MSMF / AVFoundation):
+  a capture thread opens the picked camera only (nothing until one is
+  picked), fits each frame to VID_W x VID_H RGBA, and the render loop
+  uploads it to `vid_tex` slot 0 while a `camera_*` scene is on air (blend
+  forced to 0). `camera::LIVE` gates those scenes into rotation and shows
+  the panel's "camera on" pill; the AI builder never plans them. Snaps never
+  open a camera: `--snap-camera <clip>` stands a pack clip in (default
+  dance_solo). Never open the owner's camera to test without asking. The
+  macOS path (permission via `nokhwa_initialize`, `NSCameraUsageDescription`
+  in release.yml's Info.plist) hasn't been compiled yet.
 - **A pack found twice** (the repo's dev folder ahead of the installed copy)
   loads its scenes from the first copy but its clips from every copy
   (`Pack::also`, `clip_dirs`): the repo's packs carry no clips (git-ignored),

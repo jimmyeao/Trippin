@@ -24,6 +24,8 @@
 //! many seconds and prints how much each scene's picture moves with the
 //! music: the change just after each beat against mid-beat, and how the
 //! change follows loudness (`lvl4`) and kicks (`hits4.x`). Writes `react.tsv`.
+//! `--snap-camera <clip>` stands that video clip in for the webcam in
+//! `camera_*` scenes (default dance_solo; no camera is ever opened).
 //! `--snap-logo <image>` gives the logo scene that image (else the
 //! Trippin logo).
 //! `--snap-fx <mode>` renders with a post effect at full strength (the
@@ -309,6 +311,7 @@ pub fn run(args: &[String]) -> Result<()> {
     let snap_fx: f32 = arg(args, "--snap-fx").and_then(|s| s.parse().ok()).unwrap_or(0.0);
     // `--snap-logo <image>`: the logo scene's image (else the Trippin logo).
     let snap_logo = arg(args, "--snap-logo").map(String::from);
+    let snap_camera = arg(args, "--snap-camera").unwrap_or("dance_solo").to_string();
     if let Some(p) = &snap_logo {
         statics.upload_logo(&queue, &image::open(p)?.to_rgba8());
     }
@@ -788,9 +791,13 @@ pub fn run(args: &[String]) -> Result<()> {
         queue.write_buffer(&statics.lum, 0, bytemuck::cast_slice(&gfx::lum_init(safe)));
         // video_* scenes: the clip plays at 1x on the snapshot clock, or on
         // the groove's beat grid for bar-locked scenes (video::snap_time).
+        // camera_* scenes stand in a clip for the webcam (`--snap-camera
+        // <clip>`, default dance_solo): snaps never open a camera.
         let vclip = name
             .strip_prefix("video_")
-            .and_then(crate::video::clip_path)
+            .map(str::to_string)
+            .or_else(|| name.starts_with("camera_").then(|| snap_camera.clone()))
+            .and_then(|c| crate::video::clip_path(&c))
             .and_then(|p| crate::video::Clip::open(&p).ok());
         if name.starts_with("video_") && vclip.is_none() {
             eprintln!("{name}: no clip on disk (videos/ or TRIPPIN_VIDEOS) — it renders black");
@@ -829,7 +836,8 @@ pub fn run(args: &[String]) -> Result<()> {
                         render::upload_video(&queue, &statics.vid, slot, &px);
                     }
                 }
-                u.misc4[1] = fpos.fract() as f32;
+                // A camera frame is all in slot 0.
+                u.misc4[1] = if name.starts_with("camera_") { 0.0 } else { fpos.fract() as f32 };
             }
             if let Some(a) = &accent_snap {
                 u.misc4[2] = a.amt;

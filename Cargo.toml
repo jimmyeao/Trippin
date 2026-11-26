@@ -52,6 +52,8 @@ embed-resource = "3.0.6"
 gui = []
 
 [target.'cfg(windows)'.dependencies]
+# Webcam capture (camera.rs), Media Foundation.
+nokhwa = { version = "0.10.11", features = ["input-msmf"] }
 # Now-playing from the OS media session (Spotify etc.).
 # Spout output: D3D11 shared texture + the Spout shared-memory registry.
 windows = { version = "0.62", features = [
@@ -69,6 +71,8 @@ windows = { version = "0.62", features = [
 ] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# Webcam capture (camera.rs), AVFoundation.
+nokhwa = { version = "0.10.11", features = ["input-avfoundation"] }
 block2 = "0.6"
 dispatch2 = "0.3"
 objc2 = "0.6"

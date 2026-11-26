@@ -30,6 +30,7 @@
 mod accent;
 mod albumart;
 mod artfind;
+mod camera;
 mod ai;
 mod echo;
 mod audio;
@@ -284,6 +285,8 @@ fn allowed_scenes(r: &Renderer, s: &Settings) -> Vec<usize> {
         // via an explicit cue, never by autopilot or next/prev.
         .filter(|&i| names[i] != "void")
         .filter(|&i| !names[i].starts_with("unity_") || EXT_LIVE.load(Ordering::Relaxed))
+        // camera_* scenes: only while the picked webcam sends frames.
+        .filter(|&i| !names[i].starts_with("camera_") || camera::LIVE.load(Ordering::Relaxed))
         // video_* scenes (from effects packs): only with their clip on disk.
         .filter(|&i| video::scene_ready(&names[i]))
         .filter(|&i| !s.disabled_scenes.contains(&names[i]))
@@ -698,6 +701,9 @@ fn render_loop(
     let mut ext_seq = 0u64;
     // Video clip scenes (video.rs): play head + decoder thread.
     let mut video = video::Player::new();
+    // The webcam (camera.rs): idle until Settings > Camera names one.
+    let cam = camera::Capture::start();
+    let mut cam_seen = 0u64;
     video::rescan();
     let mut flow_bpm = 120.0f32;
     let groove_log = std::env::var_os("TRIPPIN_GROOVE_LOG").is_some();
@@ -1806,6 +1812,15 @@ fn render_loop(
         for (slot, px) in video.tick(r.scene_name(dir.scene), dt, dir.intensity, &vbeat) {
             r.upload_video(slot, &px);
         }
+        // Camera scenes: the newest webcam frame into the video texture.
+        cam.set(&s.camera);
+        let camera_scene = r.scene_name(dir.scene).starts_with("camera_");
+        if camera_scene {
+            if let Some((n, px)) = cam.newer(cam_seen) {
+                cam_seen = n;
+                r.upload_video(0, &px);
+            }
+        }
 
         let (w, h) = r.size();
         let mut spectrum = [0.0; audio::SPECTRUM_BINS];
@@ -1894,7 +1909,8 @@ fn render_loop(
             pres4: f.pres4,
             clock4: clock4.map(|c| c as f32),
             // y: video frame blend (vid() in common.wgsl).
-            misc4: [0.0, video.blend, 0.0, 0.0],
+            // y: the video slots' blend; a camera frame is all in slot 0.
+            misc4: [0.0, if camera_scene { 0.0 } else { video.blend }, 0.0, 0.0],
             look4: {
                 let mut l = showparams::look(&s.show_params, r.scene_name(dir.scene));
                 l[3] = title_frac;
@@ -3804,6 +3820,25 @@ fn main() -> Result<()> {
     packs::set_root(&Settings::load().packs_dir);
     if args.iter().any(|a| a == "--list-devices") {
         return audio::list_devices();
+    }
+    // `--list-cameras`: the webcams (names for Settings > Camera). Lists
+    // them only; no camera is opened.
+    if args.iter().any(|a| a == "--list-cameras") {
+        camera::refresh_names();
+        for _ in 0..50 {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            if !camera::names().is_empty() {
+                break;
+            }
+        }
+        let n = camera::names();
+        if n.is_empty() {
+            println!("no cameras found");
+        }
+        for c in n {
+            println!("{c}");
+        }
+        return Ok(());
     }
     // `--probe-audio [name]` captures ~6 s on a device (or the default tap)
     // and prints the analysed level — verifies a source carries signal
