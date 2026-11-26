@@ -716,6 +716,17 @@ fn palette_swatch(ui: &mut egui::Ui, s: &mut Settings, name: &str, w: f32, h: f3
         );
     }
     let sel = s.palette == name;
+    // The name on a dark tab at the left: `auto` and `art` aren't fixed
+    // gradients, so without it they read as two more unnamed swatches.
+    let font = egui::FontId::proportional(10.5);
+    let galley = ui.painter().layout_no_wrap(name.to_string(), font, TEXT);
+    let tab = egui::Rect::from_min_size(rect.min, egui::vec2(galley.size().x + 10.0, h));
+    ui.painter().rect_filled(tab, 3.0, egui::Color32::from_black_alpha(150));
+    ui.painter().galley(
+        egui::pos2(tab.min.x + 5.0, rect.center().y - galley.size().y * 0.5),
+        galley,
+        TEXT,
+    );
     ui.painter().rect_stroke(
         rect,
         3.0,
