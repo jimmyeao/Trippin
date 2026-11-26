@@ -744,6 +744,8 @@ fn render_loop(
     let mut fx_current = lock(&shared.settings).fx;
     // Accent layer: a light scene the auto-pilot sometimes adds on top.
     let mut accent_layer = accent::Accent::default();
+    // The scene last seen, so a timeline show's scene changes roll accents.
+    let mut accent_scene = usize::MAX;
     let mut echo_fx = echo::Echo::default();
     // Type scenes: the now-playing line in the title texture, and the share
     // of its width the text covers (u.look4.w).
@@ -1700,10 +1702,15 @@ fn render_loop(
             fx_current = Fx::random(seed, fx_current);
         }
         // Accent layer: decided on each cut; fades out in breakdowns, and
-        // is off in Manual, during timeline shows and with the setting off.
-        if !s.accent_auto || s.mode == Mode::Manual || player.is_some() || f.calm > 0.7 {
+        // is off in Manual and with the setting off. Timeline shows have
+        // their own switch (`accent_shows`) and roll on each scene change.
+        let in_show = player.is_some();
+        let accents_on = if in_show { s.accent_shows } else { s.accent_auto && s.mode != Mode::Manual };
+        let show_cut = in_show && dir.scene != accent_scene;
+        accent_scene = dir.scene;
+        if !accents_on || f.calm > 0.7 {
             accent_layer.clear();
-        } else if ev.cut {
+        } else if ev.cut || show_cut {
             let base = r.scene_name(dir.scene);
             let base_ok = !r.scene_heavy().get(dir.scene).copied().unwrap_or(true)
                 && !base.starts_with("unity_")
@@ -3030,6 +3037,10 @@ impl App {
                 }
             }
             UiCommand::PerfCheck => self.send(Msg::PerfCheck),
+            UiCommand::AccentShows(on) => {
+                lock(&shared.settings).accent_shows = on;
+                self.mark_dirty();
+            }
             UiCommand::SaveTimeline => {
                 let mut tl = lock(&shared.timeline);
                 if let Some(doc) = tl.doc.as_mut() {

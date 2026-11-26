@@ -173,6 +173,8 @@ pub enum UiCommand {
     Thumb(String),
     /// Recall a saved Look by id.
     ApplyLook(String),
+    /// Accents in timeline shows on/off (the editor's toggle).
+    AccentShows(bool),
     /// Save the live state as a new Look with this name.
     SaveLook(String),
     DeleteLook(String),
@@ -1810,6 +1812,12 @@ fn inspector_body(
                 *tab = Tab::DancerFx;
             },
         );
+        // Accent layer (Dancer & FX has its strength).
+        ui.checkbox(&mut s.accent_auto, egui::RichText::new("Accents").size(12.0))
+            .on_hover_text(
+                "Auto lays a light scene (embers, streaks, notes, comets...) over some scenes while the \
+                 track drives. Strength on Dancer & FX; timeline shows have their own toggle in the editor.",
+            );
         // Palette row: a clickable gradient strip opening a swatch popover.
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new("Palette").size(12.0).color(MUTED));

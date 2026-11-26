@@ -439,6 +439,9 @@ pub struct Settings {
     pub accent_auto: bool,
     /// How strongly the accent layer adds in, 0..1.
     pub accent_amt: f32,
+    /// Accents in timeline shows too (the editor's "accents" toggle): one is
+    /// rolled on each scene change of the show, as Auto rolls on its cuts.
+    pub accent_shows: bool,
     /// Echo post effect (light trails of the whole frame, `echo.rs`): Auto
     /// runs it through breakdowns and on some cuts.
     pub echo: Tristate,
@@ -621,6 +624,7 @@ impl Default for Settings {
             fx_amt: 1.0,
             accent_auto: false,
             accent_amt: 0.6,
+            accent_shows: false,
             echo: Tristate::Auto,
             echo_amt: 0.8,
             heavy_scenes: Tristate::Auto,
