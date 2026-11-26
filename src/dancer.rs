@@ -94,7 +94,113 @@ pub struct DancerUniforms {
     pub trail: f32,
     /// Canon companions' fade 0..1 — eases toward `canon` so they don't pop.
     pub canon_fade: f32,
-    pub _pad2: [f32; 2],
+    /// Disintegrate envelope: 0 whole, 1 scattered into dust (see `Burst`).
+    pub burst: f32,
+    /// 0..1, re-rolled per burst: the swirl's direction and noise field.
+    pub burst_seed: f32,
+}
+
+/// Disintegrate: the dancer bursts into particles and re-forms
+/// (`vs_particles` in dancer.wgsl). Timed in beats so it breathes with the
+/// track: out over one beat, hangs for three, back over four (two bars).
+#[derive(Default, Clone, Copy)]
+pub struct Burst {
+    /// Beats since the burst began; None while she is whole.
+    at: Option<f32>,
+    pub seed: f32,
+    /// Held (Burst (hold) on a key or pad): she stays out until released.
+    held: bool,
+    /// Beats held so far — a hold that never sees its release (a remote or
+    /// OSC press) lets go after `MAX_HOLD`.
+    held_beats: f32,
+    /// Released: re-form as soon as she is fully out.
+    cut: bool,
+}
+
+impl Burst {
+    pub const RISE: f32 = 1.0;
+    pub const HOLD: f32 = 3.0;
+    pub const FALL: f32 = 4.0;
+
+    /// Start a burst. While she is already out it does nothing; while she
+    /// is re-forming it turns her round from the level she is at (the
+    /// envelope is linear, so the level maps back to a rise time exactly
+    /// and nothing jumps).
+    pub fn trigger(&mut self, seed: f32) {
+        match self.at {
+            None => {
+                self.at = Some(0.0);
+                self.seed = seed;
+            }
+            Some(t) if t > Self::RISE + Self::HOLD => {
+                self.at = Some(self.level() * Self::RISE);
+            }
+            Some(_) => {}
+        }
+    }
+
+    /// The longest a hold lasts without a release (beats).
+    pub const MAX_HOLD: f32 = 16.0;
+
+    /// Burst (hold): out on the press, and she stays out until `release`.
+    pub fn hold(&mut self, seed: f32) {
+        self.trigger(seed);
+        self.held = true;
+        self.held_beats = 0.0;
+        self.cut = false;
+    }
+
+    /// The hold's key or pad came up: re-form now (once fully out).
+    pub fn release(&mut self) {
+        if self.held {
+            self.held = false;
+            self.cut = true;
+        }
+    }
+
+    pub fn advance(&mut self, dt: f32, bpm: f32) {
+        let beats = dt * bpm.clamp(60.0, 200.0) / 60.0;
+        if self.held {
+            self.held_beats += beats;
+            if self.held_beats > Self::MAX_HOLD {
+                self.release();
+            }
+        }
+        if let Some(t) = self.at.as_mut() {
+            // Released and fully out: skip the rest of the hang, then step.
+            if !self.held && self.cut && *t >= Self::RISE && *t < Self::RISE + Self::HOLD {
+                *t = Self::RISE + Self::HOLD;
+                self.cut = false;
+            }
+            *t += beats;
+            if self.held {
+                // Out and hanging: the swirl keeps moving on the flow clock.
+                *t = t.min(Self::RISE + 0.5 * Self::HOLD);
+            }
+            if *t >= Self::RISE + Self::HOLD + Self::FALL {
+                self.at = None;
+                self.cut = false;
+            }
+        }
+    }
+
+    /// 0 whole .. 1 fully scattered.
+    pub fn level(&self) -> f32 {
+        self.at.map_or(0.0, Self::level_at)
+    }
+
+    /// The envelope `t` beats into a burst (0 before it and after it ends).
+    pub fn level_at(t: f32) -> f32 {
+        if t < 0.0 {
+            0.0
+        } else if t < Self::RISE {
+            t / Self::RISE
+        } else if t < Self::RISE + Self::HOLD {
+            1.0
+        } else {
+            (1.0 - (t - Self::RISE - Self::HOLD) / Self::FALL).max(0.0)
+        }
+    }
 }
 
 /// Whether routine `name` is out of the Auto rotation. A `_mir` twin is out
@@ -311,6 +417,8 @@ pub struct DancerLayer {
     /// between frames should start.
     last_pos: f64,
     last_downbeat: u64,
+    /// Disintegrate (drops and the Disintegrate action).
+    pub burst: Burst,
 }
 
 impl DancerLayer {
@@ -334,7 +442,20 @@ impl DancerLayer {
             seen_disabled: Vec::new(),
             last_pos: 0.0,
             last_downbeat: 0,
+            burst: Burst::default(),
         }
+    }
+
+    /// Burst her into particles (a drop, or the Disintegrate action).
+    pub fn disintegrate(&mut self) {
+        let seed = self.rand();
+        self.burst.trigger(seed);
+    }
+
+    /// Burst (hold): out while the key or pad is down.
+    pub fn hold_burst(&mut self) {
+        let seed = self.rand();
+        self.burst.hold(seed);
     }
 
     fn rand(&mut self) -> f32 {
@@ -610,6 +731,7 @@ impl DancerLayer {
         // flips; keep drawing until they've fully faded out.
         let canon_target = if self.canon { 1.0 } else { 0.0 };
         self.canon_amt += (canon_target - self.canon_amt) * (dt * 3.0).min(1.0);
+        self.burst.advance(dt, bpm);
         self.slots[0].loaded.as_ref()?;
         if self.opacity < 0.01 {
             return None;
@@ -701,7 +823,8 @@ impl DancerLayer {
             scale: size,
             trail: if trails { 1.0 } else { 0.0 },
             canon_fade: self.canon_amt,
-            _pad2: [0.0; 2],
+            burst: self.burst.level(),
+            burst_seed: self.burst.seed,
         })
     }
 }
@@ -709,6 +832,67 @@ impl DancerLayer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The burst rises over a beat, hangs, and falls back to whole over
+    /// four beats; it never steps by more than one frame's worth.
+    #[test]
+    fn burst_envelope_is_smooth_and_ends() {
+        let mut b = Burst::default();
+        assert_eq!(b.level(), 0.0);
+        b.trigger(0.7);
+        let (dt, bpm) = (1.0 / 60.0, 120.0);
+        let step = dt * bpm / 60.0 / Burst::RISE.min(Burst::FALL);
+        let mut last = b.level();
+        let mut peak = 0.0f32;
+        for _ in 0..(60 * 5) {
+            b.advance(dt, bpm);
+            let l = b.level();
+            assert!((l - last).abs() <= step + 1e-4, "jump {last} -> {l}");
+            peak = peak.max(l);
+            last = l;
+        }
+        assert_eq!(peak, 1.0);
+        assert_eq!(b.level(), 0.0, "8 beats at 120 BPM = 4 s: whole again");
+    }
+
+    /// Held, she stays out however long the hold; released, she re-forms
+    /// straight away; a hold with no release lets go after MAX_HOLD.
+    #[test]
+    fn burst_hold_and_release() {
+        let mut b = Burst::default();
+        b.hold(0.4);
+        b.advance(10.0, 60.0); // 10 beats held
+        assert_eq!(b.level(), 1.0, "still out while held");
+        b.release();
+        b.advance(0.5, 60.0);
+        assert!(b.level() < 1.0, "re-forming right after the release");
+        b.advance(4.0, 60.0);
+        assert_eq!(b.level(), 0.0);
+        let mut c = Burst::default();
+        c.hold(0.4);
+        c.advance(Burst::MAX_HOLD + 1.0, 60.0);
+        c.advance(0.5, 60.0);
+        assert!(c.level() < 1.0, "a lost release lets go");
+    }
+
+    /// A drop while she is re-forming turns her round from where she is; a
+    /// drop while she is out changes nothing.
+    #[test]
+    fn burst_retrigger_never_jumps() {
+        let mut b = Burst::default();
+        b.trigger(0.2);
+        b.advance(1.0, 60.0); // 1 beat: fully out
+        b.trigger(0.9);
+        assert_eq!(b.level(), 1.0);
+        assert_eq!(b.seed, 0.2, "seed only changes on a fresh burst");
+        b.advance(5.0, 60.0); // 6 beats: half way back
+        let before = b.level();
+        assert!(before > 0.4 && before < 0.6);
+        b.trigger(0.9);
+        assert!((b.level() - before).abs() < 1e-5);
+        b.advance(0.25, 60.0);
+        assert!(b.level() > before, "rising again");
+    }
 
     /// The auto-pilot reaches every look, indices stay in range, and a fixed
     /// look from the settings always wins.

@@ -2022,16 +2022,30 @@ pub fn groove_test(path: &std::path::Path) -> anyhow::Result<()> {
 /// own value needs the whole settings machinery).
 pub fn dump_feed(path: &std::path::Path, out: &std::path::Path, palette: &str) -> anyhow::Result<()> {
     use std::io::Write;
+    let pal = crate::link::palette_colours(palette);
+    let mut w = std::io::BufWriter::new(std::fs::File::create(out)?);
+    let (name, frames) = track_uniforms(path)?;
+    for u in &frames {
+        writeln!(w, "{}", crate::link::frame_json(u, "", &pal, false, u.calm < 0.5, &Default::default()))?;
+    }
+    w.flush()?;
+    println!("{}: {} frames ({:.1} s) -> {}", name, frames.len(), frames.len() as f32 / 60.0, out.display());
+    Ok(())
+}
+
+/// A track run through the real analyser, as the uniforms the render loop
+/// would build at 60 fps (no resolution, bloom or tone map: the caller sets
+/// those). `--dump-feed` writes them for the Unity engine; `--snap-track`
+/// drives scenes with them.
+pub fn track_uniforms(path: &std::path::Path) -> anyhow::Result<(String, Vec<crate::render::Uniforms>)> {
     let song = crate::song::load(path)?;
     let (_tx, rx) = mpsc::channel();
     let shared: SharedFeatures = Arc::new(Mutex::new(Features::default()));
     let mut a = Analyzer::new(song.sr as f32, shared, rx, None);
     a.nn_sync = true;
-    let pal = crate::link::palette_colours(palette);
-    let mut w = std::io::BufWriter::new(std::fs::File::create(out)?);
+    let mut out = Vec::new();
     let dt = 1.0f32 / 60.0;
     let mut next_t = 0.0f32;
-    let mut frames = 0usize;
     // Same smoothing / clock maths as the render loop (main.rs).
     let mut flow = 0.0f64;
     let mut flow_bpm = 120.0f32;
@@ -2093,14 +2107,11 @@ pub fn dump_feed(path: &std::path::Path, out: &std::path::Path, palette: &str) -
                 waveform,
                 ..Default::default()
             };
-            writeln!(w, "{}", crate::link::frame_json(&u, "", &pal, false, f.calm < 0.5, &Default::default()))?;
-            frames += 1;
+            out.push(u);
             next_t += dt;
         }
     }
-    w.flush()?;
-    println!("{}: {} frames ({:.1} s) -> {}", song.name, frames, frames as f32 * dt, out.display());
-    Ok(())
+    Ok((song.name.clone(), out))
 }
 
 #[cfg(test)]

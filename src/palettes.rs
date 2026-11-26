@@ -7,7 +7,9 @@
 //! so non-cyclic palettes don't need their first/last stops to match.
 //!
 //! `AUTO` is the pseudo-palette: the render loop feeds it through [`Auto`],
-//! which maps the music's mood to one of the named gradients.
+//! which maps the music's mood to one of the named gradients. `ART` is the
+//! other: the colours of the playing track's cover (`albumart.rs` publishes
+//! them through [`set_art`]), falling back to `AUTO` while there's none.
 
 use crate::audio::Features;
 
@@ -15,6 +17,30 @@ pub const LUT_SIZE: usize = 256;
 
 /// The "pick for me" palette — a `Settings.palette` value, not a gradient.
 pub const AUTO: &str = "auto";
+
+/// "The cover's colours" — a `Settings.palette` value, not a gradient. The
+/// render loop keys the live cover as `art#<serial>` (see [`is_art`]).
+pub const ART: &str = "art";
+
+pub type Lut = [u8; LUT_SIZE * 4];
+
+/// The cover palette now playing, with the serial it was published under.
+static ART_LUT: std::sync::Mutex<Option<(u64, std::sync::Arc<Lut>)>> = std::sync::Mutex::new(None);
+
+/// Publish (or clear) the cover palette.
+pub fn set_art(v: Option<(u64, std::sync::Arc<Lut>)>) {
+    *ART_LUT.lock().unwrap_or_else(|e| e.into_inner()) = v;
+}
+
+/// The cover palette now playing, if any.
+pub fn art() -> Option<(u64, std::sync::Arc<Lut>)> {
+    ART_LUT.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+/// `ART`, or a live cover's key (`art#<serial>`).
+pub fn is_art(name: &str) -> bool {
+    name == ART || name.starts_with("art#")
+}
 
 pub struct Palette {
     pub name: &'static str,
@@ -183,15 +209,16 @@ pub fn names() -> impl Iterator<Item = &'static str> {
     PALETTES.iter().map(|p| p.name)
 }
 
-/// Every selectable palette value — `AUTO` first, then the named gradients.
-/// For pickers and name validation; the render loop resolves `AUTO` itself.
+/// Every selectable palette value — `AUTO` and `ART` first, then the named
+/// gradients. For pickers and name validation; the render loop resolves the
+/// two pseudo-palettes itself.
 pub fn all_names() -> impl Iterator<Item = &'static str> {
-    std::iter::once(AUTO).chain(names())
+    [AUTO, ART].into_iter().chain(names())
 }
 
-/// `AUTO` or a named gradient.
+/// `AUTO`, `ART` or a named gradient.
 pub fn is_valid(name: &str) -> bool {
-    name == AUTO || names().any(|n| n == name)
+    name == AUTO || name == ART || names().any(|n| n == name)
 }
 
 /// Mood → palette lists for `AUTO`. Curated to stay show-safe — the niche
@@ -289,8 +316,12 @@ impl Auto {
     }
 }
 
-/// 256×4 RGBA bytes for the named palette (falls back to `rainbow`).
+/// 256×4 RGBA bytes for the named palette (falls back to `rainbow`). `ART`
+/// gives the live cover's palette, or the `AUTO` swatch with no cover.
 pub fn lut(name: &str) -> [u8; LUT_SIZE * 4] {
+    if is_art(name) {
+        return art().map_or_else(|| lut(AUTO), |(_, l)| *l);
+    }
     if name == AUTO {
         // Display LUT for the `auto` chip — cool/warm/hot thirds so the
         // swatch shows the moods it picks between.
@@ -304,8 +335,16 @@ pub fn lut(name: &str) -> [u8; LUT_SIZE * 4] {
         .iter()
         .find(|p| p.name == name)
         .unwrap_or(&PALETTES[0]);
-    let st = pal.stops;
+    lut_from_stops(pal.stops)
+}
+
+/// A LUT from `(position, colour)` stops, positions ascending in 0..1,
+/// interpolated linearly in sRGB.
+pub fn lut_from_stops(st: &[(f32, [u8; 3])]) -> Lut {
     let mut out = [0u8; LUT_SIZE * 4];
+    if st.is_empty() {
+        return out;
+    }
     for i in 0..LUT_SIZE {
         let x = i as f32 / (LUT_SIZE - 1) as f32;
         // Find the enclosing stop pair.
@@ -320,6 +359,54 @@ pub fn lut(name: &str) -> [u8; LUT_SIZE * 4] {
         out[i * 4 + 3] = 255;
     }
     out
+}
+
+/// A timed fade between LUTs, for the `ART` palette: a new cover blends in
+/// over about a bar instead of the hard cut a LUT swap would be.
+pub struct Fade {
+    from: Lut,
+    to: Lut,
+    cur: Lut,
+    key: String,
+    start: f32,
+    len: f32,
+    done: bool,
+}
+
+impl Fade {
+    /// Start from what's on screen now.
+    pub fn new(on_screen: Lut) -> Self {
+        Self { from: on_screen, to: on_screen, cur: on_screen, key: String::new(), start: 0.0, len: 1.0, done: false }
+    }
+
+    /// The fade has reached its target.
+    pub fn done(&self) -> bool {
+        self.done
+    }
+
+    /// Aim at `key` (a new key starts a fade from what's showing, over
+    /// `len` seconds). Returns the LUT to show when it changed since the
+    /// last call.
+    pub fn step(&mut self, key: &str, lut: impl FnOnce() -> Lut, now: f32, len: f32) -> Option<&Lut> {
+        if key != self.key {
+            self.key = key.to_string();
+            self.from = self.cur;
+            self.to = lut();
+            self.start = now;
+            self.len = len.max(0.01);
+            self.done = false;
+        }
+        if self.done {
+            return None;
+        }
+        let t = ((now - self.start) / self.len).clamp(0.0, 1.0);
+        let e = t * t * (3.0 - 2.0 * t);
+        for i in 0..LUT_SIZE * 4 {
+            self.cur[i] = (self.from[i] as f32 + (self.to[i] as f32 - self.from[i] as f32) * e + 0.5) as u8;
+        }
+        self.done = t >= 1.0;
+        Some(&self.cur)
+    }
 }
 
 #[cfg(test)]
@@ -352,6 +439,34 @@ mod tests {
             build,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn art_is_valid_and_falls_back_to_the_auto_swatch() {
+        assert!(is_valid(ART));
+        assert!(!is_valid("art#3"));
+        assert!(is_art("art#3") && is_art(ART) && !is_art("autumn"));
+        assert!(!names().any(|n| n == ART));
+        // No cover published in this test binary: the auto swatch.
+        if art().is_none() {
+            assert_eq!(lut(ART), lut(AUTO));
+        }
+    }
+
+    #[test]
+    fn fade_blends_then_settles() {
+        let a = lut("ocean");
+        let b = lut("fire");
+        let mut f = Fade::new(a);
+        assert_eq!(f.step("x", || b, 0.0, 2.0).copied(), Some(a)); // starts where it was
+        let mid = *f.step("x", || b, 1.0, 2.0).unwrap();
+        assert!(mid != a && mid != b);
+        assert_eq!(f.step("x", || b, 2.5, 2.0).copied(), Some(b));
+        assert!(f.step("x", || b, 3.0, 2.0).is_none()); // settled: nothing to upload
+        // A new key mid-fade starts from what's showing.
+        f.step("y", || a, 4.0, 2.0);
+        let m2 = *f.step("y", || a, 5.0, 2.0).unwrap();
+        assert!(m2 != a && m2 != b);
     }
 
     #[test]

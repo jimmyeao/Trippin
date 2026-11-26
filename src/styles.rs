@@ -126,9 +126,10 @@ pub fn catalog() -> &'static Catalog {
 /// Choose a Style (`None` = off). Choosing one also puts the palette on Auto:
 /// a Style's colour families only steer the `auto` palette, and the default
 /// (a fixed rainbow) would otherwise make the choice look like it did nothing.
-/// Pick a fixed palette afterwards to override.
+/// Pick a fixed palette afterwards to override. "Follow artwork" (the `art`
+/// palette) is kept: with no cover it falls back to the Style's families.
 pub fn select(s: &mut Settings, id: Option<String>) {
-    if id.is_some() {
+    if id.is_some() && s.palette != crate::palettes::ART {
         s.palette = crate::palettes::AUTO.to_string();
     }
     s.style = id;
@@ -376,7 +377,10 @@ mod tests {
         assert_eq!((s.style.as_deref(), s.palette.as_str()), (Some("rock"), crate::palettes::AUTO));
         s.palette = "fire".into();
         select(&mut s, None);
-        assert_eq!((s.style, s.palette.as_str()), (None, "fire"), "turning a Style off leaves the palette alone");
+        assert_eq!((s.style.as_deref(), s.palette.as_str()), (None, "fire"), "turning a Style off leaves the palette alone");
+        s.palette = crate::palettes::ART.into();
+        select(&mut s, Some("dance".into()));
+        assert_eq!(s.palette, crate::palettes::ART, "Follow artwork survives choosing a Style");
     }
 
     #[test]

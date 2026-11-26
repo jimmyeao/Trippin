@@ -188,6 +188,9 @@ impl Editor {
         thumb_store: &Mutex<HashMap<String, (u32, u32, Vec<u8>)>>,
     ) -> (Vec<UiCommand>, Frame) {
         let mut cmd = Vec::new();
+        // Read before the timeline lock is taken (lock order: AGENTS.md);
+        // a change goes back as a command.
+        let accent_shows = settings.lock().unwrap_or_else(|e| e.into_inner()).accent_shows;
 
         // Scene thumbnails rendered on the render thread land in the shared
         // store; the panel reads from it too, so we only take keys we asked
@@ -408,6 +411,23 @@ impl Editor {
                             .clicked()
                         {
                             *autosync = !*autosync;
+                        }
+                        let acc_btn = egui::Button::new(
+                            egui::RichText::new("accents")
+                                .size(11.0)
+                                .color(if accent_shows { t::ACCENT } else { t::MUTED }),
+                        )
+                        .fill(if accent_shows { t::ACCENT_SEL } else { t::RAISED })
+                        .corner_radius(egui::CornerRadius::same(10));
+                        if ui
+                            .add(acc_btn)
+                            .on_hover_text(
+                                "Accent layer during shows: a light scene (embers, streaks, notes...) \
+                                 over some of the show's scenes, rolled on each scene change.",
+                            )
+                            .clicked()
+                        {
+                            cmd.push(UiCommand::AccentShows(!accent_shows));
                         }
                         if *autosync {
                             ui.label(

@@ -214,6 +214,7 @@ jobs:
             <key>LSMinimumSystemVersion</key><string>12.0</string>
             <key>NSMicrophoneUsageDescription</key><string>Trippin listens to audio input to drive music-reactive visuals.</string>
             <key>NSScreenCaptureUsageDescription</key><string>Trippin captures the system audio mix (not the screen) to drive music-reactive visuals.</string>
+            <key>NSCameraUsageDescription</key><string>Trippin uses the camera you pick in Settings for its camera scenes.</string>
           </dict>
           </plist>
           EOF

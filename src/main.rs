@@ -27,7 +27,12 @@
 // the default macro recursion limit (128).
 #![recursion_limit = "256"]
 
+mod accent;
+mod albumart;
+mod artfind;
+mod camera;
 mod ai;
+mod echo;
 mod audio;
 mod beats;
 mod engine;
@@ -55,6 +60,7 @@ mod palettes;
 mod panel;
 mod perf;
 mod render;
+mod sim;
 mod snap;
 mod song;
 mod styles;
@@ -75,6 +81,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// through every cue path: it only lives inside a show, and
 /// `apply_playhead` resets it on play / seek / stop.
 static STROBE: AtomicBool = AtomicBool::new(false);
+/// Echo (hold) is down, and for how long (milli-beats; a lost release lets
+/// go after 16 beats).
+static HOLD_ECHO: AtomicBool = AtomicBool::new(false);
+static HOLD_ECHO_BEATS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 /// Whether the visuals window is fullscreen. The event thread owns the
 /// window and publishes this every `about_to_wait`; the render thread copies
@@ -143,6 +153,14 @@ struct Shared {
     /// again" request from the hotkey.
     np: nowplaying::SharedNowPlaying,
     np_cfg: Arc<Mutex<nowplaying::NpConfig>>,
+    /// The playing track's cover (`albumart.rs`), and its online-lookup
+    /// toggle (mirrors `Settings::np_art_online`).
+    art: albumart::SharedArt,
+    art_online: Arc<AtomicBool>,
+    /// A Look recall waiting to glide (`looks::GlideReq`). Written while
+    /// the settings lock is held, and taken by the render loop under the
+    /// same lock, so a frame never sees the Look's settings without it.
+    glide: Mutex<Option<looks::GlideReq>>,
     /// Track pushed by a LAN agent over the remote protocol; the
     /// now-playing worker's `Remote` source polls it.
     np_remote: nowplaying::RemoteNp,
@@ -173,7 +191,8 @@ struct Shared {
 /// Keys page can capture it for MIDI-learn. Remote commands (the iOS app's
 /// WebSocket clients, OSC controllers) arrive the same way.
 enum AppEvent {
-    MidiNote(u8),
+    /// A MIDI note: number, and true for note-on (false = the release).
+    MidiNote(u8, bool),
     Remote(remote::RemoteCmd),
 }
 
@@ -181,6 +200,8 @@ enum AppEvent {
 enum Msg {
     Resize(u32, u32),
     Act(Action),
+    /// A hold action's key or pad came up.
+    Release(Action),
     GoToScene(usize),
     /// Queue a scene as the next cut ("play next" — panel right-click).
     QueueNext(usize),
@@ -264,6 +285,8 @@ fn allowed_scenes(r: &Renderer, s: &Settings) -> Vec<usize> {
         // via an explicit cue, never by autopilot or next/prev.
         .filter(|&i| names[i] != "void")
         .filter(|&i| !names[i].starts_with("unity_") || EXT_LIVE.load(Ordering::Relaxed))
+        // camera_* scenes: only while the picked webcam sends frames.
+        .filter(|&i| !names[i].starts_with("camera_") || camera::LIVE.load(Ordering::Relaxed))
         // video_* scenes (from effects packs): only with their clip on disk.
         .filter(|&i| video::scene_ready(&names[i]))
         .filter(|&i| !s.disabled_scenes.contains(&names[i]))
@@ -678,6 +701,9 @@ fn render_loop(
     let mut ext_seq = 0u64;
     // Video clip scenes (video.rs): play head + decoder thread.
     let mut video = video::Player::new();
+    // The webcam (camera.rs): idle until Settings > Camera names one.
+    let cam = camera::Capture::start();
+    let mut cam_seen = 0u64;
     video::rescan();
     let mut flow_bpm = 120.0f32;
     let groove_log = std::env::var_os("TRIPPIN_GROOVE_LOG").is_some();
@@ -695,6 +721,22 @@ fn render_loop(
     let mut fade_p = -1.0f32;
     // `palette = "auto"` mood matcher (palettes::Auto).
     let mut auto_pal = palettes::Auto::default();
+    // A LUT fade in progress: the `art` palette's cover changes, and Look
+    // glides. While it runs the palette goes through `set_palette_lut`.
+    let mut pal_fade: Option<palettes::Fade> = None;
+    // Look glide (looks::glide_overlay): a request taken with the settings
+    // this frame, then the running glide with its beat window.
+    struct GlideRun {
+        req: looks::GlideReq,
+        start: f64,
+        end: f64,
+        t0: Instant,
+        secs: f32,
+        p: f32,
+        mid_done: bool,
+    }
+    let mut glide_req: Option<looks::GlideReq> = None;
+    let mut glide: Option<GlideRun> = None;
     // The selected Style's auto-palette families, cached by Style id.
     let mut style_pals: Option<(String, [Vec<&'static str>; 4])> = None;
     // The track is in a breakdown, as far as a Style's calm pool is concerned
@@ -708,6 +750,18 @@ fn render_loop(
     let mut audio_retry = Duration::from_secs(15);
     // The post effect showing now — the auto-pilot's pick when `fx_auto` is on.
     let mut fx_current = lock(&shared.settings).fx;
+    // Accent layer: a light scene the auto-pilot sometimes adds on top.
+    let mut accent_layer = accent::Accent::default();
+    // The scene last seen, so a timeline show's scene changes roll accents.
+    let mut accent_scene = usize::MAX;
+    let mut echo_fx = echo::Echo::default();
+    // Type scenes: the now-playing line in the title texture, and the share
+    // of its width the text covers (u.look4.w).
+    let mut title_line = String::new();
+    let mut title_frac = 0.0f32;
+    // The image in the logo scene's texture (gfx::Statics::logo starts as
+    // the Trippin logo, which is "").
+    let mut logo_key = String::new();
 
     // --- Timeline state ---------------------------------------------------
     // Decodes run on throwaway threads; results land in `song_rx` tagged with
@@ -784,6 +838,9 @@ fn render_loop(
                     dancer.pin(i);
                     dancer.showing = true;
                 }
+                Msg::Release(Action::HoldEcho) => HOLD_ECHO.store(false, Ordering::Relaxed),
+                Msg::Release(Action::HoldBurst) => dancer.burst.release(),
+                Msg::Release(_) => {}
                 Msg::Act(a) => apply_render(
                     &mut r,
                     &mut dir,
@@ -1052,7 +1109,28 @@ fn render_loop(
         if dt > 0.0 {
             fps += (1.0 / dt - fps) * 0.05;
         }
-        let mut s = lock(&shared.settings).clone();
+        let mut s = {
+            let g = lock(&shared.settings);
+            if let Some(mut q) = lock(&shared.glide).take() {
+                // A newer Look supersedes a glide in flight; its scene
+                // still lands if the new one names none.
+                if let Some(old) = glide.take() {
+                    q.scene = q.scene.or(old.req.scene);
+                    q.clip = q.clip.or(old.req.clip);
+                }
+                glide_req = Some(q);
+            }
+            g.clone()
+        };
+        // Look glide: in-between values on this per-frame clone (last
+        // frame's progress; a new request starts at 0).
+        if let Some((from, p)) = glide_req
+            .as_ref()
+            .map(|q| (&q.from, 0.0))
+            .or(glide.as_ref().map(|g| (&g.req.from, g.p)))
+        {
+            looks::glide_overlay(&mut s, from, p);
+        }
         // The Style's pacing overlays this per-frame clone; nothing is saved.
         styles::overlay(&mut s, styles::catalog());
         // While the GPU check is on a `unity_*` scene the engine link is
@@ -1063,6 +1141,7 @@ fn render_loop(
         }
         let allowed = allowed_scenes(&r, &s);
         let mut usable = director_scenes(&r, &s, &allowed, style_calm, &dir);
+        shared.art_online.store(s.np_art_online, Ordering::Relaxed);
         {
             let mut c = lock(&shared.np_cfg);
             if c.source != s.np_source || c.delay_s != s.np_delay_s || c.file != s.np_file {
@@ -1095,7 +1174,8 @@ fn render_loop(
         }
         // Global palette — a no-op while the name is unchanged. `auto` is
         // resolved against the live features below (they don't exist yet).
-        if s.palette != palettes::AUTO {
+        let gliding = glide.is_some() || glide_req.is_some();
+        if s.palette != palettes::AUTO && s.palette != palettes::ART && !gliding && pal_fade.is_none() {
             r.set_palette(&s.palette);
         }
         // NDI output — a conf change rebuilds it; otherwise a cheap no-op.
@@ -1474,6 +1554,34 @@ fn render_loop(
         }
         // Positive latency shows the beat earlier (compensating capture delay).
         let pos = f.beat_position(now) + s.latency_ms as f64 / 1000.0 * f.bpm as f64 / 60.0;
+        // Look glide: fix its beat window, then advance it. The routine
+        // changes at the midpoint and the scene on the closing beat; a
+        // wall clock backs up the beat in case the tempo stalls.
+        if let Some(q) = glide_req.take() {
+            let end = looks::glide_end(pos, f.beat_in_bar(pos) as f64, q.glide);
+            let secs = ((end - pos) * 60.0 / f.bpm.max(60.0) as f64) as f32;
+            glide = Some(GlideRun { req: q, start: pos, end, t0: now, secs, p: 0.0, mid_done: false });
+        }
+        if let Some(g) = glide.as_mut() {
+            let by_beat = ((pos - g.start) / (g.end - g.start).max(1e-3)) as f32;
+            let by_clock = now.duration_since(g.t0).as_secs_f32() / (g.secs * 2.0 + 0.5);
+            g.p = by_beat.max(by_clock).clamp(0.0, 1.0);
+            if g.p >= 0.5 && !g.mid_done {
+                g.mid_done = true;
+                if let Some(i) = g.req.clip {
+                    dancer.pin(i);
+                    dancer.showing = true;
+                }
+            }
+            if g.p >= 1.0 {
+                // Already on it: a cut would re-seed the scene, a jump at
+                // the very end of a smooth glide.
+                if let Some(i) = g.req.scene.filter(|&i| i != dir.scene) {
+                    dir.cut_to(i);
+                }
+                glide = None;
+            }
+        }
         let ev = dir.update(&f, pos, dt, &usable, &s);
         // A drop schedules a clip once its payoff has played. Not while a
         // timeline show plays (a paused or scrubbed song fakes drops), nor
@@ -1526,12 +1634,32 @@ fn render_loop(
             }
         }
         // `palette = "auto"`: pick the gradient to match the music's mood.
-        let pal = if s.palette == palettes::AUTO {
-            auto_pal.pick_in(&f, pos, style_pals.as_ref().map(|(_, p)| p))
+        // `"art"`: the cover's colours (auto while there's no cover), faded
+        // in over a bar on each new cover.
+        let is_art = s.palette == palettes::ART;
+        let pal_key: String = if is_art {
+            match palettes::art() {
+                Some((n, _)) => format!("art#{n}"),
+                None => auto_pal.pick_in(&f, pos, style_pals.as_ref().map(|(_, p)| p)).to_string(),
+            }
+        } else if s.palette == palettes::AUTO {
+            auto_pal.pick_in(&f, pos, style_pals.as_ref().map(|(_, p)| p)).to_string()
         } else {
-            s.palette.as_str()
+            s.palette.clone()
         };
-        r.set_palette(pal);
+        // A Look glide blends to its palette over what's left of the glide.
+        let glide_left = glide.as_ref().map(|g| ((g.end - pos).max(0.0) * 60.0 / f.bpm.max(60.0) as f64) as f32);
+        if is_art || glide_left.is_some() || pal_fade.as_ref().is_some_and(|f| !f.done()) {
+            let fade = pal_fade.get_or_insert_with(|| palettes::Fade::new(palettes::lut(r.palette_name())));
+            let len = glide_left.unwrap_or_else(|| (240.0 / f.bpm.max(60.0)).clamp(1.5, 4.0));
+            if let Some(l) = fade.step(&pal_key, || palettes::lut(&pal_key), (now - started).as_secs_f32(), len) {
+                r.set_palette_lut("~art", l);
+            }
+        } else {
+            pal_fade = None;
+            r.set_palette(&pal_key);
+        }
+        let pal = pal_key.as_str();
         // Free cuts land on musical events — the queued pick should fit
         // the mood too: calm sections want calm scenes, hot ones want hot.
         repick_for_mood(&mut dir, &r, &usable, &f, &s);
@@ -1563,6 +1691,12 @@ fn render_loop(
                 &s.disabled_clips,
             );
         }
+        // Disintegrate on a drop: the payoff of the breakdown. Not in Manual
+        // (nothing moves by itself there) nor during a timeline show (a
+        // scrubbed or paused song fakes drops).
+        if ev.drop && s.dancer_burst_drops && s.mode != Mode::Manual && player.is_none() {
+            dancer.disintegrate();
+        }
         let dancer_u = dancer.uniforms(
             pos,
             f.downbeat,
@@ -1576,8 +1710,47 @@ fn render_loop(
         );
         if ev.cut && s.fx_auto {
             let seed = dir.rand();
-            fx_current = Fx::random(seed, fx_current);
+            fx_current = Fx::random(seed, fx_current, &s.fx_auto_skip);
         }
+        // Accent layer: decided on each cut; fades out in breakdowns, and
+        // is off in Manual and with the setting off. Timeline shows have
+        // their own switch (`accent_shows`) and roll on each scene change.
+        let in_show = player.is_some();
+        let accents_on = if in_show { s.accent_shows } else { s.accent_auto && s.mode != Mode::Manual };
+        let show_cut = in_show && dir.scene != accent_scene;
+        accent_scene = dir.scene;
+        if !accents_on || f.calm > 0.7 {
+            accent_layer.clear();
+        } else if ev.cut || show_cut {
+            let base = r.scene_name(dir.scene);
+            let base_ok = !r.scene_heavy().get(dir.scene).copied().unwrap_or(true)
+                && !base.starts_with("unity_")
+                && !base.starts_with("video_")
+                && !crate::ai::scene_meta(base).flight;
+            let (roll, pick) = (dir.rand(), dir.rand());
+            accent_layer.on_cut(r.accent_count(), base_ok, f.calm < 0.3, roll, pick);
+        }
+        r.set_accent(accent_layer.tick(dt, s.accent_amt.clamp(0.0, 1.0)));
+        // Echo trails: Auto rolls on each cut and holds through breakdowns.
+        if ev.cut {
+            echo_fx.on_cut(dir.rand());
+        }
+        let echo_ok = !r.scene_feedback(dir.scene)
+            && !crate::ai::scene_meta(r.scene_name(dir.scene)).flight;
+        // A timeline show's look is the show's: Auto stays out of it.
+        let mut echo_mode = if player.is_some() && s.echo == Tristate::Auto { Tristate::Off } else { s.echo };
+        // Echo (hold): on while the key/pad is down; a hold whose release
+        // never comes (remote, OSC) lets go after 16 beats.
+        if HOLD_ECHO.load(Ordering::Relaxed) {
+            let held = HOLD_ECHO_BEATS.fetch_add((dt * f.bpm / 60.0 * 1000.0) as u32, Ordering::Relaxed);
+            if held > 16_000 {
+                HOLD_ECHO.store(false, Ordering::Relaxed);
+            } else {
+                echo_mode = Tristate::On;
+            }
+        }
+        let echo_now = echo_fx.tick(dt, echo_mode, s.echo_amt.clamp(0.0, 1.0), echo_ok, f.calm);
+        r.set_echo(echo_now);
 
         // Tempo changes ease in; position only ever moves forward smoothly.
         flow_bpm += (f.bpm - flow_bpm) * (dt * 1.5).min(1.0);
@@ -1614,7 +1787,10 @@ fn render_loop(
         // tunnel/flight scenes, where it reads as jerky (AGENTS.md).
         let fill_strobe = dir.fill_strobe
             && !crate::ai::scene_meta(r.scene_name(dir.scene)).flight;
-        let strobe_live = STROBE.load(Ordering::Relaxed) || fill_strobe;
+        // Photosensitive-safe turns every strobe off; fills still stutter
+        // video scenes (`vbeat.fill`), which is motion, not light.
+        let strobe_live = !s.photo_safe && (STROBE.load(Ordering::Relaxed) || fill_strobe);
+        r.set_safe(s.photo_safe);
         let strobe_gate = if strobe_live && f.onset < 0.45 {
             0.0
         } else {
@@ -1636,6 +1812,18 @@ fn render_loop(
         for (slot, px) in video.tick(r.scene_name(dir.scene), dt, dir.intensity, &vbeat) {
             r.upload_video(slot, &px);
         }
+        // The webcam: its newest frame into the camera texture while a
+        // camera scene is on air or the camera layer is on.
+        cam.set(&s.camera);
+        let camera_scene = r.scene_name(dir.scene).starts_with("camera_");
+        let cam_live = camera::LIVE.load(Ordering::Relaxed);
+        let cam_layer = cam_live && !camera_scene && s.camera_layer != config::CamLayer::Off;
+        if cam_live && (camera_scene || cam_layer) {
+            if let Some((n, px)) = cam.newer(cam_seen) {
+                cam_seen = n;
+                r.upload_cam(&px);
+            }
+        }
 
         let (w, h) = r.size();
         let mut spectrum = [0.0; audio::SPECTRUM_BINS];
@@ -1645,6 +1833,53 @@ fn render_loop(
             waveform[i / 4][i % 4] = v;
         }
         let beat_in_bar = f.beat_in_bar(pos);
+        // Type scenes (type_field): the track playing now, else the DJ name,
+        // else TRIPPIN, rasterised into title_tex when it changes.
+        {
+            let now_line = lock(&shared.np)
+                .track
+                .as_ref()
+                .map(|t| t.line())
+                .filter(|l| !l.trim().is_empty());
+            let line = now_line.unwrap_or_else(|| {
+                let n = s.brand_name.trim();
+                if n.is_empty() { "TRIPPIN".to_string() } else { n.to_string() }
+            });
+            if line != title_line {
+                title_line = line;
+                if let Some(b) = crate::gfx::title_bitmap(&title_line) {
+                    title_frac = r.upload_title(&b);
+                }
+            }
+        }
+        // The Logo Trip scene's image: its own pick, else the branding logo,
+        // else the Trippin logo; loaded only when the choice changes.
+        {
+            let want = [s.logo_scene_image.trim(), s.brand_logo.trim()]
+                .into_iter()
+                .find(|p| !p.is_empty())
+                .unwrap_or("");
+            if want != logo_key {
+                logo_key = want.to_string();
+                let img = if want.is_empty() {
+                    crate::gfx::app_logo()
+                } else {
+                    image::open(want).map(|i| i.to_rgba8()).unwrap_or_else(|e| {
+                        eprintln!("logo scene: {want}: {e}");
+                        crate::gfx::app_logo()
+                    })
+                };
+                r.upload_logo(&img);
+            }
+        }
+        let cam_ctl = if camera_scene && !camera::scene_params(r.scene_name(dir.scene)).is_empty() {
+            camera::scene_uniforms(&s.show_params, r.scene_name(dir.scene))
+        } else {
+            (
+                [s.roto_amt.clamp(0.0, 1.0), s.roto_ink.clamp(0.0, 1.0), s.roto_detail.clamp(0.0, 1.0), s.roto_bands.clamp(2, 8) as f32],
+                [s.roto_pal.clamp(0.0, 1.0), 0.0, 0.0, 0.0],
+            )
+        };
         let u = Uniforms {
             time: (now - started).as_secs_f32(),
             dt,
@@ -1667,7 +1902,8 @@ fn render_loop(
             intensity: dir.intensity,
             hue: dir.hue,
             seed: dir.seed,
-            flash: dir.flash,
+            // The cut flash is a full-frame white: off in safe mode.
+            flash: if s.photo_safe { 0.0 } else { dir.flash },
             flow: flow as f32,
             master: master * strobe_gate,
             fx: if s.fx_auto { fx_current } else { s.fx }.index(),
@@ -1685,7 +1921,24 @@ fn render_loop(
             clock4: clock4.map(|c| c as f32),
             // y: video frame blend (vid() in common.wgsl).
             misc4: [0.0, video.blend, 0.0, 0.0],
-            look4: showparams::look(&s.show_params, r.scene_name(dir.scene)),
+            look4: {
+                let mut l = showparams::look(&s.show_params, r.scene_name(dir.scene));
+                l[3] = title_frac;
+                l
+            },
+            // The rotoscope look, or on camera_* scenes their own controls.
+            roto4: cam_ctl.0,
+            roto5: cam_ctl.1,
+            cam4: if cam_layer {
+                [
+                    s.camera_layer.index() + if s.camera_roto { 4.0 } else { 0.0 },
+                    s.camera_amt.clamp(0.0, 1.0),
+                    s.camera_key.index(),
+                    s.camera_tol.clamp(0.0, 1.0),
+                ]
+            } else {
+                [0.0; 4]
+            },
         };
         // Lights follow the show (lights.rs). The palette LUT is rebuilt
         // only when the palette changes.
@@ -1816,7 +2069,12 @@ fn render_loop(
                 life: 0.0,
                 hue: (slot as f32) * 0.37 + ts.spec.style.index() * 0.11,
                 anim: ts.spec.anim.index(),
-                fx: ts.spec.fx.index(),
+                // Safe mode: the text strobe (on/off on the eighths) holds still.
+                fx: if s.photo_safe && ts.spec.fx == text::TextFx::Strobe {
+                    text::TextFx::None.index()
+                } else {
+                    ts.spec.fx.index()
+                },
             };
             any_text = true;
         }
@@ -1825,12 +2083,18 @@ fn render_loop(
         if shared.np_replay.swap(false, Ordering::Relaxed) {
             overlays.replay_card(now_t);
         }
-        let ov_u = {
+        let mut ov_u = {
             let np = lock(&shared.np);
-            overlays.update(&s, &np, now_t, w as f32 / h.max(1) as f32, &mut |i, img| {
+            let art = lock(&shared.art);
+            let cover = art.art.as_ref().map(|a| (art.serial, &*a.thumb));
+            overlays.update(&s, &np, cover, now_t, w as f32 / h.max(1) as f32, &mut |i, img| {
                 r.set_overlay_image(i, img)
             })
         };
+        // The logo bursts with the dancer (the same envelope and seed).
+        if let (Some(o), true) = (ov_u.as_mut(), s.logo_burst) {
+            o.burst = [dancer.burst.level(), dancer.burst.seed, 0.0, 0.0];
+        }
         if let Err(e) = r.render(dir.scene, &u, dancer_u.as_ref(), text_arg, ov_u.as_ref()) {
             eprintln!("render error: {e}");
         }
@@ -1874,15 +2138,17 @@ fn render_loop(
                 clip_title,
                 blackout,
                 strobe: strobe_live,
-                palette_now: pal.to_string(),
+                palette_now: if is_art { palettes::ART.to_string() } else { pal.to_string() },
                 // Published by the event thread — it owns the window state.
                 fullscreen: FULLSCREEN.load(Ordering::Relaxed),
                 fx: if s.fx_auto { fx_current } else { s.fx },
+                echo_now,
                 output: r.output_status(),
                 groove: f.groove,
                 calm: f.calm,
                 np_track,
                 np_status,
+                np_art: lock(&shared.art).art.as_ref().map(|a| a.from.clone()).unwrap_or_default(),
                 rec: recorder.as_ref().map(|r| lock(&r.status).clone()),
                 rec_err: rec_err.clone(),
                 scene_titles: shared.scene_titles.clone(),
@@ -2017,6 +2283,19 @@ fn apply_render(
         }
         Action::ReloadShaders => r.reload_shaders(true),
         Action::ShowNowPlaying => shared.np_replay.store(true, Ordering::Relaxed),
+        Action::Disintegrate => dancer.disintegrate(),
+        Action::HoldBurst => dancer.hold_burst(),
+        Action::HoldEcho => {
+            HOLD_ECHO.store(true, Ordering::Relaxed);
+            HOLD_ECHO_BEATS.store(0, Ordering::Relaxed);
+        }
+        Action::CycleEcho => {
+            s.echo = match s.echo {
+                Tristate::Auto => Tristate::On,
+                Tristate::On => Tristate::Off,
+                Tristate::Off => Tristate::Auto,
+            }
+        }
         // Looks are recalled on the event thread (App::apply); never sent here.
         Action::Look1
         | Action::Look2
@@ -2249,10 +2528,32 @@ impl App {
     /// with a log line and the rest of the Look still applies.
     fn apply_look(&mut self, look: &looks::SavedLook) {
         let Some(sh) = self.shared.clone() else { return };
+        let mut glided_cues = Vec::new();
         let applied = {
             let mut s = self.settings_mut();
-            looks::apply(look, &mut s, &sh.scene_names, &sh.clip_names)
+            let from = looks::GlideFrom::of(&s);
+            let glide = s.look_glide;
+            let mut applied = looks::apply(look, &mut s, &sh.scene_names, &sh.clip_names);
+            if glide != looks::Glide::Cut {
+                // Hand the scene and routine to the render loop's glide
+                // (still under the settings lock: see `Shared::glide`).
+                let scene = applied.scene.as_ref().and_then(|n| sh.scene_names.iter().position(|x| x == n));
+                let clip = applied.clip.as_ref().and_then(|n| sh.clip_names.iter().position(|x| x == n));
+                *lock(&sh.glide) = Some(looks::GlideReq { glide, from, scene, clip });
+                for (name, cue) in [
+                    (applied.scene.take(), CueKind::Scene as fn(String) -> CueKind),
+                    (applied.clip.take(), CueKind::Clip as fn(String) -> CueKind),
+                ] {
+                    if let Some(n) = name {
+                        glided_cues.push(cue(n));
+                    }
+                }
+            }
+            applied
         };
+        for c in glided_cues {
+            self.record_cue(c);
+        }
         // The settings guard is gone before record_cue takes the timeline lock.
         if applied.changed {
             self.mark_dirty();
@@ -2365,6 +2666,29 @@ impl App {
             .and_then(|sh| lock(&sh.settings).midi_action_for(note));
         if let Some(a) = action {
             self.apply(a, event_loop);
+        }
+    }
+
+    /// A pad came up: ends a hold action bound to it (others ignore it).
+    fn midi_release(&mut self, note: u8) {
+        let action = self
+            .shared
+            .as_ref()
+            .and_then(|sh| lock(&sh.settings).midi_action_for(note));
+        if let Some(a) = action.filter(|a| a.is_hold()) {
+            self.send(Msg::Release(a));
+        }
+    }
+
+    /// A key came up: ends a hold action bound to it.
+    fn key_release(&mut self, key: &Key) {
+        let Some(name) = key_name(key) else { return };
+        let action = self
+            .shared
+            .as_ref()
+            .and_then(|sh| lock(&sh.settings).action_for(&name));
+        if let Some(a) = action.filter(|a| a.is_hold()) {
+            self.send(Msg::Release(a));
         }
     }
 
@@ -2777,6 +3101,10 @@ impl App {
                 }
             }
             UiCommand::PerfCheck => self.send(Msg::PerfCheck),
+            UiCommand::AccentShows(on) => {
+                lock(&shared.settings).accent_shows = on;
+                self.mark_dirty();
+            }
             UiCommand::SaveTimeline => {
                 let mut tl = lock(&shared.timeline);
                 if let Some(doc) = tl.doc.as_mut() {
@@ -2847,7 +3175,8 @@ fn remote_line(srv: &remote::Server) -> String {
 impl ApplicationHandler<AppEvent> for App {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
         match event {
-            AppEvent::MidiNote(note) => self.midi_note(event_loop, note),
+            AppEvent::MidiNote(note, true) => self.midi_note(event_loop, note),
+            AppEvent::MidiNote(note, false) => self.midi_release(note),
             AppEvent::Remote(cmd) => self.remote_cmd(event_loop, cmd),
         }
     }
@@ -2920,9 +3249,14 @@ impl ApplicationHandler<AppEvent> for App {
             config::data_dir().join("nowplaying.txt"),
             np_remote.clone(),
         );
+        let art_online = Arc::new(AtomicBool::new(self.settings.np_art_online));
+        let art = albumart::start(np.clone(), art_online.clone(), config::data_dir().join("artcache"));
         let shared = Arc::new(Shared {
             np,
             np_cfg,
+            art,
+            art_online,
+            glide: Mutex::new(None),
             np_remote,
             np_replay: AtomicBool::new(false),
             rec_clip: AtomicBool::new(false),
@@ -3177,6 +3511,11 @@ impl ApplicationHandler<AppEvent> for App {
                             self.key(event_loop, &key);
                             return;
                         }
+                    } else if event.state == ElementState::Released {
+                        // Ends a hold action (Echo / Burst while held);
+                        // harmless for every other key.
+                        let key = event.logical_key.clone();
+                        self.key_release(&key);
                     }
                 }
                 _ => {}
@@ -3206,6 +3545,8 @@ impl ApplicationHandler<AppEvent> for App {
             WindowEvent::KeyboardInput { event, .. } => {
                 if event.state == ElementState::Pressed && !event.repeat {
                     self.key(event_loop, &event.logical_key);
+                } else if event.state == ElementState::Released {
+                    self.key_release(&event.logical_key);
                 }
             }
             // The render thread draws continuously; nothing to do here.
@@ -3279,8 +3620,8 @@ impl ApplicationHandler<AppEvent> for App {
                     (false, "off".to_string())
                 } else {
                     let proxy = self.midi_proxy.clone();
-                    match midi::connect(&want, move |note| {
-                        let _ = proxy.send_event(AppEvent::MidiNote(note));
+                    match midi::connect(&want, move |note, on| {
+                        let _ = proxy.send_event(AppEvent::MidiNote(note, on));
                     }) {
                         Ok(m) => {
                             let status = (true, m.name.clone());
@@ -3420,10 +3761,13 @@ fn check_shaders() -> Result<()> {
     paths.push(dir.join("dancer.wgsl"));
     paths.push(dir.join("text.wgsl"));
     paths.push(dir.join("overlay.wgsl"));
+    paths.push(dir.join("accent.wgsl"));
+    paths.push(dir.join("echo.wgsl"));
+    paths.extend(render::accent_files(&dir));
     let mut bad = 0;
     for p in &paths {
         let body = std::fs::read_to_string(p)?;
-        let src = format!("{common}\n{body}");
+        let src = sim::scene_src(&common, &body);
         let name = p.file_name().unwrap().to_string_lossy();
         let valid = wgpu::naga::front::wgsl::parse_str(&src)
             .map_err(|e| e.emit_to_string(&src))
@@ -3499,6 +3843,25 @@ fn main() -> Result<()> {
     packs::set_root(&Settings::load().packs_dir);
     if args.iter().any(|a| a == "--list-devices") {
         return audio::list_devices();
+    }
+    // `--list-cameras`: the webcams (names for Settings > Camera). Lists
+    // them only; no camera is opened.
+    if args.iter().any(|a| a == "--list-cameras") {
+        camera::refresh_names();
+        for _ in 0..50 {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            if !camera::names().is_empty() {
+                break;
+            }
+        }
+        let n = camera::names();
+        if n.is_empty() {
+            println!("no cameras found");
+        }
+        for c in n {
+            println!("{c}");
+        }
+        return Ok(());
     }
     // `--probe-audio [name]` captures ~6 s on a device (or the default tap)
     // and prints the analysed level — verifies a source carries signal

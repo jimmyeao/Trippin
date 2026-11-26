@@ -32,7 +32,105 @@ pub struct Statics {
     /// engine and a video scene never overwrite each other.
     pub vid: wgpu::Texture,
     pub vid_view: wgpu::TextureView,
+    /// The track playing now ("Artist - Title"), a coverage mask drawn
+    /// from the left edge (`upload_title`), for type scenes: `title_tex` /
+    /// `title_mask()` in common.wgsl. Fixed size, so bind groups never
+    /// need rebuilding.
+    pub title: wgpu::Texture,
+    pub title_view: wgpu::TextureView,
+    /// The logo scene's image (`logo_tex` / `logo()` in common.wgsl):
+    /// LOGO_N square, the image fitted inside with transparent padding,
+    /// straight alpha. Fixed size, so bind groups never need rebuilding;
+    /// starts as the Trippin logo (`upload_logo`).
+    pub logo: wgpu::Texture,
+    pub logo_view: wgpu::TextureView,
+    /// The webcam's newest frame (`cam_tex` / `cam()` in common.wgsl),
+    /// VID_W x VID_H: its own texture, so a video scene and the camera
+    /// layer never overwrite each other. Black until a camera sends frames.
+    pub cam: wgpu::Texture,
+    pub cam_view: wgpu::TextureView,
+    /// Photosensitive-safe limiter state (`Lum` in present.wgsl): the
+    /// allowed average luminance, the gain present applies, on, rise rate.
+    /// Written by `fs_lum` each frame while on; `set_safe` writes it from
+    /// the CPU when the switch changes.
+    pub lum: wgpu::Buffer,
 }
+
+/// `Lum` in present.wgsl: `[ref, gain, on, rate]`. `ref` < 0 makes the
+/// next `fs_lum` start from the frame it sees.
+pub fn lum_init(on: bool) -> [f32; 4] {
+    [-1.0, 1.0, if on { 1.0 } else { 0.0 }, SAFE_RISE_PER_S]
+}
+
+/// Photosensitive-safe: the frame's average luminance (linear, 0..1) may
+/// rise at most this much a second. WCAG 2.3.1 counts a flash as a swing
+/// of 0.1 or more; at 0.3/s that takes a third of a second, so even an
+/// instant fall and a capped rise make at most three flashes a second.
+pub const SAFE_RISE_PER_S: f32 = 0.3;
+
+pub const TITLE_W: u32 = 2048;
+/// The logo texture's side (`Statics::logo`).
+pub const LOGO_N: u32 = 512;
+/// Mip levels on the camera texture (1280x720 down to 160x90): the
+/// rotoscope finds its outlines on a blurred copy, so only the big shapes
+/// get ink (traced at full size, hair and skin texture scribbled the face).
+pub const CAM_MIPS: u32 = 4;
+
+/// Bytes in the camera texture's whole mip chain.
+pub fn cam_chain_len() -> usize {
+    (0..CAM_MIPS).map(|i| ((VID_W >> i) * (VID_H >> i) * 4) as usize).sum()
+}
+
+/// A VID_W x VID_H RGBA frame and its smaller levels (2x2 box filter),
+/// concatenated: what `Statics::upload_cam` takes. Built on the camera
+/// thread, off the render loop.
+pub fn cam_mips(level0: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(cam_chain_len());
+    out.extend_from_slice(level0);
+    let (mut w, mut h) = (VID_W as usize, VID_H as usize);
+    let mut start = 0usize;
+    for _ in 1..CAM_MIPS {
+        let (nw, nh) = (w / 2, h / 2);
+        let mut next = vec![0u8; nw * nh * 4];
+        {
+            let src = &out[start..start + w * h * 4];
+            for y in 0..nh {
+                for x in 0..nw {
+                    for c in 0..4 {
+                        let i = |xx: usize, yy: usize| src[(yy * w + xx) * 4 + c] as u32;
+                        let v = i(2 * x, 2 * y) + i(2 * x + 1, 2 * y) + i(2 * x, 2 * y + 1) + i(2 * x + 1, 2 * y + 1);
+                        next[(y * nw + x) * 4 + c] = ((v + 2) / 4) as u8;
+                    }
+                }
+            }
+        }
+        start = out.len();
+        out.extend_from_slice(&next);
+        (w, h) = (nw, nh);
+    }
+    out
+}
+
+/// The Trippin logo (the app icon), for the logo scene with no image set.
+pub fn app_logo() -> image::RgbaImage {
+    image::load_from_memory(include_bytes!("../logo.png"))
+        .map(|i| i.to_rgba8())
+        .unwrap_or_else(|_| image::RgbaImage::new(1, 1))
+}
+
+/// `img` fitted inside a LOGO_N square (aspect kept, centred, transparent
+/// padding), as RGBA bytes.
+pub fn logo_pixels(img: &image::RgbaImage) -> Vec<u8> {
+    let n = LOGO_N;
+    let (w, h) = (img.width().max(1), img.height().max(1));
+    let k = n as f32 / w.max(h) as f32;
+    let (fw, fh) = (((w as f32 * k).round() as u32).clamp(1, n), ((h as f32 * k).round() as u32).clamp(1, n));
+    let small = image::imageops::resize(img, fw, fh, image::imageops::FilterType::Triangle);
+    let mut out = image::RgbaImage::new(n, n);
+    image::imageops::overlay(&mut out, &small, ((n - fw) / 2) as i64, ((n - fh) / 2) as i64);
+    out.into_raw()
+}
+pub const TITLE_H: u32 = 160;
 
 pub const EXT_W: u32 = 1920;
 pub const EXT_H: u32 = 1080;
@@ -148,7 +246,49 @@ impl Statics {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
-        Self {
+        let title = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("title"),
+            size: wgpu::Extent3d {
+                width: TITLE_W,
+                height: TITLE_H,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let logo = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("logo"),
+            size: wgpu::Extent3d {
+                width: LOGO_N,
+                height: LOGO_N,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let cam = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("camera"),
+            size: wgpu::Extent3d {
+                width: VID_W,
+                height: VID_H,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: CAM_MIPS,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let me = Self {
             noise3_view: noise3.create_view(&Default::default()),
             _noise3: noise3,
             blue_view: blue.create_view(&Default::default()),
@@ -158,8 +298,135 @@ impl Statics {
             ext,
             vid_view: vid.create_view(&Default::default()),
             vid,
+            title_view: title.create_view(&Default::default()),
+            title,
+            logo_view: logo.create_view(&Default::default()),
+            logo,
+            cam_view: cam.create_view(&Default::default()),
+            cam,
+            lum: {
+                let b = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("safe lum"),
+                    size: 16,
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+                queue.write_buffer(&b, 0, bytemuck::cast_slice(&lum_init(false)));
+                b
+            },
+        };
+        me.upload_logo(queue, &app_logo());
+        me
+    }
+
+    /// Put a webcam frame into the camera texture: its whole mip chain
+    /// (`cam_mips`), or just VID_W x VID_H RGBA (the chain is built here).
+    pub fn upload_cam(&self, queue: &wgpu::Queue, rgba: &[u8]) {
+        let built;
+        let chain = if rgba.len() == cam_chain_len() {
+            rgba
+        } else if rgba.len() == (VID_W * VID_H * 4) as usize {
+            built = cam_mips(rgba);
+            &built
+        } else {
+            return;
+        };
+        let mut start = 0usize;
+        for i in 0..CAM_MIPS {
+            let (w, h) = (VID_W >> i, VID_H >> i);
+            let n = (w * h * 4) as usize;
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &self.cam,
+                    mip_level: i,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &chain[start..start + n],
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(w * 4),
+                    rows_per_image: Some(h),
+                },
+                wgpu::Extent3d {
+                    width: w,
+                    height: h,
+                    depth_or_array_layers: 1,
+                },
+            );
+            start += n;
         }
     }
+
+    /// Put an image into the logo texture (fitted, see `logo_pixels`).
+    pub fn upload_logo(&self, queue: &wgpu::Queue, img: &image::RgbaImage) {
+        let px = logo_pixels(img);
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.logo,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &px,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(LOGO_N * 4),
+                rows_per_image: Some(LOGO_N),
+            },
+            wgpu::Extent3d {
+                width: LOGO_N,
+                height: LOGO_N,
+                depth_or_array_layers: 1,
+            },
+        );
+    }
+
+    /// Draw a rasterised line into the title texture (left-aligned,
+    /// vertically centred; clipped to fit) and return the fraction of the
+    /// width it covers, which shaders get as `u.look4.w`.
+    pub fn upload_title(&self, queue: &wgpu::Queue, bmp: &crate::text::TextBitmap) -> f32 {
+        let (w, h) = (TITLE_W as usize, TITLE_H as usize);
+        let mut px = vec![0u8; w * h];
+        let bw = (bmp.width as usize).min(w);
+        let bh = (bmp.height as usize).min(h);
+        let y0 = (h - bh) / 2;
+        for y in 0..bh {
+            let src = &bmp.mask[y * bmp.width as usize..y * bmp.width as usize + bw];
+            px[(y0 + y) * w..(y0 + y) * w + bw].copy_from_slice(src);
+        }
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.title,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &px,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(TITLE_W),
+                rows_per_image: Some(TITLE_H),
+            },
+            wgpu::Extent3d {
+                width: TITLE_W,
+                height: TITLE_H,
+                depth_or_array_layers: 1,
+            },
+        );
+        (bw as f32 / w as f32).max(1.0 / w as f32)
+    }
+}
+
+/// Rasterise the title line to fit the title texture: 110 px cap height,
+/// smaller for a long line so it never clips.
+pub fn title_bitmap(text: &str) -> Option<crate::text::TextBitmap> {
+    let bmp = crate::text::rasterize(text, 110.0)?;
+    if bmp.width <= TITLE_W - 8 && bmp.height <= TITLE_H {
+        return Some(bmp);
+    }
+    let k = ((TITLE_W - 8) as f32 / bmp.width as f32).min(TITLE_H as f32 / bmp.height as f32);
+    crate::text::rasterize(text, 110.0 * k * 0.98)
 }
 
 // ---- 3D noise bake -------------------------------------------------------

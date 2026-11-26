@@ -12,6 +12,8 @@ egui = "0.36"
 egui-wgpu = "0.36"
 egui-winit = "0.36"
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
+# Cover art embedded in audio files (ID3 APIC, FLAC PICTURE, MP4 covr) for the `art` palette.
+lofty = "0.22"
 libloading = "0.8.9"
 pollster = "1.0.1"
 rfd = "0.17.2"
@@ -50,11 +52,14 @@ embed-resource = "3.0.6"
 gui = []
 
 [target.'cfg(windows)'.dependencies]
+# Webcam capture (camera.rs), Media Foundation.
+nokhwa = { version = "0.10.11", features = ["input-msmf"] }
 # Now-playing from the OS media session (Spotify etc.).
 # Spout output: D3D11 shared texture + the Spout shared-memory registry.
 windows = { version = "0.62", features = [
     "Media_Control",
     "Foundation",
+    "Storage_Streams",
     "Win32_Foundation",
     "Win32_Graphics_Direct3D",
     "Win32_Graphics_Direct3D11",
@@ -66,6 +71,8 @@ windows = { version = "0.62", features = [
 ] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# Webcam capture (camera.rs), AVFoundation.
+nokhwa = { version = "0.10.11", features = ["input-avfoundation"] }
 block2 = "0.6"
 dispatch2 = "0.3"
 objc2 = "0.6"

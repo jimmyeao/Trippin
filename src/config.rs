@@ -51,10 +51,18 @@ pub enum Action {
     Look8,
     /// Step through the Styles: off, then each one in turn (unbound by default).
     NextTheme,
+    /// Burst the dancer into particles; she re-forms over two bars.
+    Disintegrate,
+    /// Echo trails: auto -> on -> off.
+    CycleEcho,
+    /// Echo on only while the key or pad is held.
+    HoldEcho,
+    /// The dancer (and logo) burst out while held; re-form on release.
+    HoldBurst,
 }
 
 impl Action {
-    pub const ALL: [Action; 39] = [
+    pub const ALL: [Action; 43] = [
         Action::NextScene,
         Action::PrevScene,
         Action::ModeAuto,
@@ -94,6 +102,10 @@ impl Action {
         Action::Look7,
         Action::Look8,
         Action::NextTheme,
+        Action::Disintegrate,
+        Action::CycleEcho,
+        Action::HoldEcho,
+        Action::HoldBurst,
     ];
 
     pub fn label(self) -> &'static str {
@@ -137,7 +149,16 @@ impl Action {
             Action::Look7 => "Look 7 (the saved Look on slot 7)",
             Action::Look8 => "Look 8 (the saved Look on slot 8)",
             Action::NextTheme => "Next Style (off, Dance, House, Pop...)",
+            Action::Disintegrate => "Dancer bursts into particles (and re-forms)",
+            Action::CycleEcho => "Echo trails: auto / on / off",
+            Action::HoldEcho => "Echo trails while held",
+            Action::HoldBurst => "Dancer bursts while held, re-forms on release",
         }
+    }
+
+    /// A hold action: on while its key or pad is down, off on release.
+    pub fn is_hold(self) -> bool {
+        matches!(self, Action::HoldEcho | Action::HoldBurst)
     }
 
     /// The Look slot (1..=8) this action recalls, if it is one of `Look1..8`.
@@ -194,6 +215,10 @@ impl Action {
             Action::ToggleLogo => "L",
             Action::ToggleName => "Y",
             Action::ToggleTicker => "W",
+            Action::Disintegrate => "P",
+            Action::CycleEcho => "E",
+            // Unbound: hold effects are for pads; bind a key on the Keys page.
+            Action::HoldEcho | Action::HoldBurst => "",
             // Unbound: sixteen default keys would collide with the rest.
             Action::Look1
             | Action::Look2
@@ -269,6 +294,62 @@ fn month_day(secs: i64) -> (u32, u32) {
 /// `present.wgsl` from `u.fx`, so it transforms the scene and dancer alike.
 /// `#[serde(other)]` keeps a stale value (e.g. a removed mode) from
 /// invalidating the whole settings file.
+/// The webcam composited into every scene (`Uniforms::cam4.x`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CamLayer {
+    /// The camera shows through the scene's dark parts.
+    Behind,
+    /// The camera over the scene, cut out by `CamKey`.
+    Front,
+    #[serde(other)]
+    #[default]
+    Off,
+}
+
+impl CamLayer {
+    pub fn index(self) -> f32 {
+        match self {
+            CamLayer::Off => 0.0,
+            CamLayer::Behind => 1.0,
+            CamLayer::Front => 2.0,
+        }
+    }
+}
+
+/// How the camera layer is cut out (`Uniforms::cam4.z`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CamKey {
+    /// No key: the whole frame.
+    None,
+    Blue,
+    /// Dark background (a luma key).
+    Dark,
+    /// Green screen.
+    #[serde(other)]
+    #[default]
+    Green,
+}
+
+impl CamKey {
+    pub const ALL: [CamKey; 4] = [CamKey::Green, CamKey::Blue, CamKey::Dark, CamKey::None];
+    pub fn index(self) -> f32 {
+        match self {
+            CamKey::None => 0.0,
+            CamKey::Green => 1.0,
+            CamKey::Blue => 2.0,
+            CamKey::Dark => 3.0,
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            CamKey::None => "No key (whole frame)",
+            CamKey::Green => "Green screen",
+            CamKey::Blue => "Blue screen",
+            CamKey::Dark => "Dark background",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Fx {
     MirrorX,
@@ -276,6 +357,16 @@ pub enum Fx {
     Quad,
     Kaleido6,
     Kaleido8,
+    // Lens effects (present.wgsl `fx_uv`): appended, since the index is
+    // what the shader sees and saved Looks/timelines hold the names.
+    GlassRibs,
+    GlassFan,
+    FlyEye,
+    Anamorphic,
+    Melt,
+    Pixels,
+    Tiles,
+    Twist,
     /// Last so `#[serde(other)]` lands here: a removed mode in a stale
     /// trippin.json (e.g. "Invert") falls back to Off instead of being
     /// rejected with the whole settings file.
@@ -285,13 +376,21 @@ pub enum Fx {
 }
 
 impl Fx {
-    pub const ALL: [Fx; 6] = [
+    pub const ALL: [Fx; 14] = [
         Fx::Off,
         Fx::MirrorX,
         Fx::MirrorY,
         Fx::Quad,
         Fx::Kaleido6,
         Fx::Kaleido8,
+        Fx::GlassRibs,
+        Fx::GlassFan,
+        Fx::FlyEye,
+        Fx::Anamorphic,
+        Fx::Melt,
+        Fx::Pixels,
+        Fx::Tiles,
+        Fx::Twist,
     ];
 
     pub fn label(self) -> &'static str {
@@ -302,6 +401,14 @@ impl Fx {
             Fx::Quad => "Quad mirror",
             Fx::Kaleido6 => "Kaleido x6",
             Fx::Kaleido8 => "Kaleido x8",
+            Fx::GlassRibs => "Glass ribs",
+            Fx::GlassFan => "Glass fan",
+            Fx::FlyEye => "Fly eye",
+            Fx::Anamorphic => "Anamorphic",
+            Fx::Melt => "Melt",
+            Fx::Pixels => "Pixels",
+            Fx::Tiles => "Tiles",
+            Fx::Twist => "Twist",
         }
     }
 
@@ -314,7 +421,37 @@ impl Fx {
             Fx::Quad => 3.0,
             Fx::Kaleido6 => 4.0,
             Fx::Kaleido8 => 5.0,
+            Fx::GlassRibs => 6.0,
+            Fx::GlassFan => 7.0,
+            Fx::FlyEye => 8.0,
+            Fx::Anamorphic => 9.0,
+            Fx::Melt => 10.0,
+            Fx::Pixels => 11.0,
+            Fx::Tiles => 12.0,
+            Fx::Twist => 13.0,
         }
+    }
+
+    /// A name as the AI show builder writes it (snake case, with the
+    /// aliases models use); None for anything unknown.
+    pub fn from_name(name: &str) -> Option<Fx> {
+        Some(match name.trim().to_ascii_lowercase().replace(['-', ' '], "_").as_str() {
+            "off" | "none" => Fx::Off,
+            "mirror_x" | "mirrorx" => Fx::MirrorX,
+            "mirror_y" | "mirrory" => Fx::MirrorY,
+            "quad" | "quad_mirror" => Fx::Quad,
+            "kaleido6" | "kaleido_6" | "kaleidoscope6" => Fx::Kaleido6,
+            "kaleido8" | "kaleido_8" | "kaleidoscope8" | "kaleido" | "kaleidoscope" => Fx::Kaleido8,
+            "glass_ribs" | "glassribs" | "ribs" | "fluted_glass" => Fx::GlassRibs,
+            "glass_fan" | "glassfan" | "fan" => Fx::GlassFan,
+            "fly_eye" | "flyeye" | "honeycomb" => Fx::FlyEye,
+            "anamorphic" | "flare" | "lens_flare" => Fx::Anamorphic,
+            "melt" | "drip" => Fx::Melt,
+            "pixels" | "pixelate" | "pixel" => Fx::Pixels,
+            "tiles" | "tile" => Fx::Tiles,
+            "twist" | "swirl" => Fx::Twist,
+            _ => return None,
+        })
     }
 
     pub fn next(self) -> Fx {
@@ -322,18 +459,25 @@ impl Fx {
         Fx::ALL[(i + 1) % Fx::ALL.len()]
     }
 
-    /// Auto pool: MirrorY is excluded — an upside-down dancer mid-set reads
-    /// as a glitch rather than an effect (it stays selectable by hand).
-    const AUTO: [Fx; 5] = [Fx::Off, Fx::MirrorX, Fx::Quad, Fx::Kaleido6, Fx::Kaleido8];
+    /// Left out of Auto by default (`Settings::fx_auto_skip`): MirrorY (an
+    /// upside-down dancer mid-set reads as a glitch), Pixels and Tiles (they
+    /// shrink or chop up the dancer and the whole picture: a deliberate
+    /// look, not a cut's surprise). All stay selectable by hand.
+    pub const AUTO_SKIP: [Fx; 3] = [Fx::MirrorY, Fx::Pixels, Fx::Tiles];
 
-    /// A random pick for auto mode; never repeats the current effect.
-    pub fn random(r: f32, cur: Fx) -> Fx {
-        let i = (r * Fx::AUTO.len() as f32) as usize % Fx::AUTO.len();
-        let f = Fx::AUTO[i];
-        if f == cur {
-            Fx::AUTO[(i + 1) % Fx::AUTO.len()]
+    /// A random pick for auto mode from every effect not in `skip`; never
+    /// repeats the current effect unless it's the only one left. Off when
+    /// everything is skipped.
+    pub fn random(r: f32, cur: Fx, skip: &[Fx]) -> Fx {
+        let pool: Vec<Fx> = Fx::ALL.iter().copied().filter(|f| !skip.contains(f)).collect();
+        if pool.is_empty() {
+            return Fx::Off;
+        }
+        let i = (r * pool.len() as f32) as usize % pool.len();
+        if pool[i] == cur && pool.len() > 1 {
+            pool[(i + 1) % pool.len()]
         } else {
-            f
+            pool[i]
         }
     }
 }
@@ -392,6 +536,12 @@ pub struct Settings {
     pub dancer_size: f32,
     /// Ghost echoes of earlier frames trail the dancer's movement.
     pub dancer_trails: bool,
+    /// On a drop (drums back after a breakdown) the dancer bursts into
+    /// particles and re-forms (`dancer::Burst`). Not in Manual mode or
+    /// during timeline shows.
+    pub dancer_burst_drops: bool,
+    /// The branding logo bursts into particles with the dancer.
+    pub logo_burst: bool,
     /// Global colour palette — a WLED-style named gradient (see
     /// `palettes::PALETTES`) every scene's `palette()` samples.
     pub palette: String,
@@ -401,8 +551,24 @@ pub struct Settings {
     pub fx: Fx,
     /// Pick a fresh post effect on every scene cut.
     pub fx_auto: bool,
+    /// Effects Auto never picks (ticked off under the FX card's Auto). A
+    /// skip list, so effects added later join Auto by default.
+    pub fx_auto_skip: Vec<Fx>,
     /// Post effect strength 0..1 — blends the transform in `present.wgsl`.
     pub fx_amt: f32,
+    /// Auto lays a light accent scene (comets, orbiters...) over some
+    /// scenes while the track drives (`accent.rs`).
+    pub accent_auto: bool,
+    /// How strongly the accent layer adds in, 0..1.
+    pub accent_amt: f32,
+    /// Accents in timeline shows too (the editor's "accents" toggle): one is
+    /// rolled on each scene change of the show, as Auto rolls on its cuts.
+    pub accent_shows: bool,
+    /// Echo post effect (light trails of the whole frame, `echo.rs`): Auto
+    /// runs it through breakdowns and on some cuts.
+    pub echo: Tristate,
+    /// Echo strength 0..1.
+    pub echo_amt: f32,
     /// Raymarched `// @heavy` scenes: Auto follows the detected GPU tier.
     pub heavy_scenes: Tristate,
     /// 2D (non-`@heavy`) scenes in rotation — off leaves only the 3D ones.
@@ -457,6 +623,26 @@ pub struct Settings {
     /// `--device`. "" = the platform default tap (ScreenCaptureKit output
     /// mix on macOS, output loopback on Windows).
     pub audio_in: String,
+    /// The webcam for the `camera_*` scenes (a device name; camera.rs).
+    /// "" = no camera: nothing is opened and no camera scene plays.
+    pub camera: String,
+    /// The camera layer over every scene (Dancer & FX; present.wgsl).
+    pub camera_layer: CamLayer,
+    pub camera_key: CamKey,
+    /// Camera layer strength 0..1.
+    pub camera_amt: f32,
+    /// Key tolerance 0..1 (how much of the screen colour/darkness goes).
+    pub camera_tol: f32,
+    /// The camera layer rotoscoped: cel-shaded bands and ink outlines.
+    pub camera_roto: bool,
+    /// The rotoscope look (camera layer and the camera_roto scene): how
+    /// much of it over the plain camera, ink weight, detail (low = only big
+    /// outlines and flat shapes), colour bands (2..8), palette colour.
+    pub roto_amt: f32,
+    pub roto_ink: f32,
+    pub roto_detail: f32,
+    pub roto_bands: u32,
+    pub roto_pal: f32,
     pub show_panel: bool,
     /// NDI network output — sends the composited frame (FX + text included)
     /// to OBS/another display. Needs the free NDI runtime installed; a
@@ -498,6 +684,18 @@ pub struct Settings {
     pub np_file: String,
     /// Show the on-screen "now playing" card when the track changes.
     pub np_card: bool,
+    /// Put the track's cover art on the card (when one is found).
+    pub np_card_art: bool,
+    /// Photosensitive-safe: no strobes, cut flashes or text strobe, and the
+    /// frame's brightness may rise only so fast (present.wgsl `fs_lum`), so
+    /// nothing flashes more than three times a second (WCAG 2.3.1).
+    pub photo_safe: bool,
+    /// How a recalled Look arrives: cut, or eased over a beat/bar/2 bars
+    /// with the scene changing on the closing beat (`looks::Glide`).
+    pub look_glide: crate::looks::Glide,
+    /// Ask the iTunes Search API for covers no local source has. Sends the
+    /// artist and title to Apple, so it's off until the user turns it on.
+    pub np_art_online: bool,
     /// Seconds the card stays up (0 = stays until the next track).
     pub np_hold_s: f32,
     pub np_size: f32,
@@ -506,6 +704,9 @@ pub struct Settings {
     pub brand_name: String,
     pub brand_handles: String,
     pub brand_logo: String,
+    /// The Logo Trip scene's image (PNG/JPEG); empty uses `brand_logo`,
+    /// and with neither it shows the Trippin logo.
+    pub logo_scene_image: String,
     /// 0 top-left · 1 top-right · 2 bottom-left · 3 bottom-right.
     pub brand_corner: u8,
     pub brand_size: f32,
@@ -559,11 +760,19 @@ impl Default for Settings {
             disabled_clips: Vec::new(),
             dancer_size: 0.85,
             dancer_trails: false,
+            dancer_burst_drops: true,
+            logo_burst: true,
             palette: "rainbow".into(),
             perform_pads: false,
             fx: Fx::Off,
             fx_auto: false,
+            fx_auto_skip: Fx::AUTO_SKIP.to_vec(),
             fx_amt: 1.0,
+            accent_auto: false,
+            accent_amt: 0.6,
+            accent_shows: false,
+            echo: Tristate::Auto,
+            echo_amt: 0.8,
             heavy_scenes: Tristate::Auto,
             flat_scenes: true,
             breakdown_mode: true,
@@ -588,6 +797,17 @@ impl Default for Settings {
             link_port: 9137,
             latency_ms: 30.0,
             audio_in: String::new(),
+            camera: String::new(),
+            camera_layer: CamLayer::Off,
+            camera_key: CamKey::Green,
+            camera_amt: 0.8,
+            camera_tol: 0.4,
+            camera_roto: false,
+            roto_amt: 1.0,
+            roto_ink: 0.5,
+            roto_detail: 0.35,
+            roto_bands: 4,
+            roto_pal: 0.4,
             show_panel: true,
             ndi_enabled: false,
             ndi_name: "Trippin".into(),
@@ -608,12 +828,17 @@ impl Default for Settings {
             np_delay_s: 0.0,
             np_file: String::new(),
             np_card: true,
+            np_card_art: true,
+            photo_safe: false,
+            look_glide: crate::looks::Glide::default(),
+            np_art_online: false,
             np_hold_s: 12.0,
             np_size: 1.0,
             brand_on: false,
             brand_name: String::new(),
             brand_handles: String::new(),
             brand_logo: String::new(),
+            logo_scene_image: String::new(),
             brand_corner: 0,
             brand_size: 1.0,
             brand_opacity: 0.9,
@@ -828,6 +1053,37 @@ pub fn key_name(key: &Key) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Each effect has its own shader number (present.wgsl `fx_uv`), and
+    /// the AI builder's names (snake case of the variant) map back to it.
+    #[test]
+    fn fx_indices_unique_and_names_round_trip() {
+        for (i, a) in Fx::ALL.iter().enumerate() {
+            for b in &Fx::ALL[i + 1..] {
+                assert_ne!(a.index(), b.index(), "{a:?} and {b:?} share a shader number");
+            }
+            let snake = a.label().to_ascii_lowercase().replace(' ', "_").replace("_x6", "6").replace("_x8", "8");
+            assert_eq!(Fx::from_name(&snake), Some(*a), "{snake}");
+        }
+        assert_eq!(Fx::from_name("Glass-Ribs"), Some(Fx::GlassRibs));
+        assert_eq!(Fx::from_name("nonsense"), None);
+    }
+
+    /// Auto picks only from the effects not skipped, never repeats while
+    /// there's a choice, and falls back to Off with nothing left.
+    #[test]
+    fn fx_random_respects_the_skip_list() {
+        let skip = [Fx::MirrorY, Fx::Pixels, Fx::Tiles, Fx::Melt];
+        for k in 0..200 {
+            let r = k as f32 / 200.0;
+            let f = Fx::random(r, Fx::Twist, &skip);
+            assert!(!skip.contains(&f), "{f:?}");
+            assert_ne!(f, Fx::Twist);
+        }
+        let only: Vec<Fx> = Fx::ALL.iter().copied().filter(|f| *f != Fx::Melt).collect();
+        assert_eq!(Fx::random(0.3, Fx::Melt, &only), Fx::Melt);
+        assert_eq!(Fx::random(0.3, Fx::Melt, &Fx::ALL), Fx::Off);
+    }
 
     #[test]
     fn look_actions_are_complete_unique_and_unbound() {

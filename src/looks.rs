@@ -172,6 +172,110 @@ pub fn apply(look: &SavedLook, s: &mut Settings, scenes: &[String], clips: &[Str
     out
 }
 
+// ---- glide -------------------------------------------------------------------
+
+/// How a recalled Look arrives (`Settings::look_glide`): at once, or eased
+/// over a beat, a bar or two bars with the scene cut on the closing beat.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Glide {
+    Beat,
+    #[default]
+    Bar,
+    Bars2,
+    #[serde(other)]
+    Cut,
+}
+
+impl Glide {
+    pub const ALL: [Glide; 4] = [Glide::Cut, Glide::Beat, Glide::Bar, Glide::Bars2];
+    pub fn label(self) -> &'static str {
+        match self {
+            Glide::Cut => "Cut",
+            Glide::Beat => "1 beat",
+            Glide::Bar => "1 bar",
+            Glide::Bars2 => "2 bars",
+        }
+    }
+}
+
+/// The look-related settings as they were before a glide's Look applied.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GlideFrom {
+    pub fx: Fx,
+    pub fx_amt: f32,
+    pub fx_auto: bool,
+    pub dancer_enabled: bool,
+    pub dancer_style: Option<usize>,
+    pub dancer_size: f32,
+}
+
+impl GlideFrom {
+    pub fn of(s: &Settings) -> Self {
+        Self {
+            fx: s.fx,
+            fx_amt: s.fx_amt,
+            fx_auto: s.fx_auto,
+            dancer_enabled: s.dancer_enabled,
+            dancer_style: s.dancer_style,
+            dancer_size: s.dancer_size,
+        }
+    }
+}
+
+/// A Look recall waiting to glide: what was on before, and the scene and
+/// routine (indices) to switch to on the way.
+#[derive(Clone, Debug)]
+pub struct GlideReq {
+    pub glide: Glide,
+    pub from: GlideFrom,
+    pub scene: Option<usize>,
+    pub clip: Option<usize>,
+}
+
+/// The beat position a glide started at `pos` ends on: a beat line for
+/// `Beat`, a downbeat for the bar glides, at least three quarters of the
+/// glide's length away (so a recall late in a bar doesn't snap).
+/// `beat_in_bar` is the beat `pos` is in (0 = the downbeat).
+pub fn glide_end(pos: f64, beat_in_bar: f64, g: Glide) -> f64 {
+    let (len, unit) = match g {
+        Glide::Cut => return pos,
+        Glide::Beat => (1.0, 1.0),
+        Glide::Bar => (4.0, 4.0),
+        Glide::Bars2 => (8.0, 4.0),
+    };
+    let target = pos + len * 0.75;
+    let base = if unit == 1.0 { 0.0 } else { pos.floor() - beat_in_bar };
+    base + ((target - base) / unit).ceil() * unit
+}
+
+/// Write the in-between values for progress `p` (0..1) into the frame's
+/// settings clone, which already holds the Look's values. Amounts ease; a
+/// change of effect fades the old one out over the first half and the new
+/// one in over the second; the dancer's on/look switch at the midpoint.
+/// The palette blends separately (a LUT fade in the render loop).
+pub fn glide_overlay(s: &mut Settings, from: &GlideFrom, p: f32) {
+    let p = p.clamp(0.0, 1.0);
+    let e = p * p * (3.0 - 2.0 * p);
+    let mid = p >= 0.5;
+    if from.fx != s.fx || from.fx_auto != s.fx_auto {
+        if mid {
+            s.fx_amt *= 2.0 * p - 1.0;
+        } else {
+            s.fx = from.fx;
+            s.fx_auto = from.fx_auto;
+            s.fx_amt = from.fx_amt * (1.0 - 2.0 * p);
+        }
+    } else {
+        s.fx_amt = from.fx_amt + (s.fx_amt - from.fx_amt) * e;
+    }
+    if !mid {
+        s.dancer_enabled = from.dancer_enabled;
+        s.dancer_style = from.dancer_style;
+    }
+    s.dancer_size = from.dancer_size + (s.dancer_size - from.dancer_size) * e;
+}
+
 // ---- storage ----------------------------------------------------------------
 
 pub fn looks_dir() -> PathBuf {
@@ -274,6 +378,58 @@ pub fn by_slot(looks: &[SavedLook], slot: u8) -> Option<&SavedLook> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn glide_ends_on_the_grid() {
+        // Beat 1.5 of a bar (downbeat at 0): a bar glide ends on the next
+        // downbeat at least 3 beats away, so 8; from beat 0.2 it's 4.
+        assert_eq!(glide_end(1.5, 1.0, Glide::Bar), 8.0);
+        assert_eq!(glide_end(0.2, 0.0, Glide::Bar), 4.0);
+        assert_eq!(glide_end(0.2, 0.0, Glide::Bars2), 8.0);
+        assert_eq!(glide_end(10.3, 2.0, Glide::Beat), 12.0);
+        assert_eq!(glide_end(10.0, 2.0, Glide::Beat), 11.0);
+        assert_eq!(glide_end(7.0, 3.0, Glide::Cut), 7.0);
+        // Downbeats follow the bar, not multiples of four.
+        assert_eq!(glide_end(5.0, 0.0, Glide::Bar), 9.0);
+    }
+
+    #[test]
+    fn glide_overlay_eases_and_switches_at_the_midpoint() {
+        let mut target = Settings::default();
+        target.fx = Fx::Quad;
+        target.fx_amt = 0.8;
+        target.dancer_size = 2.0;
+        target.dancer_enabled = true;
+        let from = GlideFrom { fx: Fx::Off, fx_amt: 0.6, fx_auto: false, dancer_enabled: false, dancer_style: None, dancer_size: 1.0 };
+        let at = |p: f32| {
+            let mut s = target.clone();
+            glide_overlay(&mut s, &from, p);
+            s
+        };
+        let s = at(0.0);
+        assert_eq!((s.fx, s.fx_amt, s.dancer_enabled, s.dancer_size), (Fx::Off, 0.6, false, 1.0));
+        let s = at(0.25);
+        assert_eq!(s.fx, Fx::Off);
+        assert!((s.fx_amt - 0.3).abs() < 1e-6, "the old effect fades out");
+        let s = at(0.75);
+        assert_eq!((s.fx, s.dancer_enabled), (Fx::Quad, true));
+        assert!((s.fx_amt - 0.4).abs() < 1e-6, "the new effect fades in");
+        let s = at(1.0);
+        assert_eq!((s.fx, s.fx_amt, s.dancer_size), (Fx::Quad, 0.8, 2.0));
+        // Same effect: the amount just eases.
+        let from2 = GlideFrom { fx: Fx::Quad, ..from.clone() };
+        let mut s = target.clone();
+        glide_overlay(&mut s, &from2, 0.5);
+        assert!((s.fx_amt - 0.7).abs() < 1e-6);
+    }
+
+    #[test]
+    fn glide_setting_reads_old_and_unknown_values() {
+        let g: Glide = serde_json::from_str("\"bars2\"").unwrap();
+        assert_eq!(g, Glide::Bars2);
+        let g: Glide = serde_json::from_str("\"warp\"").unwrap();
+        assert_eq!(g, Glide::Cut);
+    }
 
     fn tmp(tag: &str) -> PathBuf {
         use std::sync::atomic::{AtomicU32, Ordering};

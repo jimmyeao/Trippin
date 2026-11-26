@@ -180,12 +180,14 @@ Default keys (all rebindable in the panel):
 | R | random ↔ sequential scene order |
 | D | dancer on / off |
 | C / S / V | next routine / next look / canon auto→on→off |
+| P | the dancer bursts into glowing dust and re-forms over two bars |
 | B | blackout (fade to black and back) |
 | Z | strobe on / off (flashes on the live drum hits) |
 | F | fullscreen on / off |
 | Space | mark this beat as the downbeat |
 | [ / ] | latency −/+ 5 ms |
-| X | cycle the post effect (off → mirrors → kaleido) |
+| X | cycle the post effect (off → mirrors → kaleido → lens effects) |
+| E | echo trails: auto → on → off |
 | F5 | reload shaders |
 | T | timeline play / pause |
 | G | timeline record on / off |
@@ -194,6 +196,7 @@ Default keys (all rebindable in the panel):
 | J | record the whole set: start / stop |
 | F1 | show / hide the control panel |
 | Esc | leave fullscreen (it never quits; close the window to quit) |
+| (unbound) | **hold** effects, best on a MIDI pad: echo trails while held; the dancer (and logo) burst out while held and re-form when you let go |
 | (unbound) | Look 1 to 8: recall the saved Look on that slot (bind keys or pads on the Keys page) |
 
 **MIDI controllers:** every action above can also sit on a MIDI pad or key.
@@ -210,7 +213,9 @@ and a lounge set doesn't get strobes. Choose one from the **Style** menu in the
 Looks row on the Perform page (or `Next Style` on a key, OSC `/trippin/style`, the
 remote). **Off** is the default and leaves Auto exactly as it was. Choosing a Style puts
 the palette on **Auto** (its colour families only steer Auto); pick a fixed palette
-afterwards to override the colours and keep the rest.
+afterwards to override the colours and keep the rest. Tick **Follow artwork** next to
+the menu to take the colours from the playing track's cover instead (the **art**
+palette); a Style keeps it, and uses its own colours while there's no cover.
 
 | Style | What you get |
 |---|---|
@@ -243,6 +248,11 @@ dancer, as they are on screen right now. One tap recalls it.
 - **Recall:** click it. Right-click a Look to put it on **slot 1 to 8** (then a
   hotkey, a MIDI pad, OSC `/trippin/look 3` or the remote can recall it) or to
   delete it.
+- **Glide** (next to Save look): how a recalled Look arrives. **Cut** changes
+  everything at once. **1 beat**, **1 bar** (the default) or **2 bars** blend the
+  palette and the effect amount over that time on the live beat (a new effect fades
+  the old one out and itself in), switch the dancer halfway, and change the scene on
+  the beat or downbeat that ends the glide.
 - **Partial Looks:** anything a Look leaves out stays as it is, so a Look can be
   "just this palette". Edit the file if you want that; the button saves everything.
 - **A scene you don't have:** a Look made on another machine, or one that uses a
@@ -281,6 +291,20 @@ dancer, as they are on screen right now. One tap recalls it.
   of glowing spectrum towers), `scope` (phosphor oscilloscope), `spectrogram`
   (scrolling waterfall), `lissajous`, `vu` (giant bass/mid/high meters),
   `led_wall`, `waveshaper`, `polar_bloom` and `levels`.
+- **Particle systems** (tens of thousands of GPU motes, ~0.2 ms each), all
+  simulated: every mote keeps its own speed from frame to frame, so kicks
+  blast them out and they swing back, the loudness sets how fast they flow,
+  the mids swirl them loose, and the bass draws them tight while breakdowns
+  let them drift into haze. `particle_nebula`, `particle_tornado`,
+  `particle_flow` (combed streaks), `particle_orbits`,
+  `particle_dna` (a double helix whose girth is the spectrum),
+  `particle_sphere` (a sphere morphing with the spectrum),
+  `particle_sea` (a sea of light to the horizon),
+  `particle_fountain` (five jets of sparks), `particle_knot` (a torus knot
+  re-tying itself every 8 bars), `particle_cube` (a twisting wireframe
+  lattice), `particle_rose` (a polar-rose flower that changes its petal
+  count), `particle_smoke_rings` (rising vortex rings) and
+  `particle_dandelion` (seeds blowing away on the wind).
 - **Pulse / particle:** `shockwaves`, `pulse_grid`, `rings`,
   `bounce` (orbs hopping on a lit floor), `ripple` (beat-spawned water
   rings), `stardrive`, `orbiters`, `ribbons`, `ink`, `flare_ring`
@@ -602,15 +626,71 @@ the per-cut hue still rotates through whichever palette is active.
 Palettes are defined as colour stops in `src/palettes.rs` — add a line
 there and it appears in the dropdown.
 
+Two palettes aren't gradients. **auto** picks one to fit the music's mood.
+**art** takes its colours from the cover of the track now playing, and
+blends into each new track's colours over a bar; with no cover found it
+behaves like auto. See *Cover art* under Now playing for where covers come
+from. `--snap <scene> --snap-art <audio or image file>` renders a scene with
+a file's cover palette and writes the cover beside its gradient.
+
 ## Visual effects
 
 A post effect transforms the whole frame — scene and dancer — chosen in the
 panel or with `X`: **Mirror X**, **Mirror Y**, **Quad mirror** or **Kaleido
-×6 / ×8**. The **Strength** slider blends the transform in (at 50% a mirror
-sits over the plain frame). **Auto** picks a fresh effect on every scene cut
-(Mirror Y stays manual-only — an upside-down dancer reads as a glitch).
+×6 / ×8**, or one of the lens effects:
+
+- **Glass ribs**: fluted glass, each rib shifting its slice of the frame;
+  the ribs lean with the phrase and refract harder with the bass.
+- **Glass fan**: the same glass bent round the centre in wedges, slowly
+  turning.
+- **Fly eye**: a honeycomb of lenses, each showing its own patch turned
+  over; the lenses grow with the bass and the comb drifts.
+- **Anamorphic**: long, thin, cool horizontal flares off the bright parts,
+  their length breathing with the bass.
+- **Melt**: the frame drips down in runs that crawl with the track.
+- **Pixels**: big pixels whose size breathes with the bass.
+- **Tiles**: the frame repeated in mirrored tiles, zooming and drifting.
+- **Twist**: a whirl round the centre that winds one way, then the other,
+  over eight bars.
+
+The lens effects move like the scenes do, with the bass presence and the
+smooth clocks; none of them pulses on the beat. The **Strength** slider
+blends the transform in (at 50% a mirror sits over the plain frame).
+**Auto** picks a fresh effect on every scene cut, from the effects ticked
+under it on Dancer & FX (Mirror Y, Pixels and Tiles start unticked: they
+turn the dancer upside down or chop up the whole picture). The Perform
+page's Controls card has **Auto effects** and **Accents** switches at the
+top.
 It's applied in `present.wgsl` from `u.fx`, so it needs no scene support and
 combines with everything (a mirrored dancer in canon is five dancers).
+
+**Accent layer** (Dancer & FX tab, or **Accents** under the Perform page's
+controls; off by default): on some scene cuts while
+the track drives, Auto lays a light overlay over the main scene — rising
+embers, soft light streaks gliding across the frame, a swarm of motes that
+tightens with the bass, drifting bokeh, god-ray light shafts, rings rippling out like rain on
+water, musical notes floating up, star glints, soap bubbles, fireflies,
+tumbling petals, comets, low floor fog, a spectrum glowing up from the
+bottom edge, the waveform as light ribbons, or a ring of sparks orbiting
+the centre (16 in all, `shaders/accents/`; they never play on their
+own). Timeline shows have their own switch, the **accents** pill in the
+editor's toolbar: an accent is then rolled on each of the show's scene
+changes. It's
+screen-blended: it shows over the dark parts of the scene and fades where
+the scene is bright, so it never washes a bright scene out. It fades away in
+breakdowns, and never plays over 3D (`@heavy`), Unity, video or flight scenes,
+in Manual mode or during timeline shows. The **Accent** slider sets how
+strongly it adds in. Preview one with `--snap <scene> --snap-accent swarm`.
+
+**Echo** (Dancer & FX tab, or `E`): light trails of the whole frame. Each
+frame is blended with its own last echo, which drifts outward and turns
+slowly (the turn swings direction every eight bars), so the dancer's arms and
+moving lights leave trails that follow the motion. It keeps the brighter of
+the two, so it can't build up or blow out. Trails are short while the beat
+drives and long in breakdowns. **Auto** runs it through breakdowns and on
+about a third of the cuts; it stays off flight scenes and scenes that leave
+their own trails. It combines with the mirror and kaleido effects. Preview
+with `--snap <scene> --snap-echo 0.8`.
 
 ## Lights: WLED and Philips Hue
 
@@ -636,9 +716,74 @@ Settings → **Lights** makes room lights follow the show.
 From the command line: `trippin --lights-demo <wled-ip> [seconds]` runs a
 test groove on one strip.
 
+### Camera scenes
+
+Pick a webcam under **Settings > Camera** and three scenes join the
+rotation, all mirrored like a selfie:
+
+- **Camera Outline**: you, traced in lines of light with trails streaming
+  out from the centre. The lines thicken with the bass and ripple with the
+  mids.
+- **Camera Kaleidoscope**: an eight-way mandala made of you, zooming with
+  the bass and turning with the track.
+- **Camera Slit-Scan**: you live on the right, every move smeared away to
+  the left in ribbons that run faster when the track is loud.
+- **Camera Rotoscope**: you as a living cartoon: flat cel-shaded bands in
+  the palette's colours and bold ink outlines that boil gently like
+  hand-traced frames. The ink thickens with the bass and on the kick.
+
+**Camera layer** (Dancer & FX, under Echo) puts the camera into *every*
+scene:
+
+- **behind**: the camera fills the background and the scene plays over
+  it. Its dark parts show you through; lasers, particles and the dancer
+  pass in front.
+- **in front**: you over the scene, cut out by a **key**: green screen,
+  blue screen, or dark background (for a dark room), or no key for the
+  whole frame. **Key tolerance** sets how much of the screen colour goes;
+  green or blue spill on your edges is pulled out.
+- **Rotoscope** (a tick under the layer): the layer drawn as a cartoon,
+  cel bands and ink outlines, behind or in front of any scene.
+
+Each camera scene has its own **scene controls** on the Perform page, under
+the scene name while it's on air (kept per scene, with Reset):
+
+- **Camera Outline**: Glow, Detail (low traces only the big outlines),
+  Trails, Ripple, Stream.
+- **Camera Kaleidoscope**: Segments (3-12), Zoom, Spin, Palette.
+- **Camera Slit-Scan**: Speed, Wave, Fade, Palette.
+- **Camera Rotoscope** (also while the camera layer is rotoscoped):
+  Amount (how much cartoon over the plain camera), Detail (low: only the
+  big outlines and flat shapes), Ink, Bands (2-8 flat shades) and Palette
+  (your own colours to the show's palette).
+
+Nothing is opened until you pick a camera, the camera scenes stay out of
+rotation until it sends frames, and a red **camera on** marker shows at the
+top of the panel while it's capturing. `trippin --list-cameras` lists the
+cameras without opening one. On macOS the first pick asks for camera
+permission.
+
 ## Streaming: OBS, overlays, now playing, clips
 
 Everything for streamers lives on the **Stream** tab.
+
+### Photosensitive-safe mode
+
+Tick **Photosensitive-safe** (Stream tab, video output; or Settings, director)
+and nothing on screen flashes more than three times a second, the WCAG 2.3.1
+limit streaming platforms point to:
+
+- strobe cues, drum-fill strobes and the timeline's flash fills are off (fills
+  still stutter video scenes), as are the white flash on a cut, the text
+  **strobe** effect and the lights' white flashes;
+- the picture's average brightness may fall as fast as it likes but rise only
+  0.3 a second (of full white), which tames scenes' own beat flashes too. A
+  steady picture looks the same; a hit that would flash the whole screen
+  comes up gently instead.
+
+It applies to the window and to Spout/NDI alike. `--snap all --snap-flash 8
+--snap-size 320x180` counts each scene's flashes per second (`flash.tsv`);
+add `--snap-safe` to measure with the switch on.
 
 ### Video output: Spout and NDI
 
@@ -691,7 +836,29 @@ follows whichever source changed most recently. The sources are:
 
 The **delay** holds a new track back until it has stayed loaded for that long,
 which skips tracks you only cued in your headphones. **N** shows the card
-again. `trippin --nowplaying` prints what each source sees.
+again. `trippin --nowplaying` prints what each source sees
+(`TRIPPIN_ART_DEBUG=1` adds where each one's cover is).
+
+#### Cover art
+
+The track's cover shows on the card (**Cover art: On the card**) and feeds
+the **art** palette. Each source finds it its own way:
+
+- **Media session** (Windows): the thumbnail Spotify and other players
+  publish. **macOS**: Spotify's artwork URL; for Music, the cover embedded
+  in the library file.
+- **Serato**, **VirtualDJ**, **Mixxx**: the cover embedded in the track's
+  file (ID3, FLAC, MP4 tags), else a `cover`/`folder`/`front` image beside
+  it. Mixxx's own cover choice comes first.
+- **rekordbox**: its own artwork thumbnail, else the file's embedded cover.
+- **Look up online** (off by default): for tracks with no cover, asks the
+  iTunes Search API by artist and title. This sends the track name to Apple.
+  Found covers are cached in `artcache` next to `trippin.json`.
+
+- **LAN agent**: the agent finds the cover on the DJ machine the same way
+  (embedded in the file, a cover image beside it, the media session's
+  thumbnail) and sends it to the rig with the track, shrunk to 256 px. The
+  rig can't read the DJ machine's files, so it couldn't find them itself.
 
 The agent is a tray app: it finds rigs advertised over Bonjour (or takes a
 `host:port`), pairs with the same PIN as the iOS remote, and its window shows
@@ -702,6 +869,13 @@ the connection status and the track it sees locally. Build it with
 
 - **Branding**: an always-on logo PNG, DJ name and social handles, in any
   corner, with a size, an opacity and an accent colour.
+- **Logo Trip** (`logo_trip`), a scene of your own logo: it runs the logo
+  (or any image set as **Logo scene** under Branding) through a droste
+  spiral, a melt, halftone dots, VHS tape and a kaleidoscope of tiles, a new
+  one every eight bars, morphing over two beats. The music shapes it: the
+  spiral turns with the track's energy, the melt runs deeper with the bass,
+  the dots swell with the mids, the tape frays with the highs. With no
+  image set it uses the Trippin logo.
 - **Ticker**: a message scrolling along the bottom.
 
 The branding, the ticker and the now-playing card are drawn by the renderer,
@@ -808,6 +982,16 @@ boundaries and cue transitions land on the "one", not just on beats.
   `--analyze <file>`, or run the whole build without the editor with
   `--ai-build <file>` (prints every cue).
 
+## Type Field (now-playing scene)
+
+**Type Field** is a scene made of the track playing now: rows of "Artist -
+Title" scroll across the frame in three depths, the near rows big and
+readable, their baselines waving with the mids. It reads the same track as
+the now-playing card (any source), and shows your DJ name (or TRIPPIN) when
+nothing is detected. Scenes can use the line through `title_mask()` in
+`common.wgsl` (`title_tex`, binding 10); preview with `--snap type_field
+--snap-title "Artist - Title"`.
+
 ## Silhouette dancers
 
 Trippin ships with a library of female dancer silhouettes in the style of Bond
@@ -817,6 +1001,15 @@ breakdowns), picks the look (mostly the classic black shadow and neon;
 sometimes a drawn look; strobe when the track is driving), goes to a three-dancer canon on
 high-energy sections, and swaps to a clip whose energy suits the track:
 graceful moves for breakdowns, salsa and grooves for drops.
+
+On a drop (the drums back after a breakdown) she **disintegrates**: her
+silhouette crumbles into glowing dust from the head down, the cloud swirls
+in her shape for a few beats while she keeps dancing inside it, and she
+re-forms from the feet up over two bars. Turn it off with "Burst into
+particles on drops" on the Dancer & FX tab; P (or a MIDI pad) does it by
+hand. It stays off in Manual mode and during timeline shows. Your branding logo bursts and
+re-forms with her, in its own colours (turn that off under Branding on the
+Stream tab).
 
 The looks, by index (`dancer::STYLES`, which timeline cues, AI plans and the
 remote use):

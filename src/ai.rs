@@ -751,7 +751,7 @@ pub fn build_show(
     // Video scenes likewise only once their clip is downloaded.
     let scenes: Vec<String> = scenes
         .iter()
-        .filter(|s| !s.starts_with("unity_") && crate::video::scene_ready(s))
+        .filter(|s| !s.starts_with("unity_") && !s.starts_with("camera_") && crate::video::scene_ready(s))
         .cloned()
         .collect();
     let scenes = scenes.as_slice();
@@ -831,7 +831,7 @@ in order, covering EVERY block of every clip:\n\
   \"dancer\": \"off\" | \"on\" | \"ROUTINE_NAME\",  // optional; routine name implies on\n\
   \"look\": 0|1|2|3|4,   // optional: 0=shadow, 1=neon, 2=strobe, 3=comic (pencil sketch), 4=wire (neon CGI)\n\
   \"trails\": true|false, \"canon\": \"auto\"|\"on\"|\"off\", // optional dancer extras\n\
-  \"fx\": \"off\"|\"mirror_x\"|\"mirror_y\"|\"quad\"|\"kaleido6\"|\"kaleido8\"|\"auto\", // optional\n\
+  \"fx\": \"off\"|\"mirror_x\"|\"mirror_y\"|\"quad\"|\"kaleido6\"|\"kaleido8\"|\"glass_ribs\"|\"glass_fan\"|\"fly_eye\"|\"anamorphic\"|\"melt\"|\"pixels\"|\"tiles\"|\"twist\"|\"auto\", // optional\n\
   \"palette\": \"PALETTE_NAME\", // optional: global colour palette, latches\n\
   \"blackout\": true, // optional: 1-beat dip to black just before the block starts\n\
   \"text\": {\"text\":\"...\",\"style\":\"neon|fire|wave|glitch|pulse|chrome\",\"pos\":\"top|middle|bottom\",\"anim\":\"fade|rise|drop|slide|zoom|type\",\"fx\":\"punch|shake|strobe|bounce|shatter\",\"size\":0.7-2.0,\"at\":0,\"seq\":\"beat|bar\"}\n\
@@ -1256,7 +1256,9 @@ fn user_prompt(
             "name": r,
             "pace": pace_label(energies.get(i).copied().unwrap_or(0.5)),
         })).collect::<Vec<_>>(),
-        "palettes": crate::palettes::all_names().collect::<Vec<_>>(),
+        // No `art`: a timeline show plays a song file, not the now-playing
+        // track, so the cover palette would follow the wrong music.
+        "palettes": crate::palettes::all_names().filter(|p| *p != crate::palettes::ART).collect::<Vec<_>>(),
         "note": "flow/vocals are one char per bar: energy . - + * # and v for vocals. \
                  blocks are the ~4-bar phrases you plan against — every block needs an \
                  entry; a block's vocal is the share of its bars that are sung (0-1).",
@@ -2107,14 +2109,7 @@ fn expand_plan(
                         }
                     }
                     name => {
-                        let want = match name {
-                            "mirror_x" | "mirrorx" | "mirror x" => Fx::MirrorX,
-                            "mirror_y" | "mirrory" | "mirror y" => Fx::MirrorY,
-                            "quad" => Fx::Quad,
-                            "kaleido6" | "kaleido_6" | "kaleidoscope6" => Fx::Kaleido6,
-                            "kaleido8" | "kaleido_8" | "kaleidoscope8" | "kaleido" => Fx::Kaleido8,
-                            _ => Fx::Off,
-                        };
+                        let want = Fx::from_name(name).unwrap_or(Fx::Off);
                         if fx_auto {
                             fx_auto = false;
                             cues.push(Cue {
@@ -2150,7 +2145,7 @@ fn expand_plan(
 
             // --- palette: latches like scene — emit only on change
             if let Some(n) = it["palette"].as_str() {
-                match crate::palettes::all_names().find(|p| p.eq_ignore_ascii_case(n)) {
+                match crate::palettes::all_names().filter(|p| *p != crate::palettes::ART).find(|p| p.eq_ignore_ascii_case(n)) {
                     Some(p) if p != pal => {
                         pal = p.to_string();
                         cues.push(Cue {
@@ -2441,17 +2436,10 @@ fn raw_to_cue(item: &Value, clips: &[Clip], scenes: &[String], routines: &[Strin
         }),
         "blackout" | "black_out" => CueKind::Blackout(on()),
         "fx" | "transform" | "effect" => CueKind::Fx(
-            match str_field(get("fx"))
+            str_field(get("fx"))
                 .or_else(|| get("name").and_then(|v| str_field(Some(v))))
-                .as_deref()
-            {
-                Some("mirror_x" | "mirrorx" | "mirror x") => Fx::MirrorX,
-                Some("mirror_y" | "mirrory" | "mirror y") => Fx::MirrorY,
-                Some("quad") => Fx::Quad,
-                Some("kaleido6" | "kaleido_6" | "kaleidoscope6") => Fx::Kaleido6,
-                Some("kaleido8" | "kaleido_8" | "kaleidoscope8" | "kaleido") => Fx::Kaleido8,
-                _ => Fx::Off,
-            },
+                .and_then(|n| Fx::from_name(&n))
+                .unwrap_or(Fx::Off),
         ),
         "fx_auto" | "auto_fx" => CueKind::FxAuto(on()),
         "palette" | "palette_change" => CueKind::Palette(

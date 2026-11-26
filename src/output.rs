@@ -76,8 +76,10 @@ pub struct Output {
     /// shader's fx/grain maths wants the real output resolution.
     pub uniform_buf: wgpu::Buffer,
     /// Same layout as the scene bind groups; `bind_groups[i]` samples
-    /// `targets[i]`. Rebuilt when the renderer's targets are.
-    pub bind_groups: [wgpu::BindGroup; 2],
+    /// `targets[i]`: the two scene targets, then the two echo targets (what
+    /// present reads when the echo effect is on). Rebuilt when the
+    /// renderer's targets are.
+    pub bind_groups: [wgpu::BindGroup; 4],
     pub staging: Arc<Vec<wgpu::Buffer>>,
     in_flight: Vec<Arc<AtomicBool>>,
     /// Staging indices encoded this frame, mapped after the queue submit.
@@ -99,7 +101,7 @@ impl Output {
         device: &wgpu::Device,
         layout: &wgpu::BindGroupLayout,
         sampler: &wgpu::Sampler,
-        targets: &[wgpu::Texture; 2],
+        targets: [&wgpu::Texture; 4],
         res: &crate::render::FrameRes,
         conf: Conf,
     ) -> Result<Output> {
@@ -312,13 +314,13 @@ impl Output {
         device: &wgpu::Device,
         layout: &wgpu::BindGroupLayout,
         sampler: &wgpu::Sampler,
-        targets: &[wgpu::Texture; 2],
+        targets: [&wgpu::Texture; 4],
         res: &crate::render::FrameRes,
         uniform_buf: &wgpu::Buffer,
-    ) -> [wgpu::BindGroup; 2] {
+    ) -> [wgpu::BindGroup; 4] {
         let make = |t: &wgpu::Texture| {
             let view = t.create_view(&Default::default());
-            let [e3, e4, e5, e6, e7, e8, e9] = res.entries();
+            let [e3, e4, e5, e6, e7, e8, e9, e10, e11, e12, e13] = res.entries();
             device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("ndi"),
                 layout,
@@ -342,10 +344,14 @@ impl Output {
                     e7,
                     e8,
                     e9,
+                    e10,
+                    e11,
+                    e12,
+                    e13,
                 ],
             })
         };
-        [make(&targets[0]), make(&targets[1])]
+        targets.map(make)
     }
 
     /// The scene targets were rebuilt (window resize) — rebind to the new views.
@@ -354,7 +360,7 @@ impl Output {
         device: &wgpu::Device,
         layout: &wgpu::BindGroupLayout,
         sampler: &wgpu::Sampler,
-        targets: &[wgpu::Texture; 2],
+        targets: [&wgpu::Texture; 4],
         res: &crate::render::FrameRes,
     ) {
         self.bind_groups = Self::bind(

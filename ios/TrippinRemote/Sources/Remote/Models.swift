@@ -165,4 +165,5 @@ struct ShowState {
 }
 
 /// The whole-frame post effects Trippin knows (`config::Fx`).
-let fxModes = ["Off", "MirrorX", "MirrorY", "Quad", "Kaleido6", "Kaleido8"]
+let fxModes = ["Off", "MirrorX", "MirrorY", "Quad", "Kaleido6", "Kaleido8",
+               "GlassRibs", "GlassFan", "FlyEye", "Anamorphic", "Melt", "Pixels", "Tiles", "Twist"]

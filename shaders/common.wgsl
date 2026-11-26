@@ -48,6 +48,13 @@ struct U {
     // The Unity show's Brightness, Saturation, Hue shift (turns); w spare.
     // Identity (1, 1, 0, 0) for every other scene. See ext_look.
     look4: vec4<f32>,
+    // The camera layer (present.wgsl): mode (0 off, 1 behind, 2 in front),
+    // strength, key (0 none, 1 green, 2 blue, 3 dark), key tolerance.
+    cam4: vec4<f32>,
+    // The rotoscope look (cam_roto): amount, ink, detail, colour bands; then
+    // x: palette colour, yzw spare.
+    roto4: vec4<f32>,
+    roto5: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> u: U;
@@ -73,6 +80,91 @@ struct U {
 // Video clip frames for `video_*` scenes (src/video.rs): two frames stacked
 // (top/bottom halves). Sample through vid(), which blends them.
 @group(0) @binding(9) var vid_tex: texture_2d<f32>;
+// The track playing now ("Artist - Title", or the DJ name / TRIPPIN when
+// nothing is detected) as a coverage mask from the left edge; u.look4.w is
+// the fraction of the width it covers. Sample through title_mask().
+@group(0) @binding(10) var title_tex: texture_2d<f32>;
+// The logo scene's image (the scene's own pick, else the branding logo, else
+// the Trippin logo), fitted inside a square with transparent padding,
+// straight alpha. Sample through logo().
+@group(0) @binding(12) var logo_tex: texture_2d<f32>;
+// The webcam (Settings > Camera), display-referred; black with no camera.
+// Sample through cam().
+@group(0) @binding(13) var cam_tex: texture_2d<f32>;
+
+// The webcam at uv in 0..1 (y down), as the camera sees it: flip x for a
+// selfie view. Display-referred: pass it through untonemap() in a scene.
+fn cam(uv: vec2<f32>) -> vec3<f32> {
+    return textureSampleLevel(cam_tex, samp, clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).rgb;
+}
+
+// The webcam at a blur level (`lod` 0 = sharp, 1 = half size, ... up to
+// CAM_MIPS - 1), blended between levels so a slider glides.
+fn cam_lod(uv: vec2<f32>, lod: f32) -> vec3<f32> {
+    let q = clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0));
+    let l = clamp(lod, 0.0, 2.999);
+    let l0 = floor(l);
+    let a = textureSampleLevel(cam_tex, samp, q, l0).rgb;
+    let b = textureSampleLevel(cam_tex, samp, q, l0 + 1.0).rgb;
+    return mix(a, b, l - l0);
+}
+
+// The webcam rotoscoped (display-referred, like cam()), set by the
+// Rotoscope controls (u.roto4/roto5): the colour flattened into cel bands
+// from a smoothed copy, ink outlines found on a blurred copy (so only the
+// big shapes are traced), mixed over the plain camera by the amount.
+// `ink_boost` thickens the ink on top of the setting (scenes put the music
+// there).
+fn cam_roto(uv: vec2<f32>, ink_boost: f32) -> vec3<f32> {
+    let amt = clamp(u.roto4.x, 0.0, 1.0);
+    let ink = clamp(u.roto4.y + ink_boost, 0.0, 2.0);
+    let detail = clamp(u.roto4.z, 0.0, 1.0);
+    let bands = clamp(u.roto4.w, 2.0, 8.0);
+    let w = vec3<f32>(0.299, 0.587, 0.114);
+    // Outlines: Sobel on a blurred copy; low detail = blurrier, fewer lines.
+    let lod_e = mix(2.4, 0.4, detail);
+    let d = exp2(lod_e) / vec2<f32>(1280.0, 720.0) * (0.8 + 1.4 * ink);
+    let s00 = dot(cam_lod(uv + d * vec2<f32>(-1.0, -1.0), lod_e), w);
+    let s10 = dot(cam_lod(uv + d * vec2<f32>(0.0, -1.0), lod_e), w);
+    let s20 = dot(cam_lod(uv + d * vec2<f32>(1.0, -1.0), lod_e), w);
+    let s01 = dot(cam_lod(uv + d * vec2<f32>(-1.0, 0.0), lod_e), w);
+    let s21 = dot(cam_lod(uv + d * vec2<f32>(1.0, 0.0), lod_e), w);
+    let s02 = dot(cam_lod(uv + d * vec2<f32>(-1.0, 1.0), lod_e), w);
+    let s12 = dot(cam_lod(uv + d * vec2<f32>(0.0, 1.0), lod_e), w);
+    let s22 = dot(cam_lod(uv + d * vec2<f32>(1.0, 1.0), lod_e), w);
+    let gx = s20 + 2.0 * s21 + s22 - s00 - 2.0 * s01 - s02;
+    let gy = s02 + 2.0 * s12 + s22 - s00 - 2.0 * s10 - s20;
+    let thr = mix(0.2, 0.07, detail);
+    let edge = smoothstep(thr, thr * 2.0, length(vec2<f32>(gx, gy)));
+    // Cel bands on a smoothed copy, the colour kept, its shading flattened.
+    let c = cam_lod(uv, mix(1.8, 0.4, detail));
+    let l = dot(c, w);
+    let x = l * bands;
+    let lq = (floor(x) + smoothstep(0.4, 0.6, fract(x))) / bands;
+    var col = c * (lq + 0.06) / (l + 0.06);
+    let p = palette(fract(lq * 0.7 + u.clock4.x * 0.01));
+    col = mix(col, p * p * (0.02 + 1.4 * lq * lq + 0.2 * lq), clamp(u.roto5.x, 0.0, 1.0));
+    col *= 1.0 - min(0.4 + 0.6 * ink, 1.0) * edge;
+    return mix(cam(uv), col, amt);
+}
+
+// The logo at uv in 0..1 across its square (y top to bottom): rgb and
+// coverage, 0 outside the square.
+fn logo(uv: vec2<f32>) -> vec4<f32> {
+    if any(uv < vec2<f32>(0.0)) || any(uv > vec2<f32>(1.0)) {
+        return vec4<f32>(0.0);
+    }
+    return textureSampleLevel(logo_tex, samp, uv, 0.0);
+}
+
+// Coverage 0..1 of the title text at uv in 0..1 across the text's own box
+// (x along the line, y top to bottom); 0 outside it.
+fn title_mask(uv: vec2<f32>) -> f32 {
+    if any(uv < vec2<f32>(0.0)) || any(uv > vec2<f32>(1.0)) {
+        return 0.0;
+    }
+    return textureSampleLevel(title_tex, samp, vec2<f32>(uv.x * max(u.look4.w, 0.0005), uv.y), 0.0).r;
+}
 
 struct VsOut {
     @builtin(position) pos: vec4<f32>,
@@ -164,6 +256,25 @@ fn toggle_on_beat() -> f32 {
 // melts into a slow, steady level instead.
 fn beat_pulse(sharpness: f32) -> f32 {
     return mix(exp(-u.beat_phase * sharpness), 0.25, u.calm);
+}
+
+// The kick as a shape envelope: rises over the first ~8% of each beat and
+// eases off before the next, scaled by the auto-gained bass level, so it
+// follows what the music does and goes still in a breakdown. Smooth, unlike
+// hits4's one-frame attack. For shape (size, reach, thickness), not light.
+fn kick_swell() -> f32 {
+    let ph = fract(u.beat_phase);
+    return smoothstep(0.0, 0.08, ph) * exp(-3.5 * ph) * 1.3 * u.lvl4.x * (1.0 - 0.85 * u.calm);
+}
+
+// A ring that leaves the centre on each beat and travels out across it (r: 0
+// at the centre, 1 at the edge of the form), fading as it goes; scaled like
+// kick_swell. For pushing shape outward or upward as a wave.
+fn beat_ring(r: f32, width: f32) -> f32 {
+    let ph = fract(u.beat_phase);
+    let x = (r - ph * 1.2) / width;
+    let fade = smoothstep(0.0, 0.05, ph) * (1.0 - ph) * (1.0 - ph);
+    return exp(-x * x) * fade * u.lvl4.x * (1.0 - 0.85 * u.calm);
 }
 
 fn rot(a: f32) -> mat2x2<f32> {

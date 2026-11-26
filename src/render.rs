@@ -88,6 +88,16 @@ pub struct Uniforms {
     /// The Unity show's Brightness, Saturation and Hue shift (turns) for
     /// `ext_look` (showparams::look); identity (1, 1, 0, 0) otherwise.
     pub look4: [f32; 4],
+    /// The camera layer (present.wgsl): mode (0 off, 1 behind the scene,
+    /// 2 in front, keyed), strength, key (0 none, 1 green, 2 blue, 3 dark
+    /// background), key tolerance.
+    pub cam4: [f32; 4],
+    /// The rotoscope look (`cam_roto`): amount, ink, detail, colour bands.
+    /// On the other camera_* scenes: their own controls
+    /// (camera::scene_params, in order).
+    pub roto4: [f32; 4],
+    /// x: palette colour 0..1 (or a camera scene's fifth control); yzw spare.
+    pub roto5: [f32; 4],
 }
 
 #[derive(Default, Clone, Copy, PartialEq)]
@@ -96,6 +106,16 @@ enum Kind {
     Scene,
     Present,
     Dancer,
+    /// The dancer's Disintegrate particles: dancer.wgsl's `vs_particles` /
+    /// `fs_particles`, instanced quads added into the scene target.
+    Particles,
+    /// Adds the accent layer's frame into the scene target (accent.wgsl).
+    AccentMix,
+    /// The echo post effect's feedback pass (echo.wgsl).
+    Echo,
+    /// The logo's Disintegrate particles: overlay.wgsl's `vs_logo` /
+    /// `fs_logo`, added over the finished frame in the present pass.
+    LogoParticles,
     /// Text overlay — drawn over the surface in the present pass.
     Text,
     /// Stream overlays (now playing, branding, ticker) — same pass.
@@ -122,6 +142,40 @@ struct Scene {
     /// `// @no-dancer` in the header: the scene draws its own people (a
     /// crowd), so the dancer overlay stays off it.
     no_dancer: bool,
+    /// The scene reads its last frame (`prev(`): it leaves its own trails,
+    /// so the echo effect stays off it.
+    feedback: bool,
+    /// `// @particles <count>`: a particle scene. Its `vs_particles` /
+    /// `fs_particles` draw `count` instanced dots (3 vertices each, one
+    /// triangle round the dot) added over its `fs_main` in the same pass.
+    parts: Option<(wgpu::RenderPipeline, u32)>,
+    /// `// @sim <count>`: stateful particles (sim.rs): the scene's
+    /// `cs_sim` step, its `vs_particles` draw, and the count.
+    sim: Option<(wgpu::ComputePipeline, wgpu::RenderPipeline, u32)>,
+}
+
+/// `// @particles <count>` in the header: how many particles the scene's
+/// `vs_particles` draws (0 = not a particle scene). Capped at 400k.
+pub fn header_particles(body: &str) -> u32 {
+    body.lines()
+        .take(8)
+        .find_map(|l| {
+            let i = l.find("@particles")?;
+            l[i + "@particles".len()..].split_whitespace().next()?.parse::<u32>().ok()
+        })
+        .unwrap_or(0)
+        .min(400_000)
+}
+
+/// Compile a particle scene's instanced pass (`vs_particles`/`fs_particles`,
+/// additive glow) for the scene target.
+pub fn compile_particles(
+    device: &wgpu::Device,
+    common: &str,
+    path: &Path,
+    layout: &wgpu::PipelineLayout,
+) -> Result<wgpu::RenderPipeline> {
+    compile_pipeline_entries(device, common, path, layout, SCENE_FORMAT, Some(GLOW_BLEND), ("vs_particles", "fs_particles"))
 }
 
 /// Parse `// @title <rest of line>` — the display-name header directive.
@@ -170,11 +224,18 @@ pub struct FrameRes<'a> {
     pub bloom: &'a wgpu::TextureView,
     pub ext: &'a wgpu::TextureView,
     pub vid: &'a wgpu::TextureView,
+    pub title: &'a wgpu::TextureView,
+    /// The logo scene's image (gfx::Statics::logo).
+    pub logo: &'a wgpu::TextureView,
+    /// The webcam's newest frame (gfx::Statics::cam).
+    pub cam: &'a wgpu::TextureView,
+    /// Photosensitive-safe limiter state (gfx::Statics::lum).
+    pub lum: &'a wgpu::Buffer,
 }
 
 impl FrameRes<'_> {
-    /// Bind group entries 3..=9 (after uniforms, feedback and sampler).
-    pub fn entries(&self) -> [wgpu::BindGroupEntry<'_>; 7] {
+    /// Bind group entries 3..=13 (after uniforms, feedback and sampler).
+    pub fn entries(&self) -> [wgpu::BindGroupEntry<'_>; 11] {
         [
             wgpu::BindGroupEntry {
                 binding: 3,
@@ -204,14 +265,67 @@ impl FrameRes<'_> {
                 binding: 9,
                 resource: wgpu::BindingResource::TextureView(self.vid),
             },
+            wgpu::BindGroupEntry {
+                binding: 10,
+                resource: wgpu::BindingResource::TextureView(self.title),
+            },
+            wgpu::BindGroupEntry {
+                binding: 11,
+                resource: self.lum.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 12,
+                resource: wgpu::BindingResource::TextureView(self.logo),
+            },
+            wgpu::BindGroupEntry {
+                binding: 13,
+                resource: wgpu::BindingResource::TextureView(self.cam),
+            },
         ]
     }
 }
 
+/// Group(0) and the dancer group are visible to vertex shaders too: the
+/// dancer's particle pass (`vs_particles`) samples the masks, palette and
+/// uniforms per particle.
+/// Compute too: sim scenes' `cs_sim` reads the uniforms and noise (sim.rs).
+pub const VIS: wgpu::ShaderStages = wgpu::ShaderStages::VERTEX_FRAGMENT.union(wgpu::ShaderStages::COMPUTE);
+
+/// Additive glow for the particle pass: colour adds, alpha composites over
+/// (transparent mode keeps a sane alpha).
+pub const GLOW_BLEND: wgpu::BlendState = wgpu::BlendState {
+    color: wgpu::BlendComponent {
+        src_factor: wgpu::BlendFactor::One,
+        dst_factor: wgpu::BlendFactor::One,
+        operation: wgpu::BlendOperation::Add,
+    },
+    alpha: wgpu::BlendComponent::OVER,
+};
+
+/// Plain additive colour, destination alpha kept: the accent layer mix.
+pub const ADD_BLEND: wgpu::BlendState = wgpu::BlendState {
+    color: wgpu::BlendComponent {
+        src_factor: wgpu::BlendFactor::One,
+        dst_factor: wgpu::BlendFactor::One,
+        operation: wgpu::BlendOperation::Add,
+    },
+    alpha: wgpu::BlendComponent {
+        src_factor: wgpu::BlendFactor::Zero,
+        dst_factor: wgpu::BlendFactor::One,
+        operation: wgpu::BlendOperation::Add,
+    },
+};
+
+/// Logo Disintegrate particles (`LG * LG` in overlay.wgsl).
+pub const LOGO_PARTICLES: u32 = 128 * 128;
+
+/// Particles per dancer slot (`P_W * P_H` in dancer.wgsl).
+pub const BURST_PARTICLES: u32 = 160 * 320;
+
 fn tex_entry(binding: u32, dim: wgpu::TextureViewDimension) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,
-        visibility: wgpu::ShaderStages::FRAGMENT,
+        visibility: VIS,
         ty: wgpu::BindingType::Texture {
             sample_type: wgpu::TextureSampleType::Float { filterable: true },
             view_dimension: dim,
@@ -221,12 +335,15 @@ fn tex_entry(binding: u32, dim: wgpu::TextureViewDimension) -> wgpu::BindGroupLa
     }
 }
 
+/// The photosensitive-safe measure's 1x1 target (its output is unused).
+const LUM_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+
 /// The group(0) layout every scene / present / dancer / text shader shares.
 pub fn frame_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     use wgpu::TextureViewDimension::{D2, D3};
     let sampler = |binding| wgpu::BindGroupLayoutEntry {
         binding,
-        visibility: wgpu::ShaderStages::FRAGMENT,
+        visibility: VIS,
         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
         count: None,
     };
@@ -235,7 +352,7 @@ pub fn frame_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
         entries: &[
             wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::FRAGMENT,
+                visibility: VIS,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -257,6 +374,24 @@ pub fn frame_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
             tex_entry(8, D2),
             // Video clip frames (two stacked slots) — gfx::Statics::vid.
             tex_entry(9, D2),
+            // The track playing now, as a text mask — gfx::Statics::title.
+            tex_entry(10, D2),
+            // Photosensitive-safe limiter state — gfx::Statics::lum. Only
+            // present.wgsl declares it (fs_lum writes, fs_main reads).
+            wgpu::BindGroupLayoutEntry {
+                binding: 11,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            // The logo scene's image — gfx::Statics::logo.
+            tex_entry(12, D2),
+            // The webcam — gfx::Statics::cam.
+            tex_entry(13, D2),
         ],
     })
 }
@@ -307,6 +442,33 @@ pub struct Renderer {
     scenes: Vec<Scene>,
     present: Scene,
     dancer: Scene,
+    particles: Scene,
+    /// Accent layer: a light overlay scene from `shaders/accents/` (its own
+    /// list, never in the scene rotation) with its own feedback pair, added
+    /// into the main target before the dancer (`set_accent`).
+    accents: Vec<Scene>,
+    accent_mix: Scene,
+    acc_targets: [wgpu::Texture; 2],
+    acc_bind_groups: [wgpu::BindGroup; 2],
+    acc_mix_bind_groups: [[wgpu::BindGroup; 2]; 2],
+    acc_cur: usize,
+    /// The accent scene and its amount wanted this frame.
+    accent: Option<(usize, f32)>,
+    /// The accent scene whose frames are in `acc_targets` (cleared on change).
+    acc_scene: Option<usize>,
+    /// Echo post effect: its own feedback pair. `echo_bgs[i]` samples
+    /// `echo_targets[i]` (present reads it when echo is on);
+    /// `echo_pass_bgs[main][echo]` binds that main target as ext_tex and that
+    /// echo target as prev_tex for the echo pass.
+    echo_pass: Scene,
+    echo_targets: [wgpu::Texture; 2],
+    echo_bgs: [wgpu::BindGroup; 2],
+    echo_pass_bgs: [[wgpu::BindGroup; 2]; 2],
+    echo_cur: usize,
+    /// Echo amount 0..1 wanted this frame (`set_echo`).
+    echo: f32,
+    /// Echo ran last frame (its pair holds a live echo).
+    echo_live: bool,
     dancer_layout: wgpu::BindGroupLayout,
     dancer_pipeline_layout: wgpu::PipelineLayout,
     dancer_buf: wgpu::Buffer,
@@ -322,6 +484,7 @@ pub struct Renderer {
     text_bg: Option<wgpu::BindGroup>,
     /// Stream overlays — one RGBA image per layer (see overlay.rs).
     overlay: Scene,
+    logo_particles: Scene,
     ov_layout: wgpu::BindGroupLayout,
     ov_pipeline_layout: wgpu::PipelineLayout,
     ov_buf: wgpu::Buffer,
@@ -354,6 +517,11 @@ pub struct Renderer {
     /// Eased bloom strength — scene cuts don't pop the glow on/off.
     bloom_amt: f32,
     frame: u32,
+    /// Layouts for sim scenes, and the particles of the sim scene on air
+    /// (its index): respawned on a cut-in, a hot reload or a skipped frame.
+    sim_kit: crate::sim::SimKit,
+    sim: Option<(usize, crate::sim::SimBuf)>,
+    sim_at: u32,
     /// External output (NDI) — Some(conf) mirrors the panel setting;
     /// `out` is Some only once the runtime loads and resources are built.
     out_conf: Option<output::Conf>,
@@ -363,8 +531,15 @@ pub struct Renderer {
     out_err: Option<(output::Conf, Instant, String)>,
     /// present/text recompiled for the output texture format.
     out_present: Option<wgpu::RenderPipeline>,
+    /// Photosensitive-safe: present.wgsl's `fs_lum` (measures the frame and
+    /// updates the limiter just before present), its 1x1 target, and the
+    /// switch as last written to `statics.lum`.
+    lum_pipe: Option<wgpu::RenderPipeline>,
+    lum_view: wgpu::TextureView,
+    safe: bool,
     out_text: Option<wgpu::RenderPipeline>,
     out_overlay: Option<wgpu::RenderPipeline>,
+    out_logo: Option<wgpu::RenderPipeline>,
     /// Transparent-background mode: no scene, alpha out (see Uniforms::misc4).
     pub transparent: bool,
 }
@@ -395,6 +570,20 @@ pub fn find_shader_dir() -> Result<PathBuf> {
         .ok_or_else(|| anyhow!("could not find a shaders/ directory containing common.wgsl"))
 }
 
+/// The accent overlays: `shaders/accents/*.wgsl`, sorted.
+pub fn accent_files(shader_dir: &Path) -> Vec<PathBuf> {
+    let mut v: Vec<PathBuf> = std::fs::read_dir(shader_dir.join("accents"))
+        .map(|rd| {
+            rd.flatten()
+                .map(|e| e.path())
+                .filter(|p| p.extension().is_some_and(|x| x == "wgsl"))
+                .collect()
+        })
+        .unwrap_or_default();
+    v.sort();
+    v
+}
+
 fn scaled(w: u32, h: u32, scale: f32) -> (u32, u32) {
     (
         ((w as f32 * scale) as u32).max(1),
@@ -402,10 +591,10 @@ fn scaled(w: u32, h: u32, scale: f32) -> (u32, u32) {
     )
 }
 
-fn dancer_tex_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
+pub fn dancer_tex_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,
-        visibility: wgpu::ShaderStages::FRAGMENT,
+        visibility: VIS,
         ty: wgpu::BindingType::Texture {
             sample_type: wgpu::TextureSampleType::Float { filterable: true },
             view_dimension: wgpu::TextureViewDimension::D2Array,
@@ -514,6 +703,7 @@ impl Renderer {
         }
         println!("Surface: {:?}, {:?}", config.present_mode, config.format);
         let layout = frame_layout(&device);
+        let sim_kit = crate::sim::SimKit::new(&device, &layout);
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("frame"),
             bind_group_layouts: &[Some(&layout)],
@@ -541,7 +731,7 @@ impl Renderer {
                 dancer_tex_entry(2),
                 wgpu::BindGroupLayoutEntry {
                     binding: 3,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    visibility: VIS,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -566,7 +756,7 @@ impl Renderer {
 
         let text_tex_entry = |binding: u32| wgpu::BindGroupLayoutEntry {
             binding,
-            visibility: wgpu::ShaderStages::FRAGMENT,
+            visibility: VIS,
             ty: wgpu::BindingType::Texture {
                 sample_type: wgpu::TextureSampleType::Float { filterable: true },
                 view_dimension: wgpu::TextureViewDimension::D2,
@@ -611,7 +801,7 @@ impl Renderer {
                 text_tex_entry(2),
                 wgpu::BindGroupLayoutEntry {
                     binding: 3,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    visibility: VIS,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -689,11 +879,94 @@ impl Renderer {
                 bloom: bloom.view(),
                 ext: &statics.ext_view,
                 vid: &statics.vid_view,
+                title: &statics.title_view,
+                logo: &statics.logo_view,
+                cam: &statics.cam_view,
+                lum: &statics.lum,
             },
         );
 
+        let acc_targets = Self::make_targets(&device, tw, th);
+        let acc_bind_groups = Self::make_bind_groups(
+            &device,
+            &layout,
+            &uniform_buf,
+            &sampler,
+            &acc_targets,
+            &FrameRes {
+                pal: &pal_view,
+                noise3: &statics.noise3_view,
+                blue: &statics.blue_view,
+                repeat: &statics.repeat,
+                bloom: bloom.view(),
+                ext: &statics.ext_view,
+                vid: &statics.vid_view,
+                title: &statics.title_view,
+                logo: &statics.logo_view,
+                cam: &statics.cam_view,
+                lum: &statics.lum,
+            },
+        );
+
+        let acc_mix_bind_groups = Self::make_mix_bind_groups(
+            &device,
+            &layout,
+            &uniform_buf,
+            &sampler,
+            &targets,
+            &acc_targets,
+            &FrameRes {
+                pal: &pal_view,
+                noise3: &statics.noise3_view,
+                blue: &statics.blue_view,
+                repeat: &statics.repeat,
+                bloom: bloom.view(),
+                ext: &statics.ext_view,
+                vid: &statics.vid_view,
+                title: &statics.title_view,
+                logo: &statics.logo_view,
+                cam: &statics.cam_view,
+                lum: &statics.lum,
+            },
+        );
+
+        let echo_targets = Self::make_targets(&device, tw, th);
+        let (echo_bgs, echo_pass_bgs) = {
+            let res = FrameRes {
+                pal: &pal_view,
+                noise3: &statics.noise3_view,
+                blue: &statics.blue_view,
+                repeat: &statics.repeat,
+                bloom: bloom.view(),
+                ext: &statics.ext_view,
+                vid: &statics.vid_view,
+                title: &statics.title_view,
+                logo: &statics.logo_view,
+                cam: &statics.cam_view,
+                lum: &statics.lum,
+            };
+            (
+                Self::make_bind_groups(&device, &layout, &uniform_buf, &sampler, &echo_targets, &res),
+                Self::make_mix_bind_groups(&device, &layout, &uniform_buf, &sampler, &echo_targets, &targets, &res),
+            )
+        };
+
+        let lum_view = device
+                .create_texture(&wgpu::TextureDescriptor {
+                    label: Some("safe lum"),
+                    size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: LUM_FORMAT,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    view_formats: &[],
+                })
+                .create_view(&Default::default());
         let shader_dir = find_shader_dir()?;
         println!("Shaders: {}", shader_dir.display());
+        let echo_path = shader_dir.join("echo.wgsl");
+        let accent_path = shader_dir.join("accent.wgsl");
         let present_path = shader_dir.join("present.wgsl");
         let dancer_path = shader_dir.join("dancer.wgsl");
         let text_path = shader_dir.join("text.wgsl");
@@ -726,9 +999,40 @@ impl Renderer {
             dancer: Scene {
                 kind: Kind::Dancer,
                 name: "dancer".into(),
+                path: dancer_path.clone(),
+                ..Default::default()
+            },
+            particles: Scene {
+                kind: Kind::Particles,
+                name: "particles".into(),
                 path: dancer_path,
                 ..Default::default()
             },
+            accent_mix: Scene {
+                kind: Kind::AccentMix,
+                name: "accent".into(),
+                path: accent_path,
+                ..Default::default()
+            },
+            accents: Vec::new(),
+            acc_targets,
+            acc_bind_groups,
+            acc_mix_bind_groups,
+            acc_cur: 0,
+            accent: None,
+            acc_scene: None,
+            echo_pass: Scene {
+                kind: Kind::Echo,
+                name: "echo".into(),
+                path: echo_path,
+                ..Default::default()
+            },
+            echo_targets,
+            echo_bgs,
+            echo_pass_bgs,
+            echo_cur: 0,
+            echo: 0.0,
+            echo_live: false,
             dancer_layout,
             dancer_pipeline_layout,
             dancer_buf,
@@ -748,6 +1052,12 @@ impl Renderer {
             overlay: Scene {
                 kind: Kind::Overlay,
                 name: "overlay".into(),
+                path: overlay_path.clone(),
+                ..Default::default()
+            },
+            logo_particles: Scene {
+                kind: Kind::LogoParticles,
+                name: "logo particles".into(),
                 path: overlay_path,
                 ..Default::default()
             },
@@ -771,12 +1081,19 @@ impl Renderer {
             bloom,
             bloom_amt: 0.0,
             frame: 0,
+            sim_kit,
+            sim: None,
+            sim_at: 0,
             out_conf: None,
             out: None,
             out_err: None,
             out_present: None,
+            lum_pipe: None,
+            lum_view,
+            safe: false,
             out_text: None,
             out_overlay: None,
+            out_logo: None,
             transparent: false,
         };
         r.reload_shaders(true);
@@ -821,7 +1138,7 @@ impl Renderer {
     ) -> [wgpu::BindGroup; 2] {
         let make = |t: &wgpu::Texture| {
             let view = t.create_view(&Default::default());
-            let [e3, e4, e5, e6, e7, e8, e9] = res.entries();
+            let [e3, e4, e5, e6, e7, e8, e9, e10, e11, e12, e13] = res.entries();
             device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: None,
                 layout,
@@ -845,10 +1162,46 @@ impl Renderer {
                     e7,
                     e8,
                     e9,
+                    e10,
+                    e11,
+                    e12,
+                    e13,
                 ],
             })
         };
         [make(&targets[0]), make(&targets[1])]
+    }
+
+    /// The accent mix pass's bind groups, `[accent][main]`: prev_tex is that
+    /// main target (the base's last frame) and ext_tex that accent target
+    /// (accent.wgsl).
+    pub fn make_mix_bind_groups(
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+        uniform_buf: &wgpu::Buffer,
+        sampler: &wgpu::Sampler,
+        targets: &[wgpu::Texture; 2],
+        acc_targets: &[wgpu::Texture; 2],
+        res: &FrameRes,
+    ) -> [[wgpu::BindGroup; 2]; 2] {
+        let make = |t: &wgpu::Texture| {
+            let ext = t.create_view(&Default::default());
+            let r = FrameRes {
+                pal: res.pal,
+                noise3: res.noise3,
+                blue: res.blue,
+                repeat: res.repeat,
+                bloom: res.bloom,
+                ext: &ext,
+                vid: res.vid,
+                title: res.title,
+                logo: res.logo,
+                cam: res.cam,
+                lum: res.lum,
+            };
+            Self::make_bind_groups(device, layout, uniform_buf, sampler, targets, &r)
+        };
+        [make(&acc_targets[0]), make(&acc_targets[1])]
     }
 
     pub fn resize(&mut self, w: u32, h: u32) {
@@ -874,6 +1227,10 @@ impl Renderer {
             bloom: self.bloom.view(),
             ext: &self.statics.ext_view,
                 vid: &self.statics.vid_view,
+                title: &self.statics.title_view,
+                logo: &self.statics.logo_view,
+                cam: &self.statics.cam_view,
+                lum: &self.statics.lum,
         };
         self.bind_groups = Self::make_bind_groups(
             &self.device,
@@ -883,8 +1240,52 @@ impl Renderer {
             &self.targets,
             &res,
         );
+        self.acc_targets = Self::make_targets(&self.device, tw, th);
+        self.acc_bind_groups = Self::make_bind_groups(
+            &self.device,
+            &self.layout,
+            &self.uniform_buf,
+            &self.sampler,
+            &self.acc_targets,
+            &res,
+        );
+        self.acc_mix_bind_groups = Self::make_mix_bind_groups(
+            &self.device,
+            &self.layout,
+            &self.uniform_buf,
+            &self.sampler,
+            &self.targets,
+            &self.acc_targets,
+            &res,
+        );
+        self.acc_scene = None;
+        self.echo_targets = Self::make_targets(&self.device, tw, th);
+        self.echo_bgs = Self::make_bind_groups(
+            &self.device,
+            &self.layout,
+            &self.uniform_buf,
+            &self.sampler,
+            &self.echo_targets,
+            &res,
+        );
+        self.echo_pass_bgs = Self::make_mix_bind_groups(
+            &self.device,
+            &self.layout,
+            &self.uniform_buf,
+            &self.sampler,
+            &self.echo_targets,
+            &self.targets,
+            &res,
+        );
+        self.echo_live = false;
         if let Some(o) = self.out.as_mut() {
-            o.rebind(&self.device, &self.layout, &self.sampler, &self.targets, &res);
+            let t = [
+                &self.targets[0],
+                &self.targets[1],
+                &self.echo_targets[0],
+                &self.echo_targets[1],
+            ];
+            o.rebind(&self.device, &self.layout, &self.sampler, t, &res);
         }
     }
 
@@ -914,6 +1315,46 @@ impl Renderer {
             },
         );
         self.pal_name = name.to_string();
+    }
+
+    /// The palette on screen (a name, or the `ART` fade's key).
+    pub fn palette_name(&self) -> &str {
+        &self.pal_name
+    }
+
+    /// Upload a LUT built elsewhere (the `ART` palette's fade) under `id`;
+    /// `set_palette` with any other name replaces it.
+    /// Photosensitive-safe on or off. Turning it on restarts the limiter
+    /// from the next frame's level; off sets the gain back to 1.
+    pub fn set_safe(&mut self, on: bool) {
+        if on != self.safe {
+            self.safe = on;
+            self.queue
+                .write_buffer(&self.statics.lum, 0, bytemuck::cast_slice(&gfx::lum_init(on)));
+        }
+    }
+
+    pub fn set_palette_lut(&mut self, id: &str, lut: &palettes::Lut) {
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.pal_tex,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            lut,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some((palettes::LUT_SIZE * 4) as u32),
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d {
+                width: palettes::LUT_SIZE as u32,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        self.pal_name = id.to_string();
     }
 
     /// The size the surface was last configured with.
@@ -1002,6 +1443,22 @@ impl Renderer {
     }
 
     /// Upload an external frame (RGBA8, EXT_W x EXT_H) for `ext_tex`.
+    /// Draw the now-playing line into the title texture; returns the width
+    /// fraction for `u.look4.w` (gfx::Statics::upload_title).
+    /// Put a webcam frame into the camera texture (gfx::Statics::upload_cam).
+    pub fn upload_cam(&self, rgba: &[u8]) {
+        self.statics.upload_cam(&self.queue, rgba);
+    }
+
+    /// Put an image into the logo scene's texture (gfx::Statics::upload_logo).
+    pub fn upload_logo(&self, img: &image::RgbaImage) {
+        self.statics.upload_logo(&self.queue, img);
+    }
+
+    pub fn upload_title(&self, bmp: &crate::text::TextBitmap) -> f32 {
+        self.statics.upload_title(&self.queue, bmp)
+    }
+
     pub fn upload_external(&self, rgba: &[u8]) {
         use crate::gfx::{EXT_H, EXT_W};
         if rgba.len() != (EXT_W * EXT_H * 4) as usize {
@@ -1043,6 +1500,27 @@ impl Renderer {
 
     /// The dancer overlay stays off this scene: it has its own figures —
     /// robots and androids (tagged `character`) or a crowd (`@no-dancer`).
+    /// The echo post effect's amount 0..1 (0 = off), from the next frame.
+    pub fn set_echo(&mut self, amt: f32) {
+        self.echo = amt;
+    }
+
+    /// The scene leaves its own trails (reads `prev()`).
+    pub fn scene_feedback(&self, i: usize) -> bool {
+        self.scenes.get(i).is_some_and(|s| s.feedback)
+    }
+
+    /// How many accent overlays loaded (`shaders/accents/`).
+    pub fn accent_count(&self) -> usize {
+        self.accents.len()
+    }
+
+    /// Set (or clear) the accent layer: an accent index (`accent_count`)
+    /// and its amount 0..1, drawn from the next frame (see accent.wgsl).
+    pub fn set_accent(&mut self, accent: Option<(usize, f32)>) {
+        self.accent = accent;
+    }
+
     pub fn scene_no_dancer(&self, i: usize) -> bool {
         self.scenes.get(i).is_some_and(|s| {
             s.no_dancer || crate::styles::catalog().tags.has(&s.name, "character")
@@ -1089,14 +1567,42 @@ impl Renderer {
             }
         }
 
+        // Accent overlays (shaders/accents/*.wgsl).
+        for p in accent_files(&self.shader_dir) {
+            if !self.accents.iter().any(|s| s.path == p) {
+                let name = p.file_stem().unwrap().to_string_lossy().into_owned();
+                self.accents.push(Scene {
+                    name,
+                    path: p,
+                    ..Default::default()
+                });
+            }
+        }
+
         let mut scenes = std::mem::take(&mut self.scenes);
+        let mut accents = std::mem::take(&mut self.accents);
         let mut present = std::mem::take(&mut self.present);
         let mut dancer = std::mem::take(&mut self.dancer);
+        let mut particles = std::mem::take(&mut self.particles);
+        let mut accent_mix = std::mem::take(&mut self.accent_mix);
+        let mut echo_pass = std::mem::take(&mut self.echo_pass);
         let mut text = std::mem::take(&mut self.text);
         let mut overlay = std::mem::take(&mut self.overlay);
+        let mut logo_particles = std::mem::take(&mut self.logo_particles);
+        let mut sim_changed = false;
         for s in scenes
             .iter_mut()
-            .chain([&mut present, &mut dancer, &mut text, &mut overlay])
+            .chain(accents.iter_mut())
+            .chain([
+                &mut present,
+                &mut dancer,
+                &mut particles,
+                &mut accent_mix,
+                &mut echo_pass,
+                &mut text,
+                &mut overlay,
+                &mut logo_particles,
+            ])
         {
             let m = mtime(&s.path);
             if !common_changed && m == s.mtime {
@@ -1105,10 +1611,15 @@ impl Renderer {
             s.mtime = m;
             // `// @heavy` in the file header gates the scene to stronger GPUs;
             // `@bloom` / `@tonemap` pick its post settings.
+            let mut npart = 0;
+            let mut nsim = 0;
             if let Ok(body) = std::fs::read_to_string(&s.path) {
                 (s.heavy, s.bloom, s.tonemap) = header_tags(&body);
                 s.title = header_title(&body);
                 s.no_dancer = header_no_dancer(&body);
+                s.feedback = body.contains("prev(");
+                npart = header_particles(&body);
+                nsim = crate::sim::header_sim(&body);
             }
             match self.compile(&common, &s.path, s.kind) {
                 Ok(p) => {
@@ -1116,6 +1627,51 @@ impl Renderer {
                         println!("reloaded {}", s.name);
                     }
                     s.pipeline = Some(p);
+                    if s.kind == Kind::Scene {
+                        s.parts = if npart > 0 {
+                            match compile_particles(&self.device, &common, &s.path, &self.pipeline_layout) {
+                                Ok(pp) => Some((pp, npart)),
+                                Err(e) => {
+                                    eprintln!("shader {} (particles) failed:\n{e}", s.name);
+                                    None
+                                }
+                            }
+                        } else {
+                            None
+                        };
+                        s.sim = None;
+                        if nsim > 0 {
+                            sim_changed = true;
+                            let cs = crate::sim::compile_compute(&self.device, &common, &s.path, &self.sim_kit);
+                            let draw = compile_pipeline_entries(
+                                &self.device,
+                                &common,
+                                &s.path,
+                                &self.sim_kit.draw_pl,
+                                SCENE_FORMAT,
+                                Some(GLOW_BLEND),
+                                ("vs_particles", "fs_particles"),
+                            );
+                            match (cs, draw) {
+                                (Ok(c), Ok(d)) => s.sim = Some((c, d, nsim)),
+                                (Err(e), _) | (_, Err(e)) => eprintln!("shader {} (sim) failed:\n{e}", s.name),
+                            }
+                        }
+                    }
+                    if s.kind == Kind::Present {
+                        match compile_pipeline_entries(
+                            &self.device,
+                            &common,
+                            &s.path,
+                            &self.pipeline_layout,
+                            LUM_FORMAT,
+                            None,
+                            ("vs_main", "fs_lum"),
+                        ) {
+                            Ok(p) => self.lum_pipe = Some(p),
+                            Err(e) => eprintln!("shader {} (fs_lum) failed:\n{e}", s.name),
+                        }
+                    }
                     // The output tap re-runs present/text into a BGRA target —
                     // keep sibling pipelines at OUT_FORMAT alongside.
                     let (layout, blend) = match s.kind {
@@ -1128,6 +1684,21 @@ impl Renderer {
                             &self.ov_pipeline_layout,
                             Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                         ),
+                        Kind::LogoParticles => {
+                            match compile_pipeline_entries(
+                                &self.device,
+                                &common,
+                                &s.path,
+                                &self.ov_pipeline_layout,
+                                OUT_FORMAT,
+                                Some(GLOW_BLEND),
+                                ("vs_logo", "fs_logo"),
+                            ) {
+                                Ok(p) => self.out_logo = Some(p),
+                                Err(e) => eprintln!("shader {} (output) failed:\n{e}", s.name),
+                            }
+                            continue;
+                        }
                         _ => continue,
                     };
                     match self.compile_into(&common, &s.path, layout, OUT_FORMAT, blend) {
@@ -1145,14 +1716,48 @@ impl Renderer {
             }
         }
         self.scenes = scenes;
+        self.accents = accents;
         self.present = present;
         self.dancer = dancer;
+        self.particles = particles;
+        self.accent_mix = accent_mix;
+        self.echo_pass = echo_pass;
         self.text = text;
         self.overlay = overlay;
+        self.logo_particles = logo_particles;
+        if sim_changed {
+            // A recompiled sim starts its particles afresh.
+            self.sim = None;
+        }
     }
 
     fn compile(&self, common: &str, path: &Path, kind: Kind) -> Result<wgpu::RenderPipeline> {
+        if kind == Kind::LogoParticles {
+            return compile_pipeline_entries(
+                &self.device,
+                common,
+                path,
+                &self.ov_pipeline_layout,
+                self.config.format,
+                Some(GLOW_BLEND),
+                ("vs_logo", "fs_logo"),
+            );
+        }
+        if kind == Kind::Particles {
+            return compile_pipeline_entries(
+                &self.device,
+                common,
+                path,
+                &self.dancer_pipeline_layout,
+                SCENE_FORMAT,
+                Some(GLOW_BLEND),
+                ("vs_particles", "fs_particles"),
+            );
+        }
         let (format, layout, blend) = match kind {
+            Kind::Particles | Kind::LogoParticles => unreachable!(),
+            Kind::AccentMix => (SCENE_FORMAT, &self.pipeline_layout, Some(ADD_BLEND)),
+            Kind::Echo => (SCENE_FORMAT, &self.pipeline_layout, None),
             Kind::Scene => (SCENE_FORMAT, &self.pipeline_layout, None),
             Kind::Present => (self.config.format, &self.pipeline_layout, None),
             Kind::Dancer => (
@@ -1421,6 +2026,19 @@ impl Renderer {
         uu.tonemap = tonemap;
         uu.frame = (self.frame % 4096) as f32;
         uu.misc4[0] = if self.transparent { 1.0 } else { 0.0 };
+        // The accent layer to draw this frame: a compiled scene, faded in.
+        let acc = self.accent.filter(|&(i, amt)| {
+            amt > 0.004
+                && !self.transparent
+                && self.accent_mix.pipeline.is_some()
+                && self.accents.get(i).is_some_and(|s| s.pipeline.is_some())
+        });
+        uu.misc4[2] = acc.map_or(0.0, |(_, a)| a);
+        let echo_on = self.echo > 0.004 && !self.transparent && self.echo_pass.pipeline.is_some();
+        uu.misc4[3] = if echo_on { self.echo } else { 0.0 };
+        if acc.is_none() {
+            self.acc_scene = None;
+        }
         let u = &uu;
         self.queue
             .write_buffer(&self.uniform_buf, 0, bytemuck::bytes_of(u));
@@ -1490,7 +2108,77 @@ impl Renderer {
         let next = 1 - prev;
         let mut enc = self.device.create_command_encoder(&Default::default());
 
+        // Accent layer: its scene into its own feedback pair first. A new
+        // accent starts from black (the last one's trails would ghost in).
+        if let Some((ai, _)) = acc {
+            let fresh = self.acc_scene != Some(ai);
+            self.acc_scene = Some(ai);
+            let an = 1 - self.acc_cur;
+            if fresh {
+                let v = self.acc_targets[self.acc_cur].create_view(&Default::default());
+                enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("accent clear"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &v,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    ..Default::default()
+                });
+            }
+            let v = self.acc_targets[an].create_view(&Default::default());
+            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("accent"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &v,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: if fresh {
+                            wgpu::LoadOp::Clear(wgpu::Color::BLACK)
+                        } else {
+                            wgpu::LoadOp::Load
+                        },
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+            if let Some(p) = self.accents[ai].pipeline.as_ref() {
+                pass.set_pipeline(p);
+                pass.set_bind_group(0, &self.acc_bind_groups[self.acc_cur], &[]);
+                pass.draw(0..3, 0..1);
+            }
+            drop(pass);
+            self.acc_cur = an;
+        }
+
+        // Sim scenes: step the particles (respawned on a cut-in or a gap).
+        let sim_draw = match (self.scenes.get(scene).and_then(|s| s.sim.clone()), self.transparent) {
+            (Some((cs, dp, n)), false) => {
+                let same = matches!(&self.sim, Some((i, b)) if *i == scene && b.count == n);
+                if !same {
+                    self.sim = Some((scene, crate::sim::SimBuf::new(&self.device, &self.sim_kit, n)));
+                }
+                let fresh = !same || self.sim_at.wrapping_add(1) != self.frame;
+                if let Some((_, b)) = self.sim.as_mut() {
+                    b.step(&self.queue, &mut enc, &cs, &self.bind_groups[prev], u, fresh);
+                }
+                self.sim_at = self.frame;
+                Some((dp, n))
+            }
+            _ => None,
+        };
         let scene_pipe = self.scenes.get(scene).and_then(|s| s.pipeline.as_ref());
+        // Dancer slots whose Disintegrate particles are out (main, or all
+        // three in the canon).
+        let burst_slots = dancer
+            .filter(|d| d.burst > 0.0)
+            .map(|d| if d.count > 1.5 && d.canon_fade > 0.001 { 3 } else { 1 });
         if scene_pipe.is_some() || self.transparent {
             let view = self.targets[next].create_view(&Default::default());
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1516,6 +2204,23 @@ impl Renderer {
             if let (Some(pipeline), false) = (scene_pipe, self.transparent) {
                 pass.set_pipeline(pipeline);
                 pass.draw(0..3, 0..1);
+                // Particle scenes: their dots over their own background.
+                if let Some((pp, n)) = self.scenes.get(scene).and_then(|s| s.parts.as_ref()) {
+                    pass.set_pipeline(pp);
+                    pass.draw(0..3, 0..*n);
+                }
+                if let (Some((dp, n)), Some((_, b))) = (&sim_draw, &self.sim) {
+                    pass.set_pipeline(dp);
+                    pass.set_bind_group(1, b.draw_group(), &[]);
+                    pass.draw(0..3, 0..*n);
+                }
+            }
+            // The accent's newest frame, added under the dancer.
+            if let (Some(_), Some(mix)) = (acc, self.accent_mix.pipeline.as_ref()) {
+                pass.set_pipeline(mix);
+                pass.set_bind_group(0, &self.acc_mix_bind_groups[self.acc_cur][prev], &[]);
+                pass.draw(0..3, 0..1);
+                pass.set_bind_group(0, &self.bind_groups[prev], &[]);
             }
             if let (Some(_), Some(dancer), Some(dancer_bg)) = (
                 dancer,
@@ -1525,13 +2230,98 @@ impl Renderer {
                 pass.set_pipeline(dancer);
                 pass.set_bind_group(1, dancer_bg, &[]);
                 pass.draw(0..3, 0..1);
+                // Disintegrate: her particles, only while a burst is on.
+                if let (Some(n), Some(pp)) = (burst_slots, self.particles.pipeline.as_ref()) {
+                    pass.set_pipeline(pp);
+                    pass.draw(0..6, 0..BURST_PARTICLES * n);
+                }
             }
             drop(pass);
             self.current = next;
-            if self.bloom_amt > 0.0 {
+            // The bloom chain also feeds the Anamorphic effect's flares.
+            if self.bloom_amt > 0.0 || (u.fx - crate::config::Fx::Anamorphic.index()).abs() < 0.5 {
                 let src = self.targets[next].create_view(&Default::default());
                 self.bloom.encode(&self.device, &mut enc, &src);
             }
+        }
+
+        // Echo: this frame max-blended with the last echo into the echo
+        // pair; present then reads the echo. A fresh echo starts from black
+        // (max-blend: that is just this frame).
+        let echo_src = if let (true, Some(ep)) = (echo_on, self.echo_pass.pipeline.as_ref()) {
+            let en = 1 - self.echo_cur;
+            if !self.echo_live {
+                let v = self.echo_targets[self.echo_cur].create_view(&Default::default());
+                enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("echo clear"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &v,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    ..Default::default()
+                });
+            }
+            let v = self.echo_targets[en].create_view(&Default::default());
+            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("echo"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &v,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+            pass.set_pipeline(ep);
+            pass.set_bind_group(0, &self.echo_pass_bgs[self.current][self.echo_cur], &[]);
+            pass.draw(0..3, 0..1);
+            drop(pass);
+            self.echo_cur = en;
+            self.echo_live = true;
+            Some(en)
+        } else {
+            self.echo_live = false;
+            None
+        };
+        // What present reads: the echo when it ran, else the scene target.
+        let present_bg = match echo_src {
+            Some(e) => &self.echo_bgs[e],
+            None => &self.bind_groups[self.current],
+        };
+        let out_src = echo_src.map_or(self.current, |e| 2 + e);
+        // The logo's Disintegrate dust: only while a burst is on and the
+        // logo shows.
+        let logo_burst = overlay.is_some_and(|o| {
+            o.burst[0] > 0.0 && o.layers[crate::overlay::L_LOGO].uvx[2] > 0.004
+        });
+
+        // Photosensitive-safe: measure the frame present is about to draw
+        // and update the limiter's gain (present.wgsl fs_lum).
+        if let (true, Some(lp)) = (self.safe, self.lum_pipe.as_ref()) {
+            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("safe lum"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.lum_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Discard,
+                    },
+                })],
+                ..Default::default()
+            });
+            pass.set_pipeline(lp);
+            pass.set_bind_group(0, present_bg, &[]);
+            pass.draw(0..3, 0..1);
         }
 
         let view = frame.texture.create_view(&Default::default());
@@ -1550,22 +2340,26 @@ impl Renderer {
                 ..Default::default()
             });
             pass.set_pipeline(self.present.pipeline.as_ref().unwrap());
-            pass.set_bind_group(0, &self.bind_groups[self.current], &[]);
+            pass.set_bind_group(0, present_bg, &[]);
             pass.draw(0..3, 0..1);
             if let (Some(_), Some(op), Some(obg)) =
                 (overlay, self.overlay.pipeline.as_ref(), self.ov_bg.as_ref())
             {
                 pass.set_pipeline(op);
-                pass.set_bind_group(0, &self.bind_groups[self.current], &[]);
+                pass.set_bind_group(0, present_bg, &[]);
                 pass.set_bind_group(1, obg, &[]);
                 pass.draw(0..3, 0..1);
+                if let (true, Some(lp)) = (logo_burst, self.logo_particles.pipeline.as_ref()) {
+                    pass.set_pipeline(lp);
+                    pass.draw(0..6, 0..LOGO_PARTICLES);
+                }
             }
             // Text rides on top of the finished frame — post FX can't distort it.
             if let (Some(_), Some(text), Some(text_bg)) =
                 (text, self.text.pipeline.as_ref(), self.text_bg.as_ref())
             {
                 pass.set_pipeline(text);
-                pass.set_bind_group(0, &self.bind_groups[self.current], &[]);
+                pass.set_bind_group(0, present_bg, &[]);
                 pass.set_bind_group(1, text_bg, &[]);
                 pass.draw(0..3, 0..1);
             }
@@ -1600,21 +2394,25 @@ impl Renderer {
                     ..Default::default()
                 });
                 pass.set_pipeline(pipe);
-                pass.set_bind_group(0, &o.bind_groups[self.current], &[]);
+                pass.set_bind_group(0, &o.bind_groups[out_src], &[]);
                 pass.draw(0..3, 0..1);
                 if let (Some(_), Some(op), Some(obg)) =
                     (overlay, self.out_overlay.as_ref(), self.ov_bg.as_ref())
                 {
                     pass.set_pipeline(op);
-                    pass.set_bind_group(0, &o.bind_groups[self.current], &[]);
+                    pass.set_bind_group(0, &o.bind_groups[out_src], &[]);
                     pass.set_bind_group(1, obg, &[]);
                     pass.draw(0..3, 0..1);
+                    if let (true, Some(lp)) = (logo_burst, self.out_logo.as_ref()) {
+                        pass.set_pipeline(lp);
+                        pass.draw(0..6, 0..LOGO_PARTICLES);
+                    }
                 }
                 if let (Some(_), Some(tp), Some(tbg)) =
                     (text, self.out_text.as_ref(), self.text_bg.as_ref())
                 {
                     pass.set_pipeline(tp);
-                    pass.set_bind_group(0, &o.bind_groups[self.current], &[]);
+                    pass.set_bind_group(0, &o.bind_groups[out_src], &[]);
                     pass.set_bind_group(1, tbg, &[]);
                     pass.draw(0..3, 0..1);
                 }
@@ -1685,7 +2483,12 @@ impl Renderer {
             &self.device,
             &self.layout,
             &self.sampler,
-            &self.targets,
+            [
+                &self.targets[0],
+                &self.targets[1],
+                &self.echo_targets[0],
+                &self.echo_targets[1],
+            ],
             &FrameRes {
                 pal: &self.pal_view,
                 noise3: &self.statics.noise3_view,
@@ -1694,6 +2497,10 @@ impl Renderer {
                 bloom: self.bloom.view(),
                 ext: &self.statics.ext_view,
                 vid: &self.statics.vid_view,
+                title: &self.statics.title_view,
+                logo: &self.statics.logo_view,
+                cam: &self.statics.cam_view,
+                lum: &self.statics.lum,
             },
             c.clone(),
         ) {
@@ -1733,6 +2540,8 @@ impl Renderer {
     /// controls, so its live tile matches the output).
     pub fn thumbnail(&mut self, scene: usize, w: u32, h: u32, look: [f32; 4]) -> Option<Vec<u8>> {
         let pipeline = self.scenes.get(scene)?.pipeline.clone()?;
+        let parts = self.scenes.get(scene)?.parts.clone();
+        let sim = self.scenes.get(scene)?.sim.clone();
         let present = self.present.pipeline.clone()?;
         let mut spectrum = [0.35f32; SPECTRUM_BINS];
         for (i, v) in spectrum.iter_mut().enumerate() {
@@ -1780,6 +2589,9 @@ impl Renderer {
             clock4: [8.0, 8.0, 8.0, 8.0],
             misc4: [0.0; 4],
             look4: look,
+            cam4: [0.0; 4],
+            roto4: [1.0, 0.5, 0.35, 4.0],
+            roto5: [0.4, 0.0, 0.0, 0.0],
         };
         self.queue
             .write_buffer(&self.uniform_buf, 0, bytemuck::bytes_of(&u));
@@ -1820,6 +2632,10 @@ impl Renderer {
                 bloom: self.bloom.view(),
                 ext: &self.statics.ext_view,
                 vid: &self.statics.vid_view,
+                title: &self.statics.title_view,
+                logo: &self.statics.logo_view,
+                cam: &self.statics.cam_view,
+                lum: &self.statics.lum,
             },
         );
         // The present pipeline is built for the surface format (usually
@@ -1827,6 +2643,17 @@ impl Renderer {
         let out_fmt = self.config.format;
         let out = mk(out_fmt);
 
+        // A sim scene: spawn its particles and let them run for two
+        // seconds of the canned frame first.
+        let sim_buf = sim.as_ref().map(|(cs, _, n)| {
+            let mut b = crate::sim::SimBuf::new(&self.device, &self.sim_kit, *n);
+            for i in 0..120 {
+                let mut e = self.device.create_command_encoder(&Default::default());
+                b.step(&self.queue, &mut e, cs, &bgs[0], &u, i == 0);
+                self.queue.submit([e.finish()]);
+            }
+            b
+        });
         let mut enc = self.device.create_command_encoder(&Default::default());
         {
             let view = targets[1].create_view(&Default::default());
@@ -1846,6 +2673,15 @@ impl Renderer {
             pass.set_pipeline(&pipeline);
             pass.set_bind_group(0, &bgs[0], &[]);
             pass.draw(0..3, 0..1);
+            if let Some((pp, n)) = &parts {
+                pass.set_pipeline(pp);
+                pass.draw(0..3, 0..*n);
+            }
+            if let (Some((_, dp, n)), Some(b)) = (&sim, &sim_buf) {
+                pass.set_pipeline(dp);
+                pass.set_bind_group(1, b.draw_group(), &[]);
+                pass.draw(0..3, 0..*n);
+            }
         }
         {
             let view = out.create_view(&Default::default());
@@ -1924,7 +2760,7 @@ impl Renderer {
 }
 
 /// An sRGB RGBA8 texture filled with `px` (straight alpha).
-fn rgba_texture(
+pub fn rgba_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     w: u32,
@@ -1967,15 +2803,28 @@ fn rgba_texture(
 
 /// Compile `common + path` into a fullscreen-triangle pipeline for `format`.
 pub fn compile_pipeline(
-device: &wgpu::Device,
+    device: &wgpu::Device,
     common: &str,
     path: &Path,
     layout: &wgpu::PipelineLayout,
     format: wgpu::TextureFormat,
     blend: Option<wgpu::BlendState>,
 ) -> Result<wgpu::RenderPipeline> {
+    compile_pipeline_entries(device, common, path, layout, format, blend, ("vs_main", "fs_main"))
+}
+
+/// `compile_pipeline` with explicit (vertex, fragment) entry points.
+pub fn compile_pipeline_entries(
+    device: &wgpu::Device,
+    common: &str,
+    path: &Path,
+    layout: &wgpu::PipelineLayout,
+    format: wgpu::TextureFormat,
+    blend: Option<wgpu::BlendState>,
+    (vs, fs): (&str, &str),
+) -> Result<wgpu::RenderPipeline> {
     let body = std::fs::read_to_string(path)?;
-    let src = format!("{common}\n{body}");
+    let src = crate::sim::scene_src(common, &body);
     // Validate with naga first to get readable errors instead of a panic.
     let module = wgpu::naga::front::wgsl::parse_str(&src)
         .map_err(|e| anyhow!(e.emit_to_string(&src)))?;
@@ -1996,7 +2845,7 @@ device: &wgpu::Device,
             layout: Some(layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: Some("vs_main"),
+                entry_point: Some(vs),
                 compilation_options: Default::default(),
                 buffers: &[],
             },
@@ -2005,7 +2854,7 @@ device: &wgpu::Device,
             multisample: Default::default(),
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: Some("fs_main"),
+                entry_point: Some(fs),
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
                     format,

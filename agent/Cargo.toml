@@ -20,8 +20,13 @@ pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
 sha2 = "0.10"
 # Tray icon + the small settings window.
 tray-icon = "0.21"
+# Covers found on the DJ machine (../src/artfind.rs), shrunk and sent as a
+# base64 JPEG for the rig's `art` palette.
+lofty = "0.22"
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
+base64 = "0.23.1"
 eframe = "0.36"
 
 [target.'cfg(windows)'.dependencies]
 # SMTC media session (Spotify, Apple Music for Windows, browsers…).
-windows = { version = "0.62", features = ["Media_Control", "Foundation"] }
+windows = { version = "0.62", features = ["Media_Control", "Foundation", "Storage_Streams"] }

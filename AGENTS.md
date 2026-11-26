@@ -241,6 +241,7 @@ cargo run --release -- --snap x --snap-calm 1        # preview breakdown (no dru
 cargo run --release -- --snap aurora --snap-dancer comic --snap-clip stock_disco   # a dancer look over a scene (name or index; default clip = first)
 cargo run --release -- --nowplaying       # prints what each now-playing source sees
 cargo run --release -- --list-devices     # capture devices (names for --device / the Audio in picker)
+cargo run --release -- --list-cameras     # webcams (names for Settings > Camera); opens none
 cargo run --release -- --probe-audio [name]   # capture ~6 s, print band peaks + BPM; exits nonzero on silence
 cargo run --release -- --beats track.flac     # onset grid vs Beat This! grid + timings (TRIPPIN_BEATS_DEBUG=1: per-30 s tempo)
 cargo run --release -- --beat-eval track.flac [from-to]   # score the live beat tracker + phrasing on a file (see §7 "Live beat tracking")
@@ -260,6 +261,39 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   `slow` from main while their calm pools require it. `styles::narrow(.., calm)`
   swaps pools; filtering one from the other finds nothing (the bug the Windows test
   caught). The render loop passes `style_calm` (0.7 in / 0.3 out) for the director's list.
+- **Disintegrate** (`dancer::Burst`, `vs_particles` in dancer.wgsl): the
+  dancer's particle burst is *stateless*: each of 160x320 particles per slot
+  is a function of its mask cell, the beat-timed envelope and `u.flow`, drawn
+  as instanced quads by a second entry point in dancer.wgsl
+  (`render::compile_pipeline_entries`, additive `GLOW_BLEND`), so group(0)
+  and the dancer group are `VERTEX_FRAGMENT` (`render::VIS`). The body hides
+  per cell with the same `burst_local` hash, so particles and body hand over
+  exactly. Push outward *proportional to the distance from her centre*: a
+  fixed-length radial push hollowed the cloud. `--snap-burst <level>` /
+  `--snap-burst-at <s>` render it; 0.02 ms at 1080p.
+- **Accent layer** (`accent.rs`, `Renderer::set_accent`, accent.wgsl): a
+  second scene in its own feedback pair (`acc_targets`), added into the main
+  target before the dancer. The mix pass binds the accent as `ext_tex`
+  (binding 8) and the base's last frame as `prev_tex` in bind groups of its
+  own (`make_mix_bind_groups`, `[accent][main]`); the scene pass keeps the
+  real Unity frame. It is screen-like (`1 - base luminance`, read wide so the
+  accent's own lights can't dim themselves): added flat, it washed plasma out
+  and vanished into glacier_cave. Accents are purpose-built overlays in
+  `shaders/accents/` (`render::accent_files`, never in the rotation, no tags):
+  borrowed scenes read as odd (owner) and centred ones (polar_bloom,
+  eq_round) as stickers. Many tiny sparks read as noise and a full-frame grid
+  of motes as blue static: give overlays few, soft, big lights, or a shape
+  (the swarm's cloud). Off by default.
+- **Echo stretches radial strokes into spikes:** its outward drift turned the
+  comic look's action lines into long white spikes, so `comic_lines` fades
+  out with `u.misc4.w` (the echo amount, readable by any shader).
+- **Echo** (`echo.rs`, echo.wgsl, `Renderer::set_echo`): whole-frame
+  feedback in its own pair (`echo_targets`), after scene + accent + dancer;
+  present (and the output tap, whose `bind_groups` are now
+  `[main0, main1, echo0, echo1]`) reads the echo when it ran. Max-blend,
+  not additive, so it can't accumulate. Per-frame zoom/turn/decay are
+  scaled by `u.dt`. Off on flight scenes and on scenes whose source reads
+  `prev(` (`Scene::feedback`): trails of trails smear.
 - **Dancer looks** are `dancer::STYLES` (shadow, neon, strobe, comic, wire); the
   index is stored in settings, timeline cues, AI plans and the iOS remote, so
   only ever append. `--snap-dancer <look>` renders one over a scene, which is how
@@ -307,7 +341,7 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
 | `src/text.rs`, `shaders/text.wgsl` | Timeline text cues (ab_glyph masks). |
 | `src/overlay.rs`, `shaders/overlay.wgsl` | Stream overlays: the now-playing card, branding and the ticker. They're drawn on the CPU into RGBA images when their content changes, and composited in the present pass. |
 | `src/nowplaying.rs` | Track detection, with a worker thread polling every 1 s. The `Remote` source reads a track pushed by the LAN agent over the remote protocol (id-tagged `RemoteNp` inbox in `Shared`). |
-| `agent/` | `trippin-agent`: standalone tray app (own Cargo.toml — build with `--manifest-path`) that runs `src/nowplaying.rs` via `#[path]` on the DJ machine and pushes tracks to a rig over the WS remote. Tray + egui settings window; Bonjour discovery + PIN. |
+| `agent/` | `trippin-agent`: standalone tray app (own Cargo.toml — build with `--manifest-path`) that runs `src/nowplaying.rs` and `src/artfind.rs` via `#[path]` on the DJ machine and pushes tracks to a rig over the WS remote, each track's cover following as a second push (`art`: base64 JPEG <= 256 px, or `art_url`), since the rig can't read the DJ machine's files. Keep `artfind.rs` free of app modules. Tray + egui settings window; Bonjour discovery + PIN. |
 | `src/output.rs` | The output tap. It re-runs present at the output size, reads it back asynchronously, and feeds the sinks (NDI, Spout, recorder). |
 | `src/ndi.rs`, `src/spout.rs` | NDI (runtime loaded dynamically), and a native Spout2 sender (D3D11 shared texture plus the Spout shared-memory registry). |
 | `src/rec.rs` | Clip recording: the ffmpeg replay buffer and set recording. |
@@ -347,6 +381,71 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   `character` (robots, androids) automatically (`Renderer::scene_no_dancer`). `@title` is the scene's
   human name in pickers/remotes — the file stem stays the id; without it
   the id is title-cased (`config::titleize`, acronym-aware).
+- **Particle scenes** (`// @particles <count>` in the header, max 400k):
+  the scene also defines `vs_particles` / `fs_particles`; the renderer draws
+  `count` instances of 3 vertices (one triangle round a unit disc) with
+  additive `GLOW_BLEND` over its `fs_main` in the same pass, in the app,
+  thumbnails and snaps (`render::header_particles`, `compile_particles`).
+  Stateless: every position is a function of the instance hash and the
+  clocks. `fs_main` paints the background and fades `prev()` for trails.
+  120k additive dots need ~0.1 per-dot brightness, and thin shells read as
+  solid neon hoops: spread them. Every built-in particle scene is now a
+  sim scene (below); `@particles` remains for stateless ones.
+- **Sim scenes** (`// @sim <count>`, `src/sim.rs`, `shaders/sim.wgsl`):
+  stateful GPU particles, for music that *pushes* things (owner: the
+  stateless particle scenes' motion was "extremely basic"). Each particle
+  keeps `pos`/`vel` (two vec4s; `.w` free for age or lifetime) in a
+  storage buffer; `cs_sim` runs each frame before the scene and calls the
+  scene's `sim_spawn(i)` (cut-in, hot reload, a skipped frame) and
+  `sim_step(i, p, dt)`; `vs_particles` reads `sim_p[instance_index]`.
+  sim.wgsl is added after common.wgsl only for `@sim` scenes
+  (`sim::scene_src`, used by every scene compile and `--check-shaders`);
+  group 1 is the particles (rw for compute, read-only for the draw), so
+  frame-layout bindings are visible to COMPUTE too (`render::VIS`).
+  All 13 particle_* scenes, 0.16-0.28 ms each at 1080p. A figure (lattice,
+  knot, helix, sphere, rings, rose, sea) uses the **shape-scene pattern**
+  (`sim_shape_step`): the figure is each particle's home, evaluated in both
+  `sim_step` and `vs_particles`, and the state is only the offset from it,
+  so the figure moves exactly as designed while kicks, snares, mids and the
+  bass knock it about. Pass the kick `centre` (the helix axis, a ring's own
+  centre; the sea passes each point as its own, then adds a kick front that
+  rolls out to sea, or the whole sea would jump). Free particles (nebula,
+  tornado, flow, fountain sparks, loose dandelion seeds) keep absolute
+  positions. A fountain reacts best through its *launch* speed (sparks
+  thrown during a kick fly higher, so the surge climbs the jet); punching
+  every airborne spark up emptied the jets and left clumps.
+  Figures of straight lines take no swirl (`sim_shape_step_k`, `loose`
+  0): the curl noise is fine-grained, so even a tenth of it rippled the
+  cube's lattice into tangles (owner: "quite distorted").
+  Patterns that work:
+  - Velocity **relaxes toward a target flow** (`acc = (target - vel) * k`,
+    k 2.5-5): the target is built from eased audio (loudness sets speed,
+    mids the curl-noise swirl via `sim_curl`/`sim_curl2`), and the
+    relaxation is the smoothing, so no raw audio reaches position.
+  - **Density comes from your own forces**: curl noise is divergence-free
+    and never clumps or thins. Spring each particle to a home or a lane
+    and let the bass tighten it (nebula home scale, flow's comb onto
+    streamlines); breakdowns loosen it.
+  - **Kicks are velocity impulses on `simc.onset`** (per band, how far
+    `hits4` jumped this frame), not accelerations from `hits4`: pushing
+    with the decaying `hits4` peaked the motion ~0.25 s after the kick
+    (kick r 0.0 on Night Tools, visibly late); the impulse put it on the
+    beat (r 0.3-0.45). Push every particle alike (radial shock, a twist):
+    per-band push strengths scattered the nebula's filaments into fuzz.
+  - Respawn at the stream's own speed, not from rest, or particles bunch
+    where they come in (a bright band at flow's left edge).
+  - Draw streaks along the screen velocity (`length` grows with speed,
+    brightness spread over it) so speed reads as shape.
+  Pitch: with `rot(a) * w.yz`, a *negative* angle tilts the camera down
+  onto a floor (particle_sea first rendered as a sliver). A solid grid of
+  points reads as a glowing ball: draw lattice *lines* (particle_cube).
+- **The now-playing line is a texture** (`title_tex`, binding 10,
+  `gfx::Statics::title`, 2048x160 R8): main.rs rasterises "Artist - Title"
+  (else the DJ name, else TRIPPIN) when it changes; `u.look4.w` is the share
+  of the width it covers (look4 is the Unity look's xyz; w was spare).
+  Sample with `title_mask(uv)`. A new FrameRes field touches 12 bind-group
+  sites (render, snap, output). Layered text needs occlusion (near rows hide
+  far ones) or it's an unreadable wall (type_field's first render).
 - **Display names vs ids:** settings, timelines, remote commands and
   `disabled_scenes`/`favourite_scenes` all key on the id — never store or
   match a title. Dancer clips carry `"title"` in `clip.json` the same way
@@ -409,6 +508,41 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   pack scene whose name is taken is skipped. Bump `packs::API` when
   common.wgsl changes a helper packs call. `--snap-energy` writes each pack's
   scenes into that pack's `scene_energy.json`.
+- **Webcam** (`camera.rs`, `Settings::camera`, nokhwa: MSMF / AVFoundation):
+  a capture thread opens the picked camera only (nothing until one is
+  picked), fits each frame to VID_W x VID_H RGBA, and the render loop
+  uploads it to its own texture (group(0) **binding 13**,
+  `gfx::Statics::cam`, `cam()` in common.wgsl; pack API 3) while a
+  `camera_*` scene is on air or the camera layer is on. The **camera
+  layer** (`Settings::camera_layer/key/amt/tol`, `Uniforms::cam4`) is
+  composited in present.wgsl *after* tone mapping, so the camera looks like
+  itself under ACES and AgX: behind (shows through the scene's dark parts)
+  or in front, keyed (`cam_key`: green/blue chroma with spill pulled out,
+  dark = luma, none); cam4.x + 4 rotoscopes it (`cam_roto` in
+  common.wgsl: nine taps smooth and feed a Sobel ink line, the luminance
+  stepped into soft cel bands; the key still reads the raw camera, and
+  the camera_roto scene uses the same function). Its outlines come from a
+  blurred copy: the camera texture carries a 4-level mip chain
+  (`gfx::cam_mips`, built on the camera thread) and `cam_lod` blends
+  levels. Traced at full size, hair, skin and sensor noise scribbled the
+  owner's face. The Rotoscope look controls ride `Uniforms::roto4/roto5`;
+  `--snap-roto amt,ink,detail,bands,pal` in snaps.
+  On the other camera_* scenes roto4/roto5 carry the scene's own controls
+  instead (`camera::scene_params`, values per scene in
+  `Settings::show_params`), shown in the Perform page's "scene controls"
+  card under the scene name; the camera layer is off on camera scenes, so
+  the two never share the slots. Snaps: `--snap-cam-layer 1|2`, `--snap-cam-key
+  0..3`, `--snap-camera-image <png>` for a still. `camera::LIVE` gates those scenes into rotation and shows
+  the panel's "camera on" pill; the AI builder never plans them. Snaps never
+  open a camera: `--snap-camera <clip>` stands a pack clip in (default
+  dance_solo). Never open the owner's camera to test without asking. The
+  macOS path (permission via `nokhwa_initialize`, `NSCameraUsageDescription`
+  in release.yml's Info.plist) hasn't been compiled yet.
+- **A pack found twice** (the repo's dev folder ahead of the installed copy)
+  loads its scenes from the first copy but its clips from every copy
+  (`Pack::also`, `clip_dirs`): the repo's packs carry no clips (git-ignored),
+  so a dev build hid every video scene of the install. Settings > Effects
+  packs flags missing clips (`missing_clips`) with a Re-download button.
 - **Tempo-matched video** (owner: the best video scenes are the ones whose
   footage moves *to the beat*). **Never vary the footage's speed within a
   beat**: a per-beat surge (tried as `video::pump`) read as unnatural. The
@@ -519,6 +653,17 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   a named palette, with hysteresis so the LUT can't strobe). Pickers and
   validators must use `palettes::all_names()` / `is_valid()`, never
   `names()` alone, or the option silently disappears.
+- `"art"` is the other pseudo-palette: the now-playing cover's colours
+  (`albumart.rs`; falls back to auto). Sources put a cheap `ArtHint` (paths,
+  URL, bytes) on `Track`, and **`Track` equality ignores it**, so a cover
+  that turns up a poll later isn't a track change (`art_serial` carries it).
+  The `albumart` thread resolves and builds the LUT off the render thread and
+  publishes it with `palettes::set_art`; the render loop keys it
+  `art#<serial>` (link and lights cache palettes by that name) and fades
+  to it over a bar (`palettes::Fade`, uploaded through `set_palette_lut`).
+  Serato's history stores paths without the drive (`serato_path`). The AI
+  builder is not offered `art`: a timeline show plays a file, not the
+  now-playing track.
 - **Audio streams die mid-set and must be rebuilt, not just logged.** A
   WASAPI loopback can strand silently (default-device change, session
   invalidation) — the callback keeps running but delivers nothing, or the
@@ -620,6 +765,12 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   <dump-feed.jsonl> unity_<x>` (it also deletes stills of removed shows).
 - The pointer over the visuals is hidden while fullscreen (synced in
   `about_to_wait`); the panel/editor windows keep theirs.
+- **Hold actions** (`Action::is_hold`: HoldEcho, HoldBurst) act on the
+  press *and* the release: MIDI now passes note-offs (`MidiNote(note, false)`,
+  `App::midi_release`), the visuals and panel windows pass key releases
+  (`App::key_release`), both as `Msg::Release`. Every other action still
+  ignores releases. A press with no release (remote, OSC) lets go after 16
+  beats (`Burst::MAX_HOLD`, `HOLD_ECHO_BEATS`).
 - **MIDI** (`midi.rs`): midir's callback thread posts `AppEvent::MidiNote`
   through an `EventLoopProxy` — the event loop type is
   `EventLoop<AppEvent>`, so `ApplicationHandler<AppEvent>::user_event`
@@ -797,6 +948,43 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   - Dancer routines re-anchor their loop to the bar they were requested in
     (`Slot::pending_anchor`), so a routine switched in on a phrase starts
     from its first frame there.
+- **Check reactivity on real music, not the groove:** `--snap <scenes>
+  --snap-track <audio> --snap-track-from 90 --snap-react 12 --snap-size
+  320x180` drives scenes with a track run through the real analyser and
+  prints, per scene, the picture change just after each beat vs mid-beat
+  (`beat x`) and its correlation with loudness and kicks (`react.tsv`).
+  Liked scenes score kick r 0.4-0.6; the first particle scenes scored ~0
+  because they read only `pres4`/`clock4`. `kick_swell()` and
+  `beat_ring(r, width)` in common.wgsl are smooth kick-driven shape
+  envelopes (bass-level scaled, still in breakdowns) for stateless scenes.
+  Momentum (sim scenes) scores lower on this measure than a stateless shape
+  pulse of the same visible size, because the drift back after each kick
+  is motion too: check sims with frame strips across a kick
+  (`--snap-at 6.2,6.25,6.33,6.45,6.65` with `--snap-track`) as well.
+- **Look glide** (`Settings::look_glide`, `looks::Glide`): `apply_look` still
+  writes the Look's settings at once, and under the same settings lock puts a
+  `GlideReq` (the old values, the scene/routine indices) in `Shared::glide`;
+  the render loop takes it with its settings clone, so no frame sees the new
+  settings without the glide. `looks::glide_overlay` writes the in-between
+  values on the per-frame clone only (never saved); the palette blends
+  through `pal_fade` (the art palette's `Fade`); the routine switches at the
+  midpoint and the scene on `glide_end`'s beat. Keep new Look fields in
+  `GlideFrom` if they should ease.
+- **Photosensitive-safe** (`Settings::photo_safe`): the render loop turns
+  off strobes, the cut flash and the text strobe; present.wgsl's `fs_lum`
+  (a one-pixel pass just before present, `Renderer::set_safe`) measures the
+  graded frame on a 16x9 grid and rate-limits rises in its average
+  luminance through a gain present applies. Its state is a storage buffer at
+  group(0) **binding 11** (`gfx::Statics::lum`, FRAGMENT only), in every
+  bind group but declared only by present.wgsl: a new group(0) bind group
+  must pass `FrameRes::lum`. Measure with `--snap-flash` (`--snap-safe`).
+- **Logo texture** (group(0) **binding 12**, `gfx::Statics::logo`,
+  `logo()` in common.wgsl; pack API 2): a fixed 512 square holding the Logo
+  Trip image fitted with transparent padding (`gfx::logo_pixels`). The
+  render loop loads `Settings::logo_scene_image`, else `brand_logo`, else
+  the Trippin logo (`gfx::app_logo`), only when that choice changes.
+  `--snap-logo <image>` for snaps. A new group(0) bind group must pass
+  `FrameRes::logo`.
 - **Text effects** (`TextFx`, `text.wgsl`): punch/shake/strobe/bounce/
   shatter use the slot's former padding float (`TextSlotU::fx`), so the
   uniform layout didn't change. `TRIPPIN_TEXT_TEST="WORDS|fx"` fires one

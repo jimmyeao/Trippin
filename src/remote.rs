@@ -17,6 +17,9 @@
 //! C→S  {"cmd":"set","key":"show_params_reset","value":true} — its defaults
 //! C→S  {"cmd":"transport","op":"toggle"|"stop"|"seek","pos":12.0}
 //! C→S  {"cmd":"now_playing","artist":"..","title":"..","source":"Serato"}
+//!       optional "art": base64 JPEG/PNG of the cover (the agent sends at
+//!       most 256 px, once per track: the rig can't read the DJ machine's
+//!       files), or "art_url": an https image URL; for the `art` palette.
 //!      — the companion agent's push; empty strings clear it. A client's
 //!      pushed track is retracted when its socket drops.
 //! C→S  {"cmd":"thumb","scene":"laser_show"}
@@ -191,6 +194,10 @@ enum In {
         title: Option<String>,
         #[serde(default)]
         source: Option<String>,
+        #[serde(default)]
+        art: Option<String>,
+        #[serde(default)]
+        art_url: Option<String>,
     },
     Thumb {
         scene: String,
@@ -685,6 +692,8 @@ fn parse(msg: In, client: u64) -> Result<Option<RemoteCmd>> {
             artist,
             title,
             source,
+            art,
+            art_url,
         } => {
             let (artist, title) = (
                 artist.unwrap_or_default().trim().to_string(),
@@ -695,11 +704,27 @@ fn parse(msg: In, client: u64) -> Result<Option<RemoteCmd>> {
                 artist,
                 title,
                 source: source.unwrap_or_default(),
+                art: art_hint(art.as_deref(), art_url.as_deref()),
             });
             Some(RemoteCmd::NowPlaying { client, track })
         }
         In::Thumb { scene } => Some(RemoteCmd::Thumb(scene)),
     })
+}
+
+/// A pushed cover: the image bytes (base64, at most 4 MB of it), else an
+/// https URL for the art resolver to fetch.
+fn art_hint(b64: Option<&str>, url: Option<&str>) -> crate::nowplaying::ArtHint {
+    use crate::nowplaying::ArtHint;
+    if let Some(b) = b64.filter(|b| !b.is_empty() && b.len() <= 4 << 20) {
+        if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(b.trim()) {
+            return ArtHint::Bytes(std::sync::Arc::new(bytes));
+        }
+    }
+    match url.map(str::trim) {
+        Some(u) if u.starts_with("https://") && u.len() < 2048 => ArtHint::Url(u.to_string()),
+        _ => ArtHint::None,
+    }
 }
 
 pub(crate) fn parse_set(key: &str, value: Value) -> Result<SetKey> {
@@ -880,6 +905,25 @@ mod tests {
             rx.recv_timeout(Duration::from_secs(2)).unwrap(),
             RemoteCmd::NowPlaying { track: Some(t), .. }
                 if t.artist == "A" && t.title == "T" && t.source == "Serato"
+        ));
+
+        // The cover follows as a second push of the same track.
+        ws.send(Message::Text(
+            r#"{"cmd":"now_playing","artist":"A","title":"T","source":"Serato","art":"AQIDBA=="}"#.into(),
+        ))
+        .unwrap();
+        assert!(matches!(
+            rx.recv_timeout(Duration::from_secs(2)).unwrap(),
+            RemoteCmd::NowPlaying { track: Some(t), .. }
+                if matches!(&t.art, crate::nowplaying::ArtHint::Bytes(b) if b.as_slice() == [1, 2, 3, 4])
+        ));
+        ws.send(Message::Text(
+            r#"{"cmd":"now_playing","artist":"A","title":"T","art_url":"http://10.0.0.1/x.jpg"}"#.into(),
+        ))
+        .unwrap();
+        assert!(matches!(
+            rx.recv_timeout(Duration::from_secs(2)).unwrap(),
+            RemoteCmd::NowPlaying { track: Some(t), .. } if t.art.is_none()
         ));
 
         // Dropping the socket retracts the pushed track (client-tagged —

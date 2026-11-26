@@ -173,6 +173,8 @@ pub enum UiCommand {
     Thumb(String),
     /// Recall a saved Look by id.
     ApplyLook(String),
+    /// Accents in timeline shows on/off (the editor's toggle).
+    AccentShows(bool),
     /// Save the live state as a new Look with this name.
     SaveLook(String),
     DeleteLook(String),
@@ -219,6 +221,8 @@ pub struct Status {
     pub fullscreen: bool,
     /// The post effect actually on screen (the auto-pilot's pick in auto mode).
     pub fx: Fx,
+    /// The echo amount on screen now (0 = off).
+    pub echo_now: f32,
     /// The palette actually on screen — the mood pick when `palette = "auto"`.
     pub palette_now: String,
     /// External output status line (NDI receiver count / error) — Some while
@@ -230,6 +234,8 @@ pub struct Status {
     /// Now playing: the track on screen, and one status line per source.
     pub np_track: Option<String>,
     pub np_status: Vec<(String, String)>,
+    /// Where the playing track's cover came from ("" = none found).
+    pub np_art: String,
     /// Clip recorder state (None = not running) / why it can't run.
     pub rec: Option<crate::rec::Status>,
     pub rec_err: Option<String>,
@@ -656,6 +662,11 @@ fn topbar(ui: &mut egui::Ui, tab: &mut Tab, s: &mut Settings, st: &Status) {
             }
             if st.silent && pill_room > 88.0 {
                 pill(ui, "no signal", WARN, WARN_BG);
+                pill_room -= 88.0;
+            }
+            // Privacy: always say when the webcam is capturing.
+            if crate::camera::LIVE.load(std::sync::atomic::Ordering::Relaxed) && pill_room > 88.0 {
+                pill(ui, "camera on", DANGER, DANGER_BG);
             }
         });
     });
@@ -712,6 +723,17 @@ fn palette_swatch(ui: &mut egui::Ui, s: &mut Settings, name: &str, w: f32, h: f3
         );
     }
     let sel = s.palette == name;
+    // The name on a dark tab at the left: `auto` and `art` aren't fixed
+    // gradients, so without it they read as two more unnamed swatches.
+    let font = egui::FontId::proportional(10.5);
+    let galley = ui.painter().layout_no_wrap(name.to_string(), font, TEXT);
+    let tab = egui::Rect::from_min_size(rect.min, egui::vec2(galley.size().x + 10.0, h));
+    ui.painter().rect_filled(tab, 3.0, egui::Color32::from_black_alpha(150));
+    ui.painter().galley(
+        egui::pos2(tab.min.x + 5.0, rect.center().y - galley.size().y * 0.5),
+        galley,
+        TEXT,
+    );
     ui.painter().rect_stroke(
         rect,
         3.0,
@@ -843,6 +865,28 @@ fn looks_strip(ui: &mut egui::Ui, s: &mut Settings, st: &Status, look_name: &mut
         if can && (save || enter) {
             cmd.push(UiCommand::SaveLook(std::mem::take(look_name)));
         }
+        // Glide: how a recalled Look arrives. One wrap-aware allocation for
+        // the label and combo (see the Style picker below).
+        ui.add_space(6.0);
+        ui.allocate_ui(egui::vec2(130.0, 22.0), |ui| {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Glide").size(11.5).color(MUTED));
+                egui::ComboBox::from_id_salt("look_glide")
+                    .selected_text(egui::RichText::new(s.look_glide.label()).size(11.5))
+                    .width(72.0)
+                    .show_ui(ui, |ui| {
+                        for g in crate::looks::Glide::ALL {
+                            ui.selectable_value(&mut s.look_glide, g, g.label());
+                        }
+                    })
+                    .response
+                    .on_hover_text(
+                        "How a Look arrives: Cut changes everything at once. A glide blends the palette \
+                         and effect amount over a beat or bar(s), swaps the dancer halfway, and changes \
+                         the scene on the closing beat.",
+                    );
+            });
+        });
         // Style: steers the auto-pilot's scene pool, palettes and pacing.
         let cat = crate::styles::catalog();
         if !cat.themes.is_empty() {
@@ -876,9 +920,23 @@ fn looks_strip(ui: &mut egui::Ui, s: &mut Settings, st: &Status, look_name: &mut
                             }
                         })
                         .response
-                        .on_hover_text("Steers which scenes and colours Auto picks, and how fast it cuts. Choosing one puts the palette on Auto.");
+                        .on_hover_text("Steers which scenes and colours Auto picks, and how fast it cuts. Choosing one puts the palette on Auto, unless Follow artwork is ticked.");
                 });
             });
+            // Follow artwork: the `art` palette (the now-playing cover's
+            // colours). It is the palette setting itself, so the popover,
+            // Looks and the remote all agree with it.
+            let mut art = s.palette == crate::palettes::ART;
+            if ui
+                .checkbox(&mut art, egui::RichText::new("Follow artwork").size(11.5))
+                .on_hover_text(
+                    "Colours from the cover of the track now playing, fading to each new cover over a bar. \
+                     With no cover, the Style's colours (or Auto) are used. Unticking goes back to Auto.",
+                )
+                .changed()
+            {
+                s.palette = if art { crate::palettes::ART } else { crate::palettes::AUTO }.to_string();
+            }
         }
         if let Some(n) = &st.look_notice {
             ui.label(egui::RichText::new(n).size(10.5).color(egui::Color32::from_rgb(230, 170, 70)));
@@ -1684,9 +1742,38 @@ fn inspector_body(
     });
 
     ui.add_space(8.0);
+    // The rotoscope look, on the scene: while Camera Rotoscope is on air,
+    // or the camera layer is rotoscoped over whatever is.
+    let on_air = scenes.get(st.scene).map(String::as_str).unwrap_or("");
+    // (The layer is off on camera scenes: they show their own controls.)
+    let layer_roto = s.camera_roto
+        && s.camera_layer != crate::config::CamLayer::Off
+        && !s.camera.is_empty()
+        && !on_air.starts_with("camera_");
+    if on_air == "camera_roto" || layer_roto {
+        roto_controls(ui, s, if on_air == "camera_roto" { "Camera Rotoscope" } else { "camera layer · rotoscope" });
+        ui.add_space(8.0);
+    } else if !crate::camera::scene_params(on_air).is_empty() {
+        let title = st.scene_titles.get(st.scene).map(String::as_str).unwrap_or(on_air);
+        camera_scene_controls(ui, s, on_air, title);
+        ui.add_space(8.0);
+    }
     section_label(ui, "controls");
     card().show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = 8.0;
+        // Quick switches first, so they're in view without scrolling (the
+        // Accents box sat below the fold at the card's foot). In a bounded
+        // box: a bare `ui.horizontal` here widened the column and pushed the
+        // scene grid's scrollbar under it (AGENTS §7, egui layout rules).
+        let qw = ui.available_width();
+        ui.allocate_ui_with_layout(egui::vec2(qw, 20.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            ui.checkbox(&mut s.accent_auto, egui::RichText::new("Accents").size(12.0)).on_hover_text(
+                "Auto lays a light scene (embers, streaks, notes, comets...) over some scenes while the \
+                 track drives. Strength on Dancer & FX; timeline shows have their own toggle in the editor.",
+            );
+            ui.checkbox(&mut s.fx_auto, egui::RichText::new("Auto effects").size(12.0))
+                .on_hover_text("A fresh post effect on every scene cut. Which ones: Dancer & FX.");
+        });
         ui.label(egui::RichText::new("Mode").size(12.0).color(MUTED));
         segmented_wide(
             ui,
@@ -1793,7 +1880,71 @@ fn inspector_body(
         let title = st.scene_titles.get(st.scene).map(String::as_str).unwrap_or(name);
         ui.add_space(8.0);
         show_controls(ui, s, name, title);
-    }
+    }}
+
+/// A camera scene's own controls (camera::scene_params), saved per scene.
+fn camera_scene_controls(ui: &mut egui::Ui, s: &mut Settings, scene: &str, title: &str) {
+    use crate::ui_theme::*;
+    section_label(ui, "scene controls");
+    card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        let slider_w = (ui.available_width() - 60.0 - 70.0).max(60.0);
+        ui.label(egui::RichText::new(title).size(12.0).color(MUTED));
+        for p in crate::camera::scene_params(scene) {
+            let mut v = crate::camera::param_value(&s.show_params, scene, p);
+            ctl_row(ui, p.label, |ui| {
+                ui.spacing_mut().slider_width = slider_w;
+                let sl = egui::Slider::new(&mut v, p.min..=p.max);
+                let sl = if p.whole { sl.step_by(1.0).max_decimals(0) } else { sl.max_decimals(2) };
+                if ui.add(sl).on_hover_text(p.tip).changed() {
+                    s.show_params.entry(scene.to_string()).or_default().insert(p.id.to_string(), v);
+                }
+            });
+        }
+        let custom = s.show_params.get(scene).is_some_and(|m| !m.is_empty());
+        if ui.add_enabled(custom, egui::Button::new("Reset")).clicked() {
+            s.show_params.remove(scene);
+        }
+    });
+}
+
+/// The rotoscope look (`cam_roto`): one set for the Camera Rotoscope scene
+/// and the rotoscoped camera layer, shown under the Perform preview.
+fn roto_controls(ui: &mut egui::Ui, s: &mut Settings, title: &str) {
+    use crate::ui_theme::*;
+    section_label(ui, "scene controls");
+    card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        // Width captured here, not inside the rows (layout rule, AGENTS.md).
+        let slider_w = (ui.available_width() - 60.0 - 70.0).max(60.0);
+        ui.label(egui::RichText::new(title).size(12.0).color(MUTED));
+        let row = |ui: &mut egui::Ui, label: &str, tip: &str, body: &mut dyn FnMut(&mut egui::Ui) -> egui::Response| {
+            ctl_row(ui, label, |ui| {
+                ui.spacing_mut().slider_width = slider_w;
+                body(ui).on_hover_text(tip);
+            });
+        };
+        row(ui, "Amount", "How much of the cartoon look over the plain camera", &mut |ui| {
+            ui.add(egui::Slider::new(&mut s.roto_amt, 0.0..=1.0))
+        });
+        row(ui, "Detail", "Low: only the big outlines and flat shapes. High: finer lines and shading", &mut |ui| {
+            ui.add(egui::Slider::new(&mut s.roto_detail, 0.0..=1.0))
+        });
+        row(ui, "Ink", "How thick and dark the outlines are", &mut |ui| {
+            ui.add(egui::Slider::new(&mut s.roto_ink, 0.0..=1.0))
+        });
+        row(ui, "Bands", "How many flat shades the colours are stepped into", &mut |ui| {
+            ui.add(egui::Slider::new(&mut s.roto_bands, 2..=8))
+        });
+        row(ui, "Palette", "0: the camera's own colours. 1: the show's palette", &mut |ui| {
+            ui.add(egui::Slider::new(&mut s.roto_pal, 0.0..=1.0))
+        });
+        if ui.button("Reset").clicked() {
+            let d = Settings::default();
+            (s.roto_amt, s.roto_ink, s.roto_detail, s.roto_bands, s.roto_pal) =
+                (d.roto_amt, d.roto_ink, d.roto_detail, d.roto_bands, d.roto_pal);
+        }
+    });
 }
 
 /// A summary row — label left, monospaced value right, chevron — that
@@ -2625,6 +2776,14 @@ fn status_dot(ui: &mut egui::Ui, ok: bool, text: &str) {
     });
 }
 
+/// The Photosensitive-safe switch (Settings > director and Stream > video
+/// output share it).
+fn photo_safe_check(ui: &mut egui::Ui, s: &mut Settings) {
+    ui.checkbox(&mut s.photo_safe, "Photosensitive-safe").on_hover_text(
+        "Nothing flashes more than three times a second: strobes, cut flashes and the text strobe are off,          and the picture's brightness can only rise so fast, which also tames scenes' own flashes          (WCAG 2.3.1, the limit streaming platforms point to).",
+    );
+}
+
 fn stream_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<UiCommand>) {
     use crate::nowplaying::NpSource;
     use crate::ui_theme::*;
@@ -2664,6 +2823,8 @@ fn stream_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<Ui
             ui.checkbox(&mut s.brand_logo_on, "logo");
             ui.checkbox(&mut s.brand_name_on, "name");
         });
+        ui.checkbox(&mut s.logo_burst, "Logo bursts into particles with the dancer")
+            .on_hover_text("On drops (and P), the logo turns to dust and re-forms with her.");
         egui::Grid::new("brand_grid")
             .num_columns(2)
             .min_col_width(96.0)
@@ -2680,6 +2841,18 @@ fn stream_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<Ui
                 if ui.button("…").clicked() {
                     if let Some(p) = rfd::FileDialog::new().add_filter("PNG", &["png"]).pick_file() {
                         s.brand_logo = p.display().to_string();
+                    }
+                }
+            });
+            grow(ui, "Logo scene", |ui| {
+                ui.add(egui::TextEdit::singleline(&mut s.logo_scene_image).desired_width(150.0).hint_text("the logo above"))
+                    .on_hover_text(
+                        "The image the Logo Trip scene runs through its spiral, melt, halftone, VHS and \
+                         kaleidoscope treatments. Empty: your logo above, or the Trippin logo.",
+                    );
+                if ui.button("…").clicked() {
+                    if let Some(p) = rfd::FileDialog::new().add_filter("image", &["png", "jpg", "jpeg"]).pick_file() {
+                        s.logo_scene_image = p.display().to_string();
                     }
                 }
             });
@@ -2749,6 +2922,13 @@ fn stream_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<Ui
                 &st.np_track.clone().unwrap_or_else(|| "no track".into()),
             );
         ui.small("Auto follows whichever source changed last — media players, Serato, VirtualDJ, rekordbox, Mixxx, or a text file.");
+        if st.np_track.is_some() {
+            ui.small(if st.np_art.is_empty() {
+                "Cover: none found".to_string()
+            } else {
+                format!("Cover: {}", st.np_art)
+            });
+        }
         egui::Grid::new("np_grid")
             .num_columns(2)
             .min_col_width(96.0)
@@ -2782,6 +2962,11 @@ fn stream_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<Ui
                 if ui.button("Show again").clicked() {
                     cmd.push(UiCommand::Do(Action::ShowNowPlaying));
                 }
+            });
+            grow(ui, "Cover art", |ui| {
+                ui.checkbox(&mut s.np_card_art, "On the card");
+                ui.checkbox(&mut s.np_art_online, "Look up online")
+                    .on_hover_text("For tracks no local source has a cover for, ask the iTunes Search API. This sends the artist and title to Apple.");
             });
             grow(ui, "Card time", |ui| {
                 ui.add(egui::Slider::new(&mut s.np_hold_s, 0.0..=60.0).step_by(1.0).suffix(" s"));
@@ -2999,6 +3184,7 @@ fn stream_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<Ui
             st.output.is_some(),
             st.output.as_deref().unwrap_or("off — enable Spout or NDI"),
         );
+        photo_safe_check(ui, s);
         egui::Grid::new("out_grid")
             .num_columns(2)
             .min_col_width(96.0)
@@ -3106,6 +3292,8 @@ fn dancer_fx_tab(
                 ui.add(egui::Slider::new(&mut s.dancer_size, 0.4..=1.0));
             });
             ui.checkbox(&mut s.dancer_trails, "Motion trails");
+            ui.checkbox(&mut s.dancer_burst_drops, "Burst into particles on drops")
+                .on_hover_text("The dancer turns to glowing dust when the drums come back after a breakdown, and re-forms over two bars. P does it by hand.");
         });
         r1.response.rect.height()
     };
@@ -3148,7 +3336,96 @@ fn dancer_fx_tab(
             });
             ui.checkbox(&mut s.fx_auto, "Auto — a fresh effect on every scene cut");
             if s.fx_auto {
-                ui.small(format!("On screen now: {}", st.fx.label()));
+                ui.small(format!("On screen now: {}. Auto picks from the ticked ones:", st.fx.label()));
+                egui::Grid::new("fx_auto_grid")
+                    .num_columns(3)
+                    .spacing(egui::vec2(6.0, 2.0))
+                    .show(ui, |ui| {
+                        for (i, f) in Fx::ALL.iter().enumerate() {
+                            let mut on = !s.fx_auto_skip.contains(f);
+                            if ui.checkbox(&mut on, egui::RichText::new(f.label()).size(11.5)).changed() {
+                                if on {
+                                    s.fx_auto_skip.retain(|x| x != f);
+                                } else {
+                                    s.fx_auto_skip.push(*f);
+                                }
+                            }
+                            if i % 3 == 2 {
+                                ui.end_row();
+                            }
+                        }
+                    });
+            }
+            ui.add_space(4.0);
+            ui.checkbox(&mut s.accent_auto, "Accent layer — Auto adds a light scene on top")
+                .on_hover_text("On some cuts while the track drives, rising embers, light streaks, a swarm of motes, bokeh, light shafts, ripples, musical notes, sparkles, bubbles, fireflies, petals, comets, floor fog, a spectrum, the waveform or a halo of sparks play over the main scene. Never in breakdowns or over 3D, Unity, video or flight scenes.");
+            ctl_row(ui, "Accent", |ui| {
+                ui.add_enabled(s.accent_auto, egui::Slider::new(&mut s.accent_amt, 0.0..=1.0));
+            });
+            ui.add_space(4.0);
+            ctl_row(ui, "Echo", |ui| {
+                segmented(
+                    ui,
+                    &mut s.echo,
+                    &[
+                        (Tristate::Auto, "auto"),
+                        (Tristate::On, "on"),
+                        (Tristate::Off, "off"),
+                    ],
+                );
+            });
+            ui.small(if st.echo_now > 0.01 {
+                "Echo is on screen now: moving lights and the dancer leave trails."
+            } else if s.echo == Tristate::Auto {
+                "Echo is off right now. Auto runs it through breakdowns and on some cuts (not on flight scenes or ones with their own trails). E cycles it."
+            } else {
+                "Echo: light trails of the whole frame. E cycles auto / on / off."
+            });
+            ctl_row(ui, "Echo amount", |ui| {
+                ui.add_enabled(s.echo != Tristate::Off, egui::Slider::new(&mut s.echo_amt, 0.0..=1.0));
+            });
+            // The webcam over every scene: behind it, or keyed in front.
+            ui.add_space(6.0);
+            {
+                use crate::config::{CamKey, CamLayer};
+                ctl_row(ui, "Camera", |ui| {
+                    segmented(
+                        ui,
+                        &mut s.camera_layer,
+                        &[(CamLayer::Off, "off"), (CamLayer::Behind, "behind"), (CamLayer::Front, "in front")],
+                    );
+                });
+                ui.small(if s.camera.is_empty() {
+                    "Camera layer: pick a camera on Settings first."
+                } else if s.camera_layer == CamLayer::Front {
+                    "You over every scene, cut out by the key (a green or blue screen, or a dark room)."
+                } else {
+                    "Behind: the camera shows through the scene's dark parts; lights and the dancer pass in front."
+                });
+                if s.camera_layer == CamLayer::Front {
+                    ctl_row(ui, "Key", |ui| {
+                        egui::ComboBox::from_id_salt("camera_key")
+                            .selected_text(s.camera_key.label())
+                            .show_ui(ui, |ui| {
+                                for k in CamKey::ALL {
+                                    ui.selectable_value(&mut s.camera_key, k, k.label());
+                                }
+                            });
+                    });
+                    ctl_row(ui, "Key tolerance", |ui| {
+                        ui.add_enabled(s.camera_key != CamKey::None, egui::Slider::new(&mut s.camera_tol, 0.0..=1.0));
+                    });
+                }
+                ctl_row(ui, "Camera amount", |ui| {
+                    ui.add_enabled(s.camera_layer != CamLayer::Off, egui::Slider::new(&mut s.camera_amt, 0.0..=1.0));
+                });
+                ui.add_enabled(
+                    s.camera_layer != CamLayer::Off,
+                    egui::Checkbox::new(&mut s.camera_roto, "Rotoscope: cartoon bands and ink outlines"),
+                );
+                if s.camera_roto {
+                    ui.small("The rotoscope look's controls are on the Perform page, under the scene name.");
+                }
             }
         });
         r2.response.rect.height()
@@ -3543,6 +3820,8 @@ fn keys_tab(
                 Action::NextClip,
                 Action::NextStyle,
                 Action::CycleCanon,
+                Action::Disintegrate,
+                Action::HoldBurst,
             ],
         ),
         (
@@ -3558,6 +3837,8 @@ fn keys_tab(
             "output",
             &[
                 Action::CycleFx,
+                Action::CycleEcho,
+                Action::HoldEcho,
                 Action::Blackout,
                 Action::Fullscreen,
                 Action::LeaveFullscreen,
@@ -3885,6 +4166,23 @@ fn effects_packs(ui: &mut egui::Ui, s: &mut Settings) {
         });
         if let Some(why) = &p.problem {
             ui.small(format!("  not loaded: {why}"));
+        }
+        // Clips gone missing (a download cut short, files deleted): say so,
+        // and offer to fetch the pack again.
+        let missing = p.missing_clips();
+        if !missing.is_empty() && p.active() {
+            ui.horizontal(|ui| {
+                ui.small(format!("  {} video clip(s) missing", missing.len()))
+                    .on_hover_text(missing.join(", "));
+                if packs::in_catalog(&p.id)
+                    && ui
+                        .add_enabled(!packs::busy(), egui::Button::new("Re-download").small())
+                        .on_hover_text("Download the pack again and reinstall it (after a restart)")
+                        .clicked()
+                {
+                    packs::install_catalog_bg(&p.id);
+                }
+            });
         }
     }
     // Where packs install: they're big, so it can be another drive. A move
@@ -4226,6 +4524,33 @@ fn settings_tab(
                                 }
                             });
                     });
+                    // Webcam for the camera scenes: off until one is picked.
+                    grow(ui, "Camera", |ui| {
+                        let sel = if s.camera.is_empty() { "Off" } else { s.camera.as_str() };
+                        let shown = ellipsize(ui.painter(), sel, &egui::FontId::proportional(12.0), combo_w - 24.0);
+                        let r = egui::ComboBox::from_id_salt("camera")
+                            .width(combo_w)
+                            .selected_text(shown)
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut s.camera, String::new(), "Off");
+                                let names = crate::camera::names();
+                                if names.is_empty() {
+                                    ui.label(egui::RichText::new("looking for cameras…").size(11.0));
+                                }
+                                for n in names {
+                                    ui.selectable_value(&mut s.camera, n.clone(), n);
+                                }
+                            });
+                        // List the cameras when the picker opens (on a thread).
+                        if r.response.clicked() {
+                            crate::camera::refresh_names();
+                        }
+                        r.response.on_hover_text(
+                            "A webcam for the camera scenes (your outline traced in light, a \
+                             kaleidoscope, a slit-scan smear). Nothing is opened until you pick one; \
+                             \"camera on\" shows at the top while it's capturing.",
+                        );
+                    });
                     grow(ui, "Latency", |ui| {
                         ui.add(
                             egui::Slider::new(&mut s.latency_ms, 0.0..=200.0)
@@ -4312,6 +4637,7 @@ fn settings_tab(
                 .on_hover_text("Quiet sections switch the show into calm mode");
             ui.checkbox(&mut s.cut_on_drops, "Cut early on a drop")
                 .on_hover_text("A drop lands early — cut to the next scene with it");
+            photo_safe_check(ui, s);
             if let Some(n) = style_override_note(s) {
                 ui.small(n);
             }
