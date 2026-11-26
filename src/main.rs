@@ -58,6 +58,7 @@ mod palettes;
 mod panel;
 mod perf;
 mod render;
+mod sim;
 mod snap;
 mod song;
 mod styles;
@@ -3703,7 +3704,7 @@ fn check_shaders() -> Result<()> {
     let mut bad = 0;
     for p in &paths {
         let body = std::fs::read_to_string(p)?;
-        let src = format!("{common}\n{body}");
+        let src = sim::scene_src(&common, &body);
         let name = p.file_name().unwrap().to_string_lossy();
         let valid = wgpu::naga::front::wgsl::parse_str(&src)
             .map_err(|e| e.emit_to_string(&src))

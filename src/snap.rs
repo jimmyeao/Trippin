@@ -171,6 +171,7 @@ pub fn run(args: &[String]) -> Result<()> {
         bind_group_layouts: &[Some(&layout)],
         immediate_size: 0,
     });
+    let sim_kit = crate::sim::SimKit::new(&device, &layout);
     let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         address_mode_u: wgpu::AddressMode::MirrorRepeat,
         address_mode_v: wgpu::AddressMode::MirrorRepeat,
@@ -719,6 +720,32 @@ pub fn run(args: &[String]) -> Result<()> {
         } else {
             None
         };
+        // Sim scenes (`// @sim N`): their step and draw, and the particles
+        // (spawned on the first frame).
+        let nsim = crate::sim::header_sim(&body);
+        let sim_pipes = if nsim > 0 {
+            let cs = crate::sim::compile_compute(&device, &common, path, &sim_kit);
+            let draw = render::compile_pipeline_entries(
+                &device,
+                &common,
+                path,
+                &sim_kit.draw_pl,
+                SCENE_FORMAT,
+                Some(render::GLOW_BLEND),
+                ("vs_particles", "fs_particles"),
+            );
+            match (cs, draw) {
+                (Ok(c), Ok(d)) => Some((c, d)),
+                (Err(e), _) | (_, Err(e)) => {
+                    eprintln!("FAIL {name} (sim):\n{e}");
+                    continue;
+                }
+            }
+        } else {
+            None
+        };
+        let sim_buf = std::cell::RefCell::new(sim_pipes.as_ref().map(|_| crate::sim::SimBuf::new(&device, &sim_kit, nsim)));
+        let sim_fresh = std::cell::Cell::new(true);
         // Clear both feedback targets so scenes start from black.
         {
             let mut enc = device.create_command_encoder(&Default::default());
@@ -795,6 +822,9 @@ pub fn run(args: &[String]) -> Result<()> {
             queue.write_buffer(&ubuf, 0, bytemuck::bytes_of(&u));
             let next = 1 - *cur;
             let mut enc = device.create_command_encoder(&Default::default());
+            if let (Some((cs, _)), Some(b)) = (&sim_pipes, sim_buf.borrow_mut().as_mut()) {
+                b.step(&queue, &mut enc, cs, &bgs[*cur], &u, sim_fresh.replace(false));
+            }
             if let Some(a) = &accent_snap {
                 let an = 1 - acc_cur.get();
                 let v = a.targets[an].create_view(&Default::default());
@@ -838,6 +868,11 @@ pub fn run(args: &[String]) -> Result<()> {
                 if let Some(pp) = &parts {
                     pass.set_pipeline(pp);
                     pass.draw(0..3, 0..npart);
+                }
+                if let (Some((_, dp)), Some(b)) = (&sim_pipes, sim_buf.borrow().as_ref()) {
+                    pass.set_pipeline(dp);
+                    pass.set_bind_group(1, b.draw_group(), &[]);
+                    pass.draw(0..3, 0..nsim);
                 }
                 if let Some(a) = &accent_snap {
                     pass.set_pipeline(&a.mix);

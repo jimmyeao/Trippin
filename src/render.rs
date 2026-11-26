@@ -139,6 +139,9 @@ struct Scene {
     /// `fs_particles` draw `count` instanced dots (3 vertices each, one
     /// triangle round the dot) added over its `fs_main` in the same pass.
     parts: Option<(wgpu::RenderPipeline, u32)>,
+    /// `// @sim <count>`: stateful particles (sim.rs): the scene's
+    /// `cs_sim` step, its `vs_particles` draw, and the count.
+    sim: Option<(wgpu::ComputePipeline, wgpu::RenderPipeline, u32)>,
 }
 
 /// `// @particles <count>` in the header: how many particles the scene's
@@ -263,7 +266,8 @@ impl FrameRes<'_> {
 /// Group(0) and the dancer group are visible to vertex shaders too: the
 /// dancer's particle pass (`vs_particles`) samples the masks, palette and
 /// uniforms per particle.
-pub const VIS: wgpu::ShaderStages = wgpu::ShaderStages::VERTEX_FRAGMENT;
+/// Compute too: sim scenes' `cs_sim` reads the uniforms and noise (sim.rs).
+pub const VIS: wgpu::ShaderStages = wgpu::ShaderStages::VERTEX_FRAGMENT.union(wgpu::ShaderStages::COMPUTE);
 
 /// Additive glow for the particle pass: colour adds, alpha composites over
 /// (transparent mode keeps a sane alpha).
@@ -487,6 +491,11 @@ pub struct Renderer {
     /// Eased bloom strength — scene cuts don't pop the glow on/off.
     bloom_amt: f32,
     frame: u32,
+    /// Layouts for sim scenes, and the particles of the sim scene on air
+    /// (its index): respawned on a cut-in, a hot reload or a skipped frame.
+    sim_kit: crate::sim::SimKit,
+    sim: Option<(usize, crate::sim::SimBuf)>,
+    sim_at: u32,
     /// External output (NDI) — Some(conf) mirrors the panel setting;
     /// `out` is Some only once the runtime loads and resources are built.
     out_conf: Option<output::Conf>,
@@ -668,6 +677,7 @@ impl Renderer {
         }
         println!("Surface: {:?}, {:?}", config.present_mode, config.format);
         let layout = frame_layout(&device);
+        let sim_kit = crate::sim::SimKit::new(&device, &layout);
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("frame"),
             bind_group_layouts: &[Some(&layout)],
@@ -1037,6 +1047,9 @@ impl Renderer {
             bloom,
             bloom_amt: 0.0,
             frame: 0,
+            sim_kit,
+            sim: None,
+            sim_at: 0,
             out_conf: None,
             out: None,
             out_err: None,
@@ -1526,6 +1539,7 @@ impl Renderer {
         let mut text = std::mem::take(&mut self.text);
         let mut overlay = std::mem::take(&mut self.overlay);
         let mut logo_particles = std::mem::take(&mut self.logo_particles);
+        let mut sim_changed = false;
         for s in scenes
             .iter_mut()
             .chain(accents.iter_mut())
@@ -1548,12 +1562,14 @@ impl Renderer {
             // `// @heavy` in the file header gates the scene to stronger GPUs;
             // `@bloom` / `@tonemap` pick its post settings.
             let mut npart = 0;
+            let mut nsim = 0;
             if let Ok(body) = std::fs::read_to_string(&s.path) {
                 (s.heavy, s.bloom, s.tonemap) = header_tags(&body);
                 s.title = header_title(&body);
                 s.no_dancer = header_no_dancer(&body);
                 s.feedback = body.contains("prev(");
                 npart = header_particles(&body);
+                nsim = crate::sim::header_sim(&body);
             }
             match self.compile(&common, &s.path, s.kind) {
                 Ok(p) => {
@@ -1573,6 +1589,24 @@ impl Renderer {
                         } else {
                             None
                         };
+                        s.sim = None;
+                        if nsim > 0 {
+                            sim_changed = true;
+                            let cs = crate::sim::compile_compute(&self.device, &common, &s.path, &self.sim_kit);
+                            let draw = compile_pipeline_entries(
+                                &self.device,
+                                &common,
+                                &s.path,
+                                &self.sim_kit.draw_pl,
+                                SCENE_FORMAT,
+                                Some(GLOW_BLEND),
+                                ("vs_particles", "fs_particles"),
+                            );
+                            match (cs, draw) {
+                                (Ok(c), Ok(d)) => s.sim = Some((c, d, nsim)),
+                                (Err(e), _) | (_, Err(e)) => eprintln!("shader {} (sim) failed:\n{e}", s.name),
+                            }
+                        }
                     }
                     if s.kind == Kind::Present {
                         match compile_pipeline_entries(
@@ -1641,6 +1675,10 @@ impl Renderer {
         self.text = text;
         self.overlay = overlay;
         self.logo_particles = logo_particles;
+        if sim_changed {
+            // A recompiled sim starts its particles afresh.
+            self.sim = None;
+        }
     }
 
     fn compile(&self, common: &str, path: &Path, kind: Kind) -> Result<wgpu::RenderPipeline> {
@@ -2069,6 +2107,22 @@ impl Renderer {
             self.acc_cur = an;
         }
 
+        // Sim scenes: step the particles (respawned on a cut-in or a gap).
+        let sim_draw = match (self.scenes.get(scene).and_then(|s| s.sim.clone()), self.transparent) {
+            (Some((cs, dp, n)), false) => {
+                let same = matches!(&self.sim, Some((i, b)) if *i == scene && b.count == n);
+                if !same {
+                    self.sim = Some((scene, crate::sim::SimBuf::new(&self.device, &self.sim_kit, n)));
+                }
+                let fresh = !same || self.sim_at.wrapping_add(1) != self.frame;
+                if let Some((_, b)) = self.sim.as_mut() {
+                    b.step(&self.queue, &mut enc, &cs, &self.bind_groups[prev], u, fresh);
+                }
+                self.sim_at = self.frame;
+                Some((dp, n))
+            }
+            _ => None,
+        };
         let scene_pipe = self.scenes.get(scene).and_then(|s| s.pipeline.as_ref());
         // Dancer slots whose Disintegrate particles are out (main, or all
         // three in the canon).
@@ -2103,6 +2157,11 @@ impl Renderer {
                 // Particle scenes: their dots over their own background.
                 if let Some((pp, n)) = self.scenes.get(scene).and_then(|s| s.parts.as_ref()) {
                     pass.set_pipeline(pp);
+                    pass.draw(0..3, 0..*n);
+                }
+                if let (Some((dp, n)), Some((_, b))) = (&sim_draw, &self.sim) {
+                    pass.set_pipeline(dp);
+                    pass.set_bind_group(1, b.draw_group(), &[]);
                     pass.draw(0..3, 0..*n);
                 }
             }
@@ -2429,6 +2488,7 @@ impl Renderer {
     pub fn thumbnail(&mut self, scene: usize, w: u32, h: u32, look: [f32; 4]) -> Option<Vec<u8>> {
         let pipeline = self.scenes.get(scene)?.pipeline.clone()?;
         let parts = self.scenes.get(scene)?.parts.clone();
+        let sim = self.scenes.get(scene)?.sim.clone();
         let present = self.present.pipeline.clone()?;
         let mut spectrum = [0.35f32; SPECTRUM_BINS];
         for (i, v) in spectrum.iter_mut().enumerate() {
@@ -2525,6 +2585,17 @@ impl Renderer {
         let out_fmt = self.config.format;
         let out = mk(out_fmt);
 
+        // A sim scene: spawn its particles and let them run for two
+        // seconds of the canned frame first.
+        let sim_buf = sim.as_ref().map(|(cs, _, n)| {
+            let mut b = crate::sim::SimBuf::new(&self.device, &self.sim_kit, *n);
+            for i in 0..120 {
+                let mut e = self.device.create_command_encoder(&Default::default());
+                b.step(&self.queue, &mut e, cs, &bgs[0], &u, i == 0);
+                self.queue.submit([e.finish()]);
+            }
+            b
+        });
         let mut enc = self.device.create_command_encoder(&Default::default());
         {
             let view = targets[1].create_view(&Default::default());
@@ -2546,6 +2617,11 @@ impl Renderer {
             pass.draw(0..3, 0..1);
             if let Some((pp, n)) = &parts {
                 pass.set_pipeline(pp);
+                pass.draw(0..3, 0..*n);
+            }
+            if let (Some((_, dp, n)), Some(b)) = (&sim, &sim_buf) {
+                pass.set_pipeline(dp);
+                pass.set_bind_group(1, b.draw_group(), &[]);
                 pass.draw(0..3, 0..*n);
             }
         }
@@ -2690,7 +2766,7 @@ pub fn compile_pipeline_entries(
     (vs, fs): (&str, &str),
 ) -> Result<wgpu::RenderPipeline> {
     let body = std::fs::read_to_string(path)?;
-    let src = format!("{common}\n{body}");
+    let src = crate::sim::scene_src(common, &body);
     // Validate with naga first to get readable errors instead of a panic.
     let module = wgpu::naga::front::wgsl::parse_str(&src)
         .map_err(|e| anyhow!(e.emit_to_string(&src)))?;

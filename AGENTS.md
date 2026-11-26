@@ -388,8 +388,38 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   Stateless: every position is a function of the instance hash and the
   clocks. `fs_main` paints the background and fades `prev()` for trails.
   120k additive dots need ~0.1 per-dot brightness, and thin shells read as
-  solid neon hoops (particle_orbits): spread them. Examples:
-  particle_orbits, particle_nebula, particle_flow (~0.12 ms each at 1080p).
+  solid neon hoops (particle_orbits): spread them. Example:
+  particle_orbits (~0.12 ms at 1080p).
+- **Sim scenes** (`// @sim <count>`, `src/sim.rs`, `shaders/sim.wgsl`):
+  stateful GPU particles, for music that *pushes* things (owner: the
+  stateless particle scenes' motion was "extremely basic"). Each particle
+  keeps `pos`/`vel` (two vec4s; `.w` free for age or lifetime) in a
+  storage buffer; `cs_sim` runs each frame before the scene and calls the
+  scene's `sim_spawn(i)` (cut-in, hot reload, a skipped frame) and
+  `sim_step(i, p, dt)`; `vs_particles` reads `sim_p[instance_index]`.
+  sim.wgsl is added after common.wgsl only for `@sim` scenes
+  (`sim::scene_src`, used by every scene compile and `--check-shaders`);
+  group 1 is the particles (rw for compute, read-only for the draw), so
+  frame-layout bindings are visible to COMPUTE too (`render::VIS`).
+  Patterns that work (particle_nebula/tornado/flow, 0.2-0.3 ms at 1080p):
+  - Velocity **relaxes toward a target flow** (`acc = (target - vel) * k`,
+    k 2.5-5): the target is built from eased audio (loudness sets speed,
+    mids the curl-noise swirl via `sim_curl`/`sim_curl2`), and the
+    relaxation is the smoothing, so no raw audio reaches position.
+  - **Density comes from your own forces**: curl noise is divergence-free
+    and never clumps or thins. Spring each particle to a home or a lane
+    and let the bass tighten it (nebula home scale, flow's comb onto
+    streamlines); breakdowns loosen it.
+  - **Kicks are velocity impulses on `simc.onset`** (per band, how far
+    `hits4` jumped this frame), not accelerations from `hits4`: pushing
+    with the decaying `hits4` peaked the motion ~0.25 s after the kick
+    (kick r 0.0 on Night Tools, visibly late); the impulse put it on the
+    beat (r 0.3-0.45). Push every particle alike (radial shock, a twist):
+    per-band push strengths scattered the nebula's filaments into fuzz.
+  - Respawn at the stream's own speed, not from rest, or particles bunch
+    where they come in (a bright band at flow's left edge).
+  - Draw streaks along the screen velocity (`length` grows with speed,
+    brightness spread over it) so speed reads as shape.
   Pitch: with `rot(a) * w.yz`, a *negative* angle tilts the camera down
   onto a floor (particle_sea first rendered as a sliver). A solid grid of
   points reads as a glowing ball: draw lattice *lines* (particle_cube).
@@ -876,6 +906,10 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   because they read only `pres4`/`clock4`. `kick_swell()` and
   `beat_ring(r, width)` in common.wgsl are smooth kick-driven shape
   envelopes (bass-level scaled, still in breakdowns) for stateless scenes.
+  Momentum (sim scenes) scores lower on this measure than a stateless shape
+  pulse of the same visible size, because the drift back after each kick
+  is motion too: check sims with frame strips across a kick
+  (`--snap-at 6.2,6.25,6.33,6.45,6.65` with `--snap-track`) as well.
 - **Look glide** (`Settings::look_glide`, `looks::Glide`): `apply_look` still
   writes the Look's settings at once, and under the same settings lock puts a
   `GlideReq` (the old values, the scene/routine indices) in `Shared::glide`;
