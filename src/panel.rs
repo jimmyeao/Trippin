@@ -1740,6 +1740,16 @@ fn inspector_body(
     section_label(ui, "controls");
     card().show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = 8.0;
+        // Quick switches first, so they're in view without scrolling (the
+        // Accents box sat below the fold at the card's foot).
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut s.accent_auto, egui::RichText::new("Accents").size(12.0)).on_hover_text(
+                "Auto lays a light scene (embers, streaks, notes, comets...) over some scenes while the \
+                 track drives. Strength on Dancer & FX; timeline shows have their own toggle in the editor.",
+            );
+            ui.checkbox(&mut s.fx_auto, egui::RichText::new("Auto effects").size(12.0))
+                .on_hover_text("A fresh post effect on every scene cut. Which ones: Dancer & FX.");
+        });
         ui.label(egui::RichText::new("Mode").size(12.0).color(MUTED));
         segmented_wide(
             ui,
@@ -1812,12 +1822,6 @@ fn inspector_body(
                 *tab = Tab::DancerFx;
             },
         );
-        // Accent layer (Dancer & FX has its strength).
-        ui.checkbox(&mut s.accent_auto, egui::RichText::new("Accents").size(12.0))
-            .on_hover_text(
-                "Auto lays a light scene (embers, streaks, notes, comets...) over some scenes while the \
-                 track drives. Strength on Dancer & FX; timeline shows have their own toggle in the editor.",
-            );
         // Palette row: a clickable gradient strip opening a swatch popover.
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new("Palette").size(12.0).color(MUTED));
@@ -3232,7 +3236,25 @@ fn dancer_fx_tab(
             });
             ui.checkbox(&mut s.fx_auto, "Auto — a fresh effect on every scene cut");
             if s.fx_auto {
-                ui.small(format!("On screen now: {}", st.fx.label()));
+                ui.small(format!("On screen now: {}. Auto picks from the ticked ones:", st.fx.label()));
+                egui::Grid::new("fx_auto_grid")
+                    .num_columns(3)
+                    .spacing(egui::vec2(6.0, 2.0))
+                    .show(ui, |ui| {
+                        for (i, f) in Fx::ALL.iter().enumerate() {
+                            let mut on = !s.fx_auto_skip.contains(f);
+                            if ui.checkbox(&mut on, egui::RichText::new(f.label()).size(11.5)).changed() {
+                                if on {
+                                    s.fx_auto_skip.retain(|x| x != f);
+                                } else {
+                                    s.fx_auto_skip.push(*f);
+                                }
+                            }
+                            if i % 3 == 2 {
+                                ui.end_row();
+                            }
+                        }
+                    });
             }
             ui.add_space(4.0);
             ui.checkbox(&mut s.accent_auto, "Accent layer — Auto adds a light scene on top")

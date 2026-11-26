@@ -114,27 +114,41 @@ fn fx_uv(uv: vec2<f32>, m: i32) -> vec3<f32> {
     return vec3<f32>(uv, 0.0);
 }
 
-// Anamorphic flare (u.fx 9): long, thin horizontal streaks off the bright
-// parts of the frame only, tinted cool; their length breathes with the bass
-// presence. Read from the bloom chain (half res, already soft; the renderer
-// runs it while this effect is on): 8 taps each side, jittered per pixel so
-// no copies show. Full-res taps of the frame cost 0.4-0.7 ms at 1080p.
+// Anamorphic flare (u.fx 9): long horizontal streaks, tinted cool, off the
+// lights that stand out from the frame (keyed to the frame's own average,
+// so a bright full-frame scene doesn't white out and a dark one with a few
+// lamps still flares); their length breathes with the bass presence. Read
+// from the bloom chain (half res, already soft; the renderer runs it while
+// this effect is on): 8 taps each side, jittered per pixel so no copies
+// show. Full-res taps of the frame cost 0.4-0.7 ms at 1080p.
+fn bloom_l(uv: vec2<f32>) -> f32 {
+    let c = finite(textureSampleLevel(bloom_tex, samp, uv, 0.0).rgb) / 6.0;
+    return dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
+}
+
 fn anamorphic(uv: vec2<f32>, frag: vec2<f32>) -> vec3<f32> {
-    let len = 0.3 + 0.25 * u.pres4.x;
+    // The frame's average, from nine fixed points (the same for every
+    // pixel, so they stay in cache).
+    var avg = 0.0;
+    for (var gy = 0; gy < 3; gy++) {
+        for (var gx = 0; gx < 3; gx++) {
+            avg += bloom_l((vec2<f32>(f32(gx), f32(gy)) + 0.5) / 3.0);
+        }
+    }
+    avg /= 9.0;
+    let key = 0.02 + 1.6 * avg;
+    let len = 0.55 + 0.3 * u.pres4.x;
     let j = bluen(frag);
     var s = 0.0;
     for (var i = 0; i < 8; i++) {
         let t = (f32(i) + j) / 8.0;
-        let o = t * t * len;
-        let w = exp(-3.0 * t);
-        let a = textureSampleLevel(bloom_tex, samp, uv + vec2<f32>(o, 0.0), 0.0).rgb / 6.0;
-        let b = textureSampleLevel(bloom_tex, samp, uv - vec2<f32>(o, 0.0), 0.0).rgb / 6.0;
-        let la = dot(finite(a), vec3<f32>(0.2126, 0.7152, 0.0722));
-        let lb = dot(finite(b), vec3<f32>(0.2126, 0.7152, 0.0722));
-        s += (max(la - 0.25, 0.0) + max(lb - 0.25, 0.0)) * w;
+        let o = t * len;
+        let w = exp(-2.5 * t);
+        s += (max(bloom_l(uv + vec2<f32>(o, 0.0)) - key, 0.0) + max(bloom_l(uv - vec2<f32>(o, 0.0)) - key, 0.0)) * w;
     }
-    // Thin: only near the bright source's own row, from the frame itself.
-    return vec3<f32>(0.3, 0.55, 1.0) * min(s / 8.0 * 2.5, 2.0);
+    s = s / 8.0 * 12.0;
+    // A soft cap: streaks glow, they never fill the frame.
+    return vec3<f32>(0.3, 0.55, 1.0) * (s / (1.0 + s)) * 0.6;
 }
 
 // AgX (Troy Sobotka; Benjamin Wrensch's polynomial fit). Holds hue and

@@ -403,32 +403,25 @@ impl Fx {
         Fx::ALL[(i + 1) % Fx::ALL.len()]
     }
 
-    /// Auto pool: MirrorY is excluded — an upside-down dancer mid-set reads
-    /// as a glitch rather than an effect (it stays selectable by hand) — and
-    /// so are Pixels and Tiles (they shrink or chop up the dancer and the
-    /// whole picture: a deliberate look, not a cut's surprise).
-    const AUTO: [Fx; 11] = [
-        Fx::Off,
-        Fx::MirrorX,
-        Fx::Quad,
-        Fx::Kaleido6,
-        Fx::Kaleido8,
-        Fx::GlassRibs,
-        Fx::GlassFan,
-        Fx::FlyEye,
-        Fx::Anamorphic,
-        Fx::Melt,
-        Fx::Twist,
-    ];
+    /// Left out of Auto by default (`Settings::fx_auto_skip`): MirrorY (an
+    /// upside-down dancer mid-set reads as a glitch), Pixels and Tiles (they
+    /// shrink or chop up the dancer and the whole picture: a deliberate
+    /// look, not a cut's surprise). All stay selectable by hand.
+    pub const AUTO_SKIP: [Fx; 3] = [Fx::MirrorY, Fx::Pixels, Fx::Tiles];
 
-    /// A random pick for auto mode; never repeats the current effect.
-    pub fn random(r: f32, cur: Fx) -> Fx {
-        let i = (r * Fx::AUTO.len() as f32) as usize % Fx::AUTO.len();
-        let f = Fx::AUTO[i];
-        if f == cur {
-            Fx::AUTO[(i + 1) % Fx::AUTO.len()]
+    /// A random pick for auto mode from every effect not in `skip`; never
+    /// repeats the current effect unless it's the only one left. Off when
+    /// everything is skipped.
+    pub fn random(r: f32, cur: Fx, skip: &[Fx]) -> Fx {
+        let pool: Vec<Fx> = Fx::ALL.iter().copied().filter(|f| !skip.contains(f)).collect();
+        if pool.is_empty() {
+            return Fx::Off;
+        }
+        let i = (r * pool.len() as f32) as usize % pool.len();
+        if pool[i] == cur && pool.len() > 1 {
+            pool[(i + 1) % pool.len()]
         } else {
-            f
+            pool[i]
         }
     }
 }
@@ -502,6 +495,9 @@ pub struct Settings {
     pub fx: Fx,
     /// Pick a fresh post effect on every scene cut.
     pub fx_auto: bool,
+    /// Effects Auto never picks (ticked off under the FX card's Auto). A
+    /// skip list, so effects added later join Auto by default.
+    pub fx_auto_skip: Vec<Fx>,
     /// Post effect strength 0..1 — blends the transform in `present.wgsl`.
     pub fx_amt: f32,
     /// Auto lays a light accent scene (comets, orbiters...) over some
@@ -691,6 +687,7 @@ impl Default for Settings {
             perform_pads: false,
             fx: Fx::Off,
             fx_auto: false,
+            fx_auto_skip: Fx::AUTO_SKIP.to_vec(),
             fx_amt: 1.0,
             accent_auto: false,
             accent_amt: 0.6,
@@ -979,6 +976,22 @@ mod tests {
         }
         assert_eq!(Fx::from_name("Glass-Ribs"), Some(Fx::GlassRibs));
         assert_eq!(Fx::from_name("nonsense"), None);
+    }
+
+    /// Auto picks only from the effects not skipped, never repeats while
+    /// there's a choice, and falls back to Off with nothing left.
+    #[test]
+    fn fx_random_respects_the_skip_list() {
+        let skip = [Fx::MirrorY, Fx::Pixels, Fx::Tiles, Fx::Melt];
+        for k in 0..200 {
+            let r = k as f32 / 200.0;
+            let f = Fx::random(r, Fx::Twist, &skip);
+            assert!(!skip.contains(&f), "{f:?}");
+            assert_ne!(f, Fx::Twist);
+        }
+        let only: Vec<Fx> = Fx::ALL.iter().copied().filter(|f| *f != Fx::Melt).collect();
+        assert_eq!(Fx::random(0.3, Fx::Melt, &only), Fx::Melt);
+        assert_eq!(Fx::random(0.3, Fx::Melt, &Fx::ALL), Fx::Off);
     }
 
     #[test]

@@ -1700,7 +1700,7 @@ fn render_loop(
         );
         if ev.cut && s.fx_auto {
             let seed = dir.rand();
-            fx_current = Fx::random(seed, fx_current);
+            fx_current = Fx::random(seed, fx_current, &s.fx_auto_skip);
         }
         // Accent layer: decided on each cut; fades out in breakdowns, and
         // is off in Manual and with the setting off. Timeline shows have

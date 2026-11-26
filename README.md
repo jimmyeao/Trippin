@@ -656,9 +656,11 @@ panel or with `X`: **Mirror X**, **Mirror Y**, **Quad mirror** or **Kaleido
 The lens effects move like the scenes do, with the bass presence and the
 smooth clocks; none of them pulses on the beat. The **Strength** slider
 blends the transform in (at 50% a mirror sits over the plain frame).
-**Auto** picks a fresh effect on every scene cut (Mirror Y, Pixels and Tiles
-stay manual-only: they turn the dancer upside down or chop up the whole
-picture).
+**Auto** picks a fresh effect on every scene cut, from the effects ticked
+under it on Dancer & FX (Mirror Y, Pixels and Tiles start unticked: they
+turn the dancer upside down or chop up the whole picture). The Perform
+page's Controls card has **Auto effects** and **Accents** switches at the
+top.
 It's applied in `present.wgsl` from `u.fx`, so it needs no scene support and
 combines with everything (a mirrored dancer in canon is five dancers).
 
