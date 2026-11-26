@@ -1,10 +1,12 @@
-// @particles 72000 @bloom 0.55 @tonemap agx
+// @sim 72000 @bloom 0.55 @tonemap agx
 // @title Particle Dandelion
 // Particle Dandelion: a glowing dandelion clock of 72,000 motes, 600 seeds on
-// fine stalks, with seeds breaking loose and drifting away on the wind and
-// regrowing. The head swells with the slow bass presence (shape), it turns
-// and the seeds drift on the smooth energy clock (motion), and the wind
-// swings from one side to the other over eight bars (direction).
+// fine stalks, simulated on the GPU (sim.rs). Seeds break loose, ride the
+// wind away and regrow. The head swells with the slow bass presence (shape)
+// and turns on the smooth energy clock (motion); the wind swings from one
+// side to the other over eight bars (direction). The loudness sets how hard
+// it blows and the mids how gusty; every kick shakes the whole clock and
+// sends a gust through the loose seeds (momentum); the highs open the tufts.
 
 const SEEDS: u32 = 600u;
 
@@ -14,28 +16,21 @@ struct POut {
     @location(1) col: vec3<f32>,
 };
 
-fn emit(w: vec3<f32>, vi: u32, size_w: f32, col: vec3<f32>) -> POut {
-    var o: POut;
-    o.pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
-    if w.z < 0.3 {
-        return o;
-    }
-    let fl = 1.7;
-    let sp = w.xy * fl / w.z;
-    let corners = array<vec2<f32>, 3>(vec2<f32>(-1.732, -1.0), vec2<f32>(1.732, -1.0), vec2<f32>(0.0, 2.0));
-    let q = corners[vi % 3u];
-    let size = max(size_w * fl / w.z, 2.0 / u.res_y);
-    let p = sp + q * size;
-    o.pos = vec4<f32>(p.x / aspect(), p.y, 0.0, 1.0);
-    o.q = q;
-    o.col = col;
-    return o;
-}
+struct Mote {
+    w: vec3<f32>,
+    dir: vec3<f32>,
+    loose: f32,
+    life: f32,
+    tuft: bool,
+    hs: vec2<f32>,
+    t: f32,
+};
 
-@vertex
-fn vs_particles(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> POut {
-    let seed = ii % SEEDS;
-    let k = ii / SEEDS; // 0..119: 0-69 the stalk, 70-119 the tuft
+// Mote i attached to the head (where it is while its seed holds on).
+fn mote(i: u32) -> Mote {
+    var o: Mote;
+    let seed = i % SEEDS;
+    let k = i / SEEDS; // 0..119: 0-69 the stalk, 70-119 the tuft
     let fs = f32(seed);
     // Seed directions: a Fibonacci sphere.
     let y = 1.0 - 2.0 * (fs + 0.5) / f32(SEEDS);
@@ -43,49 +38,102 @@ fn vs_particles(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32
     let phi = fs * 2.399963;
     let dir = vec3<f32>(cos(phi) * rr, y, sin(phi) * rr);
     let hs = hash22(vec2<f32>(fs, 3.0));
-    let h = hash22(vec2<f32>(f32(ii % 1024u), f32(ii / 1024u)) + vec2<f32>(1.3, 8.8));
-    // The head pumps with the kick.
-    let kick = kick_swell();
-    let head = 0.75 * (1.0 + 0.08 * u.pres4.x + 0.12 * kick);
+    let h = hash22(vec2<f32>(f32(i % 1024u), f32(i / 1024u)) + vec2<f32>(1.3, 8.8));
+    let head = 0.75 * (1.0 + 0.08 * u.pres4.x);
     // Seed life: grows in, stays, then breaks loose and drifts away.
-    let ph = u.clock4.x * 0.02 + hs.x;
-    let life = fract(ph);
-    let loose = smoothstep(0.72, 1.0, life);
+    let life = fract(u.clock4.x * 0.02 + hs.x);
     let grow = smoothstep(0.0, 0.1, life);
-    var w: vec3<f32>;
-    var bri = 0.0;
-    var c = vec3<f32>(0.0);
-    if k < 70u {
+    o.dir = dir;
+    o.hs = hs;
+    o.life = life;
+    o.loose = smoothstep(0.72, 0.76, life);
+    o.tuft = k >= 70u;
+    if !o.tuft {
         // The stalk, from near the centre to the tip; it stays when the seed
         // leaves.
         let t = f32(k) / 70.0;
-        w = dir * mix(0.12, head, t) * (0.9 + 0.1 * grow);
-        w += (vec3<f32>(h.x, h.y, fract(h.x * 9.1)) - 0.5) * 0.004;
-        bri = 0.05;
-        c = palette(0.3 + 0.1 * t);
+        o.t = t;
+        o.w = dir * mix(0.12, head, t) * (0.9 + 0.1 * grow) + (vec3<f32>(h.x, h.y, fract(h.x * 9.1)) - 0.5) * 0.004;
+        o.loose = 0.0;
     } else {
-        // The tuft: an umbrella of fine rays at the tip.
+        // The tuft: an umbrella of fine rays at the tip, opening with the highs.
         let a = h.x * TAU;
         let side = normalize(cross(dir, vec3<f32>(0.0, 1.0, 0.3)));
         let up = cross(dir, side);
-        // The tufts open with the highs and on each kick.
-        let open = 1.0 + 0.9 * u.lvl4.w + 1.2 * kick;
+        let open = 1.0 + 0.9 * u.lvl4.w;
         let ray = (cos(a) * side + sin(a) * up) * h.y * 0.09 * open + dir * h.y * 0.05;
-        var tip = dir * head * grow + ray * grow;
-        // Loose: carried off on the wind, rising and tumbling.
-        let wind = sin(TAU * u.flow / 32.0);
-        let drift = loose * loose * 3.2;
-        tip += vec3<f32>(wind * drift, drift * 0.35 + 0.15 * sin(drift * 3.0 + hs.y * 6.0), (hs.y - 0.5) * drift);
-        w = tip;
-        bri = 0.12 * (1.0 - smoothstep(0.85, 1.0, life));
-        c = palette(0.55 + 0.25 * hs.y);
+        o.w = dir * head * grow + ray * grow;
     }
-    // The head turns slowly on the energy clock.
+    return o;
+}
+
+fn sim_spawn(i: u32) -> Particle {
+    return sim_shape_spawn();
+}
+
+// Attached motes keep their offset from the head (the shape pattern); a
+// loose seed's motes are free (vel.w = 1) and pos is where they are.
+fn sim_step(i: u32, p_in: Particle, dt: f32) -> Particle {
+    var p = p_in;
+    let m = mote(i);
+    let free = p.vel.w > 0.5;
+    if m.loose < 0.5 {
+        if free {
+            // Its seed has regrown: back on the head.
+            return sim_shape_spawn();
+        }
+        return sim_shape_step(i, p, m.w, vec3<f32>(0.0), dt, 0.7);
+    }
+    if !free {
+        // Breaking loose: from offset to free, keeping its speed.
+        p.pos = vec4<f32>(m.w + p.pos.xyz, p.pos.w);
+        p.vel = vec4<f32>(p.vel.xyz + m.dir * 0.3, 1.0);
+    }
+    let x = p.pos.xyz;
+    // The wind: its side swings over eight bars, the loudness sets how hard
+    // it blows and the mids how gusty it is; the seeds float up a little.
+    let side = sin(TAU * u.flow / 32.0);
+    let blow = (0.35 + 1.1 * sim_loud()) * (1.0 - 0.4 * u.calm);
+    let wind = vec3<f32>(side * blow, 0.12 + 0.08 * sin(m.hs.y * 6.0), (m.hs.y - 0.5) * 0.4);
+    var tv = wind + sim_curl(x * 0.6 + vec3<f32>(u.clock4.z * 0.02, 0.0, 0.0)) * (0.1 + 1.2 * u.lvl4.y);
+    var v = p.vel.xyz + (tv - p.vel.xyz) * 1.5 * dt;
+    // Kick: a gust through the loose seeds.
+    v += vec3<f32>(side, 0.3, 0.0) * simc.onset.x * 0.9 * (1.0 - 0.8 * u.calm);
+    p.vel = vec4<f32>(v, 1.0);
+    p.pos = vec4<f32>(x + v * dt, p.pos.w + dt);
+    return p;
+}
+
+// The head turns slowly on the energy clock; then the camera.
+fn view(w_in: vec3<f32>) -> vec3<f32> {
+    var w = w_in;
     let wy = rot(u.clock4.x * 0.05) * w.xz;
     w = vec3<f32>(wy.x, w.y, wy.y);
     let wp = rot(0.15) * w.yz;
-    w = vec3<f32>(w.x, wp.x + 0.1, wp.y + 3.3);
-    return emit(w, vi, 0.004, c * c * bri * clamp(4.2 - w.z, 0.4, 1.6));
+    return vec3<f32>(w.x, wp.x + 0.1, wp.y + 3.3);
+}
+
+@vertex
+fn vs_particles(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> POut {
+    var o: POut;
+    let m = mote(ii);
+    let pp = sim_p[ii];
+    var w = m.w + pp.pos.xyz;
+    if pp.vel.w > 0.5 {
+        w = pp.pos.xyz;
+    }
+    let a = view(w);
+    let sq = sim_quad(a, view(w - pp.vel.xyz * 0.04), vi, 0.004, 1.7);
+    o.pos = sq.pos;
+    o.q = sq.q;
+    var bri = 0.05;
+    var c = palette(0.3 + 0.1 * m.t);
+    if m.tuft {
+        bri = 0.12 * (1.0 - smoothstep(0.85, 1.0, m.life));
+        c = palette(0.55 + 0.25 * m.hs.y);
+    }
+    o.col = c * c * bri * clamp(4.2 - a.z, 0.4, 1.6) * sq.dim;
+    return o;
 }
 
 @fragment

@@ -291,12 +291,12 @@ dancer, as they are on screen right now. One tap recalls it.
   of glowing spectrum towers), `scope` (phosphor oscilloscope), `spectrogram`
   (scrolling waterfall), `lissajous`, `vu` (giant bass/mid/high meters),
   `led_wall`, `waveshaper`, `polar_bloom` and `levels`.
-- **Particle systems** (tens of thousands of GPU motes, ~0.15 ms each).
-  `particle_nebula`, `particle_tornado` and `particle_flow` (combed streaks)
-  are simulated: every mote keeps its own speed from frame to frame, so
-  kicks push them out and they swing back, the loudness sets how fast they
-  flow, and the bass draws them dense while breakdowns let them drift apart.
-  `particle_orbits`,
+- **Particle systems** (tens of thousands of GPU motes, ~0.2 ms each), all
+  simulated: every mote keeps its own speed from frame to frame, so kicks
+  blast them out and they swing back, the loudness sets how fast they flow,
+  the mids swirl them loose, and the bass draws them tight while breakdowns
+  let them drift into haze. `particle_nebula`, `particle_tornado`,
+  `particle_flow` (combed streaks), `particle_orbits`,
   `particle_dna` (a double helix whose girth is the spectrum),
   `particle_sphere` (a sphere morphing with the spectrum),
   `particle_sea` (a sea of light to the horizon),

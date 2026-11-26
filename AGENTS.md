@@ -388,8 +388,8 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   Stateless: every position is a function of the instance hash and the
   clocks. `fs_main` paints the background and fades `prev()` for trails.
   120k additive dots need ~0.1 per-dot brightness, and thin shells read as
-  solid neon hoops (particle_orbits): spread them. Example:
-  particle_orbits (~0.12 ms at 1080p).
+  solid neon hoops: spread them. Every built-in particle scene is now a
+  sim scene (below); `@particles` remains for stateless ones.
 - **Sim scenes** (`// @sim <count>`, `src/sim.rs`, `shaders/sim.wgsl`):
   stateful GPU particles, for music that *pushes* things (owner: the
   stateless particle scenes' motion was "extremely basic"). Each particle
@@ -401,7 +401,19 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   (`sim::scene_src`, used by every scene compile and `--check-shaders`);
   group 1 is the particles (rw for compute, read-only for the draw), so
   frame-layout bindings are visible to COMPUTE too (`render::VIS`).
-  Patterns that work (particle_nebula/tornado/flow, 0.2-0.3 ms at 1080p):
+  All 13 particle_* scenes, 0.16-0.28 ms each at 1080p. A figure (lattice,
+  knot, helix, sphere, rings, rose, sea) uses the **shape-scene pattern**
+  (`sim_shape_step`): the figure is each particle's home, evaluated in both
+  `sim_step` and `vs_particles`, and the state is only the offset from it,
+  so the figure moves exactly as designed while kicks, snares, mids and the
+  bass knock it about. Pass the kick `centre` (the helix axis, a ring's own
+  centre; the sea passes each point as its own, then adds a kick front that
+  rolls out to sea, or the whole sea would jump). Free particles (nebula,
+  tornado, flow, fountain sparks, loose dandelion seeds) keep absolute
+  positions. A fountain reacts best through its *launch* speed (sparks
+  thrown during a kick fly higher, so the surge climbs the jet); punching
+  every airborne spark up emptied the jets and left clumps.
+  Patterns that work:
   - Velocity **relaxes toward a target flow** (`acc = (target - vel) * k`,
     k 2.5-5): the target is built from eased audio (loudness sets speed,
     mids the curl-noise swirl via `sim_curl`/`sim_curl2`), and the
