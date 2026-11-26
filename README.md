@@ -284,6 +284,16 @@ dancer, as they are on screen right now. One tap recalls it.
   of glowing spectrum towers), `scope` (phosphor oscilloscope), `spectrogram`
   (scrolling waterfall), `lissajous`, `vu` (giant bass/mid/high meters),
   `led_wall`, `waveshaper`, `polar_bloom` and `levels`.
+- **Particle systems** (tens of thousands of GPU motes, ~0.15 ms each):
+  `particle_orbits`, `particle_nebula`, `particle_flow` (combed streaks),
+  `particle_dna` (a double helix whose girth is the spectrum),
+  `particle_sphere` (a sphere morphing with the spectrum),
+  `particle_tornado`, `particle_sea` (a sea of light to the horizon),
+  `particle_fountain` (five jets of sparks), `particle_knot` (a torus knot
+  re-tying itself every 8 bars), `particle_cube` (a twisting wireframe
+  lattice), `particle_rose` (a polar-rose flower that changes its petal
+  count), `particle_smoke_rings` (rising vortex rings) and
+  `particle_dandelion` (seeds blowing away on the wind).
 - **Pulse / particle:** `shockwaves`, `pulse_grid`, `rings`,
   `bounce` (orbs hopping on a lit floor), `ripple` (beat-spawned water
   rings), `stardrive`, `orbiters`, `ribbons`, `ink`, `flare_ring`

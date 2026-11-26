@@ -390,6 +390,9 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   120k additive dots need ~0.1 per-dot brightness, and thin shells read as
   solid neon hoops (particle_orbits): spread them. Examples:
   particle_orbits, particle_nebula, particle_flow (~0.12 ms each at 1080p).
+  Pitch: with `rot(a) * w.yz`, a *negative* angle tilts the camera down
+  onto a floor (particle_sea first rendered as a sliver). A solid grid of
+  points reads as a glowing ball: draw lattice *lines* (particle_cube).
 - **The now-playing line is a texture** (`title_tex`, binding 10,
   `gfx::Statics::title`, 2048x160 R8): main.rs rasterises "Artist - Title"
   (else the DJ name, else TRIPPIN) when it changes; `u.look4.w` is the share
