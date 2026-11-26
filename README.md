@@ -618,9 +618,12 @@ combines with everything (a mirrored dancer in canon is five dancers).
 **Accent layer** (Dancer & FX tab, off by default): on some scene cuts while
 the track drives, Auto lays a light overlay over the main scene — rising
 embers, soft light streaks gliding across the frame, a swarm of motes that
-tightens with the bass, drifting bokeh, god-ray light shafts, or rings
-rippling out like rain on water (`shaders/accents/`; they never play on
-their own). It's
+tightens with the bass, drifting bokeh, god-ray light shafts, rings rippling out like rain on
+water, musical notes floating up, star glints, soap bubbles, fireflies,
+tumbling petals, comets, low floor fog, a spectrum glowing up from the
+bottom edge, the waveform as light ribbons, or a ring of sparks orbiting
+the centre (16 in all, `shaders/accents/`; they never play on their
+own). It's
 screen-blended: it shows over the dark parts of the scene and fades where
 the scene is bright, so it never washes a bright scene out. It fades away in
 breakdowns, and never plays over 3D (`@heavy`), Unity, video or flight scenes,
