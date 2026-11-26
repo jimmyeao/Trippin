@@ -232,6 +232,8 @@ pub struct Status {
     /// Now playing: the track on screen, and one status line per source.
     pub np_track: Option<String>,
     pub np_status: Vec<(String, String)>,
+    /// Where the playing track's cover came from ("" = none found).
+    pub np_art: String,
     /// Clip recorder state (None = not running) / why it can't run.
     pub rec: Option<crate::rec::Status>,
     pub rec_err: Option<String>,
@@ -2753,6 +2755,13 @@ fn stream_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<Ui
                 &st.np_track.clone().unwrap_or_else(|| "no track".into()),
             );
         ui.small("Auto follows whichever source changed last — media players, Serato, VirtualDJ, rekordbox, Mixxx, or a text file.");
+        if st.np_track.is_some() {
+            ui.small(if st.np_art.is_empty() {
+                "Cover: none found".to_string()
+            } else {
+                format!("Cover: {}", st.np_art)
+            });
+        }
         egui::Grid::new("np_grid")
             .num_columns(2)
             .min_col_width(96.0)
@@ -2786,6 +2795,11 @@ fn stream_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<Ui
                 if ui.button("Show again").clicked() {
                     cmd.push(UiCommand::Do(Action::ShowNowPlaying));
                 }
+            });
+            grow(ui, "Cover art", |ui| {
+                ui.checkbox(&mut s.np_card_art, "On the card");
+                ui.checkbox(&mut s.np_art_online, "Look up online")
+                    .on_hover_text("For tracks no local source has a cover for, ask the iTunes Search API. This sends the artist and title to Apple.");
             });
             grow(ui, "Card time", |ui| {
                 ui.add(egui::Slider::new(&mut s.np_hold_s, 0.0..=60.0).step_by(1.0).suffix(" s"));

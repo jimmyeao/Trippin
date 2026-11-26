@@ -197,9 +197,10 @@ pub fn parse_hex(s: &str, def: [f32; 3]) -> [f32; 3] {
     }
 }
 
-/// The lower-third card: a dark glass panel with an accent bar, a small
-/// "NOW PLAYING" label, the title large and the artist below.
-pub fn render_card(artist: &str, title: &str, accent: [f32; 3]) -> Option<Image> {
+/// The lower-third card: a dark glass panel with an accent bar, the cover
+/// art if there is one, a small "NOW PLAYING" label, the title large and
+/// the artist below.
+pub fn render_card(artist: &str, title: &str, accent: [f32; 3], art: Option<&image::RgbaImage>) -> Option<Image> {
     let font = crate::text::font()?;
     let (pad, bar) = (34.0f32, 12.0f32);
     let label = layout(font, "NOW PLAYING", 26.0, 0.18);
@@ -207,8 +208,12 @@ pub fn render_card(artist: &str, title: &str, accent: [f32; 3]) -> Option<Image>
     let t = fit(font, title, 68.0, 0.0, max_text);
     let a = fit(font, artist, 46.0, 0.0, max_text);
     let text_w = label.width.max(t.width).max(a.width);
-    let w = (bar + pad * 2.0 + text_w).ceil().max(420.0);
     let h = if artist.is_empty() { 170.0 } else { 222.0f32 };
+    // The cover: a rounded square inset in the panel, left of the text.
+    let inset = 22.0f32;
+    let side = h - inset * 2.0;
+    let art_w = if art.is_some() { side + inset } else { 0.0 };
+    let w = (bar + pad * 2.0 + art_w + text_w).ceil().max(420.0);
     let mut img = Image::new(w as u32 + 8, h as u32 + 8);
     // Soft drop shadow, then the panel.
     img.round_rect(6.0, 8.0, w + 2.0, h + 4.0, 22.0, |_, _| [0.0, 0.0, 0.0, 0.35]);
@@ -225,7 +230,26 @@ pub fn render_card(artist: &str, title: &str, accent: [f32; 3]) -> Option<Image>
             [0.035, 0.035, 0.06, 0.78]
         }
     });
-    let x = bar + pad;
+    if let Some(cover) = art {
+        let r = image::imageops::resize(cover, side as u32, side as u32, image::imageops::FilterType::Lanczos3);
+        let (x0, y0) = (bar + inset, inset);
+        let rad = 14.0f32;
+        for (px, py, p) in r.enumerate_pixels() {
+            // Rounded-corner coverage.
+            let (fx, fy) = (px as f32 + 0.5, py as f32 + 0.5);
+            let qx = (fx - side * 0.5).abs() - (side * 0.5 - rad);
+            let qy = (fy - side * 0.5).abs() - (side * 0.5 - rad);
+            let d = (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt() + qx.max(qy).min(0.0) - rad;
+            let cov = (0.5 - d).clamp(0.0, 1.0) * p[3] as f32 / 255.0;
+            img.blend(
+                (x0 + px as f32) as i32,
+                (y0 + py as f32) as i32,
+                [p[0] as f32 / 255.0, p[1] as f32 / 255.0, p[2] as f32 / 255.0],
+                cov,
+            );
+        }
+    }
+    let x = bar + pad + art_w - if art.is_some() { pad - inset } else { 0.0 };
     draw(&mut img, &label, x, 22.0, accent, false);
     draw(&mut img, &t, x, 56.0, [1.0, 1.0, 1.0], false);
     if !artist.is_empty() {
@@ -336,6 +360,7 @@ impl Overlays {
         &mut self,
         s: &Settings,
         np: &NowPlayingState,
+        art: Option<(u64, &image::RgbaImage)>,
         now_t: f32,
         screen_asp: f32,
         upload: &mut dyn FnMut(usize, &Image),
@@ -474,12 +499,13 @@ impl Overlays {
         // sits there) --------------------------------------------------
         if s.np_card {
             if let Some(t) = &np.track {
-                let key = format!("{}|{}|{}", t.artist, t.title, s.brand_color);
+                let art = art.filter(|_| s.np_card_art);
+                let key = format!("{}|{}|{}|{:?}", t.artist, t.title, s.brand_color, art.map(|a| a.0));
                 if np.serial != self.card_serial || key != self.card_key {
                     let fresh = np.serial != self.card_serial;
                     self.card_serial = np.serial;
                     self.card_key = key;
-                    if let Some(img) = render_card(&t.artist, &t.title, accent) {
+                    if let Some(img) = render_card(&t.artist, &t.title, accent, art.map(|a| a.1)) {
                         self.card_aspect = img.w as f32 / img.h as f32;
                         upload(L_CARD, &img);
                         if fresh || !self.card_on {
@@ -542,9 +568,13 @@ mod tests {
         if crate::text::font().is_none() {
             return; // no system font on this box
         }
-        let c = render_card("Chicane", "Saltwater (Ilan Bluestone Remix)", acc).unwrap();
+        let c = render_card("Chicane", "Saltwater (Ilan Bluestone Remix)", acc, None).unwrap();
         assert!(c.w > 400 && c.h > 100);
         save("card", &c);
+        let cover = image::RgbaImage::from_fn(256, 256, |x, y| image::Rgba([x as u8, y as u8, 160, 255]));
+        let ca = render_card("Chicane", "Saltwater (Ilan Bluestone Remix)", acc, Some(&cover)).unwrap();
+        assert!(ca.w > c.w);
+        save("card_art", &ca);
         let b = render_brand(None, "DJ Jimmy", "@jimmyeao · twitch.tv/jimmyeao", acc).unwrap();
         save("brand", &b);
         let t = render_ticker("Requests in chat · follow for the next set", acc).unwrap();

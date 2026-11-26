@@ -572,6 +572,17 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   a named palette, with hysteresis so the LUT can't strobe). Pickers and
   validators must use `palettes::all_names()` / `is_valid()`, never
   `names()` alone, or the option silently disappears.
+- `"art"` is the other pseudo-palette: the now-playing cover's colours
+  (`albumart.rs`; falls back to auto). Sources put a cheap `ArtHint` (paths,
+  URL, bytes) on `Track`, and **`Track` equality ignores it**, so a cover
+  that turns up a poll later isn't a track change (`art_serial` carries it).
+  The `albumart` thread resolves and builds the LUT off the render thread and
+  publishes it with `palettes::set_art`; the render loop keys it
+  `art#<serial>` (link and lights cache palettes by that name) and fades
+  to it over a bar (`palettes::Fade`, uploaded through `set_palette_lut`).
+  Serato's history stores paths without the drive (`serato_path`). The AI
+  builder is not offered `art`: a timeline show plays a file, not the
+  now-playing track.
 - **Audio streams die mid-set and must be rebuilt, not just logged.** A
   WASAPI loopback can strand silently (default-device change, session
   invalidation) — the callback keeps running but delivers nothing, or the

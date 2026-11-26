@@ -28,6 +28,7 @@
 #![recursion_limit = "256"]
 
 mod accent;
+mod albumart;
 mod ai;
 mod echo;
 mod audio;
@@ -149,6 +150,10 @@ struct Shared {
     /// again" request from the hotkey.
     np: nowplaying::SharedNowPlaying,
     np_cfg: Arc<Mutex<nowplaying::NpConfig>>,
+    /// The playing track's cover (`albumart.rs`), and its online-lookup
+    /// toggle (mirrors `Settings::np_art_online`).
+    art: albumart::SharedArt,
+    art_online: Arc<AtomicBool>,
     /// Track pushed by a LAN agent over the remote protocol; the
     /// now-playing worker's `Remote` source polls it.
     np_remote: nowplaying::RemoteNp,
@@ -704,6 +709,7 @@ fn render_loop(
     let mut fade_p = -1.0f32;
     // `palette = "auto"` mood matcher (palettes::Auto).
     let mut auto_pal = palettes::Auto::default();
+    let mut art_fade: Option<palettes::Fade> = None;
     // The selected Style's auto-palette families, cached by Style id.
     let mut style_pals: Option<(String, [Vec<&'static str>; 4])> = None;
     // The track is in a breakdown, as far as a Style's calm pool is concerned
@@ -1082,6 +1088,7 @@ fn render_loop(
         }
         let allowed = allowed_scenes(&r, &s);
         let mut usable = director_scenes(&r, &s, &allowed, style_calm, &dir);
+        shared.art_online.store(s.np_art_online, Ordering::Relaxed);
         {
             let mut c = lock(&shared.np_cfg);
             if c.source != s.np_source || c.delay_s != s.np_delay_s || c.file != s.np_file {
@@ -1114,7 +1121,7 @@ fn render_loop(
         }
         // Global palette — a no-op while the name is unchanged. `auto` is
         // resolved against the live features below (they don't exist yet).
-        if s.palette != palettes::AUTO {
+        if s.palette != palettes::AUTO && s.palette != palettes::ART {
             r.set_palette(&s.palette);
         }
         // NDI output — a conf change rebuilds it; otherwise a cheap no-op.
@@ -1545,12 +1552,30 @@ fn render_loop(
             }
         }
         // `palette = "auto"`: pick the gradient to match the music's mood.
-        let pal = if s.palette == palettes::AUTO {
-            auto_pal.pick_in(&f, pos, style_pals.as_ref().map(|(_, p)| p))
+        // `"art"`: the cover's colours (auto while there's no cover), faded
+        // in over a bar on each new cover.
+        let is_art = s.palette == palettes::ART;
+        let pal_key: String = if is_art {
+            match palettes::art() {
+                Some((n, _)) => format!("art#{n}"),
+                None => auto_pal.pick_in(&f, pos, style_pals.as_ref().map(|(_, p)| p)).to_string(),
+            }
+        } else if s.palette == palettes::AUTO {
+            auto_pal.pick_in(&f, pos, style_pals.as_ref().map(|(_, p)| p)).to_string()
         } else {
-            s.palette.as_str()
+            s.palette.clone()
         };
-        r.set_palette(pal);
+        if is_art {
+            let fade = art_fade.get_or_insert_with(|| palettes::Fade::new(palettes::lut(r.palette_name())));
+            let len = (240.0 / f.bpm.max(60.0)).clamp(1.5, 4.0);
+            if let Some(l) = fade.step(&pal_key, || palettes::lut(&pal_key), (now - started).as_secs_f32(), len) {
+                r.set_palette_lut("~art", l);
+            }
+        } else {
+            art_fade = None;
+            r.set_palette(&pal_key);
+        }
+        let pal = pal_key.as_str();
         // Free cuts land on musical events — the queued pick should fit
         // the mood too: calm sections want calm scenes, hot ones want hot.
         repick_for_mood(&mut dir, &r, &usable, &f, &s);
@@ -1909,7 +1934,9 @@ fn render_loop(
         }
         let mut ov_u = {
             let np = lock(&shared.np);
-            overlays.update(&s, &np, now_t, w as f32 / h.max(1) as f32, &mut |i, img| {
+            let art = lock(&shared.art);
+            let cover = art.art.as_ref().map(|a| (art.serial, &*a.thumb));
+            overlays.update(&s, &np, cover, now_t, w as f32 / h.max(1) as f32, &mut |i, img| {
                 r.set_overlay_image(i, img)
             })
         };
@@ -1960,7 +1987,7 @@ fn render_loop(
                 clip_title,
                 blackout,
                 strobe: strobe_live,
-                palette_now: pal.to_string(),
+                palette_now: if is_art { palettes::ART.to_string() } else { pal.to_string() },
                 // Published by the event thread — it owns the window state.
                 fullscreen: FULLSCREEN.load(Ordering::Relaxed),
                 fx: if s.fx_auto { fx_current } else { s.fx },
@@ -1970,6 +1997,7 @@ fn render_loop(
                 calm: f.calm,
                 np_track,
                 np_status,
+                np_art: lock(&shared.art).art.as_ref().map(|a| a.from.clone()).unwrap_or_default(),
                 rec: recorder.as_ref().map(|r| lock(&r.status).clone()),
                 rec_err: rec_err.clone(),
                 scene_titles: shared.scene_titles.clone(),
@@ -3044,9 +3072,13 @@ impl ApplicationHandler<AppEvent> for App {
             config::data_dir().join("nowplaying.txt"),
             np_remote.clone(),
         );
+        let art_online = Arc::new(AtomicBool::new(self.settings.np_art_online));
+        let art = albumart::start(np.clone(), art_online.clone(), config::data_dir().join("artcache"));
         let shared = Arc::new(Shared {
             np,
             np_cfg,
+            art,
+            art_online,
             np_remote,
             np_replay: AtomicBool::new(false),
             rec_clip: AtomicBool::new(false),

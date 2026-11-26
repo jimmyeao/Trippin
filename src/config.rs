@@ -539,6 +539,11 @@ pub struct Settings {
     pub np_file: String,
     /// Show the on-screen "now playing" card when the track changes.
     pub np_card: bool,
+    /// Put the track's cover art on the card (when one is found).
+    pub np_card_art: bool,
+    /// Ask the iTunes Search API for covers no local source has. Sends the
+    /// artist and title to Apple, so it's off until the user turns it on.
+    pub np_art_online: bool,
     /// Seconds the card stays up (0 = stays until the next track).
     pub np_hold_s: f32,
     pub np_size: f32,
@@ -655,6 +660,8 @@ impl Default for Settings {
             np_delay_s: 0.0,
             np_file: String::new(),
             np_card: true,
+            np_card_art: true,
+            np_art_online: false,
             np_hold_s: 12.0,
             np_size: 1.0,
             brand_on: false,

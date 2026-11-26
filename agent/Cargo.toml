@@ -24,4 +24,4 @@ eframe = "0.36"
 
 [target.'cfg(windows)'.dependencies]
 # SMTC media session (Spotify, Apple Music for Windows, browsers…).
-windows = { version = "0.62", features = ["Media_Control", "Foundation"] }
+windows = { version = "0.62", features = ["Media_Control", "Foundation", "Storage_Streams"] }

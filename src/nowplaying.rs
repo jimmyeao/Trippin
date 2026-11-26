@@ -25,12 +25,64 @@ use std::time::{Duration, Instant, SystemTime};
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default)]
 pub struct Track {
     pub artist: String,
     pub title: String,
     /// Which source reported it ("Serato", "Spotify", …).
     pub source: String,
+    /// Where its cover art can be found (`albumart.rs` resolves it). Not
+    /// part of a track's identity: equality ignores it, so art that turns
+    /// up a poll later doesn't count as a track change.
+    pub art: ArtHint,
+}
+
+impl PartialEq for Track {
+    fn eq(&self, o: &Self) -> bool {
+        self.artist == o.artist && self.title == o.title && self.source == o.source
+    }
+}
+impl Eq for Track {}
+
+/// A cheap pointer to a track's cover art, filled in by the source that
+/// reported the track. Resolving it (reading tags, fetching a URL, decoding)
+/// happens off this thread, in `albumart.rs`.
+#[derive(Clone, Default, PartialEq)]
+pub enum ArtHint {
+    #[default]
+    None,
+    /// Candidates in order: image files are read as they are, audio files
+    /// for their embedded picture (then a cover image beside them).
+    Files(Vec<PathBuf>),
+    /// An image URL (Spotify on macOS reports one).
+    #[allow(dead_code)] // built on macOS only
+    Url(String),
+    /// The encoded image itself (the Windows media session's thumbnail).
+    #[allow(dead_code)] // built on Windows only
+    Bytes(Arc<Vec<u8>>),
+}
+
+impl ArtHint {
+    pub fn is_none(&self) -> bool {
+        matches!(self, ArtHint::None)
+    }
+    pub fn describe(&self) -> String {
+        match self {
+            ArtHint::None => "no art".into(),
+            ArtHint::Files(f) => {
+                let names: Vec<String> = f.iter().map(|p| p.display().to_string()).collect();
+                format!("files {}", names.join(" | "))
+            }
+            ArtHint::Url(u) => format!("url {u}"),
+            ArtHint::Bytes(b) => format!("image {} bytes", b.len()),
+        }
+    }
+}
+
+impl std::fmt::Debug for ArtHint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.describe())
+    }
 }
 
 impl Track {
@@ -94,6 +146,9 @@ pub struct NowPlayingState {
     pub track: Option<Track>,
     /// Bumped every time the displayed track changes (triggers the card).
     pub serial: u64,
+    /// Bumped when the displayed track or its art hint changes (the art
+    /// resolver in `albumart.rs` watches this; the card doesn't replay).
+    pub art_serial: u64,
     /// Per-source status for the panel, e.g. "Serato: no history yet".
     pub status: Vec<(String, String)>,
 }
@@ -176,6 +231,14 @@ fn run(
             s.configure(&cfg);
             match s.poll() {
                 Ok(t) => {
+                    // Same track, art found since (Spotify publishes the
+                    // thumbnail a moment after the title): take the art
+                    // without counting it as a change.
+                    if let (Some(n), Some(l)) = (&t, latest[i].track.as_mut()) {
+                        if n == &*l && n.art != l.art && !n.art.is_none() {
+                            l.art = n.art.clone();
+                        }
+                    }
                     if t != latest[i].track {
                         // A source going quiet (None) isn't a "change" that
                         // should steal Auto from the others. And what a
@@ -189,7 +252,15 @@ fn run(
                     first[i] = false;
                     status.push((
                         s.kind().label().to_string(),
-                        latest[i].track.as_ref().map_or("idle".into(), |t| t.line()),
+                        latest[i].track.as_ref().map_or("idle".into(), |t| {
+                            if t.art.is_none() {
+                                t.line()
+                            } else if std::env::var_os("TRIPPIN_ART_DEBUG").is_some() {
+                                format!("{} · {}", t.line(), t.art.describe())
+                            } else {
+                                format!("{} · cover", t.line())
+                            }
+                        }),
                     ));
                 }
                 Err(e) => status.push((s.kind().label().to_string(), e)),
@@ -218,6 +289,15 @@ fn run(
                 }
             } else {
                 pending = None;
+                // The shown track's art turned up (or changed) after it
+                // was announced.
+                if let (Some(p), Some(cur)) = (&pick, st.track.as_mut()) {
+                    if p.art != cur.art && !p.art.is_none() {
+                        cur.art = p.art.clone();
+                        shown = Some(cur.clone());
+                        st.art_serial += 1;
+                    }
+                }
             }
             let due = pending
                 .as_ref()
@@ -227,6 +307,7 @@ fn run(
                 shown = pick.clone();
                 st.track = pick.clone();
                 st.serial += 1;
+                st.art_serial += 1;
                 let line = pick.as_ref().map(|t| t.line()).unwrap_or_default();
                 let _ = std::fs::write(&txt_path, line);
             }
@@ -288,7 +369,7 @@ impl Source for FileWatch {
             let s = s.trim_start_matches('\u{feff}');
             self.last = s.lines().rev().find(|l| !l.trim().is_empty()).map(|l| {
                 let (a, t) = l.trim().split_once(" - ").unwrap_or(("", l.trim()));
-                Track { artist: a.trim().into(), title: t.trim().into(), source: "File".into() }
+                Track { artist: a.trim().into(), title: t.trim().into(), source: "File".into(), ..Default::default() }
             });
         }
         Ok(self.last.clone())
@@ -446,7 +527,8 @@ pub fn parse_serato_session(data: &[u8]) -> Option<Track> {
                     .unwrap_or_default();
             }
             if (!title.is_empty() || !artist.is_empty()) && best.as_ref().is_none_or(|(s, _)| start >= *s) {
-                best = Some((start, Track { artist, title, source: "Serato".into() }));
+                let art = if path.is_empty() { ArtHint::None } else { ArtHint::Files(vec![serato_path(&path)]) };
+                best = Some((start, Track { artist, title, source: "Serato".into(), art }));
             }
         }
     }
@@ -458,17 +540,52 @@ pub fn parse_serato_session(data: &[u8]) -> Option<Track> {
 fn serato_db_track(db: &Path) -> Result<Option<Track>, String> {
     let c = rusqlite::Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
         .map_err(|e| e.to_string())?;
-    let r = c.query_row(
-        "SELECT IFNULL(artist, ''), IFNULL(name, '') FROM history_entry \
+    // The file's path, for its cover art. Which column holds it isn't
+    // documented, so take the first that looks like one.
+    let path_col = c
+        .prepare("SELECT name FROM pragma_table_info('history_entry')")
+        .and_then(|mut st| st.query_map([], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>())
+        .unwrap_or_default()
+        .into_iter()
+        .find(|n| {
+            let n = n.to_ascii_lowercase();
+            ["file_name", "file_path", "filepath", "location", "path", "portable_id"].contains(&n.as_str())
+        });
+    let sql = format!(
+        "SELECT IFNULL(artist, ''), IFNULL(name, ''), {} FROM history_entry \
          WHERE played = 1 AND (name <> '' OR artist <> '') \
          ORDER BY start_time DESC, id DESC LIMIT 1",
-        [],
-        |r| Ok(Track { artist: r.get(0)?, title: r.get(1)?, source: "Serato".into() }),
+        path_col.map_or("''".to_string(), |n| format!("IFNULL(CAST(\"{n}\" AS TEXT), '')"))
     );
+    let r = c.query_row(&sql, [], |r| {
+        let path: String = r.get(2)?;
+        Ok(Track {
+            artist: r.get(0)?,
+            title: r.get(1)?,
+            source: "Serato".into(),
+            art: if path.is_empty() { ArtHint::None } else { ArtHint::Files(vec![serato_path(&path)]) },
+        })
+    });
     match r {
         Ok(t) => Ok(Some(t)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Serato stores paths without the drive on Windows (`Users/…/x.mp3`, the
+/// "portable id") and without the leading `/` on macOS: put it back when
+/// the path isn't absolute.
+fn serato_path(p: &str) -> PathBuf {
+    let pb = PathBuf::from(p);
+    if pb.is_absolute() {
+        return pb;
+    }
+    if cfg!(windows) {
+        let drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
+        PathBuf::from(format!("{drive}\\")).join(pb)
+    } else {
+        PathBuf::from("/").join(pb)
     }
 }
 
@@ -538,7 +655,35 @@ pub fn parse_vdj_line(line: &str) -> Option<Track> {
         artist: artist.trim().into(),
         title: title.trim().into(),
         source: "VirtualDJ".into(),
+        ..Default::default()
     })
+}
+
+/// The newest of VirtualDJ's history playlists (`History/*.m3u`, also in
+/// year/month subfolders): its last entry whose file name contains `title`.
+fn vdj_history_file(dir: &Path, title: &str) -> Option<PathBuf> {
+    let mut lists = Vec::new();
+    let mut stack = vec![(dir.to_path_buf(), 0)];
+    while let Some((d, depth)) = stack.pop() {
+        let Ok(rd) = std::fs::read_dir(&d) else { continue };
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.is_dir() && depth < 3 {
+                stack.push((p, depth + 1));
+            } else if p.extension().is_some_and(|x| x.eq_ignore_ascii_case("m3u")) {
+                lists.push(p);
+            }
+        }
+    }
+    let newest = lists.into_iter().max_by_key(|p| mtime(p))?;
+    let text = std::fs::read_to_string(newest).ok()?;
+    let want = title.to_lowercase();
+    text.lines()
+        .rev()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .map(PathBuf::from)
+        .find(|f| f.file_stem().is_some_and(|s| s.to_string_lossy().to_lowercase().contains(&want)))
 }
 
 impl Source for VirtualDj {
@@ -552,6 +697,12 @@ impl Source for VirtualDj {
             self.seen = m;
             let s = std::fs::read_to_string(&p).map_err(|e| e.to_string())?;
             self.last = s.lines().rev().find(|l| !l.trim().is_empty()).and_then(parse_vdj_line);
+            // tracklist.txt has no paths; the history playlists beside it do.
+            if let Some(t) = self.last.as_mut() {
+                if let Some(f) = p.parent().and_then(|d| vdj_history_file(d, &t.title)) {
+                    t.art = ArtHint::Files(vec![f]);
+                }
+            }
         }
         Ok(self.last.clone())
     }
@@ -656,7 +807,8 @@ mod rbcrypt {
         let res = (|| -> Result<Option<super::Track>> {
             let c = rusqlite::Connection::open_with_flags(&tmp, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
             let mut st = c.prepare(
-                "SELECT c.Title, IFNULL(a.Name, '') FROM djmdSongHistory h \
+                "SELECT c.Title, IFNULL(a.Name, ''), IFNULL(c.ImagePath, ''), IFNULL(c.FolderPath, '') \
+                 FROM djmdSongHistory h \
                  JOIN djmdContent c ON c.ID = h.ContentID \
                  LEFT JOIN djmdArtist a ON a.ID = c.ArtistID \
                  WHERE IFNULL(h.rb_local_deleted, 0) = 0 \
@@ -664,11 +816,26 @@ mod rbcrypt {
             )?;
             let mut rows = st.query([])?;
             Ok(match rows.next()? {
-                Some(r) => Some(super::Track {
-                    title: r.get::<_, Option<String>>(0)?.unwrap_or_default(),
-                    artist: r.get(1)?,
-                    source: "rekordbox".into(),
-                }),
+                Some(r) => {
+                    // ImagePath is rekordbox's own thumbnail, relative to
+                    // its `share` folder; FolderPath is the audio file.
+                    let (img, file): (String, String) = (r.get(2)?, r.get(3)?);
+                    let mut art = Vec::new();
+                    if !img.is_empty() {
+                        if let Some(share) = super::Rekordbox::path().and_then(|p| p.parent().map(|d| d.join("share"))) {
+                            art.push(share.join(img.trim_start_matches(['/', '\\'])));
+                        }
+                    }
+                    if !file.is_empty() {
+                        art.push(file.into());
+                    }
+                    Some(super::Track {
+                        title: r.get::<_, Option<String>>(0)?.unwrap_or_default(),
+                        artist: r.get(1)?,
+                        source: "rekordbox".into(),
+                        art: if art.is_empty() { super::ArtHint::None } else { super::ArtHint::Files(art) },
+                    })
+                }
                 None => None,
             })
         })();
@@ -717,15 +884,35 @@ impl Source for Mixxx {
         let c = rusqlite::Connection::open_with_flags(&p, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
             .map_err(|e| e.to_string())?;
         let r = c.query_row(
-            "SELECT IFNULL(l.artist, ''), IFNULL(l.title, '') FROM PlaylistTracks pt \
+            "SELECT IFNULL(l.artist, ''), IFNULL(l.title, ''), IFNULL(tl.location, ''), \
+             IFNULL(l.coverart_type, 0), IFNULL(l.coverart_location, '') FROM PlaylistTracks pt \
              JOIN Playlists p ON p.id = pt.playlist_id JOIN library l ON l.id = pt.track_id \
+             LEFT JOIN track_locations tl ON tl.id = l.location \
              WHERE p.hidden = 2 ORDER BY pt.pl_datetime_added DESC LIMIT 1",
             [],
-            |r| Ok(Track { artist: r.get(0)?, title: r.get(1)?, source: "Mixxx".into() }),
+            |r| {
+                let (file, kind, cover): (String, i64, String) = (r.get(2)?, r.get(3)?, r.get(4)?);
+                Ok(Track { artist: r.get(0)?, title: r.get(1)?, source: "Mixxx".into(), art: mixxx_art(&file, kind, &cover) })
+            },
         );
         self.last = r.ok();
         Ok(self.last.clone())
     }
+}
+
+/// Mixxx's cover: `coverart_type` 2 is an image file (`coverart_location`,
+/// relative to the track's folder unless absolute), otherwise the picture
+/// embedded in the track.
+fn mixxx_art(file: &str, kind: i64, cover: &str) -> ArtHint {
+    let mut v = Vec::new();
+    if kind == 2 && !cover.is_empty() {
+        let c = PathBuf::from(cover);
+        v.push(if c.is_absolute() { c } else { Path::new(file).parent().map_or(c.clone(), |d| d.join(&c)) });
+    }
+    if !file.is_empty() {
+        v.push(file.into());
+    }
+    if v.is_empty() { ArtHint::None } else { ArtHint::Files(v) }
 }
 
 // ---- OS media session ------------------------------------------------------
@@ -742,12 +929,33 @@ mod media {
     /// flyout shows. Covers Spotify, Apple Music, Tidal, browsers, djay, etc.
     pub struct MediaSession {
         mgr: Option<Manager>,
+        /// The track the thumbnail below belongs to, the thumbnail, and
+        /// how many more polls re-read it (players publish the new cover a
+        /// moment after the new title, so the first read can be the old one).
+        art_for: (String, String),
+        art: ArtHint,
+        art_reads: u8,
     }
 
     impl MediaSession {
         pub fn new() -> Self {
-            Self { mgr: None }
+            Self { mgr: None, art_for: Default::default(), art: ArtHint::None, art_reads: 0 }
         }
+    }
+
+    /// The session's thumbnail as encoded image bytes (PNG or JPEG).
+    fn thumbnail(props: &windows::Media::Control::GlobalSystemMediaTransportControlsSessionMediaProperties) -> Option<Vec<u8>> {
+        use windows::Storage::Streams::DataReader;
+        let stream = props.Thumbnail().ok()?.OpenReadAsync().ok()?.join().ok()?;
+        let size = stream.Size().ok()?;
+        if size == 0 || size > 16 << 20 {
+            return None;
+        }
+        let reader = DataReader::CreateDataReader(&stream.GetInputStreamAt(0).ok()?).ok()?;
+        let got = reader.LoadAsync(size as u32).ok()?.join().ok()?;
+        let mut buf = vec![0u8; got as usize];
+        reader.ReadBytes(&mut buf).ok()?;
+        (!buf.is_empty()).then_some(buf)
     }
 
     impl Source for MediaSession {
@@ -788,7 +996,21 @@ mod media {
                 return Ok(None);
             }
             let source = if app.to_lowercase().contains("spotify") { "Spotify" } else { "Media" };
-            Ok(Some(Track { artist, title, source: source.into() }))
+            let key = (artist.clone(), title.clone());
+            if key != self.art_for {
+                self.art_for = key;
+                self.art = ArtHint::None;
+                self.art_reads = 4;
+            }
+            if self.art_reads > 0 {
+                self.art_reads -= 1;
+                if let Some(b) = thumbnail(&props) {
+                    if !matches!(&self.art, ArtHint::Bytes(old) if **old == b) {
+                        self.art = ArtHint::Bytes(Arc::new(b));
+                    }
+                }
+            }
+            Ok(Some(Track { artist, title, source: source.into(), art: self.art.clone() }))
         }
     }
 }
@@ -808,10 +1030,21 @@ mod media {
 
     /// Per-app script. Only run for an app that's running: a script naming
     /// an app that isn't installed fails to compile (and asks "Where is…?").
+    /// The third field is the cover: Spotify's artwork URL, or the file of
+    /// a Music library track (its art is embedded; streamed tracks have
+    /// none, and the `try` leaves the field empty).
     fn script(app: &str) -> String {
+        let art = if app == "Spotify" {
+            "set a to \"\"\n try\n set a to artwork url of current track\n end try\n"
+        } else {
+            "set a to \"\"\n try\n set a to POSIX path of ((location of current track) as alias)\n end try\n"
+        };
         format!(
             "tell application \"{app}\"\n\
-             if player state is playing then return (artist of current track) & tab & (name of current track)\n\
+             if player state is playing then\n\
+             {art}\
+             return (artist of current track) & tab & (name of current track) & tab & a\n\
+             end if\n\
              end tell\n\
              return \"\""
         )
@@ -840,15 +1073,18 @@ mod media {
                     .args(["-e", &script(app)])
                     .output()
                     .map_err(|e| e.to_string())?;
-                let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                if let Some((artist, title)) = s.split_once('\t') {
-                    if !title.is_empty() {
-                        return Ok(Some(Track {
-                            artist: artist.into(),
-                            title: title.into(),
-                            source: app.into(),
-                        }));
-                    }
+                let s = String::from_utf8_lossy(&out.stdout).trim_end_matches(['\n', '\r']).to_string();
+                let mut f = s.splitn(3, '\t');
+                let (artist, title, art) = (f.next().unwrap_or(""), f.next().unwrap_or(""), f.next().unwrap_or("").trim());
+                if !title.is_empty() {
+                    let art = if art.starts_with("http") {
+                        ArtHint::Url(art.into())
+                    } else if art.starts_with('/') {
+                        ArtHint::Files(vec![art.into()])
+                    } else {
+                        ArtHint::None
+                    };
+                    return Ok(Some(Track { artist: artist.trim().into(), title: title.into(), source: app.into(), art }));
                 }
             }
             Ok(None)
@@ -888,7 +1124,7 @@ pub fn monitor() -> anyhow::Result<()> {
         let st = np.lock().unwrap_or_else(|e| e.into_inner()).clone();
         println!(
             "NOW: {}",
-            st.track.as_ref().map_or("—".into(), |t| format!("{}  [{}]", t.line(), t.source))
+            st.track.as_ref().map_or("—".into(), |t| format!("{}  [{}]  art: {}", t.line(), t.source, t.art.describe()))
         );
         for (k, v) in &st.status {
             println!("    {k:<16} {v}");

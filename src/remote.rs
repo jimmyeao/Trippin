@@ -695,6 +695,7 @@ fn parse(msg: In, client: u64) -> Result<Option<RemoteCmd>> {
                 artist,
                 title,
                 source: source.unwrap_or_default(),
+                ..Default::default()
             });
             Some(RemoteCmd::NowPlaying { client, track })
         }

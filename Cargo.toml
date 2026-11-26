@@ -12,6 +12,8 @@ egui = "0.36"
 egui-wgpu = "0.36"
 egui-winit = "0.36"
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
+# Cover art embedded in audio files (ID3 APIC, FLAC PICTURE, MP4 covr) for the `art` palette.
+lofty = "0.22"
 libloading = "0.8.9"
 pollster = "1.0.1"
 rfd = "0.17.2"
@@ -55,6 +57,7 @@ gui = []
 windows = { version = "0.62", features = [
     "Media_Control",
     "Foundation",
+    "Storage_Streams",
     "Win32_Foundation",
     "Win32_Graphics_Direct3D",
     "Win32_Graphics_Direct3D11",

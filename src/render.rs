@@ -1215,6 +1215,36 @@ impl Renderer {
         self.pal_name = name.to_string();
     }
 
+    /// The palette on screen (a name, or the `ART` fade's key).
+    pub fn palette_name(&self) -> &str {
+        &self.pal_name
+    }
+
+    /// Upload a LUT built elsewhere (the `ART` palette's fade) under `id`;
+    /// `set_palette` with any other name replaces it.
+    pub fn set_palette_lut(&mut self, id: &str, lut: &palettes::Lut) {
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.pal_tex,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            lut,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some((palettes::LUT_SIZE * 4) as u32),
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d {
+                width: palettes::LUT_SIZE as u32,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        self.pal_name = id.to_string();
+    }
+
     /// The size the surface was last configured with.
     pub fn surface_size(&self) -> (u32, u32) {
         (self.config.width, self.config.height)

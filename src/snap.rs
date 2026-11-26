@@ -187,7 +187,29 @@ pub fn run(args: &[String]) -> Result<()> {
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     });
-    let pal_name = arg(args, "--palette").unwrap_or("rainbow");
+    // `--snap-art <audio or image file>`: render with that cover's palette,
+    // and write the cover beside its palette strip (`art_<file>.png`).
+    let mut pal_name = arg(args, "--palette").unwrap_or("rainbow");
+    if let Some(f) = arg(args, "--snap-art") {
+        let p = std::path::Path::new(f);
+        let bytes = crate::albumart::embedded(p)
+            .or_else(|| std::fs::read(p).ok())
+            .ok_or_else(|| anyhow::anyhow!("--snap-art: no cover in {f}"))?;
+        let a = crate::albumart::build(&bytes, f.to_string()).ok_or_else(|| anyhow::anyhow!("--snap-art: {f} didn't decode"))?;
+        palettes::set_art(Some((1, a.lut.clone())));
+        pal_name = palettes::ART;
+        let mut sheet = image::RgbaImage::new(128 + 256, 128);
+        let small = image::imageops::resize(&*a.thumb, 128, 128, image::imageops::FilterType::Triangle);
+        image::imageops::overlay(&mut sheet, &small, 0, 0);
+        for x in 0..256u32 {
+            let c = &a.lut[x as usize * 4..x as usize * 4 + 4];
+            for y in 0..128 {
+                sheet.put_pixel(128 + x, y, image::Rgba([c[0], c[1], c[2], 255]));
+            }
+        }
+        let stem = p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        sheet.save(out_dir.join(format!("art_{stem}.png")))?;
+    }
     queue.write_texture(
         wgpu::TexelCopyTextureInfo {
             texture: &pal,

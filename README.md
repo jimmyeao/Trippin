@@ -615,6 +615,13 @@ the per-cut hue still rotates through whichever palette is active.
 Palettes are defined as colour stops in `src/palettes.rs` — add a line
 there and it appears in the dropdown.
 
+Two palettes aren't gradients. **auto** picks one to fit the music's mood.
+**art** takes its colours from the cover of the track now playing, and
+blends into each new track's colours over a bar; with no cover found it
+behaves like auto. See *Cover art* under Now playing for where covers come
+from. `--snap <scene> --snap-art <audio or image file>` renders a scene with
+a file's cover palette and writes the cover beside its gradient.
+
 ## Visual effects
 
 A post effect transforms the whole frame — scene and dancer — chosen in the
@@ -729,7 +736,26 @@ follows whichever source changed most recently. The sources are:
 
 The **delay** holds a new track back until it has stayed loaded for that long,
 which skips tracks you only cued in your headphones. **N** shows the card
-again. `trippin --nowplaying` prints what each source sees.
+again. `trippin --nowplaying` prints what each source sees
+(`TRIPPIN_ART_DEBUG=1` adds where each one's cover is).
+
+#### Cover art
+
+The track's cover shows on the card (**Cover art: On the card**) and feeds
+the **art** palette. Each source finds it its own way:
+
+- **Media session** (Windows): the thumbnail Spotify and other players
+  publish. **macOS**: Spotify's artwork URL; for Music, the cover embedded
+  in the library file.
+- **Serato**, **VirtualDJ**, **Mixxx**: the cover embedded in the track's
+  file (ID3, FLAC, MP4 tags), else a `cover`/`folder`/`front` image beside
+  it. Mixxx's own cover choice comes first.
+- **rekordbox**: its own artwork thumbnail, else the file's embedded cover.
+- **Look up online** (off by default): for tracks with no cover, asks the
+  iTunes Search API by artist and title. This sends the track name to Apple.
+  Found covers are cached in `artcache` next to `trippin.json`.
+
+The LAN agent doesn't send covers yet.
 
 The agent is a tray app: it finds rigs advertised over Bonjour (or takes a
 `host:port`), pairs with the same PIN as the iOS remote, and its window shows

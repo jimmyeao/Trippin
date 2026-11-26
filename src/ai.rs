@@ -1256,7 +1256,9 @@ fn user_prompt(
             "name": r,
             "pace": pace_label(energies.get(i).copied().unwrap_or(0.5)),
         })).collect::<Vec<_>>(),
-        "palettes": crate::palettes::all_names().collect::<Vec<_>>(),
+        // No `art`: a timeline show plays a song file, not the now-playing
+        // track, so the cover palette would follow the wrong music.
+        "palettes": crate::palettes::all_names().filter(|p| *p != crate::palettes::ART).collect::<Vec<_>>(),
         "note": "flow/vocals are one char per bar: energy . - + * # and v for vocals. \
                  blocks are the ~4-bar phrases you plan against — every block needs an \
                  entry; a block's vocal is the share of its bars that are sung (0-1).",
@@ -2150,7 +2152,7 @@ fn expand_plan(
 
             // --- palette: latches like scene — emit only on change
             if let Some(n) = it["palette"].as_str() {
-                match crate::palettes::all_names().find(|p| p.eq_ignore_ascii_case(n)) {
+                match crate::palettes::all_names().filter(|p| *p != crate::palettes::ART).find(|p| p.eq_ignore_ascii_case(n)) {
                     Some(p) if p != pal => {
                         pal = p.to_string();
                         cues.push(Cue {
