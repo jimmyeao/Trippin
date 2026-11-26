@@ -1745,7 +1745,11 @@ fn inspector_body(
     // The rotoscope look, on the scene: while Camera Rotoscope is on air,
     // or the camera layer is rotoscoped over whatever is.
     let on_air = scenes.get(st.scene).map(String::as_str).unwrap_or("");
-    let layer_roto = s.camera_roto && s.camera_layer != crate::config::CamLayer::Off && !s.camera.is_empty();
+    // (The layer is off on camera scenes: they show their own controls.)
+    let layer_roto = s.camera_roto
+        && s.camera_layer != crate::config::CamLayer::Off
+        && !s.camera.is_empty()
+        && !on_air.starts_with("camera_");
     if on_air == "camera_roto" || layer_roto {
         roto_controls(ui, s, if on_air == "camera_roto" { "Camera Rotoscope" } else { "camera layer · rotoscope" });
         ui.add_space(8.0);

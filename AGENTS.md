@@ -526,7 +526,12 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   (`gfx::cam_mips`, built on the camera thread) and `cam_lod` blends
   levels. Traced at full size, hair, skin and sensor noise scribbled the
   owner's face. The Rotoscope look controls ride `Uniforms::roto4/roto5`;
-  `--snap-roto amt,ink,detail,bands,pal` in snaps. Snaps: `--snap-cam-layer 1|2`, `--snap-cam-key
+  `--snap-roto amt,ink,detail,bands,pal` in snaps.
+  On the other camera_* scenes roto4/roto5 carry the scene's own controls
+  instead (`camera::scene_params`, values per scene in
+  `Settings::show_params`), shown in the Perform page's "scene controls"
+  card under the scene name; the camera layer is off on camera scenes, so
+  the two never share the slots. Snaps: `--snap-cam-layer 1|2`, `--snap-cam-key
   0..3`, `--snap-camera-image <png>` for a still. `camera::LIVE` gates those scenes into rotation and shows
   the panel's "camera on" pill; the AI builder never plans them. Snaps never
   open a camera: `--snap-camera <clip>` stands a pack clip in (default
