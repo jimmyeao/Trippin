@@ -301,6 +301,16 @@ pub enum Fx {
     Quad,
     Kaleido6,
     Kaleido8,
+    // Lens effects (present.wgsl `fx_uv`): appended, since the index is
+    // what the shader sees and saved Looks/timelines hold the names.
+    GlassRibs,
+    GlassFan,
+    FlyEye,
+    Anamorphic,
+    Melt,
+    Pixels,
+    Tiles,
+    Twist,
     /// Last so `#[serde(other)]` lands here: a removed mode in a stale
     /// trippin.json (e.g. "Invert") falls back to Off instead of being
     /// rejected with the whole settings file.
@@ -310,13 +320,21 @@ pub enum Fx {
 }
 
 impl Fx {
-    pub const ALL: [Fx; 6] = [
+    pub const ALL: [Fx; 14] = [
         Fx::Off,
         Fx::MirrorX,
         Fx::MirrorY,
         Fx::Quad,
         Fx::Kaleido6,
         Fx::Kaleido8,
+        Fx::GlassRibs,
+        Fx::GlassFan,
+        Fx::FlyEye,
+        Fx::Anamorphic,
+        Fx::Melt,
+        Fx::Pixels,
+        Fx::Tiles,
+        Fx::Twist,
     ];
 
     pub fn label(self) -> &'static str {
@@ -327,6 +345,14 @@ impl Fx {
             Fx::Quad => "Quad mirror",
             Fx::Kaleido6 => "Kaleido x6",
             Fx::Kaleido8 => "Kaleido x8",
+            Fx::GlassRibs => "Glass ribs",
+            Fx::GlassFan => "Glass fan",
+            Fx::FlyEye => "Fly eye",
+            Fx::Anamorphic => "Anamorphic",
+            Fx::Melt => "Melt",
+            Fx::Pixels => "Pixels",
+            Fx::Tiles => "Tiles",
+            Fx::Twist => "Twist",
         }
     }
 
@@ -339,7 +365,37 @@ impl Fx {
             Fx::Quad => 3.0,
             Fx::Kaleido6 => 4.0,
             Fx::Kaleido8 => 5.0,
+            Fx::GlassRibs => 6.0,
+            Fx::GlassFan => 7.0,
+            Fx::FlyEye => 8.0,
+            Fx::Anamorphic => 9.0,
+            Fx::Melt => 10.0,
+            Fx::Pixels => 11.0,
+            Fx::Tiles => 12.0,
+            Fx::Twist => 13.0,
         }
+    }
+
+    /// A name as the AI show builder writes it (snake case, with the
+    /// aliases models use); None for anything unknown.
+    pub fn from_name(name: &str) -> Option<Fx> {
+        Some(match name.trim().to_ascii_lowercase().replace(['-', ' '], "_").as_str() {
+            "off" | "none" => Fx::Off,
+            "mirror_x" | "mirrorx" => Fx::MirrorX,
+            "mirror_y" | "mirrory" => Fx::MirrorY,
+            "quad" | "quad_mirror" => Fx::Quad,
+            "kaleido6" | "kaleido_6" | "kaleidoscope6" => Fx::Kaleido6,
+            "kaleido8" | "kaleido_8" | "kaleidoscope8" | "kaleido" | "kaleidoscope" => Fx::Kaleido8,
+            "glass_ribs" | "glassribs" | "ribs" | "fluted_glass" => Fx::GlassRibs,
+            "glass_fan" | "glassfan" | "fan" => Fx::GlassFan,
+            "fly_eye" | "flyeye" | "honeycomb" => Fx::FlyEye,
+            "anamorphic" | "flare" | "lens_flare" => Fx::Anamorphic,
+            "melt" | "drip" => Fx::Melt,
+            "pixels" | "pixelate" | "pixel" => Fx::Pixels,
+            "tiles" | "tile" => Fx::Tiles,
+            "twist" | "swirl" => Fx::Twist,
+            _ => return None,
+        })
     }
 
     pub fn next(self) -> Fx {
@@ -348,8 +404,22 @@ impl Fx {
     }
 
     /// Auto pool: MirrorY is excluded — an upside-down dancer mid-set reads
-    /// as a glitch rather than an effect (it stays selectable by hand).
-    const AUTO: [Fx; 5] = [Fx::Off, Fx::MirrorX, Fx::Quad, Fx::Kaleido6, Fx::Kaleido8];
+    /// as a glitch rather than an effect (it stays selectable by hand) — and
+    /// so are Pixels and Tiles (they shrink or chop up the dancer and the
+    /// whole picture: a deliberate look, not a cut's surprise).
+    const AUTO: [Fx; 11] = [
+        Fx::Off,
+        Fx::MirrorX,
+        Fx::Quad,
+        Fx::Kaleido6,
+        Fx::Kaleido8,
+        Fx::GlassRibs,
+        Fx::GlassFan,
+        Fx::FlyEye,
+        Fx::Anamorphic,
+        Fx::Melt,
+        Fx::Twist,
+    ];
 
     /// A random pick for auto mode; never repeats the current effect.
     pub fn random(r: f32, cur: Fx) -> Fx {
@@ -895,6 +965,21 @@ pub fn key_name(key: &Key) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Each effect has its own shader number (present.wgsl `fx_uv`), and
+    /// the AI builder's names (snake case of the variant) map back to it.
+    #[test]
+    fn fx_indices_unique_and_names_round_trip() {
+        for (i, a) in Fx::ALL.iter().enumerate() {
+            for b in &Fx::ALL[i + 1..] {
+                assert_ne!(a.index(), b.index(), "{a:?} and {b:?} share a shader number");
+            }
+            let snake = a.label().to_ascii_lowercase().replace(' ', "_").replace("_x6", "6").replace("_x8", "8");
+            assert_eq!(Fx::from_name(&snake), Some(*a), "{snake}");
+        }
+        assert_eq!(Fx::from_name("Glass-Ribs"), Some(Fx::GlassRibs));
+        assert_eq!(Fx::from_name("nonsense"), None);
+    }
 
     #[test]
     fn look_actions_are_complete_unique_and_unbound() {

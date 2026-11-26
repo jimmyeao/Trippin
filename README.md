@@ -186,7 +186,7 @@ Default keys (all rebindable in the panel):
 | F | fullscreen on / off |
 | Space | mark this beat as the downbeat |
 | [ / ] | latency −/+ 5 ms |
-| X | cycle the post effect (off → mirrors → kaleido) |
+| X | cycle the post effect (off → mirrors → kaleido → lens effects) |
 | E | echo trails: auto → on → off |
 | F5 | reload shaders |
 | T | timeline play / pause |
@@ -637,9 +637,28 @@ a file's cover palette and writes the cover beside its gradient.
 
 A post effect transforms the whole frame — scene and dancer — chosen in the
 panel or with `X`: **Mirror X**, **Mirror Y**, **Quad mirror** or **Kaleido
-×6 / ×8**. The **Strength** slider blends the transform in (at 50% a mirror
-sits over the plain frame). **Auto** picks a fresh effect on every scene cut
-(Mirror Y stays manual-only — an upside-down dancer reads as a glitch).
+×6 / ×8**, or one of the lens effects:
+
+- **Glass ribs**: fluted glass, each rib shifting its slice of the frame;
+  the ribs lean with the phrase and refract harder with the bass.
+- **Glass fan**: the same glass bent round the centre in wedges, slowly
+  turning.
+- **Fly eye**: a honeycomb of lenses, each showing its own patch turned
+  over; the lenses grow with the bass and the comb drifts.
+- **Anamorphic**: long, thin, cool horizontal flares off the bright parts,
+  their length breathing with the bass.
+- **Melt**: the frame drips down in runs that crawl with the track.
+- **Pixels**: big pixels whose size breathes with the bass.
+- **Tiles**: the frame repeated in mirrored tiles, zooming and drifting.
+- **Twist**: a whirl round the centre that winds one way, then the other,
+  over eight bars.
+
+The lens effects move like the scenes do, with the bass presence and the
+smooth clocks; none of them pulses on the beat. The **Strength** slider
+blends the transform in (at 50% a mirror sits over the plain frame).
+**Auto** picks a fresh effect on every scene cut (Mirror Y, Pixels and Tiles
+stay manual-only: they turn the dancer upside down or chop up the whole
+picture).
 It's applied in `present.wgsl` from `u.fx`, so it needs no scene support and
 combines with everything (a mirrored dancer in canon is five dancers).
 

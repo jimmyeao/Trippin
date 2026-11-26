@@ -2188,7 +2188,8 @@ impl Renderer {
             }
             drop(pass);
             self.current = next;
-            if self.bloom_amt > 0.0 {
+            // The bloom chain also feeds the Anamorphic effect's flares.
+            if self.bloom_amt > 0.0 || (u.fx - crate::config::Fx::Anamorphic.index()).abs() < 0.5 {
                 let src = self.targets[next].create_view(&Default::default());
                 self.bloom.encode(&self.device, &mut enc, &src);
             }

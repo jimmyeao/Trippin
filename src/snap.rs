@@ -938,7 +938,7 @@ pub fn run(args: &[String]) -> Result<()> {
                     pass.draw(0..6, 0..render::BURST_PARTICLES);
                 }
             }
-            if bloom_amt > 0.0 {
+            if bloom_amt > 0.0 || (u.fx - crate::config::Fx::Anamorphic.index()).abs() < 0.5 {
                 bloom.encode(&device, &mut enc, &view);
             }
             let mut present_bg = &bgs[next];
