@@ -413,6 +413,9 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   positions. A fountain reacts best through its *launch* speed (sparks
   thrown during a kick fly higher, so the surge climbs the jet); punching
   every airborne spark up emptied the jets and left clumps.
+  Figures of straight lines take no swirl (`sim_shape_step_k`, `loose`
+  0): the curl noise is fine-grained, so even a tenth of it rippled the
+  cube's lattice into tangles (owner: "quite distorted").
   Patterns that work:
   - Velocity **relaxes toward a target flow** (`acc = (target - vel) * k`,
     k 2.5-5): the target is built from eased audio (loudness sets speed,

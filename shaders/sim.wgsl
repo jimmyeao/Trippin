@@ -110,6 +110,13 @@ fn sim_shape_spawn() -> Particle {
 }
 
 fn sim_shape_step(i: u32, p: Particle, home: vec3<f32>, centre: vec3<f32>, dt: f32, scale: f32) -> Particle {
+    return sim_shape_step_k(i, p, home, centre, dt, scale, 1.0);
+}
+
+// The same with `loose` scaling the mids' swirl and the highs' fizz: under 1
+// for figures made of straight lines (the cube's lattice bent into tangles at
+// 1), which still take the full kick and snare.
+fn sim_shape_step_k(i: u32, p: Particle, home: vec3<f32>, centre: vec3<f32>, dt: f32, scale: f32, loose: f32) -> Particle {
     let calm = u.calm;
     var d = p.pos.xyz;
     var v = p.vel.xyz;
@@ -118,10 +125,10 @@ fn sim_shape_step(i: u32, p: Particle, home: vec3<f32>, centre: vec3<f32>, dt: f
     let stiff = (16.0 + 20.0 * u.pres4.x + 14.0 * u.lvl4.x) * (1.0 - 0.55 * calm);
     var acc = -d * stiff - v * 4.0;
     let t = u.clock4.z * 0.02;
-    acc += sim_curl(home * (0.45 / scale) + vec3<f32>(t, -0.4 * t, 0.7 * t)) * (0.25 + 1.8 * u.lvl4.y + 2.2 * calm) * scale;
+    acc += sim_curl(home * (0.45 / scale) + vec3<f32>(t, -0.4 * t, 0.7 * t)) * (0.25 + 1.8 * u.lvl4.y + 2.2 * calm) * scale * loose;
     if sim_band(i) == 3u {
         let j = vec3<f32>(sim_rand_f(i, 0u), sim_rand_f(i, 1u), sim_rand_f(i, 2u)) - vec3<f32>(0.5);
-        acc += j * u.lvl4.w * 30.0 * scale;
+        acc += j * u.lvl4.w * 30.0 * scale * loose;
     }
     v += acc * dt;
     v += dir * simc.onset.x * 3.2 * scale * (1.0 - 0.85 * calm);

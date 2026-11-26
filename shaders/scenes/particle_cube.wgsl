@@ -5,8 +5,8 @@
 // presence ripples out from the centre through the lattice (shape), and the
 // cube turns on the smooth energy clock (motion). Every point is simulated
 // (sim.rs, the shape-scene pattern): each kick blasts the lattice apart and
-// it springs back, snares wrench it round, the mids drag its lines loose and
-// the bass pulls them taut; in breakdowns it hangs as a drifting haze.
+// it springs back, snares wrench it round and the bass pulls it taut; its
+// lines stay straight (no swirl).
 
 struct POut {
     @builtin(position) pos: vec4<f32>,
@@ -45,7 +45,8 @@ fn sim_spawn(i: u32) -> Particle {
 }
 
 fn sim_step(i: u32, p: Particle, dt: f32) -> Particle {
-    return sim_shape_step(i, p, home(i).xyz, vec3<f32>(0.0), dt, 0.95);
+    // Straight lines: no swirl (its fine grain ripples them even at a tenth).
+    return sim_shape_step_k(i, p, home(i).xyz, vec3<f32>(0.0), dt, 0.95, 0.0);
 }
 
 // Turn on the energy clock, then the camera.

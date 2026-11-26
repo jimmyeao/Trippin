@@ -24,6 +24,8 @@
 //! many seconds and prints how much each scene's picture moves with the
 //! music: the change just after each beat against mid-beat, and how the
 //! change follows loudness (`lvl4`) and kicks (`hits4.x`). Writes `react.tsv`.
+//! `--snap-fx <mode>` renders with a post effect at full strength (the
+//! `u.fx` modes in present.wgsl: 1 mirror X ... 5 kaleido 8).
 //! `--snap-safe` turns the photosensitive-safe limiter on (present.wgsl
 //! `fs_lum`). `--snap-flash <s>` renders that many seconds of each scene,
 //! reads every frame back and prints the most flashes in any one second
@@ -300,6 +302,8 @@ pub fn run(args: &[String]) -> Result<()> {
     };
     let track_from: f32 = arg(args, "--snap-track-from").and_then(|s| s.parse().ok()).unwrap_or(60.0);
     let react_s: f32 = arg(args, "--snap-react").and_then(|s| s.parse().ok()).unwrap_or(0.0);
+    // `--snap-fx <mode>`: a post effect at full strength (1 mirror X ... 5 kaleido 8).
+    let snap_fx: f32 = arg(args, "--snap-fx").and_then(|s| s.parse().ok()).unwrap_or(0.0);
     let mut react_rows: Vec<(String, f32, f32, f32, f32)> = Vec::new();
     // The track's uniforms at snapshot time t (None: the synthetic groove).
     let track_at = |t: f32| -> Option<Uniforms> {
@@ -793,6 +797,9 @@ pub fn run(args: &[String]) -> Result<()> {
                 u.intensity = g.intensity.max(u.intensity);
             }
             u.look4[3] = title_frac;
+            if snap_fx > 0.0 {
+                (u.fx, u.fx_amt) = (snap_fx, 1.0);
+            }
             if let Some(c) = &vclip {
                 let len = c.frames() as f64 / c.fps as f64;
                 let beat = t as f64 * 126.0 / 60.0;
