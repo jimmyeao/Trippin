@@ -19,6 +19,11 @@ use std::time::{Duration, Instant};
 /// Frames are arriving from the picked camera.
 pub static LIVE: AtomicBool = AtomicBool::new(false);
 
+/// Something wants the person cut-out (the Person key, or the dancer as
+/// you): the camera thread runs the segmentation model and puts the mask in
+/// each frame's alpha (segment.rs). Set by the render loop each frame.
+pub static WANT_CUTOUT: AtomicBool = AtomicBool::new(false);
+
 /// The cameras found by the last `refresh_names` (human names).
 static NAMES: Mutex<Vec<String>> = Mutex::new(Vec::new());
 static LISTING: AtomicBool = AtomicBool::new(false);
@@ -250,6 +255,9 @@ fn run(want: Arc<Mutex<String>>, frame: Arc<Mutex<Frame>>) {
         };
         // Capture until the pick changes or the camera fails.
         let mut last_ok = Instant::now();
+        // The segmentation model, loaded the first time the cut-out is
+        // wanted (None after a failure: the frames go out whole).
+        let mut seg: Option<Option<crate::segment::Segmenter>> = None;
         loop {
             if *want.lock().unwrap_or_else(|e| e.into_inner()) != name {
                 break;
@@ -262,7 +270,24 @@ fn run(want: Arc<Mutex<String>>, frame: Arc<Mutex<Frame>>) {
             match got {
                 Some(img) => {
                     serial = serial.wrapping_add(1);
-                    let chain = crate::gfx::cam_mips(&fit(&img));
+                    let mut level0 = fit(&img);
+                    if WANT_CUTOUT.load(Ordering::Relaxed) {
+                        let s = seg.get_or_insert_with(|| match crate::segment::Segmenter::new() {
+                            Ok(s) => Some(s),
+                            Err(e) => {
+                                eprintln!("camera: cut-out unavailable: {e:#}");
+                                None
+                            }
+                        });
+                        if let Some(s) = s.as_mut() {
+                            use crate::gfx::{VID_H, VID_W};
+                            let small = crate::segment::downscale_rgb(&level0, VID_W as usize, VID_H as usize);
+                            if let Ok(m) = s.run(&small) {
+                                crate::segment::mask_into_alpha(&m, &mut level0, VID_W as usize, VID_H as usize);
+                            }
+                        }
+                    }
+                    let chain = crate::gfx::cam_mips(&level0);
                     *frame.lock().unwrap_or_else(|e| e.into_inner()) = Some((serial, Arc::new(chain)));
                     last_ok = Instant::now();
                     LIVE.store(true, Ordering::Relaxed);

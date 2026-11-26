@@ -26,6 +26,9 @@
 //! change follows loudness (`lvl4`) and kicks (`hits4.x`). Writes `react.tsv`.
 //! `--snap-camera <clip>` stands that video clip in for the webcam in
 //! `camera_*` scenes (default dance_solo; no camera is ever opened).
+//! `--snap-dancer-camera` makes the dancer the stand-in's person cut-out
+//! (with `--snap-dancer <look>`); `--snap-cam-key 4` keys the camera layer
+//! by the cut-out.
 //! `--snap-logo <image>` gives the logo scene that image (else the
 //! Trippin logo).
 //! `--snap-fx <mode>` renders with a post effect at full strength (the
@@ -317,8 +320,27 @@ pub fn run(args: &[String]) -> Result<()> {
     let snap_logo = arg(args, "--snap-logo").map(String::from);
     let snap_camera = arg(args, "--snap-camera").unwrap_or("dance_solo").to_string();
     // `--snap-camera-image <png>`: a still for the webcam instead of a clip.
+    // `--snap-dancer-camera`: the dancer dances the camera's cut-out.
+    let snap_dancer_cam = args.iter().any(|a| a == "--snap-dancer-camera");
+    // The person cut-out for the stand-in, as the camera thread makes it
+    // (for the Person key, 4, or the dancer as you).
+    let want_seg = snap_dancer_cam || arg(args, "--snap-cam-key").is_some_and(|k| k.trim() == "4");
+    let seg = std::cell::RefCell::new(if want_seg { Some(crate::segment::Segmenter::new()?) } else { None });
+    let cut = |px: &mut Vec<u8>| {
+        use crate::gfx::{VID_H, VID_W};
+        if let Some(s) = seg.borrow_mut().as_mut() {
+            let small = crate::segment::downscale_rgb(px, VID_W as usize, VID_H as usize);
+            if let Ok(m) = s.run(&small) {
+                crate::segment::mask_into_alpha(&m, px, VID_W as usize, VID_H as usize);
+            }
+        }
+    };
     let snap_cam_image: Option<Vec<u8>> = match arg(args, "--snap-camera-image") {
-        Some(p) => Some(crate::camera::fit(&image::open(p)?.to_rgb8())),
+        Some(p) => {
+            let mut px = crate::camera::fit(&image::open(p)?.to_rgb8());
+            cut(&mut px);
+            Some(px)
+        }
         None => None,
     };
     // `--snap-cam-layer <1 behind | 2 front>` and `--snap-cam-key <0 none |
@@ -819,7 +841,7 @@ pub fn run(args: &[String]) -> Result<()> {
         // The webcam's stand-in (snaps never open a camera): a still
         // (`--snap-camera-image`) or a clip (`--snap-camera`, default
         // dance_solo), for camera_* scenes and the camera layer.
-        let feed_cam = name.starts_with("camera_") || snap_cam_layer > 0.0;
+        let feed_cam = name.starts_with("camera_") || snap_cam_layer > 0.0 || snap_dancer_cam;
         let cam_clip = if feed_cam && snap_cam_image.is_none() {
             crate::video::clip_path(&snap_camera).and_then(|p| crate::video::Clip::open(&p).ok())
         } else {
@@ -871,7 +893,8 @@ pub fn run(args: &[String]) -> Result<()> {
             }
             if let Some(c) = &cam_clip {
                 let f = (t as f64 * c.fps as f64) as usize % c.frames().max(1);
-                if let Ok(px) = c.decode(f) {
+                if let Ok(mut px) = c.decode(f) {
+                    cut(&mut px);
                     statics.upload_cam(&queue, &px);
                 }
             }
@@ -970,7 +993,11 @@ pub fn run(args: &[String]) -> Result<()> {
             if let Some(ds) = &dancer_snap {
                 let frame_f = (t / ds.duration).rem_euclid(1.0) * ds.frames;
                 let mut slots = [SlotUniforms::default(); dancer::SLOTS];
-                slots[0] = SlotUniforms { frame: frame_f, frames: ds.frames, aspect: ds.aspect, _pad: 0.0 };
+                slots[0] = if snap_dancer_cam {
+                    SlotUniforms { frame: 0.0, frames: 1.0, aspect: crate::gfx::VID_W as f32 / crate::gfx::VID_H as f32, camera: 1.0 }
+                } else {
+                    SlotUniforms { frame: frame_f, frames: ds.frames, aspect: ds.aspect, camera: 0.0 }
+                };
                 let du = DancerUniforms {
                     slots,
                     opacity: 1.0,

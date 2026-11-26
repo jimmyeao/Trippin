@@ -321,6 +321,9 @@ impl CamLayer {
 pub enum CamKey {
     /// No key: the whole frame.
     None,
+    /// The person, found by the segmentation model (segment.rs): no screen
+    /// needed.
+    Person,
     Blue,
     /// Dark background (a luma key).
     Dark,
@@ -331,13 +334,14 @@ pub enum CamKey {
 }
 
 impl CamKey {
-    pub const ALL: [CamKey; 4] = [CamKey::Green, CamKey::Blue, CamKey::Dark, CamKey::None];
+    pub const ALL: [CamKey; 5] = [CamKey::Person, CamKey::Green, CamKey::Blue, CamKey::Dark, CamKey::None];
     pub fn index(self) -> f32 {
         match self {
             CamKey::None => 0.0,
             CamKey::Green => 1.0,
             CamKey::Blue => 2.0,
             CamKey::Dark => 3.0,
+            CamKey::Person => 4.0,
         }
     }
     pub fn label(self) -> &'static str {
@@ -346,6 +350,7 @@ impl CamKey {
             CamKey::Green => "Green screen",
             CamKey::Blue => "Blue screen",
             CamKey::Dark => "Dark background",
+            CamKey::Person => "Person (AI cut-out)",
         }
     }
 }
@@ -638,6 +643,9 @@ pub struct Settings {
     pub camera_tol: f32,
     /// The camera layer rotoscoped: cel-shaded bands and ink outlines.
     pub camera_roto: bool,
+    /// The dancer layer dances as you: the camera's person cut-out in place
+    /// of a routine (Dancer page).
+    pub dancer_camera: bool,
     /// The rotoscope look (camera layer and the camera_roto scene): how
     /// much of it over the plain camera, ink weight, detail (low = only big
     /// outlines and flat shapes), colour bands (2..8), palette colour.
@@ -807,6 +815,7 @@ impl Default for Settings {
             camera_amt: 0.8,
             camera_tol: 0.4,
             camera_roto: false,
+            dancer_camera: false,
             roto_amt: 1.0,
             roto_ink: 0.5,
             roto_detail: 0.35,

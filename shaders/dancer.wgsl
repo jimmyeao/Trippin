@@ -7,7 +7,7 @@ struct Slot {
     frame: f32,    // fractional frame index into this slot's loop
     frames: f32,   // 0 = nothing loaded in this slot
     aspect: f32,   // mask width / height
-    _pad: f32,
+    camera: f32,   // 1 = this slot is the camera's person cut-out
 };
 
 struct D {
@@ -28,6 +28,10 @@ struct D {
 @group(1) @binding(3) var<uniform> d: D;
 
 fn sample_layer(slot: i32, luv: vec2<f32>, layer: i32) -> f32 {
+    // The dancer as you: the camera's cut-out, mirrored like a selfie.
+    if slot == 0 && d.slots[0].camera > 0.5 {
+        return cam_person(vec2<f32>(1.0 - luv.x, luv.y));
+    }
     if slot == 1 {
         return textureSampleLevel(masks1, samp, luv, layer, 0.0).r;
     }
@@ -38,6 +42,9 @@ fn sample_layer(slot: i32, luv: vec2<f32>, layer: i32) -> f32 {
 }
 
 fn mask_size(slot: i32) -> vec2<f32> {
+    if slot == 0 && d.slots[0].camera > 0.5 {
+        return vec2<f32>(textureDimensions(cam_tex).xy);
+    }
     if slot == 1 {
         return vec2<f32>(textureDimensions(masks1).xy);
     }

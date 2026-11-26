@@ -538,6 +538,20 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   dance_solo). Never open the owner's camera to test without asking. The
   macOS path (permission via `nokhwa_initialize`, `NSCameraUsageDescription`
   in release.yml's Info.plist) hasn't been compiled yet.
+- **Person cut-out** (`segment.rs`): MediaPipe selfie segmentation
+  (landscape 256x144, NCHW `pixel_values` 0..1, output `alphas`; Apache 2.0)
+  bundled from `assets/` (SHA pinned by a test; `assets/README.md` credits
+  it) and run on rten, ~3 ms a frame on the CPU. The camera thread runs it
+  only while `camera::WANT_CUTOUT` (set each frame by the render loop: the
+  Person key, or `Settings::dancer_camera`), smooths the mask over frames
+  and writes it into the frame's **alpha**, so `cam_tex.a` is the person
+  (`cam_person()`; 1 everywhere when off) and the mips blur it for free.
+  The dancer as you: slot 0's `SlotUniforms::camera` makes dancer.wgsl's
+  `sample_layer`/`mask_size` read the cut-out (mirrored) instead of a
+  routine's masks, so every dancer look, trail and burst applies.
+  `--seg-test <image> <out.png>` checks the model on a still;
+  `--snap-cam-key 4` and `--snap-dancer-camera` with
+  `--snap-camera-image` render it without a camera.
 - **A pack found twice** (the repo's dev folder ahead of the installed copy)
   loads its scenes from the first copy but its clips from every copy
   (`Pack::also`, `clip_dirs`): the repo's packs carry no clips (git-ignored),

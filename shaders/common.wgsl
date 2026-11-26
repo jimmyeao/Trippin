@@ -98,6 +98,13 @@ fn cam(uv: vec2<f32>) -> vec3<f32> {
     return textureSampleLevel(cam_tex, samp, clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).rgb;
 }
 
+// The person cut-out at uv (1 = the person, 0 = the room): the
+// segmentation model's mask, when something asked for it (the Person key,
+// or the dancer as you); 1 everywhere otherwise.
+fn cam_person(uv: vec2<f32>) -> f32 {
+    return textureSampleLevel(cam_tex, samp, clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).a;
+}
+
 // The webcam at a blur level (`lod` 0 = sharp, 1 = half size, ... up to
 // CAM_MIPS - 1), blended between levels so a slider glides.
 fn cam_lod(uv: vec2<f32>, lod: f32) -> vec3<f32> {

@@ -32,6 +32,9 @@ pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
 sha2 = "0.10"
 midir = "0.11.0"
 beat-this = "1.0.0"
+# Person segmentation for the camera (segment.rs): the same rten beat-this uses.
+rten = "0.24"
+rten-tensor = "0.24"
 memmap2 = "0.9.11"
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 tungstenite = "0.30.0"

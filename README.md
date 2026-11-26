@@ -756,9 +756,12 @@ scene:
 - **behind**: the camera fills the background and the scene plays over
   it. Its dark parts show you through; lasers, particles and the dancer
   pass in front.
-- **in front**: you over the scene, cut out by a **key**: green screen,
-  blue screen, or dark background (for a dark room), or no key for the
-  whole frame. **Key tolerance** sets how much of the screen colour goes;
+- **in front**: you over the scene, cut out by a **key**: **Person (AI
+  cut-out)** finds you in any room with no screen (Google's MediaPipe
+  selfie segmentation, built in, running on the CPU in about 3 ms a frame);
+  or green screen, blue screen, dark background (for a dark room), or no
+  key for the whole frame. The key works behind the scenes too: with
+  Person, only you sit behind the scene, not your room. **Key tolerance** sets how much of the screen colour goes;
   green or blue spill on your edges is pulled out.
 - **Rotoscope** (a tick under the layer): the layer drawn as a cartoon,
   cel bands and ink outlines, behind or in front of any scene.
@@ -774,6 +777,10 @@ the scene name while it's on air (kept per scene, with Reset):
   Amount (how much cartoon over the plain camera), Detail (low: only the
   big outlines and flat shapes), Ink, Bands (2-8 flat shades) and Palette
   (your own colours to the show's palette).
+
+**Dance as me** (Dancer page): the dancer layer becomes you, your camera
+cut-out in whichever dancer look is on (shadow, neon, strobe, comic, wire),
+with its trails and its particle burst on drops.
 
 Nothing is opened until you pick a camera, the camera scenes stay out of
 rotation until it sends frames, and a red **camera on** marker shows at the

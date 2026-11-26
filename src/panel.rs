@@ -3289,6 +3289,14 @@ fn dancer_tab(
             ui.small("Silhouette layer, look and movement — one line only.");
             ui.add_space(4.0);
             ui.checkbox(&mut s.dancer_enabled, "Dancer layer on");
+            ui.checkbox(&mut s.dancer_camera, "Dance as me: my camera cut-out instead of a routine")
+                .on_hover_text(
+                    "The dancer layer becomes you: the camera's person cut-out (no green screen needed), \
+                     in whichever dancer look is on. Pick a camera on Settings first.",
+                );
+            if s.dancer_camera && s.camera.is_empty() {
+                ui.small("Pick a camera on the Settings page first.");
+            }
             ctl_row(ui, "Dancer look", |ui| {
                 // A dropdown: six segmented buttons overflow the card.
                 egui::ComboBox::from_id_salt("dancer_look")
@@ -3477,11 +3485,11 @@ fn fx_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status) {
                 ui.small(if s.camera.is_empty() {
                     "Camera layer: pick a camera on Settings first."
                 } else if s.camera_layer == CamLayer::Front {
-                    "You over every scene, cut out by the key (a green or blue screen, or a dark room)."
+                    "You over every scene, cut out by the key: Person needs no screen; or a green or blue screen, or a dark room."
                 } else {
                     "Behind: the camera shows through the scene's dark parts; lights and the dancer pass in front."
                 });
-                if s.camera_layer == CamLayer::Front {
+                if s.camera_layer != CamLayer::Off {
                     ctl_row(ui, "Key", |ui| {
                         egui::ComboBox::from_id_salt("camera_key")
                             .selected_text(s.camera_key.label())

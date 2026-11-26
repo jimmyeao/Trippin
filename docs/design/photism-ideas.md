@@ -11,8 +11,8 @@ audience (streamers, home and mobile DJs). Build order is the order below.
 | 3 | Lens effects | Medium | Built |
 | 4 | Glide between Looks | Small | Built |
 | 5 | Logo / photo scene | Medium | Built (`logo_trip`) |
-| 6 | Webcam as a source | Large | Built: camera scenes (silhouette for the dancer not yet) |
-| - | MIDI knobs and faders | Medium | **Might add** (future) |
+| 6 | Webcam as a source | Large | Built: camera scenes, camera layer, AI person cut-out, dance as me |
+| - | MIDI knobs and faders | Medium | Built: the MIDI page maps anything |
 
 ---
 

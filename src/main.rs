@@ -31,6 +31,7 @@ mod accent;
 mod albumart;
 mod artfind;
 mod camera;
+mod segment;
 mod ai;
 mod echo;
 mod audio;
@@ -1708,7 +1709,7 @@ fn render_loop(
         if ev.drop && s.dancer_burst_drops && s.mode != Mode::Manual && player.is_none() {
             dancer.disintegrate();
         }
-        let dancer_u = dancer.uniforms(
+        let mut dancer_u = dancer.uniforms(
             pos,
             f.downbeat,
             f.bpm,
@@ -1829,7 +1830,23 @@ fn render_loop(
         let camera_scene = r.scene_name(dir.scene).starts_with("camera_");
         let cam_live = camera::LIVE.load(Ordering::Relaxed);
         let cam_layer = cam_live && !camera_scene && s.camera_layer != config::CamLayer::Off;
-        if cam_live && (camera_scene || cam_layer) {
+        // The dancer as you (Dancer page): slot 0 dances the camera's
+        // person cut-out instead of a routine; no canon companions.
+        let dancer_cam = cam_live && s.dancer_camera && !camera_scene;
+        camera::WANT_CUTOUT.store(
+            !s.camera.is_empty() && ((cam_layer && s.camera_key == config::CamKey::Person) || dancer_cam),
+            Ordering::Relaxed,
+        );
+        if let (true, Some(d)) = (dancer_cam, dancer_u.as_mut()) {
+            d.slots[0] = dancer::SlotUniforms {
+                frame: 0.0,
+                frames: 1.0,
+                aspect: gfx::VID_W as f32 / gfx::VID_H as f32,
+                camera: 1.0,
+            };
+            d.count = 1.0;
+        }
+        if cam_live && (camera_scene || cam_layer || dancer_cam) {
             if let Some((n, px)) = cam.newer(cam_seen) {
                 cam_seen = n;
                 r.upload_cam(&px);
@@ -3951,6 +3968,29 @@ fn main() -> Result<()> {
     packs::set_root(&Settings::load().packs_dir);
     if args.iter().any(|a| a == "--list-devices") {
         return audio::list_devices();
+    }
+    // `--seg-test <image> <out.png>`: the camera cut-out on a still: prints
+    // the model's input/output and the time per frame, writes the mask
+    // beside the image (person white).
+    if let Some(i) = args.iter().position(|a| a == "--seg-test") {
+        let (inp, out) = (anyhow::Context::context(args.get(i + 1), "--seg-test <image> <out.png>")?, anyhow::Context::context(args.get(i + 2), "--seg-test <image> <out.png>")?);
+        let mut seg = segment::Segmenter::new()?;
+        println!("{}", seg.describe());
+        let img = image::open(inp)?.to_rgba8();
+        let (w, h) = (img.width() as usize, img.height() as usize);
+        let rgb = segment::downscale_rgb(img.as_raw(), w, h);
+        let t0 = std::time::Instant::now();
+        let mut m = Vec::new();
+        for _ in 0..20 {
+            m = seg.run(&rgb)?;
+        }
+        println!("{:.1} ms a frame", t0.elapsed().as_secs_f64() * 1000.0 / 20.0);
+        let mut px = img.into_raw();
+        segment::mask_into_alpha(&m, &mut px, w, h);
+        let mask: Vec<u8> = px.chunks(4).map(|p| p[3]).collect();
+        anyhow::Context::context(image::GrayImage::from_raw(w as u32, h as u32, mask), "mask")?.save(out)?;
+        println!("mask -> {out}");
+        return Ok(());
     }
     // `--list-cameras`: the webcams (names for Settings > Camera). Lists
     // them only; no camera is opened.
