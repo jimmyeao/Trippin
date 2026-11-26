@@ -171,8 +171,12 @@ pub fn param_value(saved: &std::collections::BTreeMap<String, std::collections::
         .clamp(p.min, p.max)
 }
 
-/// A camera scene's controls as (roto4, roto5) for the shader.
+/// A camera scene's controls as (roto4, roto5) for the shader; the
+/// rotoscope look's defaults for any other scene.
 pub fn scene_uniforms(saved: &std::collections::BTreeMap<String, std::collections::BTreeMap<String, f32>>, scene: &str) -> ([f32; 4], [f32; 4]) {
+    if scene_params(scene).is_empty() {
+        return ([1.0, 0.5, 0.35, 4.0], [0.4, 0.0, 0.0, 0.0]);
+    }
     let mut v = [0.0f32; 8];
     for (i, p) in scene_params(scene).iter().enumerate().take(5) {
         v[i] = param_value(saved, scene, p);

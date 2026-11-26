@@ -975,6 +975,16 @@ fn render_loop(
                             None => continue,
                         }
                     }
+                    // A camera scene's tile: a stand-in for the webcam (a
+                    // frame of the dance clip, else the Trippin logo), never
+                    // the live camera; the next live frame re-uploads.
+                    if name.starts_with("camera_") {
+                        let px = video::frames_at("dance_solo", 2.0)
+                            .map(|(a, _, _)| a)
+                            .unwrap_or_else(|| camera::fit(&image::DynamicImage::ImageRgba8(gfx::app_logo()).to_rgb8()));
+                        r.upload_cam(&px);
+                        cam_seen = 0;
+                    }
                     let look = showparams::look(&lock(&shared.settings).show_params, name);
                     match r.scene_names().iter().position(|n| *n == name) {
                         Some(i) => match r.thumbnail(i, 128, 72, look) {

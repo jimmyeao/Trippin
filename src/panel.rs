@@ -374,7 +374,8 @@ impl Panel {
                 .ok()
                 .and_then(|t| Tab::ALL.into_iter().find(|x| x.label().eq_ignore_ascii_case(t.trim())))
                 .unwrap_or(Tab::Perform),
-            scene_filter: String::new(),
+            // Dev aid, as TRIPPIN_PANEL_TAB: pre-fill the scene filter.
+            scene_filter: std::env::var("TRIPPIN_PANEL_FILTER").unwrap_or_default(),
             chip: LibChip::All,
             thumbs: HashMap::new(),
             want_thumbs: HashMap::new(),
@@ -2705,7 +2706,10 @@ fn thumbs_dir() -> PathBuf {
 }
 
 fn thumb_file(key: &str) -> PathBuf {
-    thumbs_dir().join(format!("{}.png", key.replace(':', "_")))
+    // Camera scenes' tiles were cached black (rendered with no camera
+    // frame); the "_v2" name leaves those behind.
+    let v = if key.starts_with("scene:camera_") { "_v2" } else { "" };
+    thumbs_dir().join(format!("{}{v}.png", key.replace(':', "_")))
 }
 
 /// Unity engine tiles are stills shipped in `shaders/thumbs` (the render

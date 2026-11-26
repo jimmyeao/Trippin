@@ -2590,8 +2590,9 @@ impl Renderer {
             misc4: [0.0; 4],
             look4: look,
             cam4: [0.0; 4],
-            roto4: [1.0, 0.5, 0.35, 4.0],
-            roto5: [0.4, 0.0, 0.0, 0.0],
+            // Camera scenes' own controls at their defaults (camera.rs).
+            roto4: crate::camera::scene_uniforms(&Default::default(), &self.scenes[scene].name).0,
+            roto5: crate::camera::scene_uniforms(&Default::default(), &self.scenes[scene].name).1,
         };
         self.queue
             .write_buffer(&self.uniform_buf, 0, bytemuck::bytes_of(&u));
