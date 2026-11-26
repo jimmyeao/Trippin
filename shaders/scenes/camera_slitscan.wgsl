@@ -12,7 +12,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let uv = in.uv;
     // The live strip: the camera, mirrored, its centre at x = 0.78.
     let cam_uv = vec2<f32>(1.0 - (uv.x - 0.28), uv.y);
-    let live = untonemap(vid(clamp(cam_uv, vec2<f32>(0.0), vec2<f32>(1.0))));
+    let live = untonemap(cam(cam_uv));
     let mask = smoothstep(0.6, 0.72, uv.x);
     // The smear: last frame, pulled in from the right. Speed follows the
     // loudness (eased), as a fraction of the width per second.

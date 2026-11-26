@@ -294,6 +294,62 @@ fn month_day(secs: i64) -> (u32, u32) {
 /// `present.wgsl` from `u.fx`, so it transforms the scene and dancer alike.
 /// `#[serde(other)]` keeps a stale value (e.g. a removed mode) from
 /// invalidating the whole settings file.
+/// The webcam composited into every scene (`Uniforms::cam4.x`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CamLayer {
+    /// The camera shows through the scene's dark parts.
+    Behind,
+    /// The camera over the scene, cut out by `CamKey`.
+    Front,
+    #[serde(other)]
+    #[default]
+    Off,
+}
+
+impl CamLayer {
+    pub fn index(self) -> f32 {
+        match self {
+            CamLayer::Off => 0.0,
+            CamLayer::Behind => 1.0,
+            CamLayer::Front => 2.0,
+        }
+    }
+}
+
+/// How the camera layer is cut out (`Uniforms::cam4.z`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CamKey {
+    /// No key: the whole frame.
+    None,
+    Blue,
+    /// Dark background (a luma key).
+    Dark,
+    /// Green screen.
+    #[serde(other)]
+    #[default]
+    Green,
+}
+
+impl CamKey {
+    pub const ALL: [CamKey; 4] = [CamKey::Green, CamKey::Blue, CamKey::Dark, CamKey::None];
+    pub fn index(self) -> f32 {
+        match self {
+            CamKey::None => 0.0,
+            CamKey::Green => 1.0,
+            CamKey::Blue => 2.0,
+            CamKey::Dark => 3.0,
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            CamKey::None => "No key (whole frame)",
+            CamKey::Green => "Green screen",
+            CamKey::Blue => "Blue screen",
+            CamKey::Dark => "Dark background",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Fx {
     MirrorX,
@@ -570,6 +626,13 @@ pub struct Settings {
     /// The webcam for the `camera_*` scenes (a device name; camera.rs).
     /// "" = no camera: nothing is opened and no camera scene plays.
     pub camera: String,
+    /// The camera layer over every scene (Dancer & FX; present.wgsl).
+    pub camera_layer: CamLayer,
+    pub camera_key: CamKey,
+    /// Camera layer strength 0..1.
+    pub camera_amt: f32,
+    /// Key tolerance 0..1 (how much of the screen colour/darkness goes).
+    pub camera_tol: f32,
     pub show_panel: bool,
     /// NDI network output — sends the composited frame (FX + text included)
     /// to OBS/another display. Needs the free NDI runtime installed; a
@@ -725,6 +788,10 @@ impl Default for Settings {
             latency_ms: 30.0,
             audio_in: String::new(),
             camera: String::new(),
+            camera_layer: CamLayer::Off,
+            camera_key: CamKey::Green,
+            camera_amt: 0.8,
+            camera_tol: 0.4,
             show_panel: true,
             ndi_enabled: false,
             ndi_name: "Trippin".into(),

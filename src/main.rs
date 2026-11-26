@@ -1812,13 +1812,16 @@ fn render_loop(
         for (slot, px) in video.tick(r.scene_name(dir.scene), dt, dir.intensity, &vbeat) {
             r.upload_video(slot, &px);
         }
-        // Camera scenes: the newest webcam frame into the video texture.
+        // The webcam: its newest frame into the camera texture while a
+        // camera scene is on air or the camera layer is on.
         cam.set(&s.camera);
         let camera_scene = r.scene_name(dir.scene).starts_with("camera_");
-        if camera_scene {
+        let cam_live = camera::LIVE.load(Ordering::Relaxed);
+        let cam_layer = cam_live && !camera_scene && s.camera_layer != config::CamLayer::Off;
+        if cam_live && (camera_scene || cam_layer) {
             if let Some((n, px)) = cam.newer(cam_seen) {
                 cam_seen = n;
-                r.upload_video(0, &px);
+                r.upload_cam(&px);
             }
         }
 
@@ -1909,12 +1912,16 @@ fn render_loop(
             pres4: f.pres4,
             clock4: clock4.map(|c| c as f32),
             // y: video frame blend (vid() in common.wgsl).
-            // y: the video slots' blend; a camera frame is all in slot 0.
-            misc4: [0.0, if camera_scene { 0.0 } else { video.blend }, 0.0, 0.0],
+            misc4: [0.0, video.blend, 0.0, 0.0],
             look4: {
                 let mut l = showparams::look(&s.show_params, r.scene_name(dir.scene));
                 l[3] = title_frac;
                 l
+            },
+            cam4: if cam_layer {
+                [s.camera_layer.index(), s.camera_amt.clamp(0.0, 1.0), s.camera_key.index(), s.camera_tol.clamp(0.0, 1.0)]
+            } else {
+                [0.0; 4]
             },
         };
         // Lights follow the show (lights.rs). The palette LUT is rebuilt

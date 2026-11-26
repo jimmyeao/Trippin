@@ -44,6 +44,11 @@ pub struct Statics {
     /// starts as the Trippin logo (`upload_logo`).
     pub logo: wgpu::Texture,
     pub logo_view: wgpu::TextureView,
+    /// The webcam's newest frame (`cam_tex` / `cam()` in common.wgsl),
+    /// VID_W x VID_H: its own texture, so a video scene and the camera
+    /// layer never overwrite each other. Black until a camera sends frames.
+    pub cam: wgpu::Texture,
+    pub cam_view: wgpu::TextureView,
     /// Photosensitive-safe limiter state (`Lum` in present.wgsl): the
     /// allowed average luminance, the gain present applies, on, rise rate.
     /// Written by `fs_lum` each frame while on; `set_safe` writes it from
@@ -230,6 +235,20 @@ impl Statics {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
+        let cam = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("camera"),
+            size: wgpu::Extent3d {
+                width: VID_W,
+                height: VID_H,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
         let me = Self {
             noise3_view: noise3.create_view(&Default::default()),
             _noise3: noise3,
@@ -244,6 +263,8 @@ impl Statics {
             title,
             logo_view: logo.create_view(&Default::default()),
             logo,
+            cam_view: cam.create_view(&Default::default()),
+            cam,
             lum: {
                 let b = device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some("safe lum"),
@@ -257,6 +278,32 @@ impl Statics {
         };
         me.upload_logo(queue, &app_logo());
         me
+    }
+
+    /// Put a webcam frame (VID_W x VID_H RGBA) into the camera texture.
+    pub fn upload_cam(&self, queue: &wgpu::Queue, rgba: &[u8]) {
+        if rgba.len() != (VID_W * VID_H * 4) as usize {
+            return;
+        }
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.cam,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            rgba,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(VID_W * 4),
+                rows_per_image: Some(VID_H),
+            },
+            wgpu::Extent3d {
+                width: VID_W,
+                height: VID_H,
+                depth_or_array_layers: 1,
+            },
+        );
     }
 
     /// Put an image into the logo texture (fitted, see `logo_pixels`).

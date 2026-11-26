@@ -729,6 +729,17 @@ rotation, all mirrored like a selfie:
 - **Camera Slit-Scan**: you live on the right, every move smeared away to
   the left in ribbons that run faster when the track is loud.
 
+**Camera layer** (Dancer & FX, under Echo) puts the camera into *every*
+scene:
+
+- **behind**: the camera fills the background and the scene plays over
+  it. Its dark parts show you through; lasers, particles and the dancer
+  pass in front.
+- **in front**: you over the scene, cut out by a **key**: green screen,
+  blue screen, or dark background (for a dark room), or no key for the
+  whole frame. **Key tolerance** sets how much of the screen colour goes;
+  green or blue spill on your edges is pulled out.
+
 Nothing is opened until you pick a camera, the camera scenes stay out of
 rotation until it sends frames, and a red **camera on** marker shows at the
 top of the panel while it's capturing. `trippin --list-cameras` lists the

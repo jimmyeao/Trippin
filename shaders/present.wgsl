@@ -184,6 +184,26 @@ fn agx(x: vec3<f32>) -> vec3<f32> {
     return pow(clamp(v, vec3<f32>(0.0), vec3<f32>(1.0)), vec3<f32>(2.2));
 }
 
+// The camera layer's key: how much of the camera shows at c (1 = all).
+// Green/blue screen (chroma), dark background (luma), or none.
+fn cam_key(c: vec3<f32>) -> f32 {
+    let key = i32(u.cam4.z + 0.5);
+    let tol = clamp(u.cam4.w, 0.0, 1.0);
+    if key == 1 {
+        let d = c.g - max(c.r, c.b);
+        return 1.0 - smoothstep(0.02 + 0.12 * tol, 0.1 + 0.2 * tol, d);
+    }
+    if key == 2 {
+        let d = c.b - max(c.r, c.g);
+        return 1.0 - smoothstep(0.02 + 0.12 * tol, 0.1 + 0.2 * tol, d);
+    }
+    if key == 3 {
+        let l = dot(c, vec3<f32>(0.299, 0.587, 0.114));
+        return smoothstep(0.02 + 0.12 * tol, 0.08 + 0.2 * tol, l);
+    }
+    return 1.0;
+}
+
 // Photosensitive-safe limiter state (gfx::Statics::lum): the average
 // luminance the frame may show, the gain that holds it there, on, and the
 // rise allowed per second.
@@ -232,6 +252,28 @@ fn graded(scr_uv: vec2<f32>) -> vec4<f32> {
         col = agx(col * expo * 1.25);
     } else {
         col = aces(col * expo);
+    }
+    // The camera layer, in display space after tone mapping so the camera
+    // looks like itself on every scene (ACES or AgX): behind the scene (it
+    // shows through the scene's dark parts) or keyed in front of it.
+    let cmode = i32(u.cam4.x + 0.5);
+    if cmode > 0 && !clear_bg {
+        var c = cam(vec2<f32>(1.0 - uv.x, uv.y));
+        let a = cam_key(c);
+        // Green / blue screen: pull the screen's colour out of the edges.
+        let key = i32(u.cam4.z + 0.5);
+        if key == 1 {
+            c.g = min(c.g, max(c.r, c.b) * 1.05);
+        } else if key == 2 {
+            c.b = min(c.b, max(c.r, c.g) * 1.05);
+        }
+        let k = clamp(u.cam4.y, 0.0, 1.0) * a;
+        if cmode == 1 {
+            let sl = dot(col, vec3<f32>(0.2126, 0.7152, 0.0722));
+            col += c * k * (1.0 - smoothstep(0.04, 0.5, sl));
+        } else {
+            col = mix(col, c, k);
+        }
     }
     // Vignette and grain use screen-space uv so edges darken the same under FX.
     let scr = scr_uv - 0.5;

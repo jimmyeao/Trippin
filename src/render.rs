@@ -88,6 +88,10 @@ pub struct Uniforms {
     /// The Unity show's Brightness, Saturation and Hue shift (turns) for
     /// `ext_look` (showparams::look); identity (1, 1, 0, 0) otherwise.
     pub look4: [f32; 4],
+    /// The camera layer (present.wgsl): mode (0 off, 1 behind the scene,
+    /// 2 in front, keyed), strength, key (0 none, 1 green, 2 blue, 3 dark
+    /// background), key tolerance.
+    pub cam4: [f32; 4],
 }
 
 #[derive(Default, Clone, Copy, PartialEq)]
@@ -217,13 +221,15 @@ pub struct FrameRes<'a> {
     pub title: &'a wgpu::TextureView,
     /// The logo scene's image (gfx::Statics::logo).
     pub logo: &'a wgpu::TextureView,
+    /// The webcam's newest frame (gfx::Statics::cam).
+    pub cam: &'a wgpu::TextureView,
     /// Photosensitive-safe limiter state (gfx::Statics::lum).
     pub lum: &'a wgpu::Buffer,
 }
 
 impl FrameRes<'_> {
-    /// Bind group entries 3..=12 (after uniforms, feedback and sampler).
-    pub fn entries(&self) -> [wgpu::BindGroupEntry<'_>; 10] {
+    /// Bind group entries 3..=13 (after uniforms, feedback and sampler).
+    pub fn entries(&self) -> [wgpu::BindGroupEntry<'_>; 11] {
         [
             wgpu::BindGroupEntry {
                 binding: 3,
@@ -264,6 +270,10 @@ impl FrameRes<'_> {
             wgpu::BindGroupEntry {
                 binding: 12,
                 resource: wgpu::BindingResource::TextureView(self.logo),
+            },
+            wgpu::BindGroupEntry {
+                binding: 13,
+                resource: wgpu::BindingResource::TextureView(self.cam),
             },
         ]
     }
@@ -374,6 +384,8 @@ pub fn frame_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
             },
             // The logo scene's image — gfx::Statics::logo.
             tex_entry(12, D2),
+            // The webcam — gfx::Statics::cam.
+            tex_entry(13, D2),
         ],
     })
 }
@@ -863,6 +875,7 @@ impl Renderer {
                 vid: &statics.vid_view,
                 title: &statics.title_view,
                 logo: &statics.logo_view,
+                cam: &statics.cam_view,
                 lum: &statics.lum,
             },
         );
@@ -884,6 +897,7 @@ impl Renderer {
                 vid: &statics.vid_view,
                 title: &statics.title_view,
                 logo: &statics.logo_view,
+                cam: &statics.cam_view,
                 lum: &statics.lum,
             },
         );
@@ -905,6 +919,7 @@ impl Renderer {
                 vid: &statics.vid_view,
                 title: &statics.title_view,
                 logo: &statics.logo_view,
+                cam: &statics.cam_view,
                 lum: &statics.lum,
             },
         );
@@ -921,6 +936,7 @@ impl Renderer {
                 vid: &statics.vid_view,
                 title: &statics.title_view,
                 logo: &statics.logo_view,
+                cam: &statics.cam_view,
                 lum: &statics.lum,
             };
             (
@@ -1116,7 +1132,7 @@ impl Renderer {
     ) -> [wgpu::BindGroup; 2] {
         let make = |t: &wgpu::Texture| {
             let view = t.create_view(&Default::default());
-            let [e3, e4, e5, e6, e7, e8, e9, e10, e11, e12] = res.entries();
+            let [e3, e4, e5, e6, e7, e8, e9, e10, e11, e12, e13] = res.entries();
             device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: None,
                 layout,
@@ -1143,6 +1159,7 @@ impl Renderer {
                     e10,
                     e11,
                     e12,
+                    e13,
                 ],
             })
         };
@@ -1173,6 +1190,7 @@ impl Renderer {
                 vid: res.vid,
                 title: res.title,
                 logo: res.logo,
+                cam: res.cam,
                 lum: res.lum,
             };
             Self::make_bind_groups(device, layout, uniform_buf, sampler, targets, &r)
@@ -1205,6 +1223,7 @@ impl Renderer {
                 vid: &self.statics.vid_view,
                 title: &self.statics.title_view,
                 logo: &self.statics.logo_view,
+                cam: &self.statics.cam_view,
                 lum: &self.statics.lum,
         };
         self.bind_groups = Self::make_bind_groups(
@@ -1420,6 +1439,11 @@ impl Renderer {
     /// Upload an external frame (RGBA8, EXT_W x EXT_H) for `ext_tex`.
     /// Draw the now-playing line into the title texture; returns the width
     /// fraction for `u.look4.w` (gfx::Statics::upload_title).
+    /// Put a webcam frame into the camera texture (gfx::Statics::upload_cam).
+    pub fn upload_cam(&self, rgba: &[u8]) {
+        self.statics.upload_cam(&self.queue, rgba);
+    }
+
     /// Put an image into the logo scene's texture (gfx::Statics::upload_logo).
     pub fn upload_logo(&self, img: &image::RgbaImage) {
         self.statics.upload_logo(&self.queue, img);
@@ -2469,6 +2493,7 @@ impl Renderer {
                 vid: &self.statics.vid_view,
                 title: &self.statics.title_view,
                 logo: &self.statics.logo_view,
+                cam: &self.statics.cam_view,
                 lum: &self.statics.lum,
             },
             c.clone(),
@@ -2558,6 +2583,7 @@ impl Renderer {
             clock4: [8.0, 8.0, 8.0, 8.0],
             misc4: [0.0; 4],
             look4: look,
+            cam4: [0.0; 4],
         };
         self.queue
             .write_buffer(&self.uniform_buf, 0, bytemuck::bytes_of(&u));
@@ -2600,6 +2626,7 @@ impl Renderer {
                 vid: &self.statics.vid_view,
                 title: &self.statics.title_view,
                 logo: &self.statics.logo_view,
+                cam: &self.statics.cam_view,
                 lum: &self.statics.lum,
             },
         );

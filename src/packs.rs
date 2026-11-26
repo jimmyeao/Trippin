@@ -28,7 +28,7 @@ use anyhow::{anyhow, bail, Context, Result};
 
 /// The pack API this build provides. Bump when common.wgsl loses or changes
 /// a helper packs may use.
-pub const API: u32 = 2;
+pub const API: u32 = 3;
 
 /// Packs on the release page. An empty checksum means not published yet.
 pub struct CatalogEntry {

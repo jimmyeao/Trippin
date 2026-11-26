@@ -10,7 +10,7 @@
 
 // The camera's luminance at uv (mirrored like a selfie).
 fn cam_l(uv: vec2<f32>) -> f32 {
-    let c = untonemap(vid(vec2<f32>(1.0 - uv.x, uv.y)));
+    let c = untonemap(cam(vec2<f32>(1.0 - uv.x, uv.y)));
     return dot(c, vec3<f32>(0.299, 0.587, 0.114));
 }
 

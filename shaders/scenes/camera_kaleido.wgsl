@@ -21,7 +21,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let q = vec2<f32>(cos(a), sin(a)) * r * zoom;
     // Into the camera frame, around its centre (mirrored like a selfie).
     let uv = vec2<f32>(0.5 - q.x * 9.0 / 16.0, 0.5 + q.y);
-    var col = untonemap(vid(clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0))));
+    var col = untonemap(cam(uv));
     let pal = palette(fract(r * 0.4 + u.clock4.x * 0.01));
     col = mix(col, pal * pal * dot(col, vec3<f32>(0.4, 0.4, 0.2)) * 2.0, 0.3);
     // A soft dark edge round the mandala.

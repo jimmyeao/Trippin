@@ -111,6 +111,7 @@ fn groove(t: f32, w: u32, h: u32, frame: u32, bloom: f32, tonemap: f32, calm: f3
         clock4: [beat * (1.0 - 0.3 * calm); 4],
         misc4: [0.0; 4],
         look4: [1.0, 1.0, 0.0, 0.0],
+        cam4: [0.0; 4],
     }
 }
 
@@ -270,6 +271,7 @@ pub fn run(args: &[String]) -> Result<()> {
             vid: &statics.vid_view,
             title: &statics.title_view,
             logo: &statics.logo_view,
+            cam: &statics.cam_view,
             lum: &statics.lum,
         },
     );
@@ -312,6 +314,15 @@ pub fn run(args: &[String]) -> Result<()> {
     // `--snap-logo <image>`: the logo scene's image (else the Trippin logo).
     let snap_logo = arg(args, "--snap-logo").map(String::from);
     let snap_camera = arg(args, "--snap-camera").unwrap_or("dance_solo").to_string();
+    // `--snap-camera-image <png>`: a still for the webcam instead of a clip.
+    let snap_cam_image: Option<Vec<u8>> = match arg(args, "--snap-camera-image") {
+        Some(p) => Some(crate::camera::fit(&image::open(p)?.to_rgb8())),
+        None => None,
+    };
+    // `--snap-cam-layer <1 behind | 2 front>` and `--snap-cam-key <0 none |
+    // 1 green | 2 blue | 3 dark>`: the camera layer over every snapped scene.
+    let snap_cam_layer: f32 = arg(args, "--snap-cam-layer").and_then(|s| s.parse().ok()).unwrap_or(0.0);
+    let snap_cam_key: f32 = arg(args, "--snap-cam-key").and_then(|s| s.parse().ok()).unwrap_or(1.0);
     if let Some(p) = &snap_logo {
         statics.upload_logo(&queue, &image::open(p)?.to_rgba8());
     }
@@ -541,6 +552,7 @@ pub fn run(args: &[String]) -> Result<()> {
                     vid: &statics.vid_view,
                     title: &statics.title_view,
                     logo: &statics.logo_view,
+                    cam: &statics.cam_view,
                     lum: &statics.lum,
                 },
             );
@@ -561,6 +573,7 @@ pub fn run(args: &[String]) -> Result<()> {
                     vid: &statics.vid_view,
                     title: &statics.title_view,
                     logo: &statics.logo_view,
+                    cam: &statics.cam_view,
                     lum: &statics.lum,
                 },
             );
@@ -595,6 +608,7 @@ pub fn run(args: &[String]) -> Result<()> {
                 vid: &statics.vid_view,
                 title: &statics.title_view,
                 logo: &statics.logo_view,
+                cam: &statics.cam_view,
                 lum: &statics.lum,
             };
             let bgs = Renderer::make_bind_groups(&device, &layout, &ubuf, &sampler, &etargets, &res);
@@ -791,14 +805,22 @@ pub fn run(args: &[String]) -> Result<()> {
         queue.write_buffer(&statics.lum, 0, bytemuck::cast_slice(&gfx::lum_init(safe)));
         // video_* scenes: the clip plays at 1x on the snapshot clock, or on
         // the groove's beat grid for bar-locked scenes (video::snap_time).
-        // camera_* scenes stand in a clip for the webcam (`--snap-camera
-        // <clip>`, default dance_solo): snaps never open a camera.
         let vclip = name
             .strip_prefix("video_")
-            .map(str::to_string)
-            .or_else(|| name.starts_with("camera_").then(|| snap_camera.clone()))
-            .and_then(|c| crate::video::clip_path(&c))
+            .and_then(crate::video::clip_path)
             .and_then(|p| crate::video::Clip::open(&p).ok());
+        // The webcam's stand-in (snaps never open a camera): a still
+        // (`--snap-camera-image`) or a clip (`--snap-camera`, default
+        // dance_solo), for camera_* scenes and the camera layer.
+        let feed_cam = name.starts_with("camera_") || snap_cam_layer > 0.0;
+        let cam_clip = if feed_cam && snap_cam_image.is_none() {
+            crate::video::clip_path(&snap_camera).and_then(|p| crate::video::Clip::open(&p).ok())
+        } else {
+            None
+        };
+        if let (true, Some(img)) = (feed_cam, &snap_cam_image) {
+            statics.upload_cam(&queue, img);
+        }
         if name.starts_with("video_") && vclip.is_none() {
             eprintln!("{name}: no clip on disk (videos/ or TRIPPIN_VIDEOS) — it renders black");
         }
@@ -812,6 +834,7 @@ pub fn run(args: &[String]) -> Result<()> {
                 (u.time, u.dt, u.res_x, u.res_y, u.frame) = (g.time, g.dt, g.res_x, g.res_y, g.frame);
                 (u.bloom, u.tonemap, u.scene_time, u.hue, u.seed) = (g.bloom, g.tonemap, g.scene_time, g.hue, g.seed);
                 (u.misc4, u.look4, u.fx, u.fx_amt) = (g.misc4, g.look4, g.fx, g.fx_amt);
+                u.cam4 = g.cam4;
                 u.intensity = g.intensity.max(u.intensity);
             }
             u.look4[3] = title_frac;
@@ -836,8 +859,16 @@ pub fn run(args: &[String]) -> Result<()> {
                         render::upload_video(&queue, &statics.vid, slot, &px);
                     }
                 }
-                // A camera frame is all in slot 0.
-                u.misc4[1] = if name.starts_with("camera_") { 0.0 } else { fpos.fract() as f32 };
+                u.misc4[1] = fpos.fract() as f32;
+            }
+            if let Some(c) = &cam_clip {
+                let f = (t as f64 * c.fps as f64) as usize % c.frames().max(1);
+                if let Ok(px) = c.decode(f) {
+                    statics.upload_cam(&queue, &px);
+                }
+            }
+            if snap_cam_layer > 0.0 && !name.starts_with("camera_") {
+                u.cam4 = [snap_cam_layer, 1.0, snap_cam_key, 0.4];
             }
             if let Some(a) = &accent_snap {
                 u.misc4[2] = a.amt;

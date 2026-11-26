@@ -48,6 +48,9 @@ struct U {
     // The Unity show's Brightness, Saturation, Hue shift (turns); w spare.
     // Identity (1, 1, 0, 0) for every other scene. See ext_look.
     look4: vec4<f32>,
+    // The camera layer (present.wgsl): mode (0 off, 1 behind, 2 in front),
+    // strength, key (0 none, 1 green, 2 blue, 3 dark), key tolerance.
+    cam4: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> u: U;
@@ -81,6 +84,15 @@ struct U {
 // the Trippin logo), fitted inside a square with transparent padding,
 // straight alpha. Sample through logo().
 @group(0) @binding(12) var logo_tex: texture_2d<f32>;
+// The webcam (Settings > Camera), display-referred; black with no camera.
+// Sample through cam().
+@group(0) @binding(13) var cam_tex: texture_2d<f32>;
+
+// The webcam at uv in 0..1 (y down), as the camera sees it: flip x for a
+// selfie view. Display-referred: pass it through untonemap() in a scene.
+fn cam(uv: vec2<f32>) -> vec3<f32> {
+    return textureSampleLevel(cam_tex, samp, clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).rgb;
+}
 
 // The logo at uv in 0..1 across its square (y top to bottom): rgb and
 // coverage, 0 outside the square.

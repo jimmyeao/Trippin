@@ -511,8 +511,15 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
 - **Webcam** (`camera.rs`, `Settings::camera`, nokhwa: MSMF / AVFoundation):
   a capture thread opens the picked camera only (nothing until one is
   picked), fits each frame to VID_W x VID_H RGBA, and the render loop
-  uploads it to `vid_tex` slot 0 while a `camera_*` scene is on air (blend
-  forced to 0). `camera::LIVE` gates those scenes into rotation and shows
+  uploads it to its own texture (group(0) **binding 13**,
+  `gfx::Statics::cam`, `cam()` in common.wgsl; pack API 3) while a
+  `camera_*` scene is on air or the camera layer is on. The **camera
+  layer** (`Settings::camera_layer/key/amt/tol`, `Uniforms::cam4`) is
+  composited in present.wgsl *after* tone mapping, so the camera looks like
+  itself under ACES and AgX: behind (shows through the scene's dark parts)
+  or in front, keyed (`cam_key`: green/blue chroma with spill pulled out,
+  dark = luma, none). Snaps: `--snap-cam-layer 1|2`, `--snap-cam-key
+  0..3`, `--snap-camera-image <png>` for a still. `camera::LIVE` gates those scenes into rotation and shows
   the panel's "camera on" pill; the AI builder never plans them. Snaps never
   open a camera: `--snap-camera <clip>` stands a pack clip in (default
   dance_solo). Never open the owner's camera to test without asking. The

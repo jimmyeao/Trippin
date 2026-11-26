@@ -3304,6 +3304,42 @@ fn dancer_fx_tab(
             ctl_row(ui, "Echo amount", |ui| {
                 ui.add_enabled(s.echo != Tristate::Off, egui::Slider::new(&mut s.echo_amt, 0.0..=1.0));
             });
+            // The webcam over every scene: behind it, or keyed in front.
+            ui.add_space(6.0);
+            {
+                use crate::config::{CamKey, CamLayer};
+                ctl_row(ui, "Camera", |ui| {
+                    segmented(
+                        ui,
+                        &mut s.camera_layer,
+                        &[(CamLayer::Off, "off"), (CamLayer::Behind, "behind"), (CamLayer::Front, "in front")],
+                    );
+                });
+                ui.small(if s.camera.is_empty() {
+                    "Camera layer: pick a camera on Settings first."
+                } else if s.camera_layer == CamLayer::Front {
+                    "You over every scene, cut out by the key (a green or blue screen, or a dark room)."
+                } else {
+                    "Behind: the camera shows through the scene's dark parts; lights and the dancer pass in front."
+                });
+                if s.camera_layer == CamLayer::Front {
+                    ctl_row(ui, "Key", |ui| {
+                        egui::ComboBox::from_id_salt("camera_key")
+                            .selected_text(s.camera_key.label())
+                            .show_ui(ui, |ui| {
+                                for k in CamKey::ALL {
+                                    ui.selectable_value(&mut s.camera_key, k, k.label());
+                                }
+                            });
+                    });
+                    ctl_row(ui, "Key tolerance", |ui| {
+                        ui.add_enabled(s.camera_key != CamKey::None, egui::Slider::new(&mut s.camera_tol, 0.0..=1.0));
+                    });
+                }
+                ctl_row(ui, "Camera amount", |ui| {
+                    ui.add_enabled(s.camera_layer != CamLayer::Off, egui::Slider::new(&mut s.camera_amt, 0.0..=1.0));
+                });
+            }
         });
         r2.response.rect.height()
     };
