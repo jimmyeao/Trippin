@@ -215,13 +215,15 @@ pub struct FrameRes<'a> {
     pub ext: &'a wgpu::TextureView,
     pub vid: &'a wgpu::TextureView,
     pub title: &'a wgpu::TextureView,
+    /// The logo scene's image (gfx::Statics::logo).
+    pub logo: &'a wgpu::TextureView,
     /// Photosensitive-safe limiter state (gfx::Statics::lum).
     pub lum: &'a wgpu::Buffer,
 }
 
 impl FrameRes<'_> {
-    /// Bind group entries 3..=11 (after uniforms, feedback and sampler).
-    pub fn entries(&self) -> [wgpu::BindGroupEntry<'_>; 9] {
+    /// Bind group entries 3..=12 (after uniforms, feedback and sampler).
+    pub fn entries(&self) -> [wgpu::BindGroupEntry<'_>; 10] {
         [
             wgpu::BindGroupEntry {
                 binding: 3,
@@ -258,6 +260,10 @@ impl FrameRes<'_> {
             wgpu::BindGroupEntry {
                 binding: 11,
                 resource: self.lum.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 12,
+                resource: wgpu::BindingResource::TextureView(self.logo),
             },
         ]
     }
@@ -366,6 +372,8 @@ pub fn frame_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
                 },
                 count: None,
             },
+            // The logo scene's image — gfx::Statics::logo.
+            tex_entry(12, D2),
         ],
     })
 }
@@ -854,6 +862,7 @@ impl Renderer {
                 ext: &statics.ext_view,
                 vid: &statics.vid_view,
                 title: &statics.title_view,
+                logo: &statics.logo_view,
                 lum: &statics.lum,
             },
         );
@@ -874,6 +883,7 @@ impl Renderer {
                 ext: &statics.ext_view,
                 vid: &statics.vid_view,
                 title: &statics.title_view,
+                logo: &statics.logo_view,
                 lum: &statics.lum,
             },
         );
@@ -894,6 +904,7 @@ impl Renderer {
                 ext: &statics.ext_view,
                 vid: &statics.vid_view,
                 title: &statics.title_view,
+                logo: &statics.logo_view,
                 lum: &statics.lum,
             },
         );
@@ -909,6 +920,7 @@ impl Renderer {
                 ext: &statics.ext_view,
                 vid: &statics.vid_view,
                 title: &statics.title_view,
+                logo: &statics.logo_view,
                 lum: &statics.lum,
             };
             (
@@ -1104,7 +1116,7 @@ impl Renderer {
     ) -> [wgpu::BindGroup; 2] {
         let make = |t: &wgpu::Texture| {
             let view = t.create_view(&Default::default());
-            let [e3, e4, e5, e6, e7, e8, e9, e10, e11] = res.entries();
+            let [e3, e4, e5, e6, e7, e8, e9, e10, e11, e12] = res.entries();
             device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: None,
                 layout,
@@ -1130,6 +1142,7 @@ impl Renderer {
                     e9,
                     e10,
                     e11,
+                    e12,
                 ],
             })
         };
@@ -1159,6 +1172,7 @@ impl Renderer {
                 ext: &ext,
                 vid: res.vid,
                 title: res.title,
+                logo: res.logo,
                 lum: res.lum,
             };
             Self::make_bind_groups(device, layout, uniform_buf, sampler, targets, &r)
@@ -1190,6 +1204,7 @@ impl Renderer {
             ext: &self.statics.ext_view,
                 vid: &self.statics.vid_view,
                 title: &self.statics.title_view,
+                logo: &self.statics.logo_view,
                 lum: &self.statics.lum,
         };
         self.bind_groups = Self::make_bind_groups(
@@ -1405,6 +1420,11 @@ impl Renderer {
     /// Upload an external frame (RGBA8, EXT_W x EXT_H) for `ext_tex`.
     /// Draw the now-playing line into the title texture; returns the width
     /// fraction for `u.look4.w` (gfx::Statics::upload_title).
+    /// Put an image into the logo scene's texture (gfx::Statics::upload_logo).
+    pub fn upload_logo(&self, img: &image::RgbaImage) {
+        self.statics.upload_logo(&self.queue, img);
+    }
+
     pub fn upload_title(&self, bmp: &crate::text::TextBitmap) -> f32 {
         self.statics.upload_title(&self.queue, bmp)
     }
@@ -2448,6 +2468,7 @@ impl Renderer {
                 ext: &self.statics.ext_view,
                 vid: &self.statics.vid_view,
                 title: &self.statics.title_view,
+                logo: &self.statics.logo_view,
                 lum: &self.statics.lum,
             },
             c.clone(),
@@ -2578,6 +2599,7 @@ impl Renderer {
                 ext: &self.statics.ext_view,
                 vid: &self.statics.vid_view,
                 title: &self.statics.title_view,
+                logo: &self.statics.logo_view,
                 lum: &self.statics.lum,
             },
         );

@@ -752,6 +752,9 @@ fn render_loop(
     // of its width the text covers (u.look4.w).
     let mut title_line = String::new();
     let mut title_frac = 0.0f32;
+    // The image in the logo scene's texture (gfx::Statics::logo starts as
+    // the Trippin logo, which is "").
+    let mut logo_key = String::new();
 
     // --- Timeline state ---------------------------------------------------
     // Decodes run on throwaway threads; results land in `song_rx` tagged with
@@ -1828,6 +1831,26 @@ fn render_loop(
                 if let Some(b) = crate::gfx::title_bitmap(&title_line) {
                     title_frac = r.upload_title(&b);
                 }
+            }
+        }
+        // The Logo Trip scene's image: its own pick, else the branding logo,
+        // else the Trippin logo; loaded only when the choice changes.
+        {
+            let want = [s.logo_scene_image.trim(), s.brand_logo.trim()]
+                .into_iter()
+                .find(|p| !p.is_empty())
+                .unwrap_or("");
+            if want != logo_key {
+                logo_key = want.to_string();
+                let img = if want.is_empty() {
+                    crate::gfx::app_logo()
+                } else {
+                    image::open(want).map(|i| i.to_rgba8()).unwrap_or_else(|e| {
+                        eprintln!("logo scene: {want}: {e}");
+                        crate::gfx::app_logo()
+                    })
+                };
+                r.upload_logo(&img);
             }
         }
         let u = Uniforms {

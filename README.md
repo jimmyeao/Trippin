@@ -819,6 +819,13 @@ the connection status and the track it sees locally. Build it with
 
 - **Branding**: an always-on logo PNG, DJ name and social handles, in any
   corner, with a size, an opacity and an accent colour.
+- **Logo Trip** (`logo_trip`), a scene of your own logo: it runs the logo
+  (or any image set as **Logo scene** under Branding) through a droste
+  spiral, a melt, halftone dots, VHS tape and a kaleidoscope of tiles, a new
+  one every eight bars, morphing over two beats. The music shapes it: the
+  spiral turns with the track's energy, the melt runs deeper with the bass,
+  the dots swell with the mids, the tape frays with the highs. With no
+  image set it uses the Trippin logo.
 - **Ticker**: a message scrolling along the bottom.
 
 The branding, the ticker and the now-playing card are drawn by the renderer,

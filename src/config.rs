@@ -628,6 +628,9 @@ pub struct Settings {
     pub brand_name: String,
     pub brand_handles: String,
     pub brand_logo: String,
+    /// The Logo Trip scene's image (PNG/JPEG); empty uses `brand_logo`,
+    /// and with neither it shows the Trippin logo.
+    pub logo_scene_image: String,
     /// 0 top-left · 1 top-right · 2 bottom-left · 3 bottom-right.
     pub brand_corner: u8,
     pub brand_size: f32,
@@ -748,6 +751,7 @@ impl Default for Settings {
             brand_name: String::new(),
             brand_handles: String::new(),
             brand_logo: String::new(),
+            logo_scene_image: String::new(),
             brand_corner: 0,
             brand_size: 1.0,
             brand_opacity: 0.9,

@@ -77,6 +77,19 @@ struct U {
 // nothing is detected) as a coverage mask from the left edge; u.look4.w is
 // the fraction of the width it covers. Sample through title_mask().
 @group(0) @binding(10) var title_tex: texture_2d<f32>;
+// The logo scene's image (the scene's own pick, else the branding logo, else
+// the Trippin logo), fitted inside a square with transparent padding,
+// straight alpha. Sample through logo().
+@group(0) @binding(12) var logo_tex: texture_2d<f32>;
+
+// The logo at uv in 0..1 across its square (y top to bottom): rgb and
+// coverage, 0 outside the square.
+fn logo(uv: vec2<f32>) -> vec4<f32> {
+    if any(uv < vec2<f32>(0.0)) || any(uv > vec2<f32>(1.0)) {
+        return vec4<f32>(0.0);
+    }
+    return textureSampleLevel(logo_tex, samp, uv, 0.0);
+}
 
 // Coverage 0..1 of the title text at uv in 0..1 across the text's own box
 // (x along the line, y top to bottom); 0 outside it.

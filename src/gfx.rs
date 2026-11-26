@@ -38,6 +38,12 @@ pub struct Statics {
     /// need rebuilding.
     pub title: wgpu::Texture,
     pub title_view: wgpu::TextureView,
+    /// The logo scene's image (`logo_tex` / `logo()` in common.wgsl):
+    /// LOGO_N square, the image fitted inside with transparent padding,
+    /// straight alpha. Fixed size, so bind groups never need rebuilding;
+    /// starts as the Trippin logo (`upload_logo`).
+    pub logo: wgpu::Texture,
+    pub logo_view: wgpu::TextureView,
     /// Photosensitive-safe limiter state (`Lum` in present.wgsl): the
     /// allowed average luminance, the gain present applies, on, rise rate.
     /// Written by `fs_lum` each frame while on; `set_safe` writes it from
@@ -58,6 +64,28 @@ pub fn lum_init(on: bool) -> [f32; 4] {
 pub const SAFE_RISE_PER_S: f32 = 0.3;
 
 pub const TITLE_W: u32 = 2048;
+/// The logo texture's side (`Statics::logo`).
+pub const LOGO_N: u32 = 512;
+
+/// The Trippin logo (the app icon), for the logo scene with no image set.
+pub fn app_logo() -> image::RgbaImage {
+    image::load_from_memory(include_bytes!("../logo.png"))
+        .map(|i| i.to_rgba8())
+        .unwrap_or_else(|_| image::RgbaImage::new(1, 1))
+}
+
+/// `img` fitted inside a LOGO_N square (aspect kept, centred, transparent
+/// padding), as RGBA bytes.
+pub fn logo_pixels(img: &image::RgbaImage) -> Vec<u8> {
+    let n = LOGO_N;
+    let (w, h) = (img.width().max(1), img.height().max(1));
+    let k = n as f32 / w.max(h) as f32;
+    let (fw, fh) = (((w as f32 * k).round() as u32).clamp(1, n), ((h as f32 * k).round() as u32).clamp(1, n));
+    let small = image::imageops::resize(img, fw, fh, image::imageops::FilterType::Triangle);
+    let mut out = image::RgbaImage::new(n, n);
+    image::imageops::overlay(&mut out, &small, ((n - fw) / 2) as i64, ((n - fh) / 2) as i64);
+    out.into_raw()
+}
 pub const TITLE_H: u32 = 160;
 
 pub const EXT_W: u32 = 1920;
@@ -188,7 +216,21 @@ impl Statics {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
-        Self {
+        let logo = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("logo"),
+            size: wgpu::Extent3d {
+                width: LOGO_N,
+                height: LOGO_N,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let me = Self {
             noise3_view: noise3.create_view(&Default::default()),
             _noise3: noise3,
             blue_view: blue.create_view(&Default::default()),
@@ -200,6 +242,8 @@ impl Statics {
             vid,
             title_view: title.create_view(&Default::default()),
             title,
+            logo_view: logo.create_view(&Default::default()),
+            logo,
             lum: {
                 let b = device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some("safe lum"),
@@ -210,7 +254,33 @@ impl Statics {
                 queue.write_buffer(&b, 0, bytemuck::cast_slice(&lum_init(false)));
                 b
             },
-        }
+        };
+        me.upload_logo(queue, &app_logo());
+        me
+    }
+
+    /// Put an image into the logo texture (fitted, see `logo_pixels`).
+    pub fn upload_logo(&self, queue: &wgpu::Queue, img: &image::RgbaImage) {
+        let px = logo_pixels(img);
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.logo,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &px,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(LOGO_N * 4),
+                rows_per_image: Some(LOGO_N),
+            },
+            wgpu::Extent3d {
+                width: LOGO_N,
+                height: LOGO_N,
+                depth_or_array_layers: 1,
+            },
+        );
     }
 
     /// Draw a rasterised line into the title texture (left-aligned,

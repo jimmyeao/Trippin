@@ -2759,6 +2759,18 @@ fn stream_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<Ui
                     }
                 }
             });
+            grow(ui, "Logo scene", |ui| {
+                ui.add(egui::TextEdit::singleline(&mut s.logo_scene_image).desired_width(150.0).hint_text("the logo above"))
+                    .on_hover_text(
+                        "The image the Logo Trip scene runs through its spiral, melt, halftone, VHS and \
+                         kaleidoscope treatments. Empty: your logo above, or the Trippin logo.",
+                    );
+                if ui.button("…").clicked() {
+                    if let Some(p) = rfd::FileDialog::new().add_filter("image", &["png", "jpg", "jpeg"]).pick_file() {
+                        s.logo_scene_image = p.display().to_string();
+                    }
+                }
+            });
             grow(ui, "Corner", |ui| {
                 // Corner arrows are tofu in the bundled fonts — words,
                 // wrapped 2x2 so BR never clips the card edge.

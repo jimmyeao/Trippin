@@ -10,7 +10,7 @@ audience (streamers, home and mobile DJs). Build order is the order below.
 | 2 | Photosensitivity safe mode | Small | Built |
 | 3 | Lens effects | Medium | Built |
 | 4 | Glide between Looks | Small | Built |
-| 5 | Logo / photo scene | Medium | Planned |
+| 5 | Logo / photo scene | Medium | Built (`logo_trip`) |
 | 6 | Webcam as a source | Large | Planned |
 | - | MIDI knobs and faders | Medium | **Might add** (future) |
 

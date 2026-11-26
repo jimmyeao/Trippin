@@ -942,6 +942,13 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   group(0) **binding 11** (`gfx::Statics::lum`, FRAGMENT only), in every
   bind group but declared only by present.wgsl: a new group(0) bind group
   must pass `FrameRes::lum`. Measure with `--snap-flash` (`--snap-safe`).
+- **Logo texture** (group(0) **binding 12**, `gfx::Statics::logo`,
+  `logo()` in common.wgsl; pack API 2): a fixed 512 square holding the Logo
+  Trip image fitted with transparent padding (`gfx::logo_pixels`). The
+  render loop loads `Settings::logo_scene_image`, else `brand_logo`, else
+  the Trippin logo (`gfx::app_logo`), only when that choice changes.
+  `--snap-logo <image>` for snaps. A new group(0) bind group must pass
+  `FrameRes::logo`.
 - **Text effects** (`TextFx`, `text.wgsl`): punch/shake/strobe/bounce/
   shatter use the slot's former padding float (`TextSlotU::fx`), so the
   uniform layout didn't change. `TRIPPIN_TEXT_TEST="WORDS|fx"` fires one

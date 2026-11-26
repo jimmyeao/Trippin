@@ -24,6 +24,8 @@
 //! many seconds and prints how much each scene's picture moves with the
 //! music: the change just after each beat against mid-beat, and how the
 //! change follows loudness (`lvl4`) and kicks (`hits4.x`). Writes `react.tsv`.
+//! `--snap-logo <image>` gives the logo scene that image (else the
+//! Trippin logo).
 //! `--snap-fx <mode>` renders with a post effect at full strength (the
 //! `u.fx` modes in present.wgsl: 1 mirror X ... 5 kaleido 8).
 //! `--snap-safe` turns the photosensitive-safe limiter on (present.wgsl
@@ -265,6 +267,7 @@ pub fn run(args: &[String]) -> Result<()> {
             ext: &statics.ext_view,
             vid: &statics.vid_view,
             title: &statics.title_view,
+            logo: &statics.logo_view,
             lum: &statics.lum,
         },
     );
@@ -304,6 +307,11 @@ pub fn run(args: &[String]) -> Result<()> {
     let react_s: f32 = arg(args, "--snap-react").and_then(|s| s.parse().ok()).unwrap_or(0.0);
     // `--snap-fx <mode>`: a post effect at full strength (1 mirror X ... 5 kaleido 8).
     let snap_fx: f32 = arg(args, "--snap-fx").and_then(|s| s.parse().ok()).unwrap_or(0.0);
+    // `--snap-logo <image>`: the logo scene's image (else the Trippin logo).
+    let snap_logo = arg(args, "--snap-logo").map(String::from);
+    if let Some(p) = &snap_logo {
+        statics.upload_logo(&queue, &image::open(p)?.to_rgba8());
+    }
     let mut react_rows: Vec<(String, f32, f32, f32, f32)> = Vec::new();
     // The track's uniforms at snapshot time t (None: the synthetic groove).
     let track_at = |t: f32| -> Option<Uniforms> {
@@ -529,6 +537,7 @@ pub fn run(args: &[String]) -> Result<()> {
                     ext: &statics.ext_view,
                     vid: &statics.vid_view,
                     title: &statics.title_view,
+                    logo: &statics.logo_view,
                     lum: &statics.lum,
                 },
             );
@@ -548,6 +557,7 @@ pub fn run(args: &[String]) -> Result<()> {
                     ext: &statics.ext_view,
                     vid: &statics.vid_view,
                     title: &statics.title_view,
+                    logo: &statics.logo_view,
                     lum: &statics.lum,
                 },
             );
@@ -581,6 +591,7 @@ pub fn run(args: &[String]) -> Result<()> {
                 ext: &statics.ext_view,
                 vid: &statics.vid_view,
                 title: &statics.title_view,
+                logo: &statics.logo_view,
                 lum: &statics.lum,
             };
             let bgs = Renderer::make_bind_groups(&device, &layout, &ubuf, &sampler, &etargets, &res);

@@ -84,6 +84,7 @@
   "ocean": 0.85,
   "orbit_night": 0.03,
   "orbiters": 0.28,
+  "logo_trip": 0.5,
   "particle_flow": 0.62,
   "particle_nebula": 0.3,
   "particle_orbits": 0.45,
