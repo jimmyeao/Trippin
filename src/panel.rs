@@ -1741,8 +1741,11 @@ fn inspector_body(
     card().show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = 8.0;
         // Quick switches first, so they're in view without scrolling (the
-        // Accents box sat below the fold at the card's foot).
-        ui.horizontal(|ui| {
+        // Accents box sat below the fold at the card's foot). In a bounded
+        // box: a bare `ui.horizontal` here widened the column and pushed the
+        // scene grid's scrollbar under it (AGENTS §7, egui layout rules).
+        let qw = ui.available_width();
+        ui.allocate_ui_with_layout(egui::vec2(qw, 20.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
             ui.checkbox(&mut s.accent_auto, egui::RichText::new("Accents").size(12.0)).on_hover_text(
                 "Auto lays a light scene (embers, streaks, notes, comets...) over some scenes while the \
                  track drives. Strength on Dancer & FX; timeline shows have their own toggle in the editor.",
