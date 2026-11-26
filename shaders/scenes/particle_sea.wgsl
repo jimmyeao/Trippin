@@ -38,11 +38,13 @@ fn sea_h(x: f32, z: f32) -> f32 {
     let d2 = vec2<f32>(sin(wind + 1.1), cos(wind + 1.1));
     let pxz = vec2<f32>(x, z);
     let swell = (0.12 + 0.22 * u.pres4.x) * sin(dot(pxz, d1) * 0.9 - t);
-    let chop = (0.04 + 0.08 * u.pres4.y) * sin(dot(pxz, d2) * 2.3 - t * 1.6 + 1.0);
+    let chop = (0.04 + 0.04 * u.pres4.y + 0.07 * u.lvl4.y) * sin(dot(pxz, d2) * 2.3 - t * 1.6 + 1.0);
     // A crest whose height across the sea is the spectrum.
     let s = spec(clamp(x / 8.0 + 0.5, 0.0, 1.0));
     let crest = 0.25 * sqrt(clamp(s, 0.0, 1.0)) * exp(-(sin(z * 0.35 - t * 0.5) - 0.9) * (sin(z * 0.35 - t * 0.5) - 0.9) * 6.0);
-    return swell + chop + crest;
+    // Each kick rolls a wave from the shore out to sea.
+    let roll = 0.3 * beat_ring(z / 12.0, 0.07);
+    return swell + chop + crest + roll;
 }
 
 @vertex

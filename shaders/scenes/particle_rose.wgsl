@@ -47,7 +47,7 @@ fn vs_particles(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32
     let shape = mix(rb, ra, m);
     // Each petal reaches with a band (petals cycle bass, mid, mid-high, high).
     let petal = u32(floor(th * ka / TAU + 0.5)) % 4u;
-    let reach = 1.0 + 0.4 * u.pres4[petal] + 0.15 * u.lvl4[petal];
+    let reach = 1.0 + 0.25 * u.pres4[petal] + 0.4 * u.lvl4[petal] + select(0.0, 0.25 * kick_swell(), petal == 0u);
     // Most motes on the petal edge, the rest filling it.
     var f = 0.92 + 0.08 * h.y;
     if (ii % 3u) == 0u {
@@ -56,7 +56,8 @@ fn vs_particles(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32
     let rad = shape * f * reach * 0.95;
     var w = vec3<f32>(cos(th) * rad, 0.0, sin(th) * rad);
     // Cupped into a bowl, with ripples rising through it.
-    w.y = 0.35 * rad * rad + 0.05 * sin(rad * 9.0 - u.clock4.x * 0.6) + (h2.x - 0.5) * 0.02;
+    // Each kick lifts a ripple from the heart to the petal tips.
+    w.y = 0.35 * rad * rad + 0.05 * sin(rad * 9.0 - u.clock4.x * 0.6) + 0.18 * beat_ring(rad / 1.2, 0.14) + (h2.x - 0.5) * 0.02;
     let dir = select(1.0, -1.0, (u32(k) & 1u) == 1u);
     let wy = rot(u.clock4.x * 0.07 * dir) * w.xz;
     w = vec3<f32>(wy.x, w.y - 0.15, wy.y);

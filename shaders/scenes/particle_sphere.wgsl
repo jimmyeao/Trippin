@@ -45,7 +45,7 @@ fn vs_particles(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32
     let t = u.clock4.x * 0.12;
     let lobes = sin(n.x * 3.0 + t) * sin(n.y * 2.5 - t * 0.7) * sin(n.z * 3.0 + t * 0.5);
     let disp = 0.32 * sqrt(clamp(band, 0.0, 1.0)) + (0.12 + 0.12 * u.pres4.y) * lobes;
-    var w = n * (1.0 + 0.12 * u.pres4.x + disp);
+    var w = n * (1.0 + 0.08 * u.pres4.x + 0.12 * kick_swell() + disp);
     // Turn on the energy clock; tilt swings over eight bars.
     let wy = rot(u.clock4.x * 0.12) * w.xz;
     w = vec3<f32>(wy.x, w.y, wy.y);

@@ -46,20 +46,24 @@ fn vs_particles(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32
     }
     var w = (g - 0.5) * 1.9;
     // Twist each horizontal layer by its height.
-    let twist = 1.0 * sin(TAU * u.flow / 32.0);
+    // The mids wind it tighter.
+    let twist = (1.0 + 0.8 * u.lvl4.y) * sin(TAU * u.flow / 32.0);
     let tw = rot(w.y * twist) * w.xz;
     w = vec3<f32>(tw.x, w.y, tw.y);
     // A ripple from the centre, its height the bass presence.
     let r = length(w);
     let wave = sin(r * 5.0 - u.clock4.x * 0.8);
     w *= 1.0 + (0.03 + 0.07 * u.pres4.x) * wave * smoothstep(0.0, 0.4, r);
+    // Each kick sends a shock ring out through the lattice.
+    let ring = beat_ring(r / 1.65, 0.16);
+    w *= 1.0 + 0.22 * ring;
     // Turn on the energy clock.
     let wy = rot(u.clock4.x * 0.08 + 0.6) * w.xz;
     w = vec3<f32>(wy.x, w.y, wy.y);
     let wp = rot(0.45 + 0.1 * sin(TAU * u.flow / 64.0)) * w.yz;
     w = vec3<f32>(w.x, wp.x, wp.y + 3.9);
     let c = palette(0.1 + 0.35 * g.y + 0.15 * wave);
-    let b = (0.22 + 0.2 * max(wave, 0.0)) * clamp(5.0 - w.z, 0.4, 1.6);
+    let b = (0.22 + 0.2 * max(wave, 0.0) + 0.25 * ring) * clamp(5.0 - w.z, 0.4, 1.6);
     return emit(w, vi, 0.006, c * c * b);
 }
 

@@ -38,9 +38,12 @@ fn vs_particles(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32
     // Height 0..1, climbing on the energy clock.
     let t = fract(h.x + u.clock4.x * 0.025);
     let y = -1.35 + t * 2.8;
-    let waist = 1.0 + 0.45 * u.pres4.x * sin(t * PI);
-    var r = (0.08 + 0.95 * t * t) * waist + (h2.x - 0.5) * (0.05 + 0.2 * t);
-    r = max(r, 0.02);
+    // Each kick sends a bulge climbing the funnel.
+    let bulge = beat_ring(t, 0.12);
+    let waist = 1.0 + 0.35 * u.pres4.x * sin(t * PI) + 0.2 * kick_swell();
+    // The highs fray its edge.
+    var r = (0.08 + 0.95 * t * t) * waist + (h2.x - 0.5) * (0.05 + (0.2 + 0.25 * u.lvl4.w) * t);
+    r = max(r + 0.32 * bulge, 0.02);
     let a = h.y * TAU + u.clock4.x * 0.9 / (0.35 + r);
     var w = vec3<f32>(cos(a) * r, y, sin(a) * r);
     // The funnel's axis bends, leaning with an eight-bar swing.

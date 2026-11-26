@@ -39,7 +39,8 @@ fn vs_particles(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32
     }
     // Breathing out with the bass presence; the heart swells on the bass.
     let rr = length(w);
-    w *= 1.0 + 0.14 * u.pres4.x + 0.18 * u.lvl4.x * exp(-rr * 1.5);
+    // ... and each kick sends a shock front out through the cloud.
+    w *= 1.0 + 0.14 * u.pres4.x + 0.18 * u.lvl4.x * exp(-rr * 1.5) + 0.2 * beat_ring(rr / 2.4, 0.16) + 0.1 * kick_swell();
     // Camera circles once every sixteen bars; its height swings.
     let yaw = TAU * u.flow / 64.0;
     let wy = rot(yaw) * w.xz;

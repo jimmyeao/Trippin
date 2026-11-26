@@ -40,10 +40,12 @@ fn vs_particles(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32
     // Each spark loops its flight on the energy clock.
     let life = fract(h.x + u.clock4.x * 0.16 * (0.85 + 0.3 * h2.x));
     let swivel = 0.35 * sin(TAU * u.flow / 32.0);
-    let spread = 0.28 + 0.12 * u.pres4.y;
+    // The mids fan the jets out; each kick pumps them higher.
+    let spread = 0.26 + 0.06 * u.pres4.y + 0.14 * u.lvl4.y;
+    let kick = kick_swell();
     let ang = (fj - 2.0) * spread + swivel + (h.y - 0.5) * 0.12;
     let az = (h2.y - 0.5) * 0.5;
-    let v0 = (2.3 + 0.7 * u.pres4.x) * (0.9 + 0.2 * h2.x);
+    let v0 = (2.3 + 0.4 * u.pres4.x + 0.75 * kick) * (0.9 + 0.2 * h2.x);
     let g = 3.2;
     let tmax = 2.0 * v0 / g * 1.15;
     let tt = life * tmax;

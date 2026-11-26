@@ -45,8 +45,10 @@ fn vs_particles(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32
     let lean = 0.4 * sin(TAU * u.flow / 32.0);
     let cy = -1.4 + life * 2.9;
     let cx = (rh.x - 0.5) * 1.2 + lean * life;
-    let big = 0.25 + 0.5 * life;
-    let core = (0.06 + 0.06 * u.pres4.x) * (0.6 + 0.6 * life);
+    // Kicks puff every ring wider and fatter; the mids thicken the cores.
+    let kick = kick_swell();
+    let big = (0.25 + 0.5 * life) * (1.0 + 0.16 * kick);
+    let core = (0.06 + 0.04 * u.pres4.x + 0.05 * u.lvl4.y + 0.06 * kick) * (0.6 + 0.6 * life);
     // A point on the torus: round the ring (a) and round its core (b), the
     // core angle rolling as it climbs.
     let a = h.x * TAU;

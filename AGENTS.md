@@ -867,6 +867,15 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   - Dancer routines re-anchor their loop to the bar they were requested in
     (`Slot::pending_anchor`), so a routine switched in on a phrase starts
     from its first frame there.
+- **Check reactivity on real music, not the groove:** `--snap <scenes>
+  --snap-track <audio> --snap-track-from 90 --snap-react 12 --snap-size
+  320x180` drives scenes with a track run through the real analyser and
+  prints, per scene, the picture change just after each beat vs mid-beat
+  (`beat x`) and its correlation with loudness and kicks (`react.tsv`).
+  Liked scenes score kick r 0.4-0.6; the first particle scenes scored ~0
+  because they read only `pres4`/`clock4`. `kick_swell()` and
+  `beat_ring(r, width)` in common.wgsl are smooth kick-driven shape
+  envelopes (bass-level scaled, still in breakdowns) for stateless scenes.
 - **Look glide** (`Settings::look_glide`, `looks::Glide`): `apply_look` still
   writes the Look's settings at once, and under the same settings lock puts a
   `GlideReq` (the old values, the scene/routine indices) in `Shared::glide`;

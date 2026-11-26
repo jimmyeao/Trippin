@@ -18,6 +18,12 @@
 //! at `--snap-accent-amt`, default 0.6), `--snap-echo <0..1>` (the echo
 //! post effect at that amount), `--snap-logo <png>` (the branding logo in
 //! the top-right corner, bursting with `--snap-burst`/`--snap-burst-at`).
+//! `--snap-track <audio>` drives the scenes with that track run through the
+//! real analyser instead of the synthetic groove (from `--snap-track-from
+//! <s>`, default 60). `--snap-react <s>` (needs `--snap-track`) renders that
+//! many seconds and prints how much each scene's picture moves with the
+//! music: the change just after each beat against mid-beat, and how the
+//! change follows loudness (`lvl4`) and kicks (`hits4.x`). Writes `react.tsv`.
 //! `--snap-safe` turns the photosensitive-safe limiter on (present.wgsl
 //! `fs_lum`). `--snap-flash <s>` renders that many seconds of each scene,
 //! reads every frame back and prints the most flashes in any one second
@@ -283,6 +289,23 @@ pub fn run(args: &[String]) -> Result<()> {
     let safe = args.iter().any(|a| a == "--snap-safe");
     let flash_s: f32 = arg(args, "--snap-flash").and_then(|s| s.parse().ok()).unwrap_or(0.0);
     let mut flash_rows: Vec<(String, u32)> = Vec::new();
+    let track = match arg(args, "--snap-track") {
+        Some(p) => {
+            let (n, fr) = crate::audio::track_uniforms(std::path::Path::new(p))?;
+            println!("track: {n} ({} frames)", fr.len());
+            Some(fr)
+        }
+        None => None,
+    };
+    let track_from: f32 = arg(args, "--snap-track-from").and_then(|s| s.parse().ok()).unwrap_or(60.0);
+    let react_s: f32 = arg(args, "--snap-react").and_then(|s| s.parse().ok()).unwrap_or(0.0);
+    let mut react_rows: Vec<(String, f32, f32, f32, f32)> = Vec::new();
+    // The track's uniforms at snapshot time t (None: the synthetic groove).
+    let track_at = |t: f32| -> Option<Uniforms> {
+        let tr = track.as_ref()?;
+        let i = (((track_from + t) * 60.0) as usize).min(tr.len().saturating_sub(1));
+        tr.get(i).copied()
+    };
     let lum_pipe = if safe {
         Some(
             render::compile_pipeline_entries(
@@ -733,6 +756,15 @@ pub fn run(args: &[String]) -> Result<()> {
         // One full frame: scene → bloom → present.
         let step = |t: f32, frame: u32, cur: &mut usize| {
             let mut u = groove(t, w, h, frame, bloom_amt, tonemap, calm);
+            if let Some(x) = track_at(t) {
+                // The music from the track; the frame's own state from the groove.
+                let g = u;
+                u = x;
+                (u.time, u.dt, u.res_x, u.res_y, u.frame) = (g.time, g.dt, g.res_x, g.res_y, g.frame);
+                (u.bloom, u.tonemap, u.scene_time, u.hue, u.seed) = (g.bloom, g.tonemap, g.scene_time, g.hue, g.seed);
+                (u.misc4, u.look4, u.fx, u.fx_amt) = (g.misc4, g.look4, g.fx, g.fx_amt);
+                u.intensity = g.intensity.max(u.intensity);
+            }
             u.look4[3] = title_frac;
             if let Some(c) = &vclip {
                 let len = c.frames() as f64 / c.fps as f64;
@@ -940,6 +972,41 @@ pub fn run(args: &[String]) -> Result<()> {
             *cur = next;
         };
         let mut t = 0.0f32;
+        if react_s > 0.0 && track.is_some() {
+            // Per-frame picture change against the music driving it.
+            let luma = |px: &[u8]| -> Vec<f32> {
+                px.chunks(4).map(|p| (0.2126 * p[0] as f32 + 0.7152 * p[1] as f32 + 0.0722 * p[2] as f32) / 255.0).collect()
+            };
+            // A second of warm-up so feedback scenes settle.
+            while t < 1.0 {
+                step(t, frame, &mut cur);
+                frame += 1;
+                t += 1.0 / 60.0;
+            }
+            let mut prev = luma(&read_pixels(&device, &queue, &out, w, h)?);
+            let (mut d, mut ph, mut lv, mut hk) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+            while t < 1.0 + react_s {
+                step(t, frame, &mut cur);
+                frame += 1;
+                let x = track_at(t).unwrap();
+                t += 1.0 / 60.0;
+                let cur_l = luma(&read_pixels(&device, &queue, &out, w, h)?);
+                let diff = cur_l.iter().zip(&prev).map(|(a, b)| (a - b).abs()).sum::<f32>() / cur_l.len().max(1) as f32;
+                prev = cur_l;
+                d.push(diff);
+                ph.push(x.beat_phase);
+                lv.push(x.lvl4[0] * 0.45 + x.lvl4[1] * 0.3 + x.lvl4[2] * 0.15 + x.lvl4[3] * 0.1);
+                hk.push(x.hits4[0]);
+            }
+            let mean = |v: &[f32]| v.iter().sum::<f32>() / v.len().max(1) as f32;
+            let on: Vec<f32> = d.iter().zip(&ph).filter(|(_, p)| **p < 0.25).map(|(x, _)| *x).collect();
+            let off: Vec<f32> = d.iter().zip(&ph).filter(|(_, p)| (0.5..0.95).contains(*p)).map(|(x, _)| *x).collect();
+            let beat = mean(&on) / mean(&off).max(1e-6);
+            let (cl, ch, m) = (pearson(&d, &lv), pearson(&d, &hk), mean(&d));
+            println!("{name:<24} motion {m:.4}  beat x{beat:.2}  loud r={cl:+.2}  kick r={ch:+.2}");
+            react_rows.push((name, m, beat, cl, ch));
+            continue;
+        }
         if flash_s > 0.0 {
             // Every frame's mean displayed luminance (the target is sRGB:
             // decode before averaging).
@@ -1038,6 +1105,13 @@ pub fn run(args: &[String]) -> Result<()> {
             println!("wrote {}", file.display());
         }
     }
+    if !react_rows.is_empty() {
+        let lines: Vec<String> = react_rows
+            .iter()
+            .map(|(n, m, b, cl, ch)| format!("{n}\t{m:.4}\t{b:.2}\t{cl:.2}\t{ch:.2}"))
+            .collect();
+        std::fs::write(out_dir.join("react.tsv"), "scene\tmotion\tbeat\tloud_r\tkick_r\n".to_string() + &lines.join("\n") + "\n")?;
+    }
     if !flash_rows.is_empty() {
         flash_rows.sort_by(|a, b| b.1.cmp(&a.1));
         let lines: Vec<String> = flash_rows.iter().map(|(n, f)| format!("{n}\t{f}")).collect();
@@ -1097,6 +1171,25 @@ fn save(
 }
 
 /// Read the output texture back as tightly packed RGBA8.
+/// Pearson correlation of two equal-length series (0 when either is flat).
+fn pearson(a: &[f32], b: &[f32]) -> f32 {
+    let n = a.len().min(b.len()) as f32;
+    if n < 2.0 {
+        return 0.0;
+    }
+    let (ma, mb) = (a.iter().sum::<f32>() / n, b.iter().sum::<f32>() / n);
+    let (mut sab, mut saa, mut sbb) = (0.0, 0.0, 0.0);
+    for (x, y) in a.iter().zip(b) {
+        sab += (x - ma) * (y - mb);
+        saa += (x - ma) * (x - ma);
+        sbb += (y - mb) * (y - mb);
+    }
+    if saa < 1e-12 || sbb < 1e-12 {
+        return 0.0;
+    }
+    sab / (saa * sbb).sqrt()
+}
+
 /// WCAG 2.3.1 general flashes: a flash is a pair of opposing changes in
 /// relative luminance of 0.1 or more, where the darker side is under 0.8.
 /// Returns the most flashes in any window of `fps` frames (one second).

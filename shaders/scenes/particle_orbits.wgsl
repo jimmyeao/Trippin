@@ -33,10 +33,13 @@ fn vs_particles(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32
     let lvl = ring_level(ring);
     // Shell: radius swells with its band; motes spread in a thin torus.
     // Wide, dusty belts (thin ones read as solid neon hoops).
-    let rad = (0.55 + fr * 0.27) * (1.0 + 0.22 * lvl) + (h2.x - 0.5) * (0.22 + 0.04 * fr);
+    // Each kick rolls a ring outward through the shells.
+    let wave = beat_ring(fr / 5.0, 0.22);
+    let rad = (0.55 + fr * 0.27) * (1.0 + 0.22 * lvl + 0.22 * wave + 0.14 * kick_swell()) + (h2.x - 0.5) * (0.22 + 0.04 * fr);
     let dir = select(1.0, -1.0, (ring & 1u) == 1u);
     let a = h.x * TAU + u.clock4.x * dir * 0.5 / (1.0 + fr * 0.45);
-    var w = vec3<f32>(cos(a) * rad, (h.y - 0.5) * 0.14 * (1.0 + fr * 0.3), sin(a) * rad);
+    // The highs thicken the belts.
+    var w = vec3<f32>(cos(a) * rad, (h.y - 0.5) * 0.14 * (1.0 + fr * 0.3) * (1.0 + 1.2 * u.lvl4.w + 1.5 * wave), sin(a) * rad);
     // Tilt: each shell its own plane, swinging over eight bars.
     let tilt = (fr - 2.5) * 0.22 + 0.25 * sin(TAU * u.flow / 32.0 + fr * 1.3);
     let tw = rot(tilt) * w.yz;

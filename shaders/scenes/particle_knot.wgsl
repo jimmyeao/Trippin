@@ -52,9 +52,11 @@ fn vs_particles(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32
     let a = pqs[ia];
     let b = pqs[ib];
     var w = mix(knot(phi, b.x, b.y), knot(phi, a.x, a.y), m);
-    w *= 1.0 + 0.12 * u.pres4.x;
+    // The kick swells the knot and fattens its tube; the mids thicken it.
+    let kick = kick_swell();
+    w *= 1.0 + 0.12 * u.pres4.x + 0.1 * kick;
     // The tube: a random offset round the curve.
-    let tube = 0.05 + 0.08 * u.pres4.y;
+    let tube = 0.05 + 0.05 * u.pres4.y + 0.06 * u.lvl4.y + 0.12 * kick;
     let off = vec3<f32>(h2.x - 0.5, h2.y - 0.5, fract(h2.x * 13.7 + h2.y * 3.1) - 0.5);
     w += normalize(off + vec3<f32>(1e-4)) * tube * sqrt(fract(h.y * 5.3));
     // Turning: direction flips with each knot.

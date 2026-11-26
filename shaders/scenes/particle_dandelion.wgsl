@@ -44,7 +44,9 @@ fn vs_particles(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32
     let dir = vec3<f32>(cos(phi) * rr, y, sin(phi) * rr);
     let hs = hash22(vec2<f32>(fs, 3.0));
     let h = hash22(vec2<f32>(f32(ii % 1024u), f32(ii / 1024u)) + vec2<f32>(1.3, 8.8));
-    let head = 0.75 * (1.0 + 0.12 * u.pres4.x);
+    // The head pumps with the kick.
+    let kick = kick_swell();
+    let head = 0.75 * (1.0 + 0.08 * u.pres4.x + 0.12 * kick);
     // Seed life: grows in, stays, then breaks loose and drifts away.
     let ph = u.clock4.x * 0.02 + hs.x;
     let life = fract(ph);
@@ -66,7 +68,9 @@ fn vs_particles(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32
         let a = h.x * TAU;
         let side = normalize(cross(dir, vec3<f32>(0.0, 1.0, 0.3)));
         let up = cross(dir, side);
-        let ray = (cos(a) * side + sin(a) * up) * h.y * 0.09 + dir * h.y * 0.05;
+        // The tufts open with the highs and on each kick.
+        let open = 1.0 + 0.9 * u.lvl4.w + 1.2 * kick;
+        let ray = (cos(a) * side + sin(a) * up) * h.y * 0.09 * open + dir * h.y * 0.05;
         var tip = dir * head * grow + ray * grow;
         // Loose: carried off on the wind, rising and tumbling.
         let wind = sin(TAU * u.flow / 32.0);

@@ -179,6 +179,25 @@ fn beat_pulse(sharpness: f32) -> f32 {
     return mix(exp(-u.beat_phase * sharpness), 0.25, u.calm);
 }
 
+// The kick as a shape envelope: rises over the first ~8% of each beat and
+// eases off before the next, scaled by the auto-gained bass level, so it
+// follows what the music does and goes still in a breakdown. Smooth, unlike
+// hits4's one-frame attack. For shape (size, reach, thickness), not light.
+fn kick_swell() -> f32 {
+    let ph = fract(u.beat_phase);
+    return smoothstep(0.0, 0.08, ph) * exp(-3.5 * ph) * 1.3 * u.lvl4.x * (1.0 - 0.85 * u.calm);
+}
+
+// A ring that leaves the centre on each beat and travels out across it (r: 0
+// at the centre, 1 at the edge of the form), fading as it goes; scaled like
+// kick_swell. For pushing shape outward or upward as a wave.
+fn beat_ring(r: f32, width: f32) -> f32 {
+    let ph = fract(u.beat_phase);
+    let x = (r - ph * 1.2) / width;
+    let fade = smoothstep(0.0, 0.05, ph) * (1.0 - ph) * (1.0 - ph);
+    return exp(-x * x) * fade * u.lvl4.x * (1.0 - 0.85 * u.calm);
+}
+
 fn rot(a: f32) -> mat2x2<f32> {
     let c = cos(a);
     let s = sin(a);
