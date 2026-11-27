@@ -4603,8 +4603,10 @@ fn settings_tab(
                                     ui.selectable_value(&mut s.camera, n.clone(), n);
                                 }
                             });
-                        // List the cameras when the picker opens (on a thread).
-                        if r.response.clicked() {
+                        // List the cameras while the picker is open and
+                        // has none (on a thread, throttled). A click alone
+                        // missed on macOS: the list never filled.
+                        if r.response.clicked() || (r.inner.is_some() && crate::camera::names().is_empty()) {
                             crate::camera::refresh_names();
                         }
                         r.response.on_hover_text(
@@ -4613,6 +4615,14 @@ fn settings_tab(
                              \"camera on\" shows at the top while it's capturing.",
                         );
                     });
+                    if !s.camera.is_empty() && crate::camera::refused() {
+                        grow(ui, "", |ui| {
+                            ui.small(
+                                egui::RichText::new("Camera access is off: System Settings > Privacy & Security > Camera, then restart Trippin.")
+                                    .color(DANGER),
+                            );
+                        });
+                    }
                     grow(ui, "Latency", |ui| {
                         ui.add(
                             egui::Slider::new(&mut s.latency_ms, 0.0..=200.0)

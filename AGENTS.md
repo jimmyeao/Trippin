@@ -543,7 +543,18 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   `installer/macos/Entitlements.plist` (without it access is refused with no
   prompt), and nokhwa's `Closest` matches only its exact frame format, while
   Mac cameras offer YUYV/NV12 and no MJPEG, so `run` tries MJPEG, YUYV, NV12
-  and then any format.
+  and then any format. The capture thread waits for the permission answer
+  (`camera::PERM`) before opening: a session started while the prompt is up
+  "opens" and never delivers a frame. The Settings picker lists cameras
+  whenever it is open with none listed (a click alone never fired on macOS,
+  so nothing ever asked). To test permission like a user, launch a copy of
+  the bundle with `open` (a terminal launch borrows the terminal's camera
+  access): give it its own `CFBundleIdentifier`, sign it ad hoc with
+  `--options runtime --entitlements installer/macos/Entitlements.plist`, and
+  `open --env HOME=<scratch>` so it reads a scratch trippin.json. A fresh
+  identity blocks on a microphone prompt at audio start, before any window,
+  and each re-sign invalidates the grant ("Failed to match existing code
+  requirement"), so the owner has to click Allow again.
 - **Person cut-out** (`segment.rs`): **MODNet** (portrait matting, Apache
   2.0, Xenova/modnet's ONNX at a pinned commit, SHA-checked; 384x224 NCHW
   in -1..1) downloaded on first use to `<data dir>/models`, run on rten

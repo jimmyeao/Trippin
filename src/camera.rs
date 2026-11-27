@@ -8,16 +8,27 @@
 //! air. `LIVE` is true while frames arrive: it gates the camera scenes and
 //! lights the panel's "camera on" marker.
 //!
-//! macOS: the camera needs permission (`nokhwa_initialize` asks; the app's
-//! Info.plist must carry NSCameraUsageDescription). Not compiled for macOS
-//! from Windows yet: the M2 has to test it.
+//! macOS: the camera needs permission. `permit` asks once
+//! (`nokhwa_initialize`; the app's Info.plist must carry
+//! NSCameraUsageDescription and its entitlements `device.camera`), and the
+//! capture thread waits for the answer before opening the camera: a session
+//! started while the prompt is up opens fine and never delivers a frame.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// Frames are arriving from the picked camera.
 pub static LIVE: AtomicBool = AtomicBool::new(false);
+
+/// Camera permission: 0 not answered yet, 1 granted, 2 refused (macOS;
+/// always 1 elsewhere). `refused` tells the panel.
+static PERM: AtomicU8 = AtomicU8::new(if cfg!(target_os = "macos") { 0 } else { 1 });
+
+/// The OS refused camera access (macOS Privacy & Security > Camera).
+pub fn refused() -> bool {
+    PERM.load(Ordering::Relaxed) == 2
+}
 
 /// Something wants the person cut-out (the Person key, or the dancer as
 /// you): the camera thread runs the segmentation model and puts the mask in
@@ -72,6 +83,16 @@ pub fn names() -> Vec<String> {
 
 /// List the cameras again, on a thread (the query can take a moment).
 pub fn refresh_names() {
+    // At most every 1.5 s (the panel asks each frame its picker is open
+    // with nothing listed).
+    static LAST: Mutex<Option<Instant>> = Mutex::new(None);
+    {
+        let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+        if last.is_some_and(|t| t.elapsed() < Duration::from_millis(1500)) {
+            return;
+        }
+        *last = Some(Instant::now());
+    }
     if LISTING.swap(true, Ordering::AcqRel) {
         return;
     }
@@ -105,12 +126,19 @@ fn permit() {
     {
         static ASKED: std::sync::Once = std::sync::Once::new();
         ASKED.call_once(|| {
+            println!("camera: asking macOS for camera access");
             nokhwa::nokhwa_initialize(|ok| {
+                println!("camera: access {}", if ok { "granted" } else { "refused" });
+                PERM.store(if ok { 1 } else { 2 }, Ordering::Relaxed);
                 if !ok {
-                    eprintln!("camera: permission refused (System Settings > Privacy > Camera)");
+                    eprintln!("camera: permission refused (System Settings > Privacy & Security > Camera)");
                 }
             });
         });
+        // Turned on in System Settings since it was refused.
+        if PERM.load(Ordering::Relaxed) == 2 && nokhwa::nokhwa_check() {
+            PERM.store(1, Ordering::Relaxed);
+        }
     }
 }
 
@@ -220,6 +248,19 @@ fn run(want: Arc<Mutex<String>>, frame: Arc<Mutex<Frame>>) {
             continue;
         }
         permit();
+        // Wait for the permission answer (the prompt may be up), and
+        // re-check now and then once refused.
+        match PERM.load(Ordering::Relaxed) {
+            0 => {
+                std::thread::sleep(Duration::from_millis(200));
+                continue;
+            }
+            2 => {
+                retry_at = Instant::now() + Duration::from_secs(3);
+                continue;
+            }
+            _ => {}
+        }
         // Open the camera whose name matches (exact first, then a part).
         let opened = std::panic::catch_unwind(|| -> Result<nokhwa::Camera, String> {
             let cams = nokhwa::query(ApiBackend::Auto).map_err(|e| e.to_string())?;
