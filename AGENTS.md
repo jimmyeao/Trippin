@@ -346,7 +346,7 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
 | `src/ndi.rs`, `src/spout.rs` | NDI (runtime loaded dynamically), and a native Spout2 sender (D3D11 shared texture plus the Spout shared-memory registry). |
 | `src/rec.rs` | Clip recording: the ffmpeg replay buffer and set recording. |
 | `src/timeline.rs`, `src/song.rs`, `src/editor.rs`, `src/ai.rs` | The timeline show editor (F2), song playback, and the AI show builder (local analysis → prompt → plan → `expand_plan` rules → cues). |
-| `src/panel.rs` | The egui control panel. Tabs: Perform, Dancer & FX, Stream, Timeline, Keys, Settings. App-wide preferences (audio in, latency, director rules, AI provider/key) live on **Settings** (`settings_tab`), not in collapsibles on other pages or in the timeline editor. |
+| `src/panel.rs` | The egui control panel. Tabs: Perform, Dancer, FX, Stream, Timeline, MIDI, Keys, Settings. App-wide preferences (audio in, latency, director rules, AI provider/key) live on **Settings** (`settings_tab`), not in collapsibles on other pages or in the timeline editor. |
 | `src/config.rs` | `Settings` (serde, `#[serde(default)]`), actions and hotkeys, `titleize` (id → display name), and `data_dir()`. |
 | `src/looks.rs` | Saved Looks (scene + palette + effect + dancer): pure state, `apply`, and one-file-per-Look storage in `<data dir>/looks`. `App::apply_look` (main.rs) applies the settings half through `looks::apply` and sends the scene/routine through the render thread, recording cues. Recalled by `Action::Look1..8` (slots), `RemoteCmd::Look` (remote `look`, OSC `/trippin/look`) and the Perform page row. Design: `docs/design/looks-styles-packs.md`. |
 | `src/tags.rs`, `shaders/scene_tags.json` | The closed scene-tag vocabulary and each scene's tags (tests fail on a scene without tags). Styles pick pools by tag. |
@@ -538,6 +538,29 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   dance_solo). Never open the owner's camera to test without asking. The
   macOS path (permission via `nokhwa_initialize`, `NSCameraUsageDescription`
   in release.yml's Info.plist) hasn't been compiled yet.
+- **Person cut-out** (`segment.rs`): **MODNet** (portrait matting, Apache
+  2.0, Xenova/modnet's ONNX at a pinned commit, SHA-checked; 384x224 NCHW
+  in -1..1) downloaded on first use to `<data dir>/models`, run on rten
+  in a pool of its own (~58 ms a frame on 6 threads; the shared 2-thread
+  pool took ~100 ms). MediaPipe's selfie model (landscape 256x144, 0..1,
+  bundled in `assets/`, SHA pinned by a test, ~3 ms) is only the stand-in
+  until MODNet is there: on the owner's camera it kept the whole shelf and
+  chair behind him. Rejected: Robust Video Matting (best and fastest, but
+  GPL-3.0) and MediaPipe multiclass (grey haze over the room). Because
+  MODNet is slow, the camera thread hands frames to a worker
+  (`segment::Cutter`) and applies the newest mask, never waiting; the
+  frame is fully cut away until the first mask. It runs only while
+  `camera::WANT_CUTOUT` (set each frame by the render loop: the
+  Person key, or `Settings::dancer_camera`), smooths the mask over frames
+  and writes it into the frame's **alpha**, so `cam_tex.a` is the person
+  (`cam_person()`; 1 everywhere when off) and the mips blur it for free.
+  The dancer as you: slot 0's `SlotUniforms::camera` makes dancer.wgsl's
+  `sample_layer`/`mask_size` read the cut-out (mirrored) instead of a
+  routine's masks, so every dancer look, trail and burst applies.
+  `--seg-test <image> <out.png>` checks MODNet on a still (`--seg-selfie`
+  the stand-in; `TRIPPIN_SEG_TIMING=1` prints rten's per-op times);
+  `--snap-cam-key 4` and `--snap-dancer-camera` with
+  `--snap-camera-image` render it without a camera.
 - **A pack found twice** (the repo's dev folder ahead of the installed copy)
   loads its scenes from the first copy but its clips from every copy
   (`Pack::also`, `clip_dirs`): the repo's packs carry no clips (git-ignored),
@@ -771,12 +794,23 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   (`App::key_release`), both as `Msg::Release`. Every other action still
   ignores releases. A press with no release (remote, OSC) lets go after 16
   beats (`Burst::MAX_HOLD`, `HOLD_ECHO_BEATS`).
-- **MIDI** (`midi.rs`): midir's callback thread posts `AppEvent::MidiNote`
-  through an `EventLoopProxy` — the event loop type is
-  `EventLoop<AppEvent>`, so `ApplicationHandler<AppEvent>::user_event`
-  dispatches. `App::midi_note` is the single entry point: it serves
-  MIDI-learn (Keys page `midi_learn`) or runs `apply` like a hotkey, so
-  pad presses record as timeline cues too. Only note-on with velocity > 0
+- **MIDI** (`midi.rs`, `midimap.rs`): midir's callback thread posts
+  `AppEvent::Midi(midimap::Msg)` (note on/off, CC, program change) through
+  an `EventLoopProxy` — the event loop type is `EventLoop<AppEvent>`, so
+  `ApplicationHandler<AppEvent>::user_event` dispatches. `App::midi_msg`
+  is the single entry point: the MIDI page's learn (`Panel::midi_ui`),
+  then the Keys page's (`midi_learn`, notes only) and its `midi_notes`
+  actions (`midi_note`), then the MIDI page's `Settings::midi_map`
+  through `midimap::Router`. **Every mapping target becomes a
+  `remote::RemoteCmd`** run by `remote_cmd`, the same path as the LAN
+  remote and OSC, so a new thing to map is a new `RemoteCmd`/`SetKey`
+  (and the remote and OSC get it too); `SetKey::SceneCtl(k, 0..1)` moves
+  the on-air scene's k-th control (camera scene, rotoscope look or Unity
+  show). CC buttons fire on crossing up through 64; controls take the CC
+  value across their range. `TRIPPIN_MIDI_TEST='b0 15 7f;500;c0 02'`
+  injects messages at startup (no controller needed);
+  `TRIPPIN_PANEL_TAB=midi` opens the panel on a page. Pad presses record
+  as timeline cues too. Only note-on with velocity > 0
   counts (note-off / vel-0 is the pad release — acting on it doubles
   toggles). Bindings are `Settings::midi_notes` (action → note, any
   channel; one note = one action, learning steals it). WinMM has no

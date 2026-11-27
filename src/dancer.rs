@@ -77,7 +77,8 @@ pub struct SlotUniforms {
     pub frames: f32,
     /// Mask width / height.
     pub aspect: f32,
-    pub _pad: f32,
+    /// 1 = slot 0 is the camera's person cut-out (`Settings::dancer_camera`).
+    pub camera: f32,
 }
 
 #[repr(C)]
@@ -382,7 +383,7 @@ impl Slot {
             frame: (t * info.frames as f64) as f32,
             frames: info.frames as f32,
             aspect: info.aspect,
-            _pad: 0.0,
+            camera: 0.0,
         }
     }
 }

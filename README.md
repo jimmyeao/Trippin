@@ -138,11 +138,13 @@ Drag the visuals window to the projector / LED wall and press **F**. A
 into tabs — **Perform** (the scene library: tick to include, search filter,
 click to preview, plus the inspector with mode, phrase length, dancer, look,
 effect and palette; the Pads toggle swaps in big performance pads),
-**Dancer & FX** (dancer on/off, look, canon, size, which routines, and the
-post effect + strength — picks apply live to the output, so the panel
+**Dancer** (dancer on/off, look, canon, size, which routines), **FX** (the
+post effect + strength, which effects Auto picks, the accent and echo
+layers and the camera layer — picks apply live to the output, so the panel
 doubles as a preview), **Stream** (OBS output, now playing, branding,
-ticker, clips — see below), **Timeline** (saved shows), **Keys** (MIDI
-input and rebindable hotkeys: click Rebind, then press a key) and
+ticker, clips — see below), **Timeline** (saved shows), **MIDI** (map
+pads, knobs and faders to anything), **Keys** (rebindable hotkeys: click
+Rebind, then press a key) and
 **Settings** (audio input, latency, mark-downbeat, neural beat tracking,
 what the auto-pilot may do — breakdowns, drop cuts, random order — and the
 AI show builder's provider, model and API key).
@@ -188,6 +190,7 @@ Default keys (all rebindable in the panel):
 | [ / ] | latency −/+ 5 ms |
 | X | cycle the post effect (off → mirrors → kaleido → lens effects) |
 | E | echo trails: auto → on → off |
+| Q | camera layer on / off (back on as behind or in front, as it was) |
 | F5 | reload shaders |
 | T | timeline play / pause |
 | G | timeline record on / off |
@@ -199,12 +202,28 @@ Default keys (all rebindable in the panel):
 | (unbound) | **hold** effects, best on a MIDI pad: echo trails while held; the dancer (and logo) burst out while held and re-form when you let go |
 | (unbound) | Look 1 to 8: recall the saved Look on that slot (bind keys or pads on the Keys page) |
 
-**MIDI controllers:** every action above can also sit on a MIDI pad or key.
-Pick the input at the top of the Keys tab (`--list-midi` shows the names),
-then click a row's **midi** button and hit the pad — the note is bound.
-Pressing the pad fires the action exactly like the hotkey, including while
-the timeline is recording. Right-click a bound note to clear it. Unplugging
-and replugging the controller is picked up automatically.
+**MIDI controllers** (the **MIDI** page): map anything to a pad, key,
+knob, fader, button or program change. Pick the controller at the top
+(`--list-midi` shows the names; the page shows the last message it heard,
+to check it's talking). Under **Add a mapping**, choose what it should do:
+
+- an **Action** (anything in the key table above: next scene, blackout,
+  strobe, Look slots...),
+- a **Scene** to cut to, or one to **queue** next,
+- an **Effect**, a **Palette**, a dancer **Routine** or a saved **Look**,
+- a **Control**: effect strength, accent and echo amounts, dancer size,
+  the camera layer and rotoscope sliders, branding opacity, the
+  now-playing card size, or **Scene control 1-5**, which move the sliders
+  of whatever scene is on air.
+
+Press **Learn**, then move the knob or press the pad. Knobs and faders move
+controls across their range; pads, keys, buttons (including CC buttons) and
+program changes fire everything else. Mappings are listed below with
+**relearn** and **remove**; one MIDI control drives one thing, so learning
+it again replaces what it had. Everything fires exactly as from the panel,
+including while the timeline is recording. The Keys tab's per-action
+**midi** buttons still work too (any channel). Unplugging and replugging
+the controller is picked up automatically.
 
 ## Styles
 
@@ -657,14 +676,14 @@ The lens effects move like the scenes do, with the bass presence and the
 smooth clocks; none of them pulses on the beat. The **Strength** slider
 blends the transform in (at 50% a mirror sits over the plain frame).
 **Auto** picks a fresh effect on every scene cut, from the effects ticked
-under it on Dancer & FX (Mirror Y, Pixels and Tiles start unticked: they
+under it on the FX page (Mirror Y, Pixels and Tiles start unticked: they
 turn the dancer upside down or chop up the whole picture). The Perform
 page's Controls card has **Auto effects** and **Accents** switches at the
 top.
 It's applied in `present.wgsl` from `u.fx`, so it needs no scene support and
 combines with everything (a mirrored dancer in canon is five dancers).
 
-**Accent layer** (Dancer & FX tab, or **Accents** under the Perform page's
+**Accent layer** (FX page, or **Accents** under the Perform page's
 controls; off by default): on some scene cuts while
 the track drives, Auto lays a light overlay over the main scene — rising
 embers, soft light streaks gliding across the frame, a swarm of motes that
@@ -682,7 +701,7 @@ breakdowns, and never plays over 3D (`@heavy`), Unity, video or flight scenes,
 in Manual mode or during timeline shows. The **Accent** slider sets how
 strongly it adds in. Preview one with `--snap <scene> --snap-accent swarm`.
 
-**Echo** (Dancer & FX tab, or `E`): light trails of the whole frame. Each
+**Echo** (FX page, or `E`): light trails of the whole frame. Each
 frame is blended with its own last echo, which drifts outward and turns
 slowly (the turn swings direction every eight bars), so the dancer's arms and
 moving lights leave trails that follow the motion. It keeps the brighter of
@@ -732,15 +751,20 @@ rotation, all mirrored like a selfie:
   the palette's colours and bold ink outlines that boil gently like
   hand-traced frames. The ink thickens with the bass and on the kick.
 
-**Camera layer** (Dancer & FX, under Echo) puts the camera into *every*
+**Camera layer** (FX page) puts the camera into *every*
 scene:
 
 - **behind**: the camera fills the background and the scene plays over
   it. Its dark parts show you through; lasers, particles and the dancer
   pass in front.
-- **in front**: you over the scene, cut out by a **key**: green screen,
-  blue screen, or dark background (for a dark room), or no key for the
-  whole frame. **Key tolerance** sets how much of the screen colour goes;
+- **in front**: you over the scene, cut out by a **key**: **Person (AI
+  cut-out)** finds you in any room with no screen (MODNet portrait
+  matting, a 26 MB download the first time you use it, running on the CPU
+  beside the camera; until it's downloaded a smaller built-in model stands
+  in, which can leave things right behind you, like a chair, in);
+  or green screen, blue screen, dark background (for a dark room), or no
+  key for the whole frame. The key works behind the scenes too: with
+  Person, only you sit behind the scene, not your room. **Key tolerance** sets how much of the screen colour goes;
   green or blue spill on your edges is pulled out.
 - **Rotoscope** (a tick under the layer): the layer drawn as a cartoon,
   cel bands and ink outlines, behind or in front of any scene.
@@ -756,6 +780,10 @@ the scene name while it's on air (kept per scene, with Reset):
   Amount (how much cartoon over the plain camera), Detail (low: only the
   big outlines and flat shapes), Ink, Bands (2-8 flat shades) and Palette
   (your own colours to the show's palette).
+
+**Dance as me** (Dancer page): the dancer layer becomes you, your camera
+cut-out in whichever dancer look is on (shadow, neon, strobe, comic, wire),
+with its trails and its particle burst on drops.
 
 Nothing is opened until you pick a camera, the camera scenes stay out of
 rotation until it sends frames, and a red **camera on** marker shows at the
@@ -1006,7 +1034,7 @@ On a drop (the drums back after a breakdown) she **disintegrates**: her
 silhouette crumbles into glowing dust from the head down, the cloud swirls
 in her shape for a few beats while she keeps dancing inside it, and she
 re-forms from the feet up over two bars. Turn it off with "Burst into
-particles on drops" on the Dancer & FX tab; P (or a MIDI pad) does it by
+particles on drops" on the Dancer page; P (or a MIDI pad) does it by
 hand. It stays off in Manual mode and during timeline shows. Your branding logo bursts and
 re-forms with her, in its own colours (turn that off under Branding on the
 Stream tab).

@@ -59,10 +59,12 @@ pub enum Action {
     HoldEcho,
     /// The dancer (and logo) burst out while held; re-form on release.
     HoldBurst,
+    /// The camera layer off, or back on as it was (`camera_layer_last`).
+    ToggleCamera,
 }
 
 impl Action {
-    pub const ALL: [Action; 43] = [
+    pub const ALL: [Action; 44] = [
         Action::NextScene,
         Action::PrevScene,
         Action::ModeAuto,
@@ -106,6 +108,7 @@ impl Action {
         Action::CycleEcho,
         Action::HoldEcho,
         Action::HoldBurst,
+        Action::ToggleCamera,
     ];
 
     pub fn label(self) -> &'static str {
@@ -153,6 +156,7 @@ impl Action {
             Action::CycleEcho => "Echo trails: auto / on / off",
             Action::HoldEcho => "Echo trails while held",
             Action::HoldBurst => "Dancer bursts while held, re-forms on release",
+            Action::ToggleCamera => "Camera layer on / off",
         }
     }
 
@@ -217,6 +221,7 @@ impl Action {
             Action::ToggleTicker => "W",
             Action::Disintegrate => "P",
             Action::CycleEcho => "E",
+            Action::ToggleCamera => "Q",
             // Unbound: hold effects are for pads; bind a key on the Keys page.
             Action::HoldEcho | Action::HoldBurst => "",
             // Unbound: sixteen default keys would collide with the rest.
@@ -321,6 +326,9 @@ impl CamLayer {
 pub enum CamKey {
     /// No key: the whole frame.
     None,
+    /// The person, found by the segmentation model (segment.rs): no screen
+    /// needed.
+    Person,
     Blue,
     /// Dark background (a luma key).
     Dark,
@@ -331,13 +339,14 @@ pub enum CamKey {
 }
 
 impl CamKey {
-    pub const ALL: [CamKey; 4] = [CamKey::Green, CamKey::Blue, CamKey::Dark, CamKey::None];
+    pub const ALL: [CamKey; 5] = [CamKey::Person, CamKey::Green, CamKey::Blue, CamKey::Dark, CamKey::None];
     pub fn index(self) -> f32 {
         match self {
             CamKey::None => 0.0,
             CamKey::Green => 1.0,
             CamKey::Blue => 2.0,
             CamKey::Dark => 3.0,
+            CamKey::Person => 4.0,
         }
     }
     pub fn label(self) -> &'static str {
@@ -346,6 +355,7 @@ impl CamKey {
             CamKey::Green => "Green screen",
             CamKey::Blue => "Blue screen",
             CamKey::Dark => "Dark background",
+            CamKey::Person => "Person (AI cut-out)",
         }
     }
 }
@@ -514,6 +524,9 @@ pub struct Settings {
     /// Action → MIDI note number, same shape as `keys`. Bound on the Keys
     /// page by learning: click "midi", then hit the pad.
     pub midi_notes: BTreeMap<Action, u8>,
+    /// The MIDI page's mappings: notes, CCs and program changes to actions,
+    /// scenes, effects, palettes, routines, Looks and sliders (midimap.rs).
+    pub midi_map: Vec<crate::midimap::Binding>,
     pub mode: Mode,
     pub random_order: bool,
     /// Bars per scene in auto mode.
@@ -626,8 +639,11 @@ pub struct Settings {
     /// The webcam for the `camera_*` scenes (a device name; camera.rs).
     /// "" = no camera: nothing is opened and no camera scene plays.
     pub camera: String,
-    /// The camera layer over every scene (Dancer & FX; present.wgsl).
+    /// The camera layer over every scene (FX page; present.wgsl).
     pub camera_layer: CamLayer,
+    /// What the camera toggle (`Action::ToggleCamera`) turns the layer back
+    /// on as: the mode it was in when it was last switched off.
+    pub camera_layer_last: CamLayer,
     pub camera_key: CamKey,
     /// Camera layer strength 0..1.
     pub camera_amt: f32,
@@ -635,6 +651,9 @@ pub struct Settings {
     pub camera_tol: f32,
     /// The camera layer rotoscoped: cel-shaded bands and ink outlines.
     pub camera_roto: bool,
+    /// The dancer layer dances as you: the camera's person cut-out in place
+    /// of a routine (Dancer page).
+    pub dancer_camera: bool,
     /// The rotoscope look (camera layer and the camera_roto scene): how
     /// much of it over the plain camera, ink weight, detail (low = only big
     /// outlines and flat shapes), colour bands (2..8), palette colour.
@@ -746,6 +765,7 @@ impl Default for Settings {
                 .collect(),
             midi_in: String::new(),
             midi_notes: BTreeMap::new(),
+            midi_map: Vec::new(),
             mode: Mode::Auto,
             random_order: true,
             phrase_bars: 16,
@@ -799,10 +819,12 @@ impl Default for Settings {
             audio_in: String::new(),
             camera: String::new(),
             camera_layer: CamLayer::Off,
+            camera_layer_last: CamLayer::Front,
             camera_key: CamKey::Green,
             camera_amt: 0.8,
             camera_tol: 0.4,
             camera_roto: false,
+            dancer_camera: false,
             roto_amt: 1.0,
             roto_ink: 0.5,
             roto_detail: 0.35,

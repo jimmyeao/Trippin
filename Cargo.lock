@@ -5133,6 +5133,8 @@ dependencies = [
  "pollster 1.0.1",
  "rfd",
  "rosc",
+ "rten",
+ "rten-tensor",
  "rusqlite",
  "rustfft",
  "rustls",

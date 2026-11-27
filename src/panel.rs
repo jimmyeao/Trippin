@@ -5,7 +5,7 @@
 //! status (1b arrangement — the 1a console is styling reference only), then
 //! one page at a time. Perform is the default: a thumbnail scene library
 //! with a live inspector on the right (1b), or the Pads perform view (1c).
-//! Dancer & FX, Stream, Timeline and Keys are the settings pages.
+//! Dancer, FX, Stream, Timeline, MIDI and Keys are the settings pages.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -255,8 +255,12 @@ enum Tab {
     /// Scene library + inspector — the old Show and Scenes tabs merged
     /// (mockup 1b).
     Perform,
-    /// Dancer routines and whole-frame FX on one page.
-    DancerFx,
+    /// The dancer layer and its routines.
+    Dancer,
+    /// Whole-frame effects, the accent and echo layers, and the camera layer.
+    Fx,
+    /// MIDI mapping: anything to a pad, key, knob, fader or program change.
+    Midi,
     Stream,
     Timeline,
     Keys,
@@ -279,11 +283,13 @@ enum LibChip {
 }
 
 impl Tab {
-    const ALL: [Tab; 6] = [
+    const ALL: [Tab; 8] = [
         Tab::Perform,
-        Tab::DancerFx,
+        Tab::Dancer,
+        Tab::Fx,
         Tab::Stream,
         Tab::Timeline,
+        Tab::Midi,
         Tab::Keys,
         Tab::Settings,
     ];
@@ -291,7 +297,9 @@ impl Tab {
     fn label(self) -> &'static str {
         match self {
             Tab::Perform => "Perform",
-            Tab::DancerFx => "Dancer & FX",
+            Tab::Dancer => "Dancer",
+            Tab::Fx => "FX",
+            Tab::Midi => "MIDI",
             Tab::Stream => "Stream",
             Tab::Timeline => "Timeline",
             Tab::Keys => "Keys",
@@ -309,6 +317,9 @@ pub struct Panel {
     /// Waiting for a MIDI pad press (note-on) to bind to this action —
     /// captured globally by `App::midi_note`, whichever window is focused.
     pub midi_learn: Option<Action>,
+    /// The MIDI page: what it's learning, the last message heard, and the
+    /// "add a mapping" picker.
+    pub midi_ui: MidiUi,
     tab: Tab,
     /// Text filter for the scene list.
     scene_filter: String,
@@ -356,8 +367,15 @@ impl Panel {
             win,
             rebinding: None,
             midi_learn: None,
-            tab: Tab::Perform,
-            scene_filter: String::new(),
+            midi_ui: MidiUi::default(),
+            // Dev aid: TRIPPIN_PANEL_TAB=<page label> opens on that page
+            // (screenshots of a page without clicking).
+            tab: std::env::var("TRIPPIN_PANEL_TAB")
+                .ok()
+                .and_then(|t| Tab::ALL.into_iter().find(|x| x.label().eq_ignore_ascii_case(t.trim())))
+                .unwrap_or(Tab::Perform),
+            // Dev aid, as TRIPPIN_PANEL_TAB: pre-fill the scene filter.
+            scene_filter: std::env::var("TRIPPIN_PANEL_FILTER").unwrap_or_default(),
             chip: LibChip::All,
             thumbs: HashMap::new(),
             want_thumbs: HashMap::new(),
@@ -412,6 +430,7 @@ impl Panel {
 
         let rebinding = &mut self.rebinding;
         let midi_learn = &mut self.midi_learn;
+        let midi_ui = &mut self.midi_ui;
         let tab = &mut self.tab;
         let scene_filter = &mut self.scene_filter;
         let chip = &mut self.chip;
@@ -452,6 +471,7 @@ impl Panel {
                 rebinding,
                 midi_learn,
                 midi_status,
+                midi_ui,
                 remote_status,
                 tab,
                 scene_filter,
@@ -488,6 +508,7 @@ fn build_ui(
     rebinding: &mut Option<Action>,
     midi_learn: &mut Option<Action>,
     midi_status: &(bool, String),
+    midi_ui: &mut MidiUi,
     remote_status: &(bool, String),
     tab: &mut Tab,
     scene_filter: &mut String,
@@ -564,9 +585,9 @@ fn build_ui(
                     .auto_shrink([false, true])
                     .horizontal_scroll_offset(0.0)
                     .show(ui, |ui| match *tab {
-                        Tab::DancerFx => {
-                            dancer_fx_tab(ui, s, st, clips, clip_thumbs, cmd)
-                        }
+                        Tab::Dancer => dancer_tab(ui, s, st, clips, clip_thumbs, cmd),
+                        Tab::Fx => fx_tab(ui, s, st),
+                        Tab::Midi => midi_tab(ui, s, st, scenes, clips, midi_status, midi_ui),
                         Tab::Stream => stream_tab(ui, s, st, cmd),
                         Tab::Timeline => timeline_tab(ui, tl_shared, saved, cmd),
                         Tab::Keys => keys_tab(ui, s, rebinding, midi_learn, midi_status, keys_filter),
@@ -1769,10 +1790,10 @@ fn inspector_body(
         ui.allocate_ui_with_layout(egui::vec2(qw, 20.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
             ui.checkbox(&mut s.accent_auto, egui::RichText::new("Accents").size(12.0)).on_hover_text(
                 "Auto lays a light scene (embers, streaks, notes, comets...) over some scenes while the \
-                 track drives. Strength on Dancer & FX; timeline shows have their own toggle in the editor.",
+                 track drives. Strength on the FX page; timeline shows have their own toggle in the editor.",
             );
             ui.checkbox(&mut s.fx_auto, egui::RichText::new("Auto effects").size(12.0))
-                .on_hover_text("A fresh post effect on every scene cut. Which ones: Dancer & FX.");
+                .on_hover_text("A fresh post effect on every scene cut. Which ones: the FX page.");
         });
         ui.label(egui::RichText::new("Mode").size(12.0).color(MUTED));
         segmented_wide(
@@ -1831,7 +1852,7 @@ fn inspector_body(
             "Dancer look",
             s.dancer_style.map(|i| STYLES[i]).unwrap_or("auto").to_string(),
             || {
-                *tab = Tab::DancerFx;
+                *tab = Tab::Dancer;
             },
         );
         nav_row(
@@ -1843,7 +1864,7 @@ fn inspector_body(
                 s.fx.label().to_string()
             },
             || {
-                *tab = Tab::DancerFx;
+                *tab = Tab::Fx;
             },
         );
         // Palette row: a clickable gradient strip opening a swatch popover.
@@ -2685,7 +2706,10 @@ fn thumbs_dir() -> PathBuf {
 }
 
 fn thumb_file(key: &str) -> PathBuf {
-    thumbs_dir().join(format!("{}.png", key.replace(':', "_")))
+    // Camera scenes' tiles were cached black (rendered with no camera
+    // frame); the "_v2" name leaves those behind.
+    let v = if key.starts_with("scene:camera_") { "_v2" } else { "" };
+    thumbs_dir().join(format!("{}{v}.png", key.replace(':', "_")))
 }
 
 /// Unity engine tiles are stills shipped in `shaders/thumbs` (the render
@@ -3231,9 +3255,9 @@ fn stream_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status, cmd: &mut Vec<Ui
 }
 
 
-/// Dancer & FX page (mockup 1a styling): two control cards side by side,
+/// Dancer page (mockup 1a styling): the dancer card,
 /// then the routine thumbnail library underneath.
-fn dancer_fx_tab(
+fn dancer_tab(
     ui: &mut egui::Ui,
     s: &mut Settings,
     st: &Status,
@@ -3245,7 +3269,7 @@ fn dancer_fx_tab(
     // Bounded column uis — `ui.columns` lets card content bleed under the
     // neighbour card inside a ScrollArea at narrow widths (A1).
     let row_w = ui.available_width();
-    let col_w = ((row_w - 12.0) / 2.0).max(220.0);
+    let col_w = row_w.min(560.0).max(220.0);
     let top = ui.cursor().min;
     let mut mk_col = |x: f32| {
         ui.new_child(
@@ -3265,6 +3289,14 @@ fn dancer_fx_tab(
             ui.small("Silhouette layer, look and movement — one line only.");
             ui.add_space(4.0);
             ui.checkbox(&mut s.dancer_enabled, "Dancer layer on");
+            ui.checkbox(&mut s.dancer_camera, "Dance as me: my camera cut-out instead of a routine")
+                .on_hover_text(
+                    "The dancer layer becomes you: the camera's person cut-out (no green screen needed), \
+                     in whichever dancer look is on. Pick a camera on Settings first.",
+                );
+            if s.dancer_camera && s.camera.is_empty() {
+                ui.small("Pick a camera on the Settings page first.");
+            }
             ctl_row(ui, "Dancer look", |ui| {
                 // A dropdown: six segmented buttons overflow the card.
                 egui::ComboBox::from_id_salt("dancer_look")
@@ -3297,12 +3329,54 @@ fn dancer_fx_tab(
         });
         r1.response.rect.height()
     };
-    let h2 = {
-        // Equal heights: the FX card stretches to the Dancer card's height.
-        let ui = &mut mk_col(col_w + 12.0);
-        let r2 = card().show(ui, |ui| {
+    ui.add_space(h1);
+    ui.add_space(6.0);
+
+    // Routine library: one tile per routine — `_mir` twins ride on their
+    // base tile as a "mir" badge, tick to keep in rotation, click to preview.
+    card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        section_label(ui, "routines");
+        ui.small("Auto-pilot picks among the ticked routines — click a tile to preview it live.");
+        ui.add_space(4.0);
+        let avail = ui.available_width();
+        let cols = ((avail + 8.0) / 108.0).floor().max(3.0) as usize;
+        let bases: Vec<usize> = (0..clips.len())
+            .filter(|&i| !clips[i].ends_with("_mir"))
+            .collect();
+        for chunk in bases.chunks(cols) {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+                for &i in chunk {
+                    let name = &clips[i];
+                    let has_mir = clips.iter().any(|c| c == &format!("{name}_mir"));
+                    let title = st.clip_titles.get(i).map(String::as_str).unwrap_or(name);
+                    clip_tile(ui, s, st, i, name, title, has_mir, clip_thumbs, cmd);
+                }
+            });
+        }
+    });
+}
+
+/// The FX page: whole-frame effects (left); the accent and echo layers and
+/// the camera layer (right).
+fn fx_tab(ui: &mut egui::Ui, s: &mut Settings, st: &Status) {
+    use crate::ui_theme::*;
+    // Bounded column uis, as on the Dancer page (A1).
+    let row_w = ui.available_width();
+    let col_w = ((row_w - 12.0) / 2.0).max(220.0);
+    let top = ui.cursor().min;
+    let mut mk_col = |x: f32| {
+        ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(egui::Rect::from_min_size(egui::pos2(top.x + x, top.y), egui::vec2(col_w, 4000.0)))
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+        )
+    };
+    let h1 = {
+        let ui = &mut mk_col(0.0);
+        let r = card().show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.set_min_height((h1 - 26.0).max(60.0));
             section_label(ui, "fx");
             ui.small("Whole-frame transforms — your pick is the live preview.");
             ui.add_space(4.0);
@@ -3356,6 +3430,14 @@ fn dancer_fx_tab(
                         }
                     });
             }
+        });
+        r.response.rect.height()
+    };
+    let h2 = {
+        let ui = &mut mk_col(col_w + 12.0);
+        let r1 = card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            section_label(ui, "layers");
             ui.add_space(4.0);
             ui.checkbox(&mut s.accent_auto, "Accent layer — Auto adds a light scene on top")
                 .on_hover_text("On some cuts while the track drives, rising embers, light streaks, a swarm of motes, bokeh, light shafts, ripples, musical notes, sparkles, bubbles, fireflies, petals, comets, floor fog, a spectrum, the waveform or a halo of sparks play over the main scene. Never in breakdowns or over 3D, Unity, video or flight scenes.");
@@ -3384,6 +3466,11 @@ fn dancer_fx_tab(
             ctl_row(ui, "Echo amount", |ui| {
                 ui.add_enabled(s.echo != Tristate::Off, egui::Slider::new(&mut s.echo_amt, 0.0..=1.0));
             });
+        });
+        ui.add_space(8.0);
+        let r2 = card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            section_label(ui, "camera layer");
             // The webcam over every scene: behind it, or keyed in front.
             ui.add_space(6.0);
             {
@@ -3398,11 +3485,11 @@ fn dancer_fx_tab(
                 ui.small(if s.camera.is_empty() {
                     "Camera layer: pick a camera on Settings first."
                 } else if s.camera_layer == CamLayer::Front {
-                    "You over every scene, cut out by the key (a green or blue screen, or a dark room)."
+                    "You over every scene, cut out by the key: Person needs no screen; or a green or blue screen, or a dark room."
                 } else {
                     "Behind: the camera shows through the scene's dark parts; lights and the dancer pass in front."
                 });
-                if s.camera_layer == CamLayer::Front {
+                if s.camera_layer != CamLayer::Off {
                     ctl_row(ui, "Key", |ui| {
                         egui::ComboBox::from_id_salt("camera_key")
                             .selected_text(s.camera_key.label())
@@ -3428,39 +3515,13 @@ fn dancer_fx_tab(
                 }
             }
         });
-        r2.response.rect.height()
+        r1.response.rect.height() + 8.0 + r2.response.rect.height()
     };
     // The child uis didn't move the parent cursor — claim the row height.
     ui.add_space(h1.max(h2));
-    ui.add_space(6.0);
-
-    // Routine library: one tile per routine — `_mir` twins ride on their
-    // base tile as a "mir" badge, tick to keep in rotation, click to preview.
-    card().show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        section_label(ui, "routines");
-        ui.small("Auto-pilot picks among the ticked routines — click a tile to preview it live.");
-        ui.add_space(4.0);
-        let avail = ui.available_width();
-        let cols = ((avail + 8.0) / 108.0).floor().max(3.0) as usize;
-        let bases: Vec<usize> = (0..clips.len())
-            .filter(|&i| !clips[i].ends_with("_mir"))
-            .collect();
-        for chunk in bases.chunks(cols) {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
-                for &i in chunk {
-                    let name = &clips[i];
-                    let has_mir = clips.iter().any(|c| c == &format!("{name}_mir"));
-                    let title = st.clip_titles.get(i).map(String::as_str).unwrap_or(name);
-                    clip_tile(ui, s, st, i, name, title, has_mir, clip_thumbs, cmd);
-                }
-            });
-        }
-    });
 }
 
-/// One routine tile in the Dancer & FX library. `_mir` twins are folded
+/// One routine tile in the Dancer page library. `_mir` twins are folded
 /// into their base clip: a small "mir" badge toggles the twin's rotation
 /// membership (review — 22 tiles, not 44).
 fn clip_tile(
@@ -3839,6 +3900,7 @@ fn keys_tab(
                 Action::CycleFx,
                 Action::CycleEcho,
                 Action::HoldEcho,
+                Action::ToggleCamera,
                 Action::Blackout,
                 Action::Fullscreen,
                 Action::LeaveFullscreen,
@@ -5068,4 +5130,189 @@ fn mode_str(m: PlayMode, following: bool) -> &'static str {
         PlayMode::Stopped if following => "following",
         PlayMode::Stopped => "stopped",
     }
+}
+
+
+/// The MIDI page's state (kept on the panel between frames).
+#[derive(Default)]
+pub struct MidiUi {
+    /// Learning: the next note, CC or program change maps to this
+    /// (taken by `App::midi_msg`).
+    pub learn: Option<crate::midimap::Target>,
+    /// The last message heard, and when.
+    pub last: Option<(crate::midimap::Msg, Instant)>,
+    /// The picker: which kind of target, and the one chosen.
+    kind: usize,
+    pick: Option<crate::midimap::Target>,
+    filter: String,
+}
+
+const MIDI_KINDS: [&str; 8] = ["Action", "Scene", "Queue scene", "Effect", "Palette", "Routine", "Look", "Control"];
+
+/// MIDI page: the input port, "add a mapping" (pick what it does, press
+/// Learn, move the control), and the list of mappings.
+fn midi_tab(
+    ui: &mut egui::Ui,
+    s: &mut Settings,
+    st: &Status,
+    scenes: &[String],
+    clips: &[String],
+    midi_status: &(bool, String),
+    mu: &mut MidiUi,
+) {
+    use crate::midimap::{Control, Target};
+    use crate::ui_theme::*;
+    let title = |id: &str| -> String {
+        scenes
+            .iter()
+            .position(|n| n == id)
+            .and_then(|i| st.scene_titles.get(i).cloned())
+            .unwrap_or_else(|| id.to_string())
+    };
+
+    // ---- input -----------------------------------------------------------
+    section_label(ui, "midi input");
+    card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("Controller").size(12.0).color(MUTED));
+            egui::ComboBox::from_id_salt("midi_in_page")
+                .width(240.0)
+                .selected_text(if s.midi_in.is_empty() { "off".to_string() } else { s.midi_in.clone() })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut s.midi_in, String::new(), "off");
+                    for name in crate::midi::ports() {
+                        ui.selectable_value(&mut s.midi_in, name.clone(), name);
+                    }
+                });
+            status_dot(ui, midi_status.0, if s.midi_in.is_empty() { "off" } else { midi_status.1.as_str() });
+        });
+        let last = match &mu.last {
+            Some((m, at)) => format!("Last heard: {} ({:.0} s ago)", m.label(), at.elapsed().as_secs_f32()),
+            None => "Nothing heard yet: move a knob or press a pad to check the controller.".to_string(),
+        };
+        ui.label(egui::RichText::new(last).size(11.5).color(FAINT));
+    });
+    ui.add_space(8.0);
+
+    // ---- add a mapping ----------------------------------------------------
+    section_label(ui, "add a mapping");
+    card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.small("Pick what it should do, press Learn, then press the pad or move the knob, fader or button. Knobs and faders move sliders; pads, keys, buttons and program changes fire everything else.");
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(|ui| {
+            for (i, k) in MIDI_KINDS.iter().enumerate() {
+                if ui.selectable_label(mu.kind == i, *k).clicked() && mu.kind != i {
+                    mu.kind = i;
+                    mu.pick = None;
+                    mu.filter.clear();
+                }
+            }
+        });
+        ui.add_space(4.0);
+        // The items of the chosen kind, as (target, label).
+        let items: Vec<(Target, String)> = match mu.kind {
+            0 => Action::ALL.iter().map(|a| (Target::Action(*a), a.label().to_string())).collect(),
+            1 | 2 => scenes
+                .iter()
+                .filter(|n| *n != "void")
+                .map(|n| {
+                    let t = if mu.kind == 1 { Target::Scene(n.clone()) } else { Target::QueueScene(n.clone()) };
+                    (t, title(n))
+                })
+                .collect(),
+            3 => Fx::ALL.iter().map(|f| (Target::Fx(*f), f.label().to_string())).collect(),
+            4 => crate::palettes::all_names().map(|p| (Target::Palette(p.to_string()), p.to_string())).collect(),
+            5 => clips.iter().map(|c| (Target::Routine(c.clone()), c.clone())).collect(),
+            6 => st.looks.iter().map(|l| (Target::Look(l.id.clone()), l.name.clone())).collect(),
+            _ => Control::ALL.iter().map(|c| (Target::Control(*c), c.label())).collect(),
+        };
+        let q = mu.filter.to_lowercase();
+        ui.horizontal(|ui| {
+            if items.len() > 12 {
+                ui.add(egui::TextEdit::singleline(&mut mu.filter).desired_width(140.0).hint_text("filter…"));
+            }
+            let shown = mu
+                .pick
+                .as_ref()
+                .and_then(|p| items.iter().find(|(t, _)| t == p))
+                .map(|(_, l)| l.clone())
+                .unwrap_or_else(|| "choose…".into());
+            egui::ComboBox::from_id_salt("midi_pick")
+                .width(260.0)
+                .height(360.0)
+                .selected_text(shown)
+                .show_ui(ui, |ui| {
+                    for (t, l) in items.iter().filter(|(_, l)| q.is_empty() || l.to_lowercase().contains(&q)) {
+                        if ui.selectable_label(mu.pick.as_ref() == Some(t), l).clicked() {
+                            mu.pick = Some(t.clone());
+                        }
+                    }
+                });
+            if mu.learn.is_some() {
+                ui.label(egui::RichText::new("move a knob or press a pad…").size(12.0).color(WARN));
+                if ui.small_button("cancel").clicked() {
+                    mu.learn = None;
+                }
+            } else if ui.add_enabled(mu.pick.is_some(), egui::Button::new("Learn")).clicked() {
+                mu.learn = mu.pick.clone();
+            }
+        });
+        if mu.kind == 7 {
+            ui.small("Scene controls 1-5 move the sliders of whatever scene is on air (its scene controls card).");
+        }
+    });
+    ui.add_space(8.0);
+
+    // ---- mappings ---------------------------------------------------------------
+    section_label(ui, "mappings");
+    card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        if s.midi_map.is_empty() && s.midi_notes.is_empty() {
+            ui.small("None yet.");
+            return;
+        }
+        let mut remove: Option<usize> = None;
+        let mut remove_note: Option<Action> = None;
+        let mut relearn: Option<Target> = None;
+        egui::Grid::new("midi_map_grid").num_columns(4).spacing(egui::vec2(12.0, 6.0)).striped(true).show(ui, |ui| {
+            ui.label(egui::RichText::new("control").size(11.0).color(MUTED));
+            ui.label(egui::RichText::new("does").size(11.0).color(MUTED));
+            ui.label("");
+            ui.label("");
+            ui.end_row();
+            for (i, b) in s.midi_map.iter().enumerate() {
+                ui.label(egui::RichText::new(b.src.label()).monospace().size(11.5));
+                ui.label(egui::RichText::new(b.target.label(&title)).size(12.0));
+                if ui.small_button("relearn").on_hover_text("Map this to a different control").clicked() {
+                    relearn = Some(b.target.clone());
+                    remove = Some(i);
+                }
+                if ui.small_button("remove").clicked() {
+                    remove = Some(i);
+                }
+                ui.end_row();
+            }
+            // The Keys page's pad bindings (any channel) belong here too.
+            for (a, n) in &s.midi_notes {
+                ui.label(egui::RichText::new(format!("Note {} ({n}) · any ch", crate::midi::note_name(*n))).monospace().size(11.5));
+                ui.label(egui::RichText::new(format!("Action: {} (Keys page)", a.label())).size(12.0));
+                ui.label("");
+                if ui.small_button("remove").clicked() {
+                    remove_note = Some(*a);
+                }
+                ui.end_row();
+            }
+        });
+        if let Some(i) = remove {
+            s.midi_map.remove(i);
+        }
+        if let Some(a) = remove_note {
+            s.midi_notes.remove(&a);
+        }
+        if let Some(t) = relearn {
+            mu.learn = Some(t);
+        }
+    });
 }

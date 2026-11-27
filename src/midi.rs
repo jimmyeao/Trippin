@@ -24,10 +24,10 @@ pub fn ports() -> Vec<String> {
         .collect()
 }
 
-/// Connect to the port called `name`. `on_note(note, on)` runs on midir's
-/// callback thread for every note-on (`on`) and note-off — keep it cheap (it
+/// Connect to the port called `name`. `on_msg` runs on midir's callback
+/// thread for every note on/off, CC and program change — keep it cheap (it
 /// just posts to the event loop). Only hold actions act on a note-off.
-pub fn connect(name: &str, on_note: impl Fn(u8, bool) + Send + 'static) -> Result<Midi> {
+pub fn connect(name: &str, on_msg: impl Fn(crate::midimap::Msg) + Send + 'static) -> Result<Midi> {
     let mut input = midir::MidiInput::new("Trippin")?;
     input.ignore(midir::Ignore::None);
     let port = input
@@ -40,14 +40,10 @@ pub fn connect(name: &str, on_note: impl Fn(u8, bool) + Send + 'static) -> Resul
         "trippin",
         move |_ts, msg, _| {
             // Note-off (0x8n, or 0x9n with velocity 0) is the pad release:
-            // passed on as `on = false`, and only hold actions use it —
-            // firing a toggle on it would double every press.
-            if msg.len() >= 3 && msg[0] & 0xF0 == 0x90 && msg[2] > 0 {
-                on_note(msg[1] & 0x7F, true);
-            } else if msg.len() >= 3
-                && (msg[0] & 0xF0 == 0x80 || (msg[0] & 0xF0 == 0x90 && msg[2] == 0))
-            {
-                on_note(msg[1] & 0x7F, false);
+            // only hold actions use it — firing a toggle on it would
+            // double every press.
+            if let Some(m) = crate::midimap::Msg::parse(msg) {
+                on_msg(m);
             }
         },
         (),

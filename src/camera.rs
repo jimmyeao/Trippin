@@ -19,6 +19,11 @@ use std::time::{Duration, Instant};
 /// Frames are arriving from the picked camera.
 pub static LIVE: AtomicBool = AtomicBool::new(false);
 
+/// Something wants the person cut-out (the Person key, or the dancer as
+/// you): the camera thread runs the segmentation model and puts the mask in
+/// each frame's alpha (segment.rs). Set by the render loop each frame.
+pub static WANT_CUTOUT: AtomicBool = AtomicBool::new(false);
+
 /// The cameras found by the last `refresh_names` (human names).
 static NAMES: Mutex<Vec<String>> = Mutex::new(Vec::new());
 static LISTING: AtomicBool = AtomicBool::new(false);
@@ -171,8 +176,12 @@ pub fn param_value(saved: &std::collections::BTreeMap<String, std::collections::
         .clamp(p.min, p.max)
 }
 
-/// A camera scene's controls as (roto4, roto5) for the shader.
+/// A camera scene's controls as (roto4, roto5) for the shader; the
+/// rotoscope look's defaults for any other scene.
 pub fn scene_uniforms(saved: &std::collections::BTreeMap<String, std::collections::BTreeMap<String, f32>>, scene: &str) -> ([f32; 4], [f32; 4]) {
+    if scene_params(scene).is_empty() {
+        return ([1.0, 0.5, 0.35, 4.0], [0.4, 0.0, 0.0, 0.0]);
+    }
     let mut v = [0.0f32; 8];
     for (i, p) in scene_params(scene).iter().enumerate().take(5) {
         v[i] = param_value(saved, scene, p);
@@ -246,6 +255,8 @@ fn run(want: Arc<Mutex<String>>, frame: Arc<Mutex<Frame>>) {
         };
         // Capture until the pick changes or the camera fails.
         let mut last_ok = Instant::now();
+        // The cut-out worker, started the first time the cut-out is wanted.
+        let mut seg: Option<crate::segment::Cutter> = None;
         loop {
             if *want.lock().unwrap_or_else(|e| e.into_inner()) != name {
                 break;
@@ -258,7 +269,16 @@ fn run(want: Arc<Mutex<String>>, frame: Arc<Mutex<Frame>>) {
             match got {
                 Some(img) => {
                     serial = serial.wrapping_add(1);
-                    let chain = crate::gfx::cam_mips(&fit(&img));
+                    let mut level0 = fit(&img);
+                    if WANT_CUTOUT.load(Ordering::Relaxed) {
+                        use crate::gfx::{VID_H, VID_W};
+                        seg.get_or_insert_with(crate::segment::Cutter::start).cut(
+                            &mut level0,
+                            VID_W as usize,
+                            VID_H as usize,
+                        );
+                    }
+                    let chain = crate::gfx::cam_mips(&level0);
                     *frame.lock().unwrap_or_else(|e| e.into_inner()) = Some((serial, Arc::new(chain)));
                     last_ok = Instant::now();
                     LIVE.store(true, Ordering::Relaxed);

@@ -186,9 +186,14 @@ fn agx(x: vec3<f32>) -> vec3<f32> {
 
 // The camera layer's key: how much of the camera shows at c (1 = all).
 // Green/blue screen (chroma), dark background (luma), or none.
-fn cam_key(c: vec3<f32>) -> f32 {
+fn cam_key(c: vec3<f32>, person: f32) -> f32 {
     let key = i32(u.cam4.z + 0.5);
     let tol = clamp(u.cam4.w, 0.0, 1.0);
+    if key == 4 {
+        // The model's mask: tolerance moves the edge in or out.
+        let mid = 0.65 - 0.3 * tol;
+        return smoothstep(mid - 0.15, mid + 0.15, person);
+    }
     if key == 1 {
         let d = c.g - max(c.r, c.b);
         return 1.0 - smoothstep(0.02 + 0.12 * tol, 0.1 + 0.2 * tol, d);
@@ -263,7 +268,7 @@ fn graded(scr_uv: vec2<f32>) -> vec4<f32> {
         let cuv = vec2<f32>(1.0 - uv.x, uv.y);
         var c = cam(cuv);
         // The key reads the camera as it is; the rotoscope only restyles.
-        let a = cam_key(c);
+        let a = cam_key(c, cam_person(cuv));
         if cm_all >= 4 {
             c = cam_roto(cuv, 0.0);
         }

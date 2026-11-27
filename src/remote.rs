@@ -104,6 +104,18 @@ pub enum SetKey {
     ShowParam(String, f32),
     /// Put the on-air Unity show's controls back to their defaults.
     ShowParamsReset,
+    AccentAmt(f32),
+    EchoAmt(f32),
+    CameraAmt(f32),
+    CameraTol(f32),
+    RotoAmt(f32),
+    RotoDetail(f32),
+    RotoInk(f32),
+    RotoBands(u32),
+    RotoPal(f32),
+    /// The k-th control (0-based) of the scene on air, as 0..1 across its
+    /// range: a camera scene's, the rotoscope look's or a Unity show's.
+    SceneCtl(u8, f32),
 }
 
 /// A command a remote client sent — arrives on the event thread as
@@ -763,6 +775,19 @@ pub(crate) fn parse_set(key: &str, value: Value) -> Result<SetKey> {
         "brand_opacity" => SetKey::BrandOpacity(f(0.1..=1.0)?),
         "ticker_speed" => SetKey::TickerSpeed(f(0.3..=3.0)?),
         "show_params_reset" => SetKey::ShowParamsReset,
+        "accent_amt" => SetKey::AccentAmt(f(0.0..=1.0)?),
+        "echo_amt" => SetKey::EchoAmt(f(0.0..=1.0)?),
+        "camera_amt" => SetKey::CameraAmt(f(0.0..=1.0)?),
+        "camera_tol" => SetKey::CameraTol(f(0.0..=1.0)?),
+        "roto_amt" => SetKey::RotoAmt(f(0.0..=1.0)?),
+        "roto_detail" => SetKey::RotoDetail(f(0.0..=1.0)?),
+        "roto_ink" => SetKey::RotoInk(f(0.0..=1.0)?),
+        "roto_bands" => SetKey::RotoBands(f(2.0..=8.0)?.round() as u32),
+        "roto_pal" => SetKey::RotoPal(f(0.0..=1.0)?),
+        k if k.starts_with("scene_ctl:") => {
+            let i: u8 = k["scene_ctl:".len()..].parse().map_err(|_| anyhow!("{key}: expected scene_ctl:<0-7>"))?;
+            SetKey::SceneCtl(i.min(7), f(0.0..=1.0)?)
+        }
         k if k.starts_with("show_param:") => {
             let v = value.as_f64().ok_or_else(|| anyhow!("{key}: expected a number"))? as f32;
             if !v.is_finite() {
