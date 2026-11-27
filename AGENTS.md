@@ -1179,6 +1179,16 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   `"show_params_reset"`; the state push carries `show_controls`
   (`{id,label,min,max,value}`) for the Unity show on air. The browser
   harness renders them; the iOS app doesn't yet.
+- **Scene controls and layers over the remote** (from 0.29.2): the state
+  push carries `scene_controls` (`remote_scene_controls` in main.rs), built
+  in exactly the order `SetKey::SceneCtl` indexes them (camera scene, else
+  rotoscope, else Unity show): keep the two in step, or a slider moves the
+  wrong control. The iOS Look page draws them (and the accent, echo and
+  camera-layer amounts) and sends `scene_ctl:<k>` as 0..1 of each range.
+  Without Xcode's first launch done (`sudo xcodebuild -runFirstLaunch`)
+  xcodebuild can't load its simulator plug-in; `xcrun --sdk iphonesimulator
+  swiftc -typecheck -target arm64-apple-ios17.0-simulator` on `Sources/`
+  still type-checks the app.
 - First enable pops the Windows firewall prompt once — expected.
 - **trippin-agent:** never `match` on a `MutexGuard`'s contents
   (`match link.lock()…rigs.first()` kept the guard alive through the

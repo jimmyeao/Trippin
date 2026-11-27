@@ -34,6 +34,15 @@
 //!      etc are ids, `scene_title`/`clip_title` the display names.
 //!      `show_controls` lists the on-air Unity show's controls as
 //!      `{id,label,min,max,value}` (empty for other scenes).
+//!      `scene_controls` (`{label,min,max,value,whole}`, titled by
+//!      `scene_controls_title`) lists whatever `scene_ctl:<k>` drives on air:
+//!      a camera scene's controls, else the rotoscope look, else the Unity
+//!      show's; send `{"cmd":"set","key":"scene_ctl:2","value":0.5}` as 0..1
+//!      of the k-th range. The layers: `accent_auto`, `accent_amt`, `echo`
+//!      ("Auto"/"On"/"Off"), `echo_amt`, `camera_set`, `camera_live`,
+//!      `camera_layer`, `camera_key`, `camera_amt`, `camera_tol`,
+//!      `camera_roto`; their amounts take `set` keys of the same names
+//!      (`roto_*` too). All absent before 0.29.2.
 //! S→C  {"type":"thumb","scene":...,"png_b64":...}
 //! S→C  {"type":"err","msg":...}
 //! ```

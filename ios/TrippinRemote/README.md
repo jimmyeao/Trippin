@@ -40,7 +40,7 @@ harness, which is handy for checking the server is up.
 | `Sources/Remote/Discovery.swift` | `NWBrowser` for `_trippin._tcp`, plus resolving a service to IPv4 host:port on each connect attempt. |
 | `Sources/Remote/Models.swift`, `JSON.swift` | The `hello` and `state` frames, read field by field so new server fields never break the app. Action ids are echoed back verbatim. |
 | `Sources/Remote/Keychain.swift` | PINs per server (the Bonjour name or host:port), this device only. A rejected PIN is forgotten. |
-| `Sources/UI/` | Connect, status bar, Perform pads, the scene grid (tap cuts, hold queues), Dancer, Look/FX and Timeline. iPhone uses tabs; iPad puts the scene grid alongside the controls. |
+| `Sources/UI/` | Connect, status bar, Perform pads, the scene grid (tap cuts, hold queues), Dancer, Look/FX (with the accent, echo and camera layers and the on-air scene's controls, from Trippin 0.29.2) and Timeline. iPhone uses tabs; iPad puts the scene grid alongside the controls. |
 
 ## TestFlight
 
