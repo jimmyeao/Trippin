@@ -6,7 +6,9 @@ It speaks the WebSocket protocol documented at the top of `src/remote.rs`
 
 ## Build
 
-The Xcode project is generated from `project.yml` and isn't checked in:
+The Xcode project (and `Sources/Info.plist`) is generated from
+`project.yml`, and committed so Xcode Cloud can build from a checkout. Open
+it as is; after editing `project.yml`, regenerate and commit the result:
 
 ```
 brew install xcodegen
