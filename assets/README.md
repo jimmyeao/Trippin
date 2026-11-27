@@ -12,4 +12,7 @@ the `bundled_model_is_pinned` test).
 
 Licensed under the Apache License, Version 2.0
 (<https://www.apache.org/licenses/LICENSE-2.0>). Copyright Google LLC.
-It is used unmodified.
+It is used unmodified. It is the stand-in: the cut-out prefers MODNet
+(portrait matting, ZHKKKe/MODNet, Apache 2.0), downloaded on first use
+from <https://huggingface.co/Xenova/modnet> at a pinned commit and checked
+against its SHA-256 (`src/segment.rs`).

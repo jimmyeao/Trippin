@@ -59,10 +59,12 @@ pub enum Action {
     HoldEcho,
     /// The dancer (and logo) burst out while held; re-form on release.
     HoldBurst,
+    /// The camera layer off, or back on as it was (`camera_layer_last`).
+    ToggleCamera,
 }
 
 impl Action {
-    pub const ALL: [Action; 43] = [
+    pub const ALL: [Action; 44] = [
         Action::NextScene,
         Action::PrevScene,
         Action::ModeAuto,
@@ -106,6 +108,7 @@ impl Action {
         Action::CycleEcho,
         Action::HoldEcho,
         Action::HoldBurst,
+        Action::ToggleCamera,
     ];
 
     pub fn label(self) -> &'static str {
@@ -153,6 +156,7 @@ impl Action {
             Action::CycleEcho => "Echo trails: auto / on / off",
             Action::HoldEcho => "Echo trails while held",
             Action::HoldBurst => "Dancer bursts while held, re-forms on release",
+            Action::ToggleCamera => "Camera layer on / off",
         }
     }
 
@@ -217,6 +221,7 @@ impl Action {
             Action::ToggleTicker => "W",
             Action::Disintegrate => "P",
             Action::CycleEcho => "E",
+            Action::ToggleCamera => "Q",
             // Unbound: hold effects are for pads; bind a key on the Keys page.
             Action::HoldEcho | Action::HoldBurst => "",
             // Unbound: sixteen default keys would collide with the rest.
@@ -636,6 +641,9 @@ pub struct Settings {
     pub camera: String,
     /// The camera layer over every scene (FX page; present.wgsl).
     pub camera_layer: CamLayer,
+    /// What the camera toggle (`Action::ToggleCamera`) turns the layer back
+    /// on as: the mode it was in when it was last switched off.
+    pub camera_layer_last: CamLayer,
     pub camera_key: CamKey,
     /// Camera layer strength 0..1.
     pub camera_amt: f32,
@@ -811,6 +819,7 @@ impl Default for Settings {
             audio_in: String::new(),
             camera: String::new(),
             camera_layer: CamLayer::Off,
+            camera_layer_last: CamLayer::Front,
             camera_key: CamKey::Green,
             camera_amt: 0.8,
             camera_tol: 0.4,

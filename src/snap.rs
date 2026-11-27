@@ -325,14 +325,11 @@ pub fn run(args: &[String]) -> Result<()> {
     // The person cut-out for the stand-in, as the camera thread makes it
     // (for the Person key, 4, or the dancer as you).
     let want_seg = snap_dancer_cam || arg(args, "--snap-cam-key").is_some_and(|k| k.trim() == "4");
-    let seg = std::cell::RefCell::new(if want_seg { Some(crate::segment::Segmenter::new()?) } else { None });
+    let seg = std::cell::RefCell::new(if want_seg { Some(crate::segment::Segmenter::modnet()?) } else { None });
     let cut = |px: &mut Vec<u8>| {
         use crate::gfx::{VID_H, VID_W};
         if let Some(s) = seg.borrow_mut().as_mut() {
-            let small = crate::segment::downscale_rgb(px, VID_W as usize, VID_H as usize);
-            if let Ok(m) = s.run(&small) {
-                crate::segment::mask_into_alpha(&m, px, VID_W as usize, VID_H as usize);
-            }
+            let _ = s.cut(px, VID_W as usize, VID_H as usize);
         }
     };
     let snap_cam_image: Option<Vec<u8>> = match arg(args, "--snap-camera-image") {

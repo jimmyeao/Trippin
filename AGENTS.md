@@ -538,18 +538,27 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   dance_solo). Never open the owner's camera to test without asking. The
   macOS path (permission via `nokhwa_initialize`, `NSCameraUsageDescription`
   in release.yml's Info.plist) hasn't been compiled yet.
-- **Person cut-out** (`segment.rs`): MediaPipe selfie segmentation
-  (landscape 256x144, NCHW `pixel_values` 0..1, output `alphas`; Apache 2.0)
-  bundled from `assets/` (SHA pinned by a test; `assets/README.md` credits
-  it) and run on rten, ~3 ms a frame on the CPU. The camera thread runs it
-  only while `camera::WANT_CUTOUT` (set each frame by the render loop: the
+- **Person cut-out** (`segment.rs`): **MODNet** (portrait matting, Apache
+  2.0, Xenova/modnet's ONNX at a pinned commit, SHA-checked; 384x224 NCHW
+  in -1..1) downloaded on first use to `<data dir>/models`, run on rten
+  in a pool of its own (~58 ms a frame on 6 threads; the shared 2-thread
+  pool took ~100 ms). MediaPipe's selfie model (landscape 256x144, 0..1,
+  bundled in `assets/`, SHA pinned by a test, ~3 ms) is only the stand-in
+  until MODNet is there: on the owner's camera it kept the whole shelf and
+  chair behind him. Rejected: Robust Video Matting (best and fastest, but
+  GPL-3.0) and MediaPipe multiclass (grey haze over the room). Because
+  MODNet is slow, the camera thread hands frames to a worker
+  (`segment::Cutter`) and applies the newest mask, never waiting; the
+  frame is fully cut away until the first mask. It runs only while
+  `camera::WANT_CUTOUT` (set each frame by the render loop: the
   Person key, or `Settings::dancer_camera`), smooths the mask over frames
   and writes it into the frame's **alpha**, so `cam_tex.a` is the person
   (`cam_person()`; 1 everywhere when off) and the mips blur it for free.
   The dancer as you: slot 0's `SlotUniforms::camera` makes dancer.wgsl's
   `sample_layer`/`mask_size` read the cut-out (mirrored) instead of a
   routine's masks, so every dancer look, trail and burst applies.
-  `--seg-test <image> <out.png>` checks the model on a still;
+  `--seg-test <image> <out.png>` checks MODNet on a still (`--seg-selfie`
+  the stand-in; `TRIPPIN_SEG_TIMING=1` prints rten's per-op times);
   `--snap-cam-key 4` and `--snap-dancer-camera` with
   `--snap-camera-image` render it without a camera.
 - **A pack found twice** (the repo's dev folder ahead of the installed copy)

@@ -190,6 +190,7 @@ Default keys (all rebindable in the panel):
 | [ / ] | latency −/+ 5 ms |
 | X | cycle the post effect (off → mirrors → kaleido → lens effects) |
 | E | echo trails: auto → on → off |
+| Q | camera layer on / off (back on as behind or in front, as it was) |
 | F5 | reload shaders |
 | T | timeline play / pause |
 | G | timeline record on / off |
@@ -757,8 +758,10 @@ scene:
   it. Its dark parts show you through; lasers, particles and the dancer
   pass in front.
 - **in front**: you over the scene, cut out by a **key**: **Person (AI
-  cut-out)** finds you in any room with no screen (Google's MediaPipe
-  selfie segmentation, built in, running on the CPU in about 3 ms a frame);
+  cut-out)** finds you in any room with no screen (MODNet portrait
+  matting, a 26 MB download the first time you use it, running on the CPU
+  beside the camera; until it's downloaded a smaller built-in model stands
+  in, which can leave things right behind you, like a chair, in);
   or green screen, blue screen, dark background (for a dark room), or no
   key for the whole frame. The key works behind the scenes too: with
   Person, only you sit behind the scene, not your room. **Key tolerance** sets how much of the screen colour goes;

@@ -2317,6 +2317,17 @@ fn apply_render(
             HOLD_ECHO.store(true, Ordering::Relaxed);
             HOLD_ECHO_BEATS.store(0, Ordering::Relaxed);
         }
+        Action::ToggleCamera => {
+            if s.camera_layer == config::CamLayer::Off {
+                s.camera_layer = match s.camera_layer_last {
+                    config::CamLayer::Off => config::CamLayer::Front,
+                    l => l,
+                };
+            } else {
+                s.camera_layer_last = s.camera_layer;
+                s.camera_layer = config::CamLayer::Off;
+            }
+        }
         Action::CycleEcho => {
             s.echo = match s.echo {
                 Tristate::Auto => Tristate::On,
@@ -3974,17 +3985,24 @@ fn main() -> Result<()> {
     // beside the image (person white).
     if let Some(i) = args.iter().position(|a| a == "--seg-test") {
         let (inp, out) = (anyhow::Context::context(args.get(i + 1), "--seg-test <image> <out.png>")?, anyhow::Context::context(args.get(i + 2), "--seg-test <image> <out.png>")?);
-        let mut seg = segment::Segmenter::new()?;
+        // `--seg-selfie` checks the bundled fallback model instead of MODNet.
+        let mut seg = if args.iter().any(|a| a == "--seg-selfie") {
+            segment::Segmenter::selfie()?
+        } else {
+            segment::Segmenter::modnet()?
+        };
         println!("{}", seg.describe());
         let img = image::open(inp)?.to_rgba8();
         let (w, h) = (img.width() as usize, img.height() as usize);
-        let rgb = segment::downscale_rgb(img.as_raw(), w, h);
+        let (sw, sh) = seg.size();
+        let rgb = segment::downscale_rgb(img.as_raw(), w, h, sw, sh);
+        let _ = seg.run(&rgb)?;
         let t0 = std::time::Instant::now();
-        let mut m = Vec::new();
-        for _ in 0..20 {
+        let mut m = seg.run(&rgb)?;
+        for _ in 0..9 {
             m = seg.run(&rgb)?;
         }
-        println!("{:.1} ms a frame", t0.elapsed().as_secs_f64() * 1000.0 / 20.0);
+        println!("{:.1} ms a frame", t0.elapsed().as_secs_f64() * 1000.0 / 10.0);
         let mut px = img.into_raw();
         segment::mask_into_alpha(&m, &mut px, w, h);
         let mask: Vec<u8> = px.chunks(4).map(|p| p[3]).collect();

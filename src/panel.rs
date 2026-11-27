@@ -3900,6 +3900,7 @@ fn keys_tab(
                 Action::CycleFx,
                 Action::CycleEcho,
                 Action::HoldEcho,
+                Action::ToggleCamera,
                 Action::Blackout,
                 Action::Fullscreen,
                 Action::LeaveFullscreen,
