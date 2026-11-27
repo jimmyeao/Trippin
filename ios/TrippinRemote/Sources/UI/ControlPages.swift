@@ -36,6 +36,7 @@ struct RemoteSlider: View {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { local = nil }
                 }
             }
+            .accessibilityIdentifier("slider.\(key)")
         }
     }
 

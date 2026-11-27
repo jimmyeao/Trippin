@@ -312,6 +312,35 @@ final class RemoteFlowTests: XCTestCase {
     /// A paced tour for the App Store preview video: the host screen-records
     /// the Simulator while this runs, then trims from the first Perform frame.
     /// TRIPPIN_PREVIEW_LANDSCAPE=1 runs it in landscape (iPad).
+    /// The Look page's layer and scene-control sections against a live
+    /// Trippin 0.29.2+: cut to a camera scene, find both sections, move the
+    /// echo amount and Glow (the rig's state echoes them; the host checks
+    /// the rig's side).
+    func test9_LayersAndSceneControls() {
+        app.launchArguments = ["-uitestReset"]
+        app.launch()
+        connectManually(pin: pin)
+        wait(app.descendants(matching: .any)["link"], value: "Live", timeout: 10, "connected")
+        page("Scenes")
+        let tile = app.descendants(matching: .any)["scene.camera_outline"]
+        for _ in 0..<8 where !tile.isHittable { app.swipeUp() }
+        tile.tap()
+        page("Look")
+        let layers = app.descendants(matching: .any)["section.layers"]
+        for _ in 0..<6 where !layers.isHittable { app.swipeUp() }
+        XCTAssertTrue(layers.exists, "Layers section")
+        let echo = wait(app.sliders["slider.echo_amt"], "echo slider")
+        echo.adjust(toNormalizedSliderPosition: 0.2)
+        shot("40 layers")
+        let ctl = app.descendants(matching: .any)["section.scene_controls"]
+        for _ in 0..<6 where !ctl.isHittable { app.swipeUp() }
+        wait(ctl, "scene controls section")
+        let glow = wait(app.sliders["slider.scene_ctl:0"], "glow slider")
+        glow.adjust(toNormalizedSliderPosition: 0.75)
+        sleep(1)
+        shot("41 scene controls")
+    }
+
     func test8_PreviewTour() {
         app.launchArguments = ["-uitestReset"]
         app.launch()
