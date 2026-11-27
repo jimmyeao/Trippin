@@ -537,7 +537,12 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   open a camera: `--snap-camera <clip>` stands a pack clip in (default
   dance_solo). Never open the owner's camera to test without asking. The
   macOS path (permission via `nokhwa_initialize`, `NSCameraUsageDescription`
-  in release.yml's Info.plist) hasn't been compiled yet.
+  in release.yml's Info.plist) compiles on the M2. Two Mac-only traps: the
+  hardened-runtime app needs `com.apple.security.device.camera` in
+  `installer/macos/Entitlements.plist` (without it access is refused with no
+  prompt), and nokhwa's `Closest` matches only its exact frame format, while
+  Mac cameras offer YUYV/NV12 and no MJPEG, so `run` tries MJPEG, YUYV, NV12
+  and then any format.
 - **A pack found twice** (the repo's dev folder ahead of the installed copy)
   loads its scenes from the first copy but its clips from every copy
   (`Pack::also`, `clip_dirs`): the repo's packs carry no clips (git-ignored),
