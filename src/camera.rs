@@ -228,12 +228,27 @@ fn run(want: Arc<Mutex<String>>, frame: Arc<Mutex<Frame>>) {
                 .find(|c| c.human_name() == name)
                 .or_else(|| cams.iter().find(|c| c.human_name().to_lowercase().contains(&name.to_lowercase())))
                 .ok_or_else(|| format!("no camera named {name:?}"))?;
-            let fmt = RequestedFormat::new::<RgbFormat>(RequestedFormatType::Closest(CameraFormat::new(
-                Resolution::new(1280, 720),
-                FrameFormat::MJPEG,
-                30,
-            )));
-            let mut cam = nokhwa::Camera::new(pick.index().clone(), fmt).map_err(|e| e.to_string())?;
+            // `Closest` only matches its exact frame format: Mac cameras
+            // (FaceTime HD, Continuity) offer YUYV/NV12 and no MJPEG, so an
+            // MJPEG-only request never opened them. Try each in turn, then
+            // whatever the camera has.
+            let mut tries: Vec<RequestedFormatType> = [FrameFormat::MJPEG, FrameFormat::YUYV, FrameFormat::NV12]
+                .into_iter()
+                .map(|f| RequestedFormatType::Closest(CameraFormat::new(Resolution::new(1280, 720), f, 30)))
+                .collect();
+            tries.push(RequestedFormatType::None);
+            let mut err = String::from("no usable format");
+            let mut cam = None;
+            for t in tries {
+                match nokhwa::Camera::new(pick.index().clone(), RequestedFormat::new::<RgbFormat>(t)) {
+                    Ok(c) => {
+                        cam = Some(c);
+                        break;
+                    }
+                    Err(e) => err = e.to_string(),
+                }
+            }
+            let mut cam = cam.ok_or(err)?;
             cam.open_stream().map_err(|e| e.to_string())?;
             Ok(cam)
         });

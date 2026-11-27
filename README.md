@@ -105,6 +105,7 @@ second display); `--vsync` restores them if that ever causes trouble.
 cargo run --release                         # capture what you hear (loopback / system audio)
 cargo run --release -- --list-devices       # list capture devices
 cargo run --release -- --probe-audio "Rane" # capture ~6 s from a device, print signal + BPM
+cargo run --release -- --probe-camera        # open a camera (default: the first) ~6 s, count frames
 cargo run --release -- --beats track.flac   # old onset grid vs the Beat This! grid, with timings
 cargo run --release -- --beat-eval track.flac          # score live beat tracking + phrasing on a file
 cargo run --release -- --record-audio Mic 900 set.wav  # record an input for --beat-eval

@@ -242,6 +242,7 @@ cargo run --release -- --snap aurora --snap-dancer comic --snap-clip stock_disco
 cargo run --release -- --nowplaying       # prints what each now-playing source sees
 cargo run --release -- --list-devices     # capture devices (names for --device / the Audio in picker)
 cargo run --release -- --list-cameras     # webcams (names for Settings > Camera); opens none
+cargo run --release -- --probe-camera [name]  # OPENS a camera ~6 s and counts frames (ask the owner first)
 cargo run --release -- --probe-audio [name]   # capture ~6 s, print band peaks + BPM; exits nonzero on silence
 cargo run --release -- --beats track.flac     # onset grid vs Beat This! grid + timings (TRIPPIN_BEATS_DEBUG=1: per-30 s tempo)
 cargo run --release -- --beat-eval track.flac [from-to]   # score the live beat tracker + phrasing on a file (see §7 "Live beat tracking")
@@ -537,7 +538,12 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   open a camera: `--snap-camera <clip>` stands a pack clip in (default
   dance_solo). Never open the owner's camera to test without asking. The
   macOS path (permission via `nokhwa_initialize`, `NSCameraUsageDescription`
-  in release.yml's Info.plist) hasn't been compiled yet.
+  in release.yml's Info.plist) compiles on the M2. Two Mac-only traps: the
+  hardened-runtime app needs `com.apple.security.device.camera` in
+  `installer/macos/Entitlements.plist` (without it access is refused with no
+  prompt), and nokhwa's `Closest` matches only its exact frame format, while
+  Mac cameras offer YUYV/NV12 and no MJPEG, so `run` tries MJPEG, YUYV, NV12
+  and then any format.
 - **Person cut-out** (`segment.rs`): **MODNet** (portrait matting, Apache
   2.0, Xenova/modnet's ONNX at a pinned commit, SHA-checked; 384x224 NCHW
   in -1..1) downloaded on first use to `<data dir>/models`, run on rten
