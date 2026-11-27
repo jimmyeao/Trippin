@@ -3863,6 +3863,43 @@ fn main() -> Result<()> {
         }
         return Ok(());
     }
+    // `--probe-camera [name]` opens a camera (default: the first found) for
+    // ~6 s and counts the frames that arrive. Opens the camera: ask first.
+    if let Some(i) = args.iter().position(|a| a == "--probe-camera") {
+        let name = match args.get(i + 1).filter(|a| !a.starts_with("--")) {
+            Some(n) => n.clone(),
+            None => {
+                camera::refresh_names();
+                for _ in 0..50 {
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    if !camera::names().is_empty() {
+                        break;
+                    }
+                }
+                camera::names().first().cloned().unwrap_or_default()
+            }
+        };
+        if name.is_empty() {
+            anyhow::bail!("no cameras found");
+        }
+        let cap = camera::Capture::start();
+        cap.set(&name);
+        let (mut seen, mut frames) = (0u64, 0u32);
+        let t0 = std::time::Instant::now();
+        while t0.elapsed() < std::time::Duration::from_secs(6) {
+            if let Some((s, _)) = cap.newer(seen) {
+                seen = s;
+                frames += 1;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        cap.set("");
+        println!("camera {name:?}: {frames} frames in 6 s");
+        if frames == 0 {
+            anyhow::bail!("no frames");
+        }
+        return Ok(());
+    }
     // `--probe-audio [name]` captures ~6 s on a device (or the default tap)
     // and prints the analysed level — verifies a source carries signal
     // without opening the window.

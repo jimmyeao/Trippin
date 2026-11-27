@@ -242,6 +242,7 @@ cargo run --release -- --snap aurora --snap-dancer comic --snap-clip stock_disco
 cargo run --release -- --nowplaying       # prints what each now-playing source sees
 cargo run --release -- --list-devices     # capture devices (names for --device / the Audio in picker)
 cargo run --release -- --list-cameras     # webcams (names for Settings > Camera); opens none
+cargo run --release -- --probe-camera [name]  # OPENS a camera ~6 s and counts frames (ask the owner first)
 cargo run --release -- --probe-audio [name]   # capture ~6 s, print band peaks + BPM; exits nonzero on silence
 cargo run --release -- --beats track.flac     # onset grid vs Beat This! grid + timings (TRIPPIN_BEATS_DEBUG=1: per-30 s tempo)
 cargo run --release -- --beat-eval track.flac [from-to]   # score the live beat tracker + phrasing on a file (see §7 "Live beat tracking")
