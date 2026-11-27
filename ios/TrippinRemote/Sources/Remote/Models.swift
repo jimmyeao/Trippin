@@ -49,6 +49,25 @@ struct SongState: Equatable {
     }
 }
 
+/// One control of the scene on air (`state.scene_controls`): a camera
+/// scene's, the rotoscope look's or a Unity show's. Sent back as
+/// `scene_ctl:<index>` with the value as 0..1 of the range.
+struct SceneControl: Equatable {
+    var label: String
+    var min: Double
+    var max: Double
+    var value: Double
+    var whole: Bool
+
+    init(_ j: JSON) {
+        label = j["label"].string ?? ""
+        min = j["min"].double ?? 0
+        max = j["max"].double ?? 1
+        value = j["value"].double ?? min
+        whole = j["whole"].bool ?? false
+    }
+}
+
 /// A `state` frame (~10 Hz). Missing fields keep sane defaults.
 struct ShowState {
     var bpm = 0.0
@@ -103,6 +122,23 @@ struct ShowState {
     var tickerOn = false
     var tickerSpeed = 1.0
     var tickerText = ""
+    // The layers (Trippin 0.29.2+; nil/empty from older servers).
+    var accentAuto: Bool?
+    var accentAmt: Double?
+    /// "Auto" / "On" / "Off".
+    var echo: String?
+    var echoAmt: Double?
+    /// A camera is picked in Trippin's Settings / frames are arriving.
+    var cameraSet: Bool?
+    var cameraLive = false
+    /// "Off" / "Behind" / "Front".
+    var cameraLayer: String?
+    var cameraKey: String?
+    var cameraAmt: Double?
+    var cameraTol: Double?
+    var cameraRoto = false
+    var sceneControls: [SceneControl] = []
+    var sceneControlsTitle = ""
 
     init() {}
     init(_ j: JSON) {
@@ -150,6 +186,19 @@ struct ShowState {
         tickerOn = j["ticker_on"].bool ?? false
         tickerSpeed = j["ticker_speed"].double ?? 1
         tickerText = j["ticker_text"].string ?? ""
+        accentAuto = j["accent_auto"].bool
+        accentAmt = j["accent_amt"].double
+        echo = j["echo"].string
+        echoAmt = j["echo_amt"].double
+        cameraSet = j["camera_set"].bool
+        cameraLive = j["camera_live"].bool ?? false
+        cameraLayer = j["camera_layer"].string
+        cameraKey = j["camera_key"].string
+        cameraAmt = j["camera_amt"].double
+        cameraTol = j["camera_tol"].double
+        cameraRoto = j["camera_roto"].bool ?? false
+        sceneControls = j["scene_controls"].array.map(SceneControl.init)
+        sceneControlsTitle = j["scene_controls_title"].string ?? ""
     }
 
     /// Now playing arrives as a string or as an object with artist/title.

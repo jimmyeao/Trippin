@@ -11,6 +11,9 @@ struct RemoteSlider: View {
     let range: ClosedRange<Double>
     var step: Double? = nil
     var format: (Double) -> String = { String(format: "%.2f", $0) }
+    /// What goes on the wire for a shown value (scene controls send 0..1
+    /// of their range).
+    var wire: ((Double) -> Double)? = nil
     @State private var local: Double?
     @State private var lastSent = Date.distantPast
 
@@ -33,6 +36,7 @@ struct RemoteSlider: View {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { local = nil }
                 }
             }
+            .accessibilityIdentifier("slider.\(key)")
         }
     }
 
@@ -40,7 +44,7 @@ struct RemoteSlider: View {
         lastSent = Date()
         var out = v
         if let step { out = (v / step).rounded() * step }
-        conn.set(key, out)
+        conn.set(key, wire?(out) ?? out)
     }
 }
 
@@ -129,6 +133,7 @@ struct LookView: View {
                     RemoteSlider(title: "Amount", key: "fx_amt", value: s.fxAmt, range: 0...1)
                     RemoteToggle(title: "Auto FX on drops", key: "fx_auto", value: s.fxAuto)
                 }
+                LayersSection(s: s)
                 SectionHeader(title: "Director")
                 Card {
                     Text("Phrase length").foregroundStyle(Theme.text)
@@ -173,6 +178,73 @@ struct LookView: View {
             .padding(16)
         }
         .onAppear { if ticker.isEmpty { ticker = conn.state.tickerText } }
+    }
+}
+
+// MARK: - Layers
+
+/// The accent, echo and camera layers and the on-air scene's own controls
+/// (Trippin 0.29.2+: hidden when the server doesn't report them).
+struct LayersSection: View {
+    @EnvironmentObject var conn: Connection
+    let s: ShowState
+
+    var body: some View {
+        if s.accentAmt != nil || s.echoAmt != nil {
+            SectionHeader(title: "Layers")
+                .accessibilityIdentifier("section.layers")
+            Card {
+                if let a = s.accentAmt {
+                    RemoteSlider(title: "Accent", key: "accent_amt", value: a, range: 0...1)
+                    if s.accentAuto == false {
+                        Text("Accents are off in Trippin (Dancer & FX page).")
+                            .font(.footnote).foregroundStyle(Theme.muted)
+                    }
+                }
+                if let e = s.echoAmt {
+                    RemoteSlider(title: "Echo", key: "echo_amt", value: e, range: 0...1)
+                }
+                HStack(spacing: 10) {
+                    ActionPad(key: "CycleEcho", height: 52)
+                    ActionPad(key: "HoldEcho", height: 52)
+                }
+            }
+        }
+        if let set = s.cameraSet {
+            SectionHeader(title: "Camera layer")
+            Card {
+                if set {
+                    ActionPad(key: "ToggleCamera", height: 52)
+                    if let a = s.cameraAmt {
+                        RemoteSlider(title: "Amount", key: "camera_amt", value: a, range: 0...1)
+                    }
+                    if let t = s.cameraTol, s.cameraKey != "None" {
+                        RemoteSlider(title: "Key tolerance", key: "camera_tol", value: t, range: 0...1)
+                    }
+                    if !s.cameraLive {
+                        Text("No picture from the camera yet.").font(.footnote).foregroundStyle(Theme.muted)
+                    }
+                } else {
+                    Text("No camera picked: choose one in Trippin's Settings > Camera.")
+                        .font(.footnote).foregroundStyle(Theme.muted)
+                }
+            }
+        }
+        if !s.sceneControls.isEmpty {
+            SectionHeader(title: s.sceneControlsTitle.isEmpty ? "Scene controls" : s.sceneControlsTitle)
+                .accessibilityIdentifier("section.scene_controls")
+            Card {
+                ForEach(Array(s.sceneControls.enumerated()), id: \.offset) { i, c in
+                    let span = max(c.max - c.min, 0.0001)
+                    RemoteSlider(title: c.label, key: "scene_ctl:\(i)", value: c.value, range: c.min...max(c.max, c.min + 0.0001),
+                                 step: c.whole ? 1 : nil,
+                                 format: { c.whole ? "\(Int($0.rounded()))" : String(format: "%.2f", $0) },
+                                 wire: { ($0 - c.min) / span })
+                }
+            }
+            // A new scene's controls start fresh (no held slider state).
+            .id(s.sceneName)
+        }
     }
 }
 

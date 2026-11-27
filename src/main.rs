@@ -3003,8 +3003,22 @@ impl App {
                 } else {
                     Vec::new()
                 };
+                let (scene_controls_title, scene_controls) = remote_scene_controls(&s, on_air);
                 serde_json::json!({
                     "show_controls": show_controls,
+                    "scene_controls": scene_controls,
+                    "scene_controls_title": scene_controls_title,
+                    "accent_auto": s.accent_auto,
+                    "accent_amt": s.accent_amt,
+                    "echo": s.echo,
+                    "echo_amt": s.echo_amt,
+                    "camera_set": !s.camera.is_empty(),
+                    "camera_live": camera::LIVE.load(Ordering::Relaxed),
+                    "camera_layer": s.camera_layer,
+                    "camera_key": s.camera_key,
+                    "camera_amt": s.camera_amt,
+                    "camera_tol": s.camera_tol,
+                    "camera_roto": s.camera_roto,
                     "type": "state",
                     "bpm": st.bpm,
                     "conf": st.confidence,
@@ -4380,4 +4394,41 @@ fn main() -> Result<()> {
     event_loop.run_app(&mut app)?;
     engine::shutdown();
     Ok(())
+}
+
+/// The on-air scene's controls for the remote (`state.scene_controls`), in
+/// the order `SetKey::SceneCtl` indexes them: a camera scene's own, else the
+/// rotoscope look (the camera_roto scene or a rotoscoped camera layer), else
+/// the Unity show's. The remote sends `scene_ctl:<k>` as 0..1 of the range.
+fn remote_scene_controls(s: &config::Settings, on_air: &str) -> (String, Vec<serde_json::Value>) {
+    let row = |label: &str, min: f32, max: f32, value: f32, whole: bool| {
+        serde_json::json!({ "label": label, "min": min, "max": max, "value": value, "whole": whole })
+    };
+    let cam = camera::scene_params(on_air);
+    if !cam.is_empty() {
+        let rows = cam
+            .iter()
+            .map(|p| row(p.label, p.min, p.max, camera::param_value(&s.show_params, on_air, p), p.whole))
+            .collect();
+        return (config::titleize(on_air), rows);
+    }
+    if on_air == "camera_roto" || (s.camera_roto && s.camera_layer != config::CamLayer::Off) {
+        let rows = vec![
+            row("Amount", 0.0, 1.0, s.roto_amt, false),
+            row("Detail", 0.0, 1.0, s.roto_detail, false),
+            row("Ink", 0.0, 1.0, s.roto_ink, false),
+            row("Bands", 2.0, 8.0, s.roto_bands as f32, true),
+            row("Palette", 0.0, 1.0, s.roto_pal, false),
+        ];
+        return ("Rotoscope".to_string(), rows);
+    }
+    if showparams::has_controls(on_air) {
+        let rows = showparams::builtin()
+            .into_iter()
+            .chain(showparams::show_defs(on_air))
+            .map(|d| row(&d.label, d.min, d.max, showparams::value(&s.show_params, on_air, &d), false))
+            .collect();
+        return (config::titleize(on_air), rows);
+    }
+    (String::new(), Vec::new())
 }

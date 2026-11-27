@@ -22,6 +22,7 @@ struct PadLook {
         "ToggleLogo": "Logo", "ToggleName": "DJ name", "ToggleTicker": "Ticker",
         "Fullscreen": "Fullscreen", "TimelinePlay": "Timeline play", "TimelineRecord": "Arm record",
         "LatencyDown": "Latency −", "LatencyUp": "Latency +",
+        "CycleEcho": "Echo", "HoldEcho": "Hold echo", "HoldBurst": "Hold burst", "ToggleCamera": "Camera",
     ]
 
     /// `dancer::STYLES` by index.
@@ -66,6 +67,14 @@ struct PadLook {
         // Tristate: lit unless auto, current value underneath.
         case "CycleCanon":
             if let c = s.canon { l.subtitle = c.lowercased(); l.on = c.lowercased() == "on" }
+        case "CycleEcho":
+            if let e = s.echo { l.subtitle = e.lowercased(); l.on = e == "On" }
+        case "ToggleCamera":
+            if s.cameraSet == false {
+                l.subtitle = "none picked"
+            } else if let c = s.cameraLayer {
+                l.on = c != "Off"; l.tint = Theme.dancer; l.subtitle = c.lowercased()
+            }
         default: break
         }
         return l

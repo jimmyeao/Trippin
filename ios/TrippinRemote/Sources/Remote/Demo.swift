@@ -44,6 +44,9 @@ final class DemoServer {
     private var tickerSpeed = 1.0
     private var tickerText = "Thanks for tuning in"
     private var recOn = false
+    private var accentAmt = 0.6
+    private var echo = "Auto"
+    private var echoAmt = 0.5
     private var songPlaying = false
     private var songPos = 0.0
     private var songAt = Date()
@@ -80,6 +83,7 @@ final class DemoServer {
         ("ShowNowPlaying", "Show the now-playing card"), ("SaveClip", "Save a clip (the last 30 s)"),
         ("RecordSet", "Record set on / off"), ("MarkPhrase", "Mark phrase start"),
         ("ToggleLogo", "Logo on / off"), ("ToggleName", "DJ name on / off"), ("ToggleTicker", "Ticker on / off"),
+        ("CycleEcho", "Echo: auto / on / off"),
     ]
 
     init(deliver: @escaping (String) -> Void) {
@@ -151,6 +155,10 @@ final class DemoServer {
             "np_size": npSize, "brand_on": brandOn, "brand_opacity": brandOpacity,
             "brand_logo_on": brandLogoOn, "brand_name_on": brandNameOn, "has_logo": true, "has_name": true,
             "ticker_on": tickerOn, "ticker_speed": tickerSpeed, "ticker_text": tickerText,
+            "accent_auto": true, "accent_amt": accentAmt, "echo": echo, "echo_amt": echoAmt,
+            "camera_set": false, "camera_live": false, "camera_layer": "Off", "camera_key": "Green",
+            "camera_amt": 0.8, "camera_tol": 0.4, "camera_roto": false,
+            "scene_controls": [] as [Any], "scene_controls_title": "",
         ])
     }
 
@@ -211,6 +219,7 @@ final class DemoServer {
         case "ToggleName": brandNameOn.toggle(); brandOn = brandOn || brandNameOn
         case "ToggleTicker": tickerOn.toggle()
         case "MarkDownbeat", "MarkPhrase": barStart = Date()
+        case "CycleEcho": echo = ["Auto": "On", "On": "Off"][echo] ?? "Auto"
         default: break
         }
     }
@@ -232,6 +241,8 @@ final class DemoServer {
         case "brand_opacity": if let d { brandOpacity = min(max(d, 0.1), 1) }
         case "ticker_speed": if let d { tickerSpeed = min(max(d, 0.3), 3) }
         case "ticker_text": if let s = v as? String { tickerText = s }
+        case "accent_amt": if let d { accentAmt = min(max(d, 0), 1) }
+        case "echo_amt": if let d { echoAmt = min(max(d, 0), 1) }
         default: emit(["type": "err", "msg": "\"\(key)\" isn't remotely settable"])
         }
     }
