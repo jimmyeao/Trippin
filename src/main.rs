@@ -4030,7 +4030,8 @@ fn main() -> Result<()> {
         return Ok(());
     }
     // `--probe-camera [name]` opens a camera (default: the first found) for
-    // ~6 s and counts the frames that arrive. Opens the camera: ask first.
+    // ~6 s (after up to 30 s for permission) and counts the frames that arrive.
+    // Opens the camera: ask first.
     if let Some(i) = args.iter().position(|a| a == "--probe-camera") {
         let name = match args.get(i + 1).filter(|a| !a.starts_with("--")) {
             Some(n) => n.clone(),
@@ -4050,6 +4051,17 @@ fn main() -> Result<()> {
         }
         let cap = camera::Capture::start();
         cap.set(&name);
+        // Up to 30 s for the first frame (a permission prompt may be up),
+        // then count for 6 s.
+        let wait = std::time::Instant::now();
+        while !camera::LIVE.load(std::sync::atomic::Ordering::Relaxed)
+            && wait.elapsed() < std::time::Duration::from_secs(30)
+        {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        if camera::refused() {
+            println!("camera access refused (System Settings > Privacy & Security > Camera)");
+        }
         let (mut seen, mut frames) = (0u64, 0u32);
         let t0 = std::time::Instant::now();
         while t0.elapsed() < std::time::Duration::from_secs(6) {
