@@ -341,7 +341,8 @@ dancer, as they are on screen right now. One tap recalls it.
   `drone_title` (spells the playing track's title, flies about, spells the
   artist, over a city harbour; the DJ name when nothing is playing) and
   `drone_xmas` (seasonal: tree, star, MERRY CHRISTMAS, snowman, snowflake,
-  bell, your DJ name and a present over a snowy village).
+  bell, your DJ name, a present, and Santa's sleigh pulled by galloping
+  reindeer with Rudolph in front, over a snowy village).
 - **Pulse / particle:** `shockwaves`, `pulse_grid`, `rings`,
   `bounce` (orbs hopping on a lit floor), `ripple` (beat-spawned water
   rings), `stardrive`, `orbiters`, `ribbons`, `ink`, `flare_ring`

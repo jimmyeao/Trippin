@@ -3,9 +3,10 @@
 // @no-dancer
 // Christmas Drone Show: 8,000 drones over a snowy village fly a Christmas
 // show, a new figure every two bars: a tree, a star, MERRY CHRISTMAS, a
-// snowman, a snowflake, a bell, the DJ's name (or HAPPY HOLIDAYS) and a
-// present. Each figure turns, swings or pumps with the music (shape and
-// motion), each change is a flight with every drone on its own arc, a hop
+// snowman, a snowflake, a bell, the DJ's name (or HAPPY HOLIDAYS), a
+// present, and Santa on his sleigh pulled by three reindeer (Rudolph in
+// front) galloping a stride a beat, trailing stardust. Each figure turns,
+// swings, gallops or pumps with the music (shape and motion), each change is a flight with every drone on its own arc, a hop
 // runs along the words on the beat, and snow falls. Seasonal (config.rs).
 // Two-line title (gfx.rs).
 
@@ -412,10 +413,180 @@ const GREEN: vec3<f32> = vec3<f32>(0.15, 0.9, 0.3);
 const GOLD: vec3<f32> = vec3<f32>(1.0, 0.7, 0.2);
 const WHITE: vec3<f32> = vec3<f32>(0.9, 0.93, 1.0);
 
-// Slots, two bars each: 0 tree, 1 star, 2 MERRY CHRISTMAS, 3 snowman,
-// 4 snowflake, 5 bell, 6 the DJ line, 7 present.
+// Figures: 0 tree, 1 star, 2 MERRY CHRISTMAS, 3 snowman, 4 snowflake,
+// 5 bell, 6 the DJ line, 7 present, 8 Santa's sleigh. Two bars each, in a
+// sixteen-slot running order (it divides the 512 slots the bar count wraps
+// at) that brings the sleigh round three times.
 fn slot(bar: u32) -> u32 {
-    return (bar / 2u) % 8u;
+    switch (bar / 2u) % 16u {
+        case 0u: { return 0u; }
+        case 1u: { return 1u; }
+        case 2u: { return 2u; }
+        case 3u: { return 8u; }
+        case 4u: { return 3u; }
+        case 5u: { return 4u; }
+        case 6u: { return 6u; }
+        case 7u: { return 5u; }
+        case 8u: { return 8u; }
+        case 9u: { return 7u; }
+        case 10u: { return 2u; }
+        case 11u: { return 1u; }
+        case 12u: { return 4u; }
+        case 13u: { return 8u; }
+        case 14u: { return 6u; }
+        default: { return 3u; }
+    }
+}
+
+// A point in a filled ellipse, and on a thick segment, for two randoms.
+fn ell(c: vec2<f32>, rad: vec2<f32>, a: f32, b: f32) -> vec2<f32> {
+    return c + ring(a * TAU, sqrt(b)) * rad;
+}
+
+fn seg(a: vec2<f32>, b: vec2<f32>, w: f32, t: f32, s: f32) -> vec2<f32> {
+    let d = b - a;
+    let n = normalize(vec2<f32>(-d.y, d.x) + vec2<f32>(1e-5, 0.0));
+    return a + d * t + n * (s - 0.5) * w;
+}
+
+// Down a leg swung by angle a (positive: the foot forward).
+fn leg_dir(a: f32) -> vec2<f32> {
+    return vec2<f32>(sin(a), -cos(a));
+}
+
+// Where reindeer k is (its body's middle): in single file ahead of the
+// sleigh, bobbing with its own stride.
+fn deer_at(k: u32) -> vec2<f32> {
+    let ph = fract(fract(u.beat) + f32(k) * 0.17);
+    return vec2<f32>(-0.4 + 1.7 * f32(k), 0.1 + 0.09 * abs(sin(PI * ph)));
+}
+
+// Santa on his sleigh, side on and heading right, pulled by three reindeer
+// whose legs gallop a stride a beat (front and back pairs half a stride
+// apart), Rudolph's red nose in front, gold reins sagging from Santa's
+// hand, and stardust streaming behind. Design units, roughly x -6.5..4.4.
+fn sleigh(i: u32, r: vec4<f32>) -> Form {
+    let r5 = sim_rand(i, 17u);
+    var q = vec2<f32>(0.0);
+    var col = RED;
+    var lit = 1.0;
+    if r.y < 0.42 {
+        let k = min(u32(r.y / 0.14), 2u);
+        let sub = fract(r.y / 0.14);
+        let o = deer_at(k);
+        let ph = fract(fract(u.beat) + f32(k) * 0.17);
+        col = vec3<f32>(0.85, 0.52, 0.26);
+        if sub < 0.4 {
+            q = ell(o, vec2<f32>(0.5, 0.21), r.x, r.z);
+        } else if sub < 0.5 {
+            q = seg(o + vec2<f32>(0.36, 0.05), o + vec2<f32>(0.62, 0.45), 0.16, r.x, r.z);
+        } else if sub < 0.58 {
+            q = ell(o + vec2<f32>(0.74, 0.5), vec2<f32>(0.17, 0.085), r.x, r.z);
+        } else if sub < 0.68 {
+            // Antlers: two beams sweeping back and up, each with two tines.
+            let base = o + vec2<f32>(select(0.66, 0.59, r.z < 0.5), 0.57);
+            let tip = base + vec2<f32>(-0.22, 0.38);
+            let part = u32(r.w * 3.0) % 3u;
+            if part == 0u {
+                q = seg(base, tip, 0.045, r.x, r5);
+            } else {
+                let at = mix(base, tip, select(0.4, 0.75, part == 2u));
+                q = seg(at, at + vec2<f32>(0.12, 0.13), 0.04, r.x, r5);
+            }
+            col = vec3<f32>(1.0, 0.9, 0.72);
+        } else if sub < 0.96 {
+            // Legs: thigh and shin, swinging about the hip; each knee
+            // folds as its leg comes forward off the ground.
+            let leg = u32(r.z * 4.0) % 4u;
+            let front = leg < 2u;
+            let lp = fract(ph + select(0.5, 0.0, front) + f32(leg % 2u) * 0.12);
+            let ang = 0.7 * sin(TAU * lp);
+            let fold = 0.5 + 0.5 * cos(TAU * lp);
+            let hip = o + vec2<f32>(select(-0.36, 0.34, front), -0.12);
+            let knee = hip + leg_dir(ang) * 0.3;
+            let foot = knee + leg_dir(ang + select(0.6, -0.9, front) * fold) * 0.3;
+            q = select(seg(knee, foot, 0.06, r.x, r5), seg(hip, knee, 0.09, r.x, r5), r.w < 0.5);
+        } else {
+            if k == 2u && r.w < 0.6 {
+                q = ell(o + vec2<f32>(0.93, 0.5), vec2<f32>(0.065), r.x, r.z);
+                col = vec3<f32>(1.0, 0.05, 0.05);
+            } else {
+                q = ell(o + vec2<f32>(-0.53, 0.12), vec2<f32>(0.08, 0.05), r.x, r.z);
+            }
+        }
+    } else if r.y < 0.6 {
+        // The sleigh: a red tub, higher at the back with a gold rim, a
+        // curled front, and gold runners on struts.
+        let sub = fract((r.y - 0.42) / 0.18);
+        if sub < 0.55 {
+            let x = mix(-3.7, -1.75, r.x);
+            let top = 0.5 + 0.3 * smoothstep(-2.6, -3.7, x);
+            q = vec2<f32>(x, mix(-0.35, top, r.z));
+            col = select(RED, GOLD, r.z > 0.93);
+        } else if sub < 0.7 {
+            q = vec2<f32>(-1.75, 0.12) + ring(r.x * 1.6 * PI - 0.5 * PI, 0.4 * mix(0.7, 1.0, r.z));
+        } else if sub < 0.9 {
+            if r.z < 0.72 {
+                q = seg(vec2<f32>(-3.9, -0.75), vec2<f32>(-1.5, -0.75), 0.06, r.x, r5);
+            } else {
+                q = vec2<f32>(-1.5, -0.45) + ring(-0.5 * PI + r.x * 1.2 * PI, 0.3);
+            }
+            col = GOLD;
+        } else {
+            let sx = select(-3.3, -2.05, r.z < 0.5);
+            q = seg(vec2<f32>(sx, -0.75), vec2<f32>(sx, -0.35), 0.06, r.x, r5);
+            col = GOLD;
+        }
+    } else if r.y < 0.76 {
+        // Santa: red coat trimmed white, face, beard, hat and pompom, one
+        // arm out on the reins.
+        let sub = fract((r.y - 0.6) / 0.16);
+        if sub < 0.45 {
+            q = ell(vec2<f32>(-2.55, 0.85), vec2<f32>(0.4, 0.45), r.x, r.z);
+            col = select(RED, WHITE, q.y < 0.52);
+        } else if sub < 0.55 {
+            q = ell(vec2<f32>(-2.35, 1.42), vec2<f32>(0.17), r.x, r.z);
+            col = vec3<f32>(1.0, 0.72, 0.58);
+        } else if sub < 0.7 {
+            q = ell(vec2<f32>(-2.27, 1.22), vec2<f32>(0.18, 0.22), r.x, r.z);
+            col = WHITE;
+        } else if sub < 0.85 {
+            if r.w < 0.3 {
+                q = seg(vec2<f32>(-2.6, 1.56), vec2<f32>(-2.12, 1.56), 0.09, r.x, r5);
+                col = WHITE;
+            } else {
+                q = seg(vec2<f32>(-2.38, 1.58), vec2<f32>(-2.75, 1.92), 0.34 * (1.0 - r.x) + 0.04, r.x, r5);
+            }
+        } else if sub < 0.9 {
+            q = ell(vec2<f32>(-2.78, 1.92), vec2<f32>(0.08), r.x, r.z);
+            col = WHITE;
+        } else {
+            q = seg(vec2<f32>(-2.35, 1.0), vec2<f32>(-1.95, 0.8), 0.13, r.x, r5);
+        }
+    } else if r.y < 0.81 {
+        // The sack of presents behind him.
+        q = ell(vec2<f32>(-3.25, 0.85), vec2<f32>(0.36, 0.42), r.x, r.z);
+        col = vec3<f32>(0.8, 0.5, 0.22);
+    } else if r.y < 0.88 {
+        // Reins from his hand to each reindeer's collar, sagging.
+        let k = u32(r.z * 3.0) % 3u;
+        let b = deer_at(k) + vec2<f32>(0.42, 0.15);
+        q = mix(vec2<f32>(-1.95, 0.8), b, r.x) - vec2<f32>(0.0, 0.18 * sin(PI * r.x));
+        col = GOLD;
+    } else {
+        // Stardust streaming out behind, fading as it goes; dark where a
+        // grain wraps round to the sleigh again.
+        let t = fract(r.x + u.time * 0.35);
+        let x = -3.9 - t * 2.6;
+        q = vec2<f32>(x, -0.6 + 0.25 * sin(x * 2.5 + u.time * 2.0) * t + (r.z - 0.5) * 0.35 * t);
+        col = mix(GOLD, WHITE, r.w);
+        lit = smoothstep(0.0, 0.08, t) * (1.0 - t);
+    }
+    // The team rides the phrase up and down, nose up a little.
+    var p2 = (q + vec2<f32>(0.9, -0.5)) * 0.8;
+    p2.y += 0.12 * sin(TAU * u.flow / 16.0);
+    p2 = rot(0.06 + 0.04 * sin(TAU * u.flow / 32.0)) * p2;
+    return mk(vec3<f32>(p2, (r5 - 0.5) * 0.12), col, lit);
 }
 
 fn star5(t: f32) -> vec2<f32> {
@@ -445,6 +616,10 @@ fn slot_form(s: u32, i: u32) -> Form {
     var p = vec3<f32>(0.0);
     var col = WHITE;
     switch s {
+        case 8u: {
+            let f = sleigh(i, r);
+            return mk(CENTRE + f.p * 1.35, f.col, f.lit);
+        }
         case 0u: {
             // A tree: a cone of drones hung with coloured bulbs, a gold star
             // on top, turning; the kick shakes the bulbs bright.
