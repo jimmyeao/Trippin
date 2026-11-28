@@ -16,6 +16,8 @@
   "caustics": ["organic", "cold", "slow"],
   "chevrons": ["geometric", "neon", "driving"],
   "christmas": ["seasonal", "bright", "warm"],
+  "xmas_icons": ["seasonal", "bright", "warm"],
+  "xmas_snowflakes": ["seasonal", "cold", "geometric"],
   "chrome_bloom": ["abstract", "slow", "dark"],
   "chrome_ferro": ["abstract", "slow", "dark"],
   "chrome_spheres": ["abstract", "geometric", "slow"],
