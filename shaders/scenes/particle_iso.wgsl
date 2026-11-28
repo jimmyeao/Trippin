@@ -129,7 +129,7 @@ fn view(w_in: vec3<f32>, ya: f32) -> vec3<f32> {
     let wy = rot(ya) * w.xz;
     w = vec3<f32>(wy.x, w.y, wy.y);
     let wp = rot(0.6155) * w.yz;
-    return vec3<f32>(w.x, wp.x - 0.05, wp.y + 9.0);
+    return vec3<f32>(w.x, wp.x + 0.3, wp.y + 9.0);
 }
 
 @vertex
@@ -139,7 +139,7 @@ fn vs_particles(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32
     let ya = yaw();
     let w = pp.pos.xyz;
     let a = view(w, ya);
-    let s = sim_quad(a, view(w - pp.vel.xyz * 0.03, ya), vi, 0.006, 6.8);
+    let s = sim_quad(a, view(w - pp.vel.xyz * 0.03, ya), vi, 0.006, 6.0);
     o.pos = s.pos;
     o.q = s.q;
     let c = palette(0.1 + 0.55 * pp.pos.w + 0.15 * pp.vel.w);
