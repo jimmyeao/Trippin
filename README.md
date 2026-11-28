@@ -325,8 +325,8 @@ dancer, as they are on screen right now. One tap recalls it.
   lattice), `particle_rose` (a polar-rose flower that changes its petal
   count), `particle_smoke_rings` (rising vortex rings) and
   `particle_dandelion` (seeds blowing away on the wind).
-- **Shape-changing particles** change shape on the beat, landing on the
-  hit, each beat its own size and the kick pumping it bigger, as solid
+- **Shape-changing particles** change shape on the bar (Particle Morph)
+  or the beat, landing on the hit, growing and shrinking with the beat, as solid
   clouds of light with glowing edges: `particle_morph` (an isometric cube,
   six-point cross, octahedron, star of David, torus, stella octangula,
   spiked star and hexagonal prism, ticking a quarter turn every two

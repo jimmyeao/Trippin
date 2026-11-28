@@ -57,8 +57,8 @@ pub enum ArtHint {
     /// An image URL (Spotify on macOS reports one).
     #[allow(dead_code)] // built on macOS only
     Url(String),
-    /// The encoded image itself (the Windows media session's thumbnail).
-    #[allow(dead_code)] // built on Windows only
+    /// The encoded image itself (the Windows media session's thumbnail,
+    /// a streamed Apple Music track's artwork on macOS).
     Bytes(Arc<Vec<u8>>),
 }
 
@@ -1020,12 +1020,47 @@ mod media {
     use super::*;
 
     /// Spotify / Apple Music via AppleScript (no private frameworks needed).
-    pub struct MediaSession;
+    pub struct MediaSession {
+        /// The Music track whose artwork was last exported ("artist\ttitle"),
+        /// and what came of it, so a streamed track's cover is fetched once.
+        art_key: String,
+        art: ArtHint,
+    }
 
     impl MediaSession {
         pub fn new() -> Self {
-            Self
+            Self { art_key: String::new(), art: ArtHint::None }
         }
+    }
+
+    /// The current Music track's artwork as encoded image bytes. Streamed
+    /// (Apple Music) tracks have no file to read a cover from, but Music
+    /// hands over the artwork itself; AppleScript can only write it to a
+    /// file, so it goes through a temp file that is read back and removed.
+    fn music_artwork() -> Option<Vec<u8>> {
+        let path = std::env::temp_dir().join(format!("trippin-music-art-{}", std::process::id()));
+        let script = "on run argv\n\
+             tell application \"Music\"\n\
+             if (count of artworks of current track) is 0 then return \"\"\n\
+             set d to raw data of artwork 1 of current track\n\
+             end tell\n\
+             set fh to open for access POSIX file (item 1 of argv) with write permission\n\
+             try\n\
+             set eof fh to 0\n\
+             write d to fh\n\
+             end try\n\
+             close access fh\n\
+             return \"ok\"\n\
+             end run";
+        let out = std::process::Command::new("osascript")
+            .args(["-e", script])
+            .arg(&path)
+            .output()
+            .ok()?;
+        let ok = String::from_utf8_lossy(&out.stdout).trim() == "ok";
+        let bytes = if ok { std::fs::read(&path).ok() } else { None };
+        let _ = std::fs::remove_file(&path);
+        bytes.filter(|b| b.len() > 64)
     }
 
     /// Per-app script. Only run for an app that's running: a script naming
@@ -1081,6 +1116,14 @@ mod media {
                         ArtHint::Url(art.into())
                     } else if art.starts_with('/') {
                         ArtHint::Files(vec![art.into()])
+                    } else if app == "Music" {
+                        // Streamed: ask Music for the artwork, once a track.
+                        let key = format!("{artist}\t{title}");
+                        if key != self.art_key {
+                            self.art_key = key;
+                            self.art = music_artwork().map_or(ArtHint::None, |b| ArtHint::Bytes(Arc::new(b)));
+                        }
+                        self.art.clone()
                     } else {
                         ArtHint::None
                     };

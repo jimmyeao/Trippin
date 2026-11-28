@@ -1,11 +1,11 @@
 // @sim 140000 @bloom 0.5 @tonemap agx
 // @title Particle Morph
 // Particle Morph: 140,000 points in solid geometric figures, seen
-// isometrically from above, that change on every beat: a cube, a six-point
-// cross, an octahedron, a star of David, a torus, a stella octangula, a
-// spiked star and a hexagonal prism, each screwing in and landing inside
-// half a beat, every beat its own size and the kick pumping it bigger
-// (shape). Faces glow faintly and edges brightest. The figure ticks a
+// isometrically from above, that change on every bar line: a cube, a
+// six-point cross, an octahedron, a star of David, a torus, a stella
+// octangula, a spiked star and a hexagonal prism, each screwing in and
+// landing inside half a beat, and every beat pumping it bigger before it
+// shrinks back, the bar's one biggest (shape). Faces glow faintly and edges brightest. The figure ticks a
 // quarter turn every two beats (motion) and swings the other way each
 // phrase (direction); in breakdowns a figure a bar, turning steadily.
 // Every point is simulated: kicks blast it out, snares wrench it round.
@@ -174,35 +174,26 @@ fn fill(i: u32) -> f32 {
     return 0.96 * pow((r - 0.6) / 0.4, 0.3333);
 }
 
-// The beat's own size: big on the one, small on the two, and so on.
-fn beat_size(n: u32) -> f32 {
-    switch n % 4u {
-        case 0u: { return 1.18; }
-        case 1u: { return 0.8; }
-        case 2u: { return 1.04; }
-        default: { return 0.74; }
-    }
-}
-
 // Where the morph stands: (from, to figure, progress 0..1 for this
-// particle, size). A new figure on every beat, landing fast (ease out over
-// under half a beat); in breakdowns one a bar, eased over a beat and a half.
+// particle). A new figure on every bar line, landing fast (eased out over
+// half a beat); in breakdowns one every two bars, eased over a beat and a
+// half. Bars come from the beat count less the bar phase, so morphs land
+// on the one, and the count of figures divides the 1024-bar wrap.
 struct Morph {
     a: u32,
     b: u32,
     e: f32,
-    s: f32,
 };
 
 fn morph(i: u32) -> Morph {
-    let bt = u32(max(floor(u.beat), 0.0));
+    let bar = u32(max(floor((u.beat - u.bar_phase * 4.0) / 4.0 + 0.5), 0.0));
     let slow = u.calm > 0.5;
-    var idx = bt;
-    var into = fract(u.beat);
-    var len = 0.42;
+    var idx = bar;
+    var into = u.bar_phase * 4.0;
+    var len = 0.5;
     if slow {
-        idx = bt / 4u;
-        into += f32(bt % 4u);
+        idx = bar / 2u;
+        into += f32(bar % 2u) * 4.0;
         len = 1.5;
     }
     // Points ripple across, a tenth of the morph from first to last.
@@ -212,8 +203,20 @@ fn morph(i: u32) -> Morph {
     m.a = (idx + NSHAPES - 1u) % NSHAPES;
     m.b = idx % NSHAPES;
     m.e = 1.0 - ex * ex * ex;
-    m.s = select(mix(beat_size(idx + 3u), beat_size(idx), m.e), 1.0, slow);
     return m;
+}
+
+// The figure's size on the beat: it grows fast on every beat and shrinks
+// back across it, the bar's one biggest. In breakdowns it breathes slowly
+// on the phrase instead.
+fn beat_size() -> f32 {
+    let ph = fract(u.beat_phase);
+    let env = smoothstep(0.0, 0.07, ph) * exp(-3.2 * ph);
+    let one = u32(floor(u.bar_phase * 4.0 + 0.02)) % 4u == 0u;
+    let accent = select(0.75, 1.0, one);
+    let pump = 0.82 + 0.45 * env * accent;
+    let breathe = 0.92 + 0.06 * sin(TAU * u.flow / 8.0);
+    return mix(pump, breathe, u.calm);
 }
 
 // Particle i's place in the figure (morph included), and its colour key.
@@ -228,10 +231,11 @@ fn home(i: u32) -> vec4<f32> {
     let ang = (1.0 - m.e) * 0.8 * sgn(m.b % 2u == 0u) + p.y * 0.9 * u.lvl4.y;
     let q = rot(ang) * p.xz;
     p = vec3<f32>(q.x, p.y, q.y);
-    // Each beat sets its size; the kick pumps it bigger and stretches it.
+    // Each beat pumps it bigger and lets it shrink back; the kick adds a
+    // little more and stretches it upright.
     let ks = kick_swell();
-    p *= 0.86 * m.s * (1.0 + 0.38 * ks + 0.08 * u.pres4.x);
-    p.y *= 1.0 + 0.18 * ks;
+    p *= 0.95 * beat_size() * (1.0 + 0.12 * ks + 0.06 * u.pres4.x);
+    p.y *= 1.0 + 0.12 * ks;
     // w: the colour key (figure + progress, 0..8) plus 16 x the edge
     // weight in 16 steps, unpacked by the draw.
     return vec4<f32>(p, mix(f32(m.a), f32(m.b), m.e) + 16.0 * floor(sh.w * 15.0 + 0.5));

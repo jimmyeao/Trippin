@@ -1443,8 +1443,6 @@ impl Renderer {
     }
 
     /// Upload an external frame (RGBA8, EXT_W x EXT_H) for `ext_tex`.
-    /// Draw the now-playing line into the title texture; returns the width
-    /// fraction for `u.look4.w` (gfx::Statics::upload_title).
     /// Put a webcam frame into the camera texture (gfx::Statics::upload_cam).
     pub fn upload_cam(&self, rgba: &[u8]) {
         self.statics.upload_cam(&self.queue, rgba);
@@ -1455,11 +1453,9 @@ impl Renderer {
         self.statics.upload_logo(&self.queue, img);
     }
 
-    pub fn upload_title(&self, bmp: &crate::text::TextBitmap) -> f32 {
-        self.statics.upload_title(&self.queue, bmp)
-    }
-
-    /// One line, or two separated by a newline (gfx::Statics::upload_title_text).
+    /// Draw the now-playing line into the title texture: one line, or two
+    /// separated by a newline; returns `u.look4.w`
+    /// (gfx::Statics::upload_title_text).
     pub fn upload_title_text(&self, text: &str) -> f32 {
         self.statics.upload_title_text(&self.queue, text)
     }

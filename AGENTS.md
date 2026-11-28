@@ -445,14 +445,16 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   first versions: "underwhelming", reactivity "very basic" (a mid-morph
   burst and a small kick swell read as pulsing), and outlines should be
   "a filled in particle cloud". What works:
-  - **Morph on the beat:** the figure index is `floor(u.beat)` (every two
-    beats for the detailed Christmas icons; one a bar in breakdowns) mod a
-    count that divides 4096, eased *out* (`1-(1-x)^3`) over under half a
-    beat so it lands on the hit. Bar-indexed layouts (Iso) use
-    `floor((u.beat - u.bar_phase*4)/4 + 0.5)` and must divide 1024.
-  - **Grow/shrink:** each beat sets its own size (`beat_size`: 1.15, 0.8,
-    1.0, 0.76), eased with the morph, and `kick_swell()` pumps it ~35%;
-    the new figure screws in a fraction of a turn as it lands.
+  - **Change on the bar, grow/shrink on the beat** (owner, after a
+    version that changed shape every beat: "my goal was to have it
+    grow/shrink with the beat, and change on the bar"). The figure index
+    is the bar (`floor((u.beat - u.bar_phase*4)/4 + 0.5)`, a count that
+    divides 1024; two bars in breakdowns), eased *out* (`1-(1-x)^3`) over
+    half a beat so it lands on the one. Size: a beat envelope
+    (`smoothstep(0,0.07,ph)*exp(-3.2*ph)` on `beat_phase`, the bar's one
+    biggest) pumps it ~45% and lets it shrink back; `kick_swell()` adds a
+    little. particle_polygons and the Christmas scenes still change shape
+    every beat or two (the owner hasn't ruled on those).
   - **Filled solids:** 60% of the points on the skin (`fill() == 1`), the
     rest spread through the volume (`cbrt`), the same `f` for every figure
     so skin morphs into skin. Box surfaces: a random point in the cube
