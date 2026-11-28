@@ -147,5 +147,11 @@
   "warp_grid": 0.6,
   "waveform": 0.84,
   "waveshaper": 0.49,
-  "wire_terrain": 0.92
+  "wire_terrain": 0.92,
+  "now_playing": 0.68,
+  "particle_iso": 0.83,
+  "particle_morph": 0.55,
+  "particle_polygons": 0.44,
+  "xmas_icons": 0.66,
+  "xmas_snowflakes": 0.61
 }
