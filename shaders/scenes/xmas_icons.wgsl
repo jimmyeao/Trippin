@@ -1,10 +1,9 @@
 // @sim 127000 @bloom 0.55 @tonemap agx
 // @title Christmas Icons
-// Christmas Icons: 120,000 coloured lights that snap from one Christmas
-// figure to the next on every bar line: a tree wound with a garland, a
-// star, a bauble, a candy cane, a bell, a snowflake, a wrapped present and
-// a wreath, each bursting open and pulling into the next over the bar's
-// first beat (shape), while 7,000 snowflakes drift down behind. The
+// Christmas Icons: 120,000 coloured lights in solid Christmas figures that
+// change every two beats: a tree hung with bulbs, a star, a bauble, a candy
+// cane, a bell, a snowflake, a wrapped present and a wreath, each spinning
+// in and landing inside half a beat, pumped bigger by the kick (shape), while 7,000 snowflakes drift down behind. The
 // figure sways on the smooth clocks, swinging back each phrase (direction),
 // the bell rings on the beat, and kicks blast the lights out and gust the
 // snow (motion). Every light is simulated. Seasonal (see config.rs).
@@ -43,64 +42,61 @@ fn star5_corner(k: u32) -> vec2<f32> {
     return ring(a, select(1.0, 0.42, (k % 2u) == 1u));
 }
 
-// Figure k's point (y up, about +-1.2) for the light with randoms r.
-fn shape(k: u32, r: vec4<f32>) -> vec3<f32> {
+// A point in or on a box: on its surface (uniform per face) pulled in by f.
+fn box_pt(c: vec3<f32>, h: vec3<f32>, r3: vec3<f32>, f: f32) -> vec3<f32> {
+    var d = r3 * 2.0 - 1.0;
+    d /= max(max(abs(d.x), abs(d.y)), max(abs(d.z), 1e-4));
+    return c + d * h * f;
+}
+
+// A point on the unit sphere for two randoms.
+fn sph(a: f32, b: f32) -> vec3<f32> {
+    let z = a * 2.0 - 1.0;
+    let q = ring(b * TAU, sqrt(max(0.0, 1.0 - z * z)));
+    return vec3<f32>(q.x, z, q.y);
+}
+
+// Figure k's point (y up, about +-1.2) for the light with randoms r: solid
+// figures, filled. f (0..1) is how deep the light sits (1 = the skin, where
+// 60% of them are), the same for every figure, so skin morphs into skin.
+fn shape(k: u32, r: vec4<f32>, f: f32) -> vec3<f32> {
     let t = r.x;
     switch k {
         case 0u: {
-            // Tree: a garland spiralling up a cone, three tier rims, a
-            // trunk and a little star on top.
-            if r.y < 0.55 {
-                let h = t;
-                let rad = 0.95 * (1.0 - h);
-                let a = h * TAU * 6.0;
-                return vec3<f32>(cos(a) * rad, -1.0 + 2.1 * h, sin(a) * rad);
-            } else if r.y < 0.8 {
-                let tier = floor(r.z * 3.0);
-                let h = tier / 3.0;
-                let rad = 0.95 * (1.0 - h) + 0.08;
-                let q = ring(t * TAU, rad);
-                return vec3<f32>(q.x, -1.0 + 2.1 * h + 0.05 * sin(t * TAU * 12.0), q.y);
+            // Tree: three stacked cones, a trunk and a star on top. The
+            // bulbs (r.y < 0.16) sit on the skin.
+            if r.y < 0.84 {
+                let tier = floor(fract(r.y * 13.0) * 3.0);
+                let base = -0.85 + tier * 0.55;
+                let rad = 0.95 - tier * 0.22;
+                let h = 1.0 - sqrt(t);
+                let ff = select(f, 1.0, r.y < 0.16);
+                let q = ring(r.z * TAU, rad * (1.0 - h) * ff);
+                return vec3<f32>(q.x, base + h * 0.85, q.y);
             } else if r.y < 0.9 {
-                let q = ring(t * TAU, 0.12);
-                return vec3<f32>(q.x, -1.0 - 0.25 * r.z, q.y);
+                return box_pt(vec3<f32>(0.0, -1.0, 0.0), vec3<f32>(0.12, 0.15, 0.12), r.zwx, f);
             }
-            let q = star5(t) * 0.17;
-            return vec3<f32>(q.x, 1.22 + q.y, 0.0);
+            let q = star5(t) * 0.2 * f;
+            return vec3<f32>(q.x, 1.18 + q.y, (r.z * 2.0 - 1.0) * 0.05);
         }
         case 1u: {
-            // Star: the outline, and ridges from each corner to a raised
-            // centre front and back.
-            if r.y < 0.5 {
-                let q = star5(t) * 1.15;
-                return vec3<f32>(q.x, q.y, 0.0);
-            }
-            let c = star5_corner(u32(r.z * 10.0) % 10u) * 1.15;
-            let z = sgn(r.w > 0.5) * 0.32;
-            return mix(vec3<f32>(c, 0.0), vec3<f32>(0.0, 0.0, z), t);
+            // Star: a solid five-point star, thickest at its heart.
+            let q = star5(t) * 1.15 * f;
+            return vec3<f32>(q.x, q.y, (r.y * 2.0 - 1.0) * 0.32 * (1.0 - 0.8 * f * length(star5(t))));
         }
         case 2u: {
-            // Bauble: a wire globe, its cap and the hanging loop.
-            if r.y < 0.82 {
-                let c = vec3<f32>(0.0, -0.15, 0.0);
-                if r.z < 0.6 {
-                    let ph = floor(r.w * 8.0) / 8.0 * PI;
-                    let th = t * TAU;
-                    return c + vec3<f32>(sin(th) * cos(ph), cos(th), sin(th) * sin(ph)) * 0.88;
-                }
-                let lat = (floor(r.w * 4.0) + 1.0) / 5.0 * PI;
-                let q = ring(t * TAU, sin(lat) * 0.88);
-                return c + vec3<f32>(q.x, cos(lat) * 0.88, q.y);
-            } else if r.y < 0.94 {
-                let q = ring(t * TAU, 0.2);
-                return vec3<f32>(q.x, 0.72 + 0.14 * r.z, q.y);
+            // Bauble: a solid ball, its cap and the hanging loop.
+            if r.y < 0.86 {
+                return vec3<f32>(0.0, -0.15, 0.0) + sph(t, r.z) * 0.88 * f;
+            } else if r.y < 0.95 {
+                let q = ring(r.z * TAU, 0.2 * f);
+                return vec3<f32>(q.x, 0.72 + 0.14 * r.w, q.y);
             }
             let q = ring(t * TAU, 0.12);
             return vec3<f32>(q.x, 1.0 + q.y, 0.0);
         }
         case 3u: {
-            // Candy cane: two stripes wound round a hooked tube.
-            let stripe = select(0.0, PI, r.y < 0.5);
+            // Candy cane: a solid hooked tube; r.y < 0.5 are the red stripes.
             let len_s = 1.7;
             let len_h = PI * 0.33;
             let s = t * (len_s + len_h);
@@ -111,98 +107,77 @@ fn shape(k: u32, r: vec4<f32>) -> vec3<f32> {
                 tang = vec3<f32>(0.0, 1.0, 0.0);
             } else {
                 let a = (s - len_s) / 0.33;
-                c = vec3<f32>(0.0 + 0.33 * cos(a), 0.55 + 0.33 * sin(a), 0.0);
+                c = vec3<f32>(0.33 * cos(a), 0.55 + 0.33 * sin(a), 0.0);
                 tang = vec3<f32>(-sin(a), cos(a), 0.0);
             }
             let n1 = vec3<f32>(tang.y, -tang.x, 0.0);
             let n2 = vec3<f32>(0.0, 0.0, 1.0);
-            let a = s * 22.0 + stripe + r.z * 0.6;
-            return c + (n1 * cos(a) + n2 * sin(a)) * 0.13;
+            let stripe = select(PI, 0.0, r.y < 0.5);
+            let a = s * 9.0 + stripe + (r.z - 0.5) * PI;
+            return c + (n1 * cos(a) + n2 * sin(a)) * 0.15 * f;
         }
         case 4u: {
-            // Bell: a lathed profile, meridians and rims, and its clapper.
+            // Bell: a solid lathed bell and its clapper.
             if r.y < 0.9 {
-                let y = select(t, floor(r.w * 5.0) / 4.0, r.z < 0.35);
+                let y = t;
                 let rad = 0.22 + 0.62 * y * y * y + 0.12 * smoothstep(0.85, 1.0, y);
-                let a = select(floor(r.w * 12.0) / 12.0 * TAU, t * TAU, r.z < 0.35);
-                let q = ring(a, rad);
+                let q = ring(r.z * TAU, rad * f);
                 return vec3<f32>(q.x, 0.95 - 1.8 * y, q.y);
             }
-            let z = r.z * 2.0 - 1.0;
-            let q = ring(t * TAU, sqrt(max(0.0, 1.0 - z * z)) * 0.14);
-            return vec3<f32>(q.x, -0.95 + 0.14 * z, q.y);
+            return vec3<f32>(0.0, -0.95, 0.0) + sph(t, r.z) * 0.15 * f;
         }
         case 5u: {
-            // Snowflake: six arms, each with two pairs of side branches.
+            // Snowflake: six broad arms, each with two pairs of side branches.
             let arm = floor(r.y * 6.0);
             let ang = arm / 6.0 * TAU + PI * 0.5;
             var q: vec2<f32>;
-            if r.z < 0.4 {
+            var w = 0.07;
+            if r.z < 0.45 {
                 q = vec2<f32>(t * 1.2, 0.0);
+                w = 0.08 * (1.0 - 0.6 * t);
             } else {
                 let b = u32(r.z * 10.0) % 4u;
                 let at = select(0.42, 0.78, b >= 2u);
-                let l = select(0.38, 0.26, b >= 2u);
+                let l = select(0.4, 0.28, b >= 2u);
                 let side = sgn((b % 2u) == 0u);
                 q = vec2<f32>(at, 0.0) + vec2<f32>(0.5, 0.866 * side) * t * l;
+                w = 0.05 * (1.0 - 0.5 * t);
             }
-            let p = rot(ang) * q;
-            return vec3<f32>(p.x, p.y, (r.w - 0.5) * 0.04);
+            let p = rot(ang) * (q + vec2<f32>(0.0, (r.w * 2.0 - 1.0) * w));
+            return vec3<f32>(p.x, p.y, (fract(r.w * 17.0) - 0.5) * 0.1);
         }
         case 6u: {
-            // A present: the box's edges, a ribbon round it both ways, a bow.
+            // A present: a solid box, a ribbon round it both ways (r.y < 0.5)
+            // and a bow of two solid loops.
             let hw = vec3<f32>(0.75, 0.58, 0.75);
-            if r.y < 0.5 {
-                let e = u32(r.z * 12.0) % 12u;
-                let axis = e % 3u;
-                let b = e / 3u;
-                let s1 = sgn((b & 1u) != 0u);
-                let s2 = sgn((b & 2u) != 0u);
-                var p = vec3<f32>(t * 2.0 - 1.0, s1, s2);
-                if axis == 1u {
-                    p = vec3<f32>(s1, t * 2.0 - 1.0, s2);
-                } else if axis == 2u {
-                    p = vec3<f32>(s1, s2, t * 2.0 - 1.0);
-                }
-                return p * hw - vec3<f32>(0.0, 0.25, 0.0);
-            } else if r.y < 0.82 {
-                // Round the box: a square loop in the x=0 or z=0 plane.
-                let s = t * 4.0;
-                let f = fract(s) * 2.0 - 1.0;
-                let side = u32(s) % 4u;
-                var q = vec2<f32>(f, 1.0);
-                if side == 1u {
-                    q = vec2<f32>(1.0, -f);
-                } else if side == 2u {
-                    q = vec2<f32>(-f, -1.0);
-                } else if side == 3u {
-                    q = vec2<f32>(-1.0, f);
-                }
-                let off = (r.w - 0.5) * 0.1;
-                let p = select(vec3<f32>(off, q.y, q.x), vec3<f32>(q.x, q.y, off), r.z < 0.5);
-                return p * hw - vec3<f32>(0.0, 0.25, 0.0);
+            let c = vec3<f32>(0.0, -0.25, 0.0);
+            if r.y < 0.25 {
+                return box_pt(c, vec3<f32>(0.11, hw.y + 0.015, hw.z + 0.015), r.xzw, f);
+            } else if r.y < 0.5 {
+                return box_pt(c, vec3<f32>(hw.x + 0.015, hw.y + 0.015, 0.11), r.xzw, f);
+            } else if r.y < 0.9 {
+                return box_pt(c, hw, r.xzw, f);
             }
-            // The bow: two tilted loops on top.
             let side = sgn(r.z < 0.5);
-            let q = ring(t * TAU, 0.24);
-            return vec3<f32>(side * (0.26 + q.x), 0.38 + 0.2 + q.y * 0.7, q.y * 0.3 * side);
+            let a = t * TAU;
+            let th = r.w * TAU;
+            let rr = 0.22 + 0.07 * f * cos(th);
+            return vec3<f32>(side * (0.26 + rr * cos(a)), 0.58 + rr * sin(a) * 0.7, 0.07 * f * sin(th) + rr * sin(a) * 0.3 * side);
         }
         default: {
-            // Wreath: a bumpy ring of greenery, berries and a bow below.
-            if r.y < 0.8 {
+            // Wreath: a solid bumpy ring of greenery, berries and a bow.
+            if r.y < 0.82 {
                 let a = t * TAU;
                 let th = r.z * TAU;
-                let bump = 0.2 + 0.06 * sin(a * 24.0 + th * 2.0);
+                let bump = (0.2 + 0.06 * sin(a * 24.0 + th * 2.0)) * f;
                 let rr = 0.9 + bump * cos(th);
                 return vec3<f32>(cos(a) * rr, sin(a) * rr, bump * sin(th));
-            } else if r.y < 0.92 {
+            } else if r.y < 0.93 {
                 let a = floor(r.z * 9.0) / 9.0 * TAU + 0.35;
-                let z = r.w * 2.0 - 1.0;
-                let q = ring(t * TAU, sqrt(max(0.0, 1.0 - z * z)) * 0.07);
-                return vec3<f32>(cos(a) * 0.9 + q.x, sin(a) * 0.9 + q.y, 0.2 + 0.07 * z);
+                return vec3<f32>(cos(a) * 0.9, sin(a) * 0.9, 0.2) + sph(t, r.w) * 0.08 * f;
             }
             let side = sgn(r.z < 0.5);
-            let q = ring(t * TAU, 0.18);
+            let q = ring(t * TAU, 0.18 * mix(0.6, 1.0, f));
             return vec3<f32>(side * (0.2 + q.x), -0.95 + q.y * 0.6, 0.25);
         }
     }
@@ -216,13 +191,13 @@ fn colour(k: u32, r: vec4<f32>) -> vec3<f32> {
     let white = vec3<f32>(0.85, 0.9, 1.0);
     switch k {
         case 0u: {
-            if r.y < 0.55 {
+            if r.y < 0.16 {
                 // Bulbs: red, gold, blue, pink.
                 let li = u32(r.w * 4.0) % 4u;
                 let rb = select(red, gold, li == 1u);
                 let bp = select(vec3<f32>(0.2, 0.45, 1.0), vec3<f32>(1.0, 0.2, 0.75), li == 3u);
-                return select(rb, bp, li >= 2u);
-            } else if r.y < 0.8 {
+                return select(rb, bp, li >= 2u) * 1.6;
+            } else if r.y < 0.84 {
                 return green;
             } else if r.y < 0.9 {
                 return vec3<f32>(0.6, 0.3, 0.1);
@@ -230,13 +205,13 @@ fn colour(k: u32, r: vec4<f32>) -> vec3<f32> {
             return gold;
         }
         case 1u: { return gold; }
-        case 2u: { return select(red, gold, r.y >= 0.82); }
+        case 2u: { return select(red, gold, r.y >= 0.86); }
         case 3u: { return select(white, red, r.y < 0.5); }
         case 4u: { return select(gold, vec3<f32>(1.0, 0.85, 0.5), r.y >= 0.9); }
         case 5u: { return mix(white, vec3<f32>(0.4, 0.75, 1.0), r.x); }
-        case 6u: { return select(gold, red, r.y < 0.5); }
+        case 6u: { return select(red, gold, r.y < 0.5 || r.y >= 0.9); }
         default: {
-            if r.y < 0.8 {
+            if r.y < 0.82 {
                 return green;
             }
             return red;
@@ -248,24 +223,34 @@ fn rnd4(i: u32) -> vec4<f32> {
     return vec4<f32>(sim_rand(i, 0u), sim_rand(i, 1u), sim_rand(i, 2u), sim_rand(i, 3u));
 }
 
-// (to-figure index + progress), as in particle_morph: a figure per bar, two
-// in breakdowns, lights rippling across a third of a beat.
-fn morph(i: u32) -> vec2<f32> {
-    let bar = u32(max(floor((u.beat - u.bar_phase * 4.0) / 4.0 + 0.5), 0.0));
-    var idx = bar;
-    var into = u.bar_phase * 4.0;
-    var len = 1.0;
-    if u.calm > 0.5 {
-        idx = bar / 2u;
-        into += f32(bar % 2u) * 4.0;
-        len = 2.0;
+// How deep in the figure the light sits: 60% on the skin, the rest inside.
+fn fill(i: u32) -> f32 {
+    let r = sim_rand(i, 4u);
+    if r < 0.6 {
+        return 1.0;
     }
-    let x = clamp((into - sim_rand(i, 5u) * 0.35 * len) / len, 0.0, 1.0);
-    return vec2<f32>(f32(idx % NSHAPES), x * x * (3.0 - 2.0 * x));
+    return 0.96 * pow((r - 0.6) / 0.4, 0.3333);
 }
 
-fn place(k: u32, r: vec4<f32>) -> vec3<f32> {
-    var p = shape(k, r);
+// (to-figure index + progress): a new figure every two beats, landing fast;
+// one a bar in breakdowns, lights rippling across.
+fn morph(i: u32) -> vec2<f32> {
+    let bt = u32(max(floor(u.beat), 0.0));
+    var idx = bt / 2u;
+    var into = fract(u.beat) + f32(bt % 2u);
+    var len = 0.6;
+    if u.calm > 0.5 {
+        idx = bt / 4u;
+        into = fract(u.beat) + f32(bt % 4u);
+        len = 1.5;
+    }
+    let x = clamp((into - sim_rand(i, 5u) * 0.12 * len) / len, 0.0, 1.0);
+    let ex = 1.0 - x;
+    return vec2<f32>(f32(idx % NSHAPES), 1.0 - ex * ex * ex);
+}
+
+fn place(k: u32, r: vec4<f32>, f: f32) -> vec3<f32> {
+    var p = shape(k, r, f);
     if k == 4u {
         // The bell rings: a swing about its crown, two beats a cycle.
         let sw = 0.32 * sin(PI * u.flow) * (1.0 - 0.6 * u.calm);
@@ -277,13 +262,16 @@ fn place(k: u32, r: vec4<f32>) -> vec3<f32> {
 
 fn home(i: u32, m: vec2<f32>) -> vec3<f32> {
     let r = rnd4(i);
+    let f = fill(i);
     let b = u32(m.x);
     let a = (b + NSHAPES - 1u) % NSHAPES;
-    var p = mix(place(a, r), place(b, r), m.y);
-    let burst = sin(PI * m.y);
-    let dir = normalize(p + (r.yzw - 0.5) * 0.3 + vec3<f32>(1e-4));
-    p += dir * burst * (0.45 + 0.2 * u.lvl4.x);
-    return p * (1.0 + 0.08 * kick_swell() + 0.05 * u.pres4.x);
+    var p = mix(place(a, r, f), place(b, r, f), m.y);
+    // The new figure spins in (a quarter turn, alternating ways), and the
+    // kick pumps it bigger, more on the one.
+    let q = rot((1.0 - m.y) * 1.4 * sgn(b % 2u == 0u)) * p.xz;
+    p = vec3<f32>(q.x, p.y, q.y);
+    let one = select(0.85, 1.0, (u32(max(floor(u.beat), 0.0)) % 2u) == 0u);
+    return p * one * (1.0 + 0.32 * kick_swell() + 0.05 * u.pres4.x);
 }
 
 // Snow: a slab behind and around the figure, falling and drifting.
@@ -320,13 +308,13 @@ fn sim_step(i: u32, p: Particle, dt: f32) -> Particle {
     }
     let m = morph(i);
     let h = home(i, m);
-    let k = (120.0 + 60.0 * u.pres4.x) * (1.0 - 0.5 * calm);
+    let k = (160.0 + 60.0 * u.pres4.x) * (1.0 - 0.5 * calm);
     var acc = (h - x) * k - v * (1.6 * sqrt(k));
     let t = u.clock4.z * 0.02;
-    acc += sim_curl(h * 0.5 + vec3<f32>(t, -0.4 * t, 0.7 * t)) * (0.06 + 0.5 * u.lvl4.y + 1.5 * calm);
+    acc += sim_curl(h * 0.5 + vec3<f32>(t, -0.4 * t, 0.7 * t)) * (0.03 + 0.15 * u.lvl4.y + 1.2 * calm);
     v += acc * dt;
     let dir = h / max(length(h), 1e-3);
-    v += dir * simc.onset.x * 2.2 * (1.0 - 0.85 * calm);
+    v += dir * simc.onset.x * 1.4 * (1.0 - 0.85 * calm);
     v += vec3<f32>(-h.z, 0.0, h.x) * simc.onset.z * 1.0 * (1.0 - 0.6 * calm);
     x += v * dt;
     return Particle(vec4<f32>(x, m.x + m.y * 0.99), vec4<f32>(v, min(length(x - h) * 2.5, 1.0)));
@@ -354,11 +342,11 @@ fn vs_particles(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32
         let s = sim_quad(a, a - pp.vel.xyz * vec3<f32>(0.04, 0.04, 0.0), vi, sz, 2.4);
         o.pos = s.pos;
         o.q = s.q;
-        o.col = vec3<f32>(0.75, 0.8, 0.95) * 0.22 * s.dim * clamp(6.0 - a.z, 0.25, 1.0);
+        o.col = vec3<f32>(0.75, 0.8, 0.95) * 0.14 * s.dim * clamp(6.0 - a.z, 0.25, 1.0);
         return o;
     }
     let a = view(w);
-    let s = sim_quad(a, view(w - pp.vel.xyz * 0.035), vi, 0.0055, 2.4);
+    let s = sim_quad(a, view(w - pp.vel.xyz * 0.02), vi, 0.004, 2.4);
     o.pos = s.pos;
     o.q = s.q;
     let r = rnd4(ii);
@@ -366,7 +354,9 @@ fn vs_particles(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32
     let e = fract(pp.pos.w);
     let c = mix(colour((b + NSHAPES - 1u) % NSHAPES, r), colour(b, r), e);
     let tw = 0.75 + 0.25 * sin(u.time * (2.0 + 3.0 * r.z) + r.w * TAU);
-    let bri = (0.2 + 0.15 * pp.vel.w) * tw * clamp(5.4 - a.z, 0.5, 1.5);
+    // The skin lights brighter than the inside, so the solid keeps its form.
+    let skin = step(sim_rand(ii, 4u), 0.6);
+    let bri = ((0.05 + 0.1 * skin) + 0.15 * pp.vel.w) * tw * clamp(5.4 - a.z, 0.5, 1.5);
     o.col = c * c * bri * s.dim;
     return o;
 }

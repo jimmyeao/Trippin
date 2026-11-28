@@ -325,13 +325,14 @@ dancer, as they are on screen right now. One tap recalls it.
   lattice), `particle_rose` (a polar-rose flower that changes its petal
   count), `particle_smoke_rings` (rising vortex rings) and
   `particle_dandelion` (seeds blowing away on the wind).
-- **Shape-changing particles** snap to a new figure on every bar line,
-  bursting open and folding into it over the first beat:
-  `particle_morph` (an isometric nested cube, six-point cross, octahedron,
-  star of David, torus, stella octangula, gyroscope and globe, ticking a
-  quarter turn every two beats), `particle_iso` (an isometric block of
-  49 wire columns whose heights are the spectrum, in four formations) and
-  `particle_polygons` (six concentric outlines folding through triangles,
+- **Shape-changing particles** change shape on the beat, landing on the
+  hit, each beat its own size and the kick pumping it bigger, as solid
+  clouds of light with glowing edges: `particle_morph` (an isometric cube,
+  six-point cross, octahedron, star of David, torus, stella octangula,
+  spiked star and hexagonal prism, ticking a quarter turn every two
+  beats), `particle_iso` (an isometric block of 49 solid columns, seen from
+  above, whose heights are the spectrum, in a new formation every bar) and
+  `particle_polygons` (six concentric bands folding through triangles,
   squares, hexagons and stars).
 - **Pulse / particle:** `shockwaves`, `pulse_grid`, `rings`,
   `bounce` (orbs hopping on a lit floor), `ripple` (beat-spawned water

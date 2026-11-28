@@ -441,18 +441,35 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   onto a floor (particle_sea first rendered as a sliver). A solid grid of
   points reads as a glowing ball: draw lattice *lines* (particle_cube).
 - **Shape-changing particle scenes** (`particle_morph`, `particle_iso`,
-  `particle_polygons`, `xmas_icons`, `xmas_snowflakes`): the figure index is
-  the bar (`floor((u.beat - u.bar_phase*4)/4 + 0.5)`) mod a count that
-  divides 1024, so the 4096-beat wrap is seamless, and each morph eases
-  from figure `idx-1` to `idx` over the bar's first beat (continuous at the
-  bar line, unlike a pose driven by `bar_phase`). Particles are *free* on a
-  stiff spring (k ~120, damping 1.6 sqrt k) to the moving home instead of
-  the offset pattern, so a bar the downbeat check moves becomes a short
-  flight, not a snap. Store what the draw needs (colour key, morph state,
-  looseness) in `pos.w`/`vel.w` from `sim_step`: recomputing the figure in
-  `vs_particles` runs it three times per particle (morph went 2.8 -> 1.4 ms).
-  Quarter-turn "ticks" on the beat wind back on odd phrases so the angle is
-  continuous; in breakdowns the ease melts into a steady turn.
+  `particle_polygons`, `xmas_icons`, `xmas_snowflakes`). Owner, on the
+  first versions: "underwhelming", reactivity "very basic" (a mid-morph
+  burst and a small kick swell read as pulsing), and outlines should be
+  "a filled in particle cloud". What works:
+  - **Morph on the beat:** the figure index is `floor(u.beat)` (every two
+    beats for the detailed Christmas icons; one a bar in breakdowns) mod a
+    count that divides 4096, eased *out* (`1-(1-x)^3`) over under half a
+    beat so it lands on the hit. Bar-indexed layouts (Iso) use
+    `floor((u.beat - u.bar_phase*4)/4 + 0.5)` and must divide 1024.
+  - **Grow/shrink:** each beat sets its own size (`beat_size`: 1.15, 0.8,
+    1.0, 0.76), eased with the morph, and `kick_swell()` pumps it ~35%;
+    the new figure screws in a fraction of a turn as it lands.
+  - **Filled solids:** 60% of the points on the skin (`fill() == 1`), the
+    rest spread through the volume (`cbrt`), the same `f` for every figure
+    so skin morphs into skin. Box surfaces: a random point in the cube
+    pushed out along its ray (`d / max|d|`, uniform per face). Additive
+    solids read as blobs, so light faces faintly and **edges** brightest:
+    each figure returns an edge weight, packed into `pos.w` (key + 16 x
+    edge level). No curl swirl on straight-edged solids while the beat
+    plays: it frays the edges.
+  - Particles are *free* on a stiff spring (k ~160, damping 1.6 sqrt k) to
+    the moving home, so a jumped beat or bar becomes a short flight. Store
+    what the draw needs in `pos.w`/`vel.w` from `sim_step`: recomputing the
+    figure in `vs_particles` runs it three times per particle (morph went
+    2.8 -> 1.4 ms).
+  - Pitch with `rot(-0.6155) * w.yz` to look *down* isometrically; the
+    positive angle viewed the block from below (owner: "off putting").
+  - Quarter-turn "ticks" wind back on odd phrases so the angle stays
+    continuous; in breakdowns the ease melts into a steady turn.
 - **Scene controls on a non-camera scene** (`now_playing`): `camera::
   scene_params` serves any scene, up to eight controls (roto4 + roto5).
   They share the slots with the camera layer's rotoscope, so main.rs drops

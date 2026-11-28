@@ -53,6 +53,13 @@ fn dissolve() -> f32 {
 fn home_of(uv: vec2<f32>) -> vec3<f32> {
     var p = text_world(uv);
     let w = c_wave();
+    // The kick pumps the line bigger about its middle, and each beat sends
+    // a hop along the letters, left to right.
+    let ks = kick_swell();
+    let mid = vec3<f32>(0.0, c_height(), 0.0);
+    p = mid + (p - mid) * (1.0 + 0.12 * w * ks);
+    p.y += w * 0.09 * beat_ring(uv.x, 0.18) * (0.5 + 0.5 * c_size());
+    p.z -= w * 0.25 * beat_ring(uv.x, 0.18);
     p.y += w * 0.05 * sin(p.x * 2.6 - u.clock4.x * 0.9) * (0.35 + u.pres4.x);
     p.z += w * 0.18 * kick_swell() * cos(p.x * 1.7 + u.clock4.y * 0.3);
     return p;

@@ -1,9 +1,9 @@
 // @sim 96000 @bloom 0.55 @tonemap agx
 // @title Particle Polygons
-// Particle Polygons: six concentric outlines of 96,000 points that change
-// shape together on every bar line: triangle, square, hexagon, six-point
-// star, octagon, four-point star, pentagram and a twelve-tooth gear, each
-// folding into the next over the bar's first beat (shape). Neighbouring
+// Particle Polygons: six concentric solid bands of 96,000 points that change
+// shape together on every beat: triangle, square, hexagon, six-point star,
+// octagon, four-point star, pentagram and a twelve-tooth gear, each landing
+// inside half a beat, every beat its own size (shape). Neighbouring
 // rings turn opposite ways on the smooth energy clock (motion) and the
 // whole mandala swings back each phrase (direction). Each kick sends a ring
 // of push out from the centre through the outlines, and every point is
@@ -56,34 +56,52 @@ fn outline(d: vec2<f32>, t: f32) -> vec2<f32> {
     return mix(vec2<f32>(cos(a0), sin(a0)) * r0, vec2<f32>(cos(a1), sin(a1)) * r1, f);
 }
 
+// The beat's own size: big on the one, small on the two, and so on.
+fn beat_size(n: u32) -> f32 {
+    switch n % 4u {
+        case 0u: { return 1.15; }
+        case 1u: { return 0.8; }
+        case 2u: { return 1.02; }
+        default: { return 0.76; }
+    }
+}
+
 fn home(i: u32) -> vec4<f32> {
     let ring = min(i / PER, RINGS - 1u);
     let t = f32(i % PER) / f32(PER);
-    let bar = u32(max(floor((u.beat - u.bar_phase * 4.0) / 4.0 + 0.5), 0.0));
+    // A new shape on every beat, landing fast; one a bar in breakdowns.
+    let bt = u32(max(floor(u.beat), 0.0));
     let slow = u.calm > 0.5;
-    var idx = bar;
-    var into = u.bar_phase * 4.0;
-    var len = 1.0;
+    var idx = bt;
+    var into = fract(u.beat);
+    var len = 0.45;
     if slow {
-        idx = bar / 2u;
-        into += f32(bar % 2u) * 4.0;
-        len = 2.0;
+        idx = bt / 4u;
+        into += f32(bt % 4u);
+        len = 1.5;
     }
     // Rings fold in from the centre out.
-    let x = clamp((into - f32(ring) * 0.08 * len) / len, 0.0, 1.0);
-    let e = x * x * (3.0 - 2.0 * x);
+    let x = clamp((into - f32(ring) * 0.035 * len / 0.45) / len, 0.0, 1.0);
+    let ex = 1.0 - x;
+    let e = 1.0 - ex * ex * ex;
     let pa = outline(shape_def(idx + 7u), t);
     let pb = outline(shape_def(idx), t);
-    var p = mix(pa, pb, e);
-    let rr = 0.16 + 0.13 * f32(ring);
-    // The kick ring passes out through the outlines.
-    let push = beat_ring(f32(ring) / 5.0, 0.35);
-    p *= rr * (1.0 + 0.18 * push + 0.05 * u.pres4.x) * (1.0 + 0.25 * sin(PI * e));
-    // Neighbours turn opposite ways; the phrase swing turns them all back.
+    // Each ring is a solid band, its outer edge densest (and lit brightest).
+    let rr = 0.17 + 0.13 * f32(ring);
+    let band = sim_rand(i, 1u);
+    let depth = select(0.115 * pow(band, 1.6), 0.0, band < 0.35);
+    var p = mix(pa, pb, e) * (rr - depth);
+    // The beat sets its size, and the kick's ring passes out through the
+    // bands, swelling each as it goes.
+    let sz = select(mix(beat_size(idx + 3u), beat_size(idx), e), 1.0, slow);
+    let push = beat_ring(f32(ring) / 5.0, 0.3);
+    p *= sz * (1.0 + 0.4 * push + 0.05 * u.pres4.x);
+    // Neighbours turn opposite ways, and each new shape screws in a twelfth
+    // of a turn; the phrase swing turns them all back.
     let dir = select(-1.0, 1.0, ring % 2u == 0u);
-    let a = dir * u.clock4.x * 0.05 * (1.0 + 0.3 * f32(ring)) + 0.6 * sin(TAU * u.flow / 64.0);
+    let a = dir * (u.clock4.x * 0.05 * (1.0 + 0.3 * f32(ring)) + (1.0 - e) * 0.5) + 0.6 * sin(TAU * u.flow / 64.0);
     p = rot(a) * p;
-    return vec4<f32>(p, f32(ring) / 5.0, mix(f32(idx + 7u), f32(idx), e));
+    return vec4<f32>(p, f32(ring) / 5.0, mix(f32((idx + 7u) % 8u), f32(idx % 8u), e));
 }
 
 fn sim_spawn(i: u32) -> Particle {
@@ -120,8 +138,10 @@ fn vs_particles(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32
     o.q = s.q;
     let ring = pp.pos.w;
     let loose = pp.vel.w;
+    // The band's outer edge lights brightest; its body is a softer fill.
+    let rim = step(sim_rand(ii, 1u), 0.35);
     let c = palette(0.08 * pp.pos.z + 0.5 * ring + 0.15 * loose);
-    let bri = (0.15 + 0.12 * ring + 0.15 * loose + 0.08 * u.lvl4.z);
+    let bri = (0.05 + 0.13 * rim) * (1.0 + 0.6 * ring) + 0.15 * loose + 0.04 * u.lvl4.z;
     o.col = c * c * bri * s.dim;
     return o;
 }

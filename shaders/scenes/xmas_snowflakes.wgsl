@@ -1,9 +1,9 @@
 // @sim 105000 @bloom 0.6 @tonemap agx
 // @title Christmas Snowflakes
 // Christmas Snowflakes: five giant six-armed snowflakes of light, 100,000
-// points in all, that grow a new crystal on every bar line: side branches
-// sprout, slide and change length, plates and rings open at the heart, each
-// design folding into the next over the bar's first beat (shape). The mids
+// points in all, broad filled arms, that grow a new crystal every two
+// beats: side branches sprout, slide and change length, plates open at the
+// heart, each design spinning in and landing inside half a beat (shape). The mids
 // grow the branches longer, each kick sends a wave out along the arms, and
 // the flakes turn on the smooth energy clock, neighbours opposite ways, and
 // bob on the phrase (motion), with fine snow falling past. Every point is
@@ -52,15 +52,17 @@ fn crystal(d: u32, f: u32, r: vec4<f32>) -> vec2<f32> {
     let side = sgn(fract(r.y * 6.0) < 0.5);
     let grow = 1.0 + 0.45 * u.lvl4.y;
     var q: vec2<f32>;
+    // Arms and branches are broad, filled bands of light, not lines.
+    let wid = (fract(r.w * 13.0) * 2.0 - 1.0);
     if r.z < 0.28 {
         // The arm's spine.
-        q = vec2<f32>(r.x, 0.0);
+        q = vec2<f32>(r.x, wid * 0.055 * (1.0 - 0.6 * r.x) * grow);
     } else if r.z < 0.88 {
         // One of three side branches at 60 degrees, either side.
         let j = u32((r.z - 0.28) / 0.2) % 3u;
         let at = 0.2 + 0.22 * f32(j) + 0.16 * dr(d, f, j);
         let len = (0.08 + 0.34 * dr(d, f, j + 3u)) * (1.0 - 0.45 * at) * grow;
-        q = vec2<f32>(at, 0.0) + vec2<f32>(0.5, 0.866 * side) * r.x * len;
+        q = vec2<f32>(at, 0.0) + vec2<f32>(0.5, 0.866 * side) * r.x * len + vec2<f32>(-0.866 * side, 0.5) * wid * 0.035 * (1.0 - 0.5 * r.x);
     } else {
         // At the heart: a hexagonal plate's rim (its size per design) or a
         // ring of six small hexagons near the tips.
@@ -70,10 +72,12 @@ fn crystal(d: u32, f: u32, r: vec4<f32>) -> vec2<f32> {
         let c0 = vec2<f32>(cos(a0), sin(a0));
         let c1 = vec2<f32>(cos(a0 + TAU / 6.0), sin(a0 + TAU / 6.0));
         let hx = mix(c0, c1, fract(s));
+        // A filled hexagonal plate, or small filled hexagons at the tips.
+        let fill = sqrt(fract(r.w * 7.0));
         if dr(d, f, 8u) < 0.5 {
-            return hx * rad;
+            return hx * rad * fill;
         }
-        q = vec2<f32>(0.86, 0.0) + hx * 0.08 * grow;
+        q = vec2<f32>(0.86, 0.0) + hx * 0.08 * grow * fill;
     }
     return rot(arm / 6.0 * TAU + PI * 0.5) * q;
 }
@@ -85,27 +89,31 @@ fn rnd4(i: u32) -> vec4<f32> {
 fn home(i: u32) -> vec3<f32> {
     let f = flake_of(i);
     let r = rnd4(i);
-    let bar = u32(max(floor((u.beat - u.bar_phase * 4.0) / 4.0 + 0.5), 0.0));
-    var idx = bar;
-    var into = u.bar_phase * 4.0;
-    var len = 1.0;
+    // A new crystal every two beats, landing fast; one a bar in breakdowns.
+    let bt = u32(max(floor(u.beat), 0.0));
+    var idx = bt / 2u;
+    var into = fract(u.beat) + f32(bt % 2u);
+    var len = 0.6;
     if u.calm > 0.5 {
-        idx = bar / 2u;
-        into += f32(bar % 2u) * 4.0;
-        len = 2.0;
+        idx = bt / 4u;
+        into = fract(u.beat) + f32(bt % 4u);
+        len = 1.5;
     }
-    // Flakes change one after another, a tenth of a beat apart.
-    let x = clamp((into - f32(f) * 0.1 - r.w * 0.2) / len, 0.0, 1.0);
-    let e = x * x * (3.0 - 2.0 * x);
-    // Designs are indexed mod 1024 bars, so the 4096-beat wrap is seamless.
+    // Flakes change one after another, a twentieth of a beat apart.
+    let x = clamp((into - f32(f) * 0.05 - r.w * 0.06) / len, 0.0, 1.0);
+    let ex = 1.0 - x;
+    let e = 1.0 - ex * ex * ex;
+    // Designs are indexed mod 1024, so the 4096-beat wrap is seamless.
     let da = (idx + 1023u) % 1024u;
     let db = idx % 1024u;
     var q = mix(crystal(da, f, r), crystal(db, f, r), e);
     // A kick's wave out along the arms; a burst mid-change.
-    q *= 1.0 + 0.12 * beat_ring(length(q), 0.3) + 0.2 * sin(PI * e);
+    // A kick's wave out along the arms, the kick pumping the whole flake,
+    // and each new crystal spinning in a twelfth of a turn.
+    q *= 1.0 + 0.3 * beat_ring(length(q), 0.3) + 0.25 * kick_swell();
     let c = flake_at(f);
     let dir = sgn(f % 2u == 0u);
-    q = rot(dir * u.clock4.x * 0.035 + f32(f)) * q;
+    q = rot(dir * (u.clock4.x * 0.035 + (1.0 - e) * 0.52) + f32(f)) * q;
     let bob = 0.07 * sin(TAU * u.flow / 32.0 + f32(f) * 1.3);
     return vec3<f32>(c.xy + q * c.z + vec2<f32>(0.0, bob), 0.12 * f32(f % 2u));
 }
@@ -165,17 +173,17 @@ fn vs_particles(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32
         let s = sim_quad(a, b, vi, sz, 2.4);
         o.pos = s.pos;
         o.q = s.q;
-        o.col = vec3<f32>(0.75, 0.82, 1.0) * 0.18 * s.dim * clamp(5.0 - a.z, 0.3, 1.0);
+        o.col = vec3<f32>(0.75, 0.82, 1.0) * 0.12 * s.dim * clamp(5.0 - a.z, 0.3, 1.0);
         return o;
     }
-    let s = sim_quad(a, b, vi, 0.0045, 2.4);
+    let s = sim_quad(a, b, vi, 0.0038, 2.4);
     o.pos = s.pos;
     o.q = s.q;
     // Icy white at the heart, the palette's cold tint towards the tips.
     let rr = clamp(pp.pos.w, 0.0, 1.2);
     let tint = palette(0.2 + 0.4 * rr);
     let c = mix(vec3<f32>(0.75, 0.88, 1.0), tint * tint, 0.25 + 0.35 * rr);
-    let bri = (0.2 + 0.18 * pp.vel.w + 0.08 * u.lvl4.z) * (1.15 - 0.4 * rr);
+    let bri = (0.13 + 0.18 * pp.vel.w + 0.06 * u.lvl4.z) * (1.15 - 0.4 * rr);
     o.col = c * bri * s.dim;
     return o;
 }
