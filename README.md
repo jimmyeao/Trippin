@@ -325,6 +325,14 @@ dancer, as they are on screen right now. One tap recalls it.
   lattice), `particle_rose` (a polar-rose flower that changes its petal
   count), `particle_smoke_rings` (rising vortex rings) and
   `particle_dandelion` (seeds blowing away on the wind).
+- **Shape-changing particles** snap to a new figure on every bar line,
+  bursting open and folding into it over the first beat:
+  `particle_morph` (an isometric nested cube, six-point cross, octahedron,
+  star of David, torus, stella octangula, gyroscope and globe, ticking a
+  quarter turn every two beats), `particle_iso` (an isometric block of
+  49 wire columns whose heights are the spectrum, in four formations) and
+  `particle_polygons` (six concentric outlines folding through triangles,
+  squares, hexagons and stars).
 - **Pulse / particle:** `shockwaves`, `pulse_grid`, `rings`,
   `bounce` (orbs hopping on a lit floor), `ripple` (beat-spawned water
   rings), `stardrive`, `orbiters`, `ribbons`, `ink`, `flare_ring`
@@ -410,10 +418,13 @@ dancer, as they are on screen right now. One tap recalls it.
   and `data_fall` (cyber-rain columns).
 - **Pseudo-3D** (projected, no marching — cheap on iGPUs): `cube_spin`
   (tumbling wireframe cubes) and `dot_wave` (a stadium-crowd wave of dots).
-- **Seasonal:** `halloween`, `christmas` and `fireworks` only enter the
-  playlist in season (October, December, Bonfire Night and New Year; see
-  `Seasonal` in the panel). They're the most audio-reactive scenes:
-  beat-flickering lanterns, onset lightning, and bursts that barrage on drops.
+- **Seasonal:** `halloween`, `christmas`, `xmas_icons`, `xmas_snowflakes`
+  and `fireworks` only enter the playlist in season (October, December,
+  Bonfire Night and New Year; see `Seasonal` in the panel). They're the
+  most audio-reactive scenes: beat-flickering lanterns, onset lightning,
+  bursts that barrage on drops, Christmas figures of light (a tree, star,
+  bauble, candy cane, bell, snowflake, present and wreath) that change on
+  every bar, and giant snowflakes that grow a new crystal each bar.
 
 Heaviest on integrated graphics (at the automatic 75% scale): `block_tunnel`
 ~57 fps and `fire_mandala` ~84 fps at 2560×1440. Every scene holds 144 fps on
@@ -1017,7 +1028,18 @@ boundaries and cue transitions land on the "one", not just on beats.
 Title" scroll across the frame in three depths, the near rows big and
 readable, their baselines waving with the mids. It reads the same track as
 the now-playing card (any source), and shows your DJ name (or TRIPPIN) when
-nothing is detected. Scenes can use the line through `title_mask()` in
+nothing is detected.
+
+**Now Playing** (`now_playing`) spells the track out in 150,000 points of
+light: when the track changes the points fly into the new title, kicks blow
+the letters apart and they spring back, and at the end of each phrase the
+text can melt into a swirl and re-form on the one. Its **scene controls**
+(Perform page, and the iOS remote) pick the text (artist - title, title
+only, artist only, or your DJ name), its size and height, how hard kicks
+scatter it, how far it dissolves, white or palette colour, how much it
+ripples with the bass, and how many points drift behind as a starfield.
+
+Scenes can use the line through `title_mask()` in
 `common.wgsl` (`title_tex`, binding 10); preview with `--snap type_field
 --snap-title "Artist - Title"`.
 

@@ -1869,10 +1869,27 @@ fn render_loop(
                 .as_ref()
                 .map(|t| t.line())
                 .filter(|l| !l.trim().is_empty());
-            let line = now_line.unwrap_or_else(|| {
+            let dj = || {
                 let n = s.brand_name.trim();
                 if n.is_empty() { "TRIPPIN".to_string() } else { n.to_string() }
-            });
+            };
+            // The Now Playing scene can ask for part of the line, or the DJ.
+            let on_air = r.scene_name(dir.scene);
+            let line = if on_air == camera::NOW_PLAYING_SCENE {
+                let mode = camera::scene_params(on_air)
+                    .first()
+                    .map_or(0.0, |p| camera::param_value(&s.show_params, on_air, p)) as u32;
+                let track = lock(&shared.np).track.clone();
+                let part = track.and_then(|t| match mode {
+                    1 if !t.title.trim().is_empty() => Some(t.title.trim().to_string()),
+                    2 if !t.artist.trim().is_empty() => Some(t.artist.trim().to_string()),
+                    3 => None,
+                    _ => Some(t.line()).filter(|l| !l.trim().is_empty()),
+                });
+                part.unwrap_or_else(dj)
+            } else {
+                now_line.unwrap_or_else(dj)
+            };
             if line != title_line {
                 title_line = line;
                 if let Some(b) = crate::gfx::title_bitmap(&title_line) {
@@ -1900,7 +1917,11 @@ fn render_loop(
                 r.upload_logo(&img);
             }
         }
-        let cam_ctl = if camera_scene && !camera::scene_params(r.scene_name(dir.scene)).is_empty() {
+        // A scene with its own controls (camera scenes, Now Playing) puts
+        // them in the rotoscope slots, so the camera layer's rotoscope
+        // stands down while one is on air.
+        let own_ctl = !camera::scene_params(r.scene_name(dir.scene)).is_empty();
+        let cam_ctl = if own_ctl {
             camera::scene_uniforms(&s.show_params, r.scene_name(dir.scene))
         } else {
             (
@@ -1954,12 +1975,12 @@ fn render_loop(
                 l[3] = title_frac;
                 l
             },
-            // The rotoscope look, or on camera_* scenes their own controls.
+            // The rotoscope look, or a scene's own controls (camera_*, Now Playing).
             roto4: cam_ctl.0,
             roto5: cam_ctl.1,
             cam4: if cam_layer {
                 [
-                    s.camera_layer.index() + if s.camera_roto { 4.0 } else { 0.0 },
+                    s.camera_layer.index() + if s.camera_roto && !own_ctl { 4.0 } else { 0.0 },
                     s.camera_amt.clamp(0.0, 1.0),
                     s.camera_key.index(),
                     s.camera_tol.clamp(0.0, 1.0),

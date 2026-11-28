@@ -182,13 +182,33 @@ const SLITSCAN: [SceneParam; 4] = [
     p("cam_palette", "Palette", "How much ageing ribbons take the show's palette", 0.0, 1.0, 0.4),
 ];
 
-/// The controls of a camera scene (none for others; camera_roto has the
-/// rotoscope look, `Settings::roto_*`).
+/// The Now Playing scene's controls (not a camera scene, but it rides the
+/// same per-scene slots: the camera layer's rotoscope stands down while a
+/// scene with its own controls is on air). `np_text` also picks the line
+/// main.rs rasterises into the title texture.
+const NOW_PLAYING: [SceneParam; 8] = [
+    SceneParam { whole: true, ..p("np_text", "Text", "0: artist - title. 1: title only. 2: artist only. 3: the DJ name (Stream > Branding)", 0.0, 3.0, 0.0) },
+    p("np_size", "Size", "How big the text is", 0.4, 1.6, 1.0),
+    p("np_height", "Height", "Where the text sits: down (-) or up (+) from the middle", -0.7, 0.7, 0.0),
+    p("np_scatter", "Scatter", "How hard each kick blows the letters apart", 0.0, 2.0, 1.0),
+    p("np_dissolve", "Dissolve", "How far the text melts into a swirl at the end of each phrase (0: always readable)", 0.0, 1.0, 0.5),
+    p("np_colour", "Colour", "0: white. 1: the show's palette", 0.0, 1.0, 0.7),
+    p("np_wave", "Wave", "How much the letters ripple with the bass", 0.0, 2.0, 1.0),
+    p("np_backdrop", "Backdrop", "How many points drift behind the text as a starfield", 0.0, 1.0, 0.5),
+];
+
+/// The id of the Now Playing scene.
+pub const NOW_PLAYING_SCENE: &str = "now_playing";
+
+/// The controls of a scene that has its own: the camera scenes and Now
+/// Playing (none for others; camera_roto has the rotoscope look,
+/// `Settings::roto_*`).
 pub fn scene_params(scene: &str) -> &'static [SceneParam] {
     match scene {
         "camera_outline" => &OUTLINE,
         "camera_kaleido" => &KALEIDO,
         "camera_slitscan" => &SLITSCAN,
+        NOW_PLAYING_SCENE => &NOW_PLAYING,
         _ => &[],
     }
 }
@@ -204,17 +224,17 @@ pub fn param_value(saved: &std::collections::BTreeMap<String, std::collections::
         .clamp(p.min, p.max)
 }
 
-/// A camera scene's controls as (roto4, roto5) for the shader; the
+/// A scene's own controls as (roto4, roto5) for the shader (up to eight); the
 /// rotoscope look's defaults for any other scene.
 pub fn scene_uniforms(saved: &std::collections::BTreeMap<String, std::collections::BTreeMap<String, f32>>, scene: &str) -> ([f32; 4], [f32; 4]) {
     if scene_params(scene).is_empty() {
         return ([1.0, 0.5, 0.35, 4.0], [0.4, 0.0, 0.0, 0.0]);
     }
     let mut v = [0.0f32; 8];
-    for (i, p) in scene_params(scene).iter().enumerate().take(5) {
+    for (i, p) in scene_params(scene).iter().enumerate().take(8) {
         v[i] = param_value(saved, scene, p);
     }
-    ([v[0], v[1], v[2], v[3]], [v[4], 0.0, 0.0, 0.0])
+    ([v[0], v[1], v[2], v[3]], [v[4], v[5], v[6], v[7]])
 }
 
 /// Fit an RGB frame into VID_W x VID_H (cover: fill, crop the overflow),

@@ -440,6 +440,25 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   Pitch: with `rot(a) * w.yz`, a *negative* angle tilts the camera down
   onto a floor (particle_sea first rendered as a sliver). A solid grid of
   points reads as a glowing ball: draw lattice *lines* (particle_cube).
+- **Shape-changing particle scenes** (`particle_morph`, `particle_iso`,
+  `particle_polygons`, `xmas_icons`, `xmas_snowflakes`): the figure index is
+  the bar (`floor((u.beat - u.bar_phase*4)/4 + 0.5)`) mod a count that
+  divides 1024, so the 4096-beat wrap is seamless, and each morph eases
+  from figure `idx-1` to `idx` over the bar's first beat (continuous at the
+  bar line, unlike a pose driven by `bar_phase`). Particles are *free* on a
+  stiff spring (k ~120, damping 1.6 sqrt k) to the moving home instead of
+  the offset pattern, so a bar the downbeat check moves becomes a short
+  flight, not a snap. Store what the draw needs (colour key, morph state,
+  looseness) in `pos.w`/`vel.w` from `sim_step`: recomputing the figure in
+  `vs_particles` runs it three times per particle (morph went 2.8 -> 1.4 ms).
+  Quarter-turn "ticks" on the beat wind back on odd phrases so the angle is
+  continuous; in breakdowns the ease melts into a steady turn.
+- **Scene controls on a non-camera scene** (`now_playing`): `camera::
+  scene_params` serves any scene, up to eight controls (roto4 + roto5).
+  They share the slots with the camera layer's rotoscope, so main.rs drops
+  the layer's rotoscope flag (`own_ctl`) and the panel hides its card while
+  such a scene is on air. `np_text` also picks the line main.rs rasterises
+  into `title_tex` while Now Playing is on air.
 - **The now-playing line is a texture** (`title_tex`, binding 10,
   `gfx::Statics::title`, 2048x160 R8): main.rs rasterises "Artist - Title"
   (else the DJ name, else TRIPPIN) when it changes; `u.look4.w` is the share

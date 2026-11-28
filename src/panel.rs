@@ -1770,7 +1770,8 @@ fn inspector_body(
     let layer_roto = s.camera_roto
         && s.camera_layer != crate::config::CamLayer::Off
         && !s.camera.is_empty()
-        && !on_air.starts_with("camera_");
+        && !on_air.starts_with("camera_")
+        && crate::camera::scene_params(on_air).is_empty();
     if on_air == "camera_roto" || layer_roto {
         roto_controls(ui, s, if on_air == "camera_roto" { "Camera Rotoscope" } else { "camera layer · rotoscope" });
         ui.add_space(8.0);

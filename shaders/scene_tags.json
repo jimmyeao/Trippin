@@ -98,6 +98,7 @@
   "particle_morph": ["geometric", "abstract", "driving"],
   "particle_iso": ["geometric", "analyser", "neon"],
   "particle_polygons": ["geometric", "abstract", "bright"],
+  "now_playing": ["abstract", "neon", "slow"],
   "particle_dandelion": ["organic", "slow", "dark"],
   "particle_dna": ["abstract", "geometric", "neon"],
   "particle_fountain": ["abstract", "driving", "bright"],
