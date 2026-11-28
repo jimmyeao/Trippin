@@ -334,6 +334,14 @@ dancer, as they are on screen right now. One tap recalls it.
   above, whose heights are the spectrum, in a new formation every bar) and
   `particle_polygons` (six concentric bands folding through triangles,
   squares, hexagons and stars).
+- **Drone shows:** 8,000 drones flying formations in the night sky, each
+  change a flight with every drone on its own arc, mirrored in the water
+  below: `drone_show` (a globe, helix, galaxy, spectrum sheet, beating
+  heart, knot, starburst and nested cubes over a mountain lake),
+  `drone_title` (spells the playing track's title, flies about, spells the
+  artist, over a city harbour; the DJ name when nothing is playing) and
+  `drone_xmas` (seasonal: tree, star, MERRY CHRISTMAS, snowman, snowflake,
+  bell, your DJ name and a present over a snowy village).
 - **Pulse / particle:** `shockwaves`, `pulse_grid`, `rings`,
   `bounce` (orbs hopping on a lit floor), `ripple` (beat-spawned water
   rings), `stardrive`, `orbiters`, `ribbons`, `ink`, `flare_ring`
@@ -419,7 +427,7 @@ dancer, as they are on screen right now. One tap recalls it.
   and `data_fall` (cyber-rain columns).
 - **Pseudo-3D** (projected, no marching — cheap on iGPUs): `cube_spin`
   (tumbling wireframe cubes) and `dot_wave` (a stadium-crowd wave of dots).
-- **Seasonal:** `halloween`, `christmas`, `xmas_icons`, `xmas_snowflakes`
+- **Seasonal:** `halloween`, `christmas`, `xmas_icons`, `xmas_snowflakes`, `drone_xmas`
   and `fireworks` only enter the playlist in season (October, December,
   Bonfire Night and New Year; see `Seasonal` in the panel). They're the
   most audio-reactive scenes: beat-flickering lanterns, onset lightning,

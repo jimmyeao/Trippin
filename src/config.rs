@@ -259,11 +259,12 @@ pub enum Seasonal {
 }
 
 /// Seasonal scenes and when they're in season: (month, day) ranges, inclusive.
-pub const SEASONS: [(&str, &[((u32, u32), (u32, u32))]); 5] = [
+pub const SEASONS: [(&str, &[((u32, u32), (u32, u32))]); 6] = [
     ("halloween", &[((10, 1), (11, 2))]),
     ("christmas", &[((12, 1), (12, 27))]),
     ("xmas_icons", &[((12, 1), (12, 27))]),
     ("xmas_snowflakes", &[((12, 1), (12, 27))]),
+    ("drone_xmas", &[((12, 1), (12, 27))]),
     // Bonfire Night and New Year.
     (
         "fireworks",
@@ -1171,6 +1172,8 @@ mod tests {
         assert_eq!(in_season("christmas", (12, 24)), Some(true));
         assert_eq!(in_season("xmas_icons", (12, 24)), Some(true));
         assert_eq!(in_season("xmas_snowflakes", (11, 28)), Some(false));
+        assert_eq!(in_season("drone_xmas", (12, 20)), Some(true));
+        assert_eq!(in_season("drone_xmas", (12, 30)), Some(false));
         assert_eq!(in_season("fireworks", (11, 5)), Some(true));
         assert_eq!(in_season("fireworks", (12, 31)), Some(true));
         assert_eq!(in_season("fireworks", (1, 1)), Some(true));

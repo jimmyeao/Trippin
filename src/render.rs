@@ -1459,6 +1459,11 @@ impl Renderer {
         self.statics.upload_title(&self.queue, bmp)
     }
 
+    /// One line, or two separated by a newline (gfx::Statics::upload_title_text).
+    pub fn upload_title_text(&self, text: &str) -> f32 {
+        self.statics.upload_title_text(&self.queue, text)
+    }
+
     pub fn upload_external(&self, rgba: &[u8]) {
         use crate::gfx::{EXT_H, EXT_W};
         if rgba.len() != (EXT_W * EXT_H * 4) as usize {

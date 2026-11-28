@@ -1887,14 +1887,29 @@ fn render_loop(
                     _ => Some(t.line()).filter(|l| !l.trim().is_empty()),
                 });
                 part.unwrap_or_else(dj)
+            } else if on_air == "drone_title" {
+                // Two lines: the title, then the artist (the drones spell
+                // one, fly about, then spell the other).
+                let track = lock(&shared.np).track.clone();
+                match track {
+                    Some(t) if !t.title.trim().is_empty() => {
+                        let artist = t.artist.trim();
+                        let artist = if artist.is_empty() { dj() } else { artist.to_string() };
+                        format!("{}\n{artist}", t.title.trim())
+                    }
+                    Some(t) if !t.line().trim().is_empty() => format!("{}\n{}", t.line().trim(), dj()),
+                    _ => format!("{}\nLIVE", dj()),
+                }
+            } else if on_air == "drone_xmas" {
+                let n = s.brand_name.trim();
+                let second = if n.is_empty() { "HAPPY HOLIDAYS".to_string() } else { n.to_string() };
+                format!("MERRY CHRISTMAS\n{second}")
             } else {
                 now_line.unwrap_or_else(dj)
             };
             if line != title_line {
                 title_line = line;
-                if let Some(b) = crate::gfx::title_bitmap(&title_line) {
-                    title_frac = r.upload_title(&b);
-                }
+                title_frac = r.upload_title_text(&title_line);
             }
         }
         // The Logo Trip scene's image: its own pick, else the branding logo,

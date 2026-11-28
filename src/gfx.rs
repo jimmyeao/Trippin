@@ -386,15 +386,32 @@ impl Statics {
     /// vertically centred; clipped to fit) and return the fraction of the
     /// width it covers, which shaders get as `u.look4.w`.
     pub fn upload_title(&self, queue: &wgpu::Queue, bmp: &crate::text::TextBitmap) -> f32 {
-        let (w, h) = (TITLE_W as usize, TITLE_H as usize);
-        let mut px = vec![0u8; w * h];
-        let bw = (bmp.width as usize).min(w);
-        let bh = (bmp.height as usize).min(h);
-        let y0 = (h - bh) / 2;
-        for y in 0..bh {
-            let src = &bmp.mask[y * bmp.width as usize..y * bmp.width as usize + bw];
-            px[(y0 + y) * w..(y0 + y) * w + bw].copy_from_slice(src);
-        }
+        let mut px = vec![0u8; (TITLE_W * TITLE_H) as usize];
+        let f = blit_title(&mut px, bmp, 0, TITLE_H as usize);
+        self.write_title(queue, &px);
+        f
+    }
+
+    /// Put text into the title texture and return its `u.look4.w`. One
+    /// line fills the texture, as `upload_title`. Two lines ("a\nb", for
+    /// the scenes in `TWO_LINE_SCENES`) go one in each half, and look4.w
+    /// packs both widths: the first line's share in its fraction (at most
+    /// 0.999), the second's in thousandths in its whole part (at least 1),
+    /// so a shader tells the two apart by `floor(w) > 0`.
+    pub fn upload_title_text(&self, queue: &wgpu::Queue, text: &str) -> f32 {
+        let Some((a, b)) = text.split_once('\n') else {
+            return title_bitmap(text).map_or(0.0, |b| self.upload_title(queue, &b));
+        };
+        let half = (TITLE_H / 2) as usize;
+        let mut px = vec![0u8; (TITLE_W * TITLE_H) as usize];
+        let min = 1.0 / TITLE_W as f32;
+        let fa = fit_bitmap(a, 66.0, TITLE_H / 2).map_or(min, |m| blit_title(&mut px, &m, 0, half));
+        let fb = fit_bitmap(b, 66.0, TITLE_H / 2).map_or(min, |m| blit_title(&mut px, &m, half, half));
+        self.write_title(queue, &px);
+        fa.min(0.999) + (fb * 1000.0).round().max(1.0)
+    }
+
+    fn write_title(&self, queue: &wgpu::Queue, px: &[u8]) {
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &self.title,
@@ -402,7 +419,7 @@ impl Statics {
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            &px,
+            px,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(TITLE_W),
@@ -414,19 +431,41 @@ impl Statics {
                 depth_or_array_layers: 1,
             },
         );
-        (bw as f32 / w as f32).max(1.0 / w as f32)
     }
+}
+
+/// Scenes that draw two lines from the title texture (`upload_title_text`):
+/// the drone shows spell one line, fly about, then spell the other.
+pub const TWO_LINE_SCENES: [&str; 2] = ["drone_title", "drone_xmas"];
+
+/// Copy a bitmap into rows `y0..y0+rows` of a title-texture buffer (left
+/// aligned, centred in those rows, clipped) and return the width share.
+fn blit_title(px: &mut [u8], bmp: &crate::text::TextBitmap, y0: usize, rows: usize) -> f32 {
+    let w = TITLE_W as usize;
+    let bw = (bmp.width as usize).min(w);
+    let bh = (bmp.height as usize).min(rows);
+    let top = y0 + (rows - bh) / 2;
+    for y in 0..bh {
+        let src = &bmp.mask[y * bmp.width as usize..y * bmp.width as usize + bw];
+        px[(top + y) * w..(top + y) * w + bw].copy_from_slice(src);
+    }
+    (bw as f32 / w as f32).max(1.0 / w as f32)
 }
 
 /// Rasterise the title line to fit the title texture: 110 px cap height,
 /// smaller for a long line so it never clips.
 pub fn title_bitmap(text: &str) -> Option<crate::text::TextBitmap> {
-    let bmp = crate::text::rasterize(text, 110.0)?;
-    if bmp.width <= TITLE_W - 8 && bmp.height <= TITLE_H {
+    fit_bitmap(text, 110.0, TITLE_H)
+}
+
+/// Rasterise text at `px`, shrunk to fit the texture's width and `max_h`.
+fn fit_bitmap(text: &str, px: f32, max_h: u32) -> Option<crate::text::TextBitmap> {
+    let bmp = crate::text::rasterize(text, px)?;
+    if bmp.width <= TITLE_W - 8 && bmp.height <= max_h {
         return Some(bmp);
     }
-    let k = ((TITLE_W - 8) as f32 / bmp.width as f32).min(TITLE_H as f32 / bmp.height as f32);
-    crate::text::rasterize(text, 110.0 * k * 0.98)
+    let k = ((TITLE_W - 8) as f32 / bmp.width as f32).min(max_h as f32 / bmp.height as f32);
+    crate::text::rasterize(text, px * k * 0.98)
 }
 
 // ---- 3D noise bake -------------------------------------------------------

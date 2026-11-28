@@ -470,6 +470,29 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
     positive angle viewed the block from below (owner: "off putting").
   - Quarter-turn "ticks" wind back on odd phrases so the angle stays
     continuous; in breakdowns the ease melts into a steady turn.
+- **Drone shows** (`drone_show`, `drone_title`, `drone_xmas`, generated
+  by `tools/drone_scenes.py` so their shared code stays identical (edit
+  there, not the .wgsl): formations, text,
+  flight, draw, water). 8,000 lit points on a spring (k 60) to a formation
+  per slot (`slot(bar)` -> `slot_form`); a change of slot is a *flight*
+  over ~2 beats (`fly`: per-drone delay and arc), not a morph. Colours ride
+  in `pos.w` as packed 8-bit rgb, lit in `vel.w` (spare drones park dark).
+  Text drones take the first of 14 fixed random tries that lands in a
+  letter, so they need no stored state until the text changes. The water
+  is last frame mirrored (`prev`), so the show reflects for free; keep the
+  formations above the skyline, which fs_main draws *under* the drones.
+- **Two-line title** (`gfx::TWO_LINE_SCENES`, `upload_title_text`): a
+  "a\nb" string puts each line in half the title texture, and `u.look4.w`
+  packs both widths (first line's share in the fraction, max 0.999; the
+  second's thousandths in the whole part, min 1), so `floor(w) > 0` means
+  two lines. main.rs sends "title\nartist" for drone_title and "MERRY
+  CHRISTMAS\n<DJ name or HAPPY HOLIDAYS>" for drone_xmas; snaps split the
+  sample line the same way.
+- **`--snap-energy` writes the installed packs' `scene_energy.json` too**
+  (Application Support), even with `TRIPPIN_NO_DEV_PACKS=1`. To rate new
+  built-in scenes, back up and restore those files (the repo's `packs/`
+  copies are what shipped) and keep only the new entries in
+  `shaders/scene_energy.json`.
 - **Scene controls on a non-camera scene** (`now_playing`): `camera::
   scene_params` serves any scene, up to eight controls (roto4 + roto5).
   They share the slots with the camera layer's rotoscope, so main.rs drops

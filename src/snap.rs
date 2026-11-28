@@ -256,8 +256,9 @@ pub fn run(args: &[String]) -> Result<()> {
     let pal_view = pal.create_view(&Default::default());
     let statics = gfx::Statics::new(&device, &queue);
     // Type scenes: a sample now-playing line (`--snap-title` to change it).
-    let title_frac = gfx::title_bitmap(arg(args, "--snap-title").unwrap_or("Daft Punk - One More Time"))
-        .map_or(0.0, |b| statics.upload_title(&queue, &b));
+    let snap_line = arg(args, "--snap-title").unwrap_or("Daft Punk - One More Time").to_string();
+    let mut title_text = snap_line.clone();
+    let mut title_frac = statics.upload_title_text(&queue, &title_text);
     let bloom = gfx::Bloom::new(&device, w, h);
     let targets = Renderer::make_targets(&device, w, h);
     let bgs = Renderer::make_bind_groups(
@@ -757,6 +758,19 @@ pub fn run(args: &[String]) -> Result<()> {
     for path in &scenes {
         let name = path.file_stem().unwrap().to_string_lossy().into_owned();
         let body = std::fs::read_to_string(path)?;
+        // Two-line scenes get the sample line split as the app would send it.
+        let want = match name.as_str() {
+            "drone_xmas" => "MERRY CHRISTMAS\nDJ TRIPPIN".to_string(),
+            n if gfx::TWO_LINE_SCENES.contains(&n) => match snap_line.split_once(" - ") {
+                Some((artist, title)) => format!("{title}\n{artist}"),
+                None => format!("{snap_line}\nLIVE"),
+            },
+            _ => snap_line.clone(),
+        };
+        if want != title_text {
+            title_frac = statics.upload_title_text(&queue, &want);
+            title_text = want;
+        }
         let (_, bloom_amt, tonemap) = render::header_tags(&body);
         let pipe = match render::compile_pipeline(&device, &common, path, &pl, SCENE_FORMAT, None) {
             Ok(p) => p,
