@@ -851,6 +851,11 @@ cargo run --release -- --list-midi          # MIDI input ports (pad/key controll
   stopped only if that pid is no longer a running Trippin, so another live
   Trippin's player is never touched (only one player can run at a time
   either way). Any change to the frame-file name must keep `frame_name`.
+- **wgpu's Metal backend reports vendor 0 for every Mac GPU.** The
+  `@heavy` gate checked `vendor == 0x106b` (Apple), so "auto" turned 3D
+  scenes off on every Mac, the owner's M2 Pro included. Apple Silicon is
+  now known by its adapter name ("Apple M…") on Metal (`render.rs`
+  `apple_silicon`). Don't key anything else on the vendor id on macOS.
 - **macOS: tag egui window layers sRGB** (`egui_win.rs::tag_srgb`, after
   every `surface.configure`). wgpu leaves an sRGB surface's CAMetalLayer
   untagged, and the window server flips untagged content between

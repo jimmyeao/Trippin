@@ -637,12 +637,15 @@ impl Renderer {
             .clamp(0.25, 1.0);
         // `@heavy` scenes raymarch every pixel — keep them off iGPUs that
         // would drop frames, but Apple Silicon reports "integrated" while
-        // being plenty fast. `--gpu low` always opts out.
+        // being plenty fast. wgpu's Metal backend reports vendor 0 for every
+        // Mac GPU, so Apple Silicon is known by its name ("Apple M2 Pro");
+        // an Intel Mac's iGPU still counts as integrated. `--gpu low` always
+        // opts out.
+        let apple_silicon = info.vendor == 0x106b || (info.backend == wgpu::Backend::Metal && info.name.starts_with("Apple"));
         let heavy_ok = !low_power
             && match info.device_type {
                 wgpu::DeviceType::DiscreteGpu => true,
-                // Vendor 0x106b = Apple.
-                wgpu::DeviceType::IntegratedGpu => info.vendor == 0x106b,
+                wgpu::DeviceType::IntegratedGpu => apple_silicon,
                 _ => false,
             };
         println!(
